@@ -31,7 +31,9 @@ Add to `~/Library/Application Support/Claude/claude_desktop_config.json` (macOS)
 ```
 
 Use absolute paths for `node` (`which node`) and set `CLAUDE_BIN`: GUI apps start with a minimal
-`PATH`. Restart Claude Desktop and the `duskfleet` tools appear.
+`PATH`, and Claude Desktop spawns the server without a shell, so `~` is never expanded (the
+server then fails with "No executable file at ~/..."). Restart Claude Desktop and the
+`duskfleet` tools appear. The dashboard's MCP page prints this snippet with your real paths.
 
 ## Connect from Claude Code
 

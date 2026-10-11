@@ -1,7 +1,8 @@
 # Troubleshooting
 
 - **`doctor` cannot find `claude`**: set `claude.binary` in `duskfleet.yaml` or `CLAUDE_BIN`.
-  GUI-launched hosts (Claude Desktop) start with a minimal `PATH`.
+  GUI-launched hosts (Claude Desktop) start with a minimal `PATH` and do not expand `~` in
+  `claude_desktop_config.json` ("No executable file at ~/..."): use absolute paths.
 - **A run never finishes although the agent already answered**: a user-level hook in
   `~/.claude/settings.json` (for example a `Stop` hook that shows a desktop notification) may be
   blocking in a headless context. Set `claude.setting_sources: [project, local]` so runs skip

@@ -1,6 +1,6 @@
 import { CopyButton } from "@/components/CopyButton";
-import { homeDir, mcpRegistration, toolCatalog, type JsonSchema, type ToolCatalogEntry } from "@/lib/data";
-import { fmtRelative, fmtTime, tildeText } from "@/lib/format";
+import { mcpRegistration, toolCatalog, type JsonSchema, type ToolCatalogEntry } from "@/lib/data";
+import { fmtRelative, fmtTime } from "@/lib/format";
 
 export const dynamic = "force-dynamic";
 
@@ -17,7 +17,6 @@ const GROUPS: Array<{ key: ToolCatalogEntry["group"]; title: string; blurb: stri
 export default function McpPage() {
   const catalog = toolCatalog();
   const reg = mcpRegistration();
-  const home = homeDir();
   const desktopJson = JSON.stringify(
     { mcpServers: { duskfleet: { command: reg.node, args: [reg.entry], env: { CLAUDE_BIN: reg.claudeBin } } } },
     null,
@@ -87,16 +86,18 @@ export default function McpPage() {
               </section>
             ))}
 
-            <ConnectClient desktopJson={desktopJson} claudeCodeCmd={claudeCodeCmd} home={home} />
+            <ConnectClient desktopJson={desktopJson} claudeCodeCmd={claudeCodeCmd} />
           </div>
         </div>
       )}
-      {!catalog && <ConnectClient desktopJson={desktopJson} claudeCodeCmd={claudeCodeCmd} home={home} />}
+      {!catalog && <ConnectClient desktopJson={desktopJson} claudeCodeCmd={claudeCodeCmd} />}
     </>
   );
 }
 
-function ConnectClient({ desktopJson, claudeCodeCmd, home }: { desktopJson: string; claudeCodeCmd: string; home: string }) {
+function ConnectClient({ desktopJson, claudeCodeCmd }: { desktopJson: string; claudeCodeCmd: string }) {
+  // Shown verbatim, not tilde-shortened: Claude Desktop spawns the server without a shell and
+  // never expands "~", so a snippet read off the screen must already hold absolute paths.
   return (
     <section id="connect">
       <h2>Connect a client</h2>
@@ -104,16 +105,17 @@ function ConnectClient({ desktopJson, claudeCodeCmd, home }: { desktopJson: stri
         <div>
           <div className="muted" style={{ fontSize: "0.86rem", marginBottom: 6 }}>
             Claude Desktop / Cowork: add to <code>~/Library/Application Support/Claude/claude_desktop_config.json</code>, then restart the app.
+            Keep the paths absolute: the app does not expand <code>~</code>.
           </div>
           <div className="cmd">
-            <pre className="block" style={{ whiteSpace: "pre", overflowX: "auto" }} title="Copy gives the absolute paths the host needs">{tildeText(desktopJson, home)}</pre>
+            <pre className="block" style={{ whiteSpace: "pre", overflowX: "auto" }}>{desktopJson}</pre>
             <CopyButton text={desktopJson} />
           </div>
         </div>
         <div>
           <div className="muted" style={{ fontSize: "0.86rem", marginBottom: 6 }}>Claude Code (any project, one command):</div>
           <div className="cmd">
-            <pre className="block" style={{ whiteSpace: "pre", overflowX: "auto" }} title="Copy gives the absolute paths the host needs">{tildeText(claudeCodeCmd, home)}</pre>
+            <pre className="block" style={{ whiteSpace: "pre", overflowX: "auto" }}>{claudeCodeCmd}</pre>
             <CopyButton text={claudeCodeCmd} />
           </div>
           <div className="muted" style={{ fontSize: "0.8rem", marginTop: 10 }}>
