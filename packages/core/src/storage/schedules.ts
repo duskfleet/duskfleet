@@ -176,16 +176,22 @@ export class ScheduleRepository {
 
   /**
    * Try to take or renew the single scheduler lease for `ttlMs`. Returns true when
-   * this holder owns it. Another live holder keeps it until its lease expires.
+   * this holder owns it. Another live holder keeps it until its lease expires,
+   * unless `preempt` is set (the `serve` role): then it is also taken from a live
+   * holder of any other role, so an MCP server a host keeps alive with stale code
+   * cannot out-tick the installed service. The displaced holder's next renewal
+   * fails (its `holder = ?` clause no longer matches) and it stands by.
    */
-  acquireLease(holder: string, ttlMs: number): boolean {
+  acquireLease(holder: string, ttlMs: number, preempt = false): boolean {
     const now = Date.now();
     const expires = new Date(now + ttlMs).toISOString();
     const nowIso = new Date(now).toISOString();
     this.db.prepare("INSERT OR IGNORE INTO scheduler_lease (id, holder, expires_at) VALUES (1, ?, ?)").run(holder, expires);
     const r = this.db
-      .prepare("UPDATE scheduler_lease SET holder = ?, expires_at = ? WHERE id = 1 AND (holder = ? OR expires_at < ?)")
-      .run(holder, expires, holder, nowIso);
+      .prepare(
+        "UPDATE scheduler_lease SET holder = ?, expires_at = ? WHERE id = 1 AND (holder = ? OR expires_at < ? OR (? AND holder NOT LIKE 'serve@%'))",
+      )
+      .run(holder, expires, holder, nowIso, preempt ? 1 : 0);
     return Number(r.changes) > 0;
   }
 

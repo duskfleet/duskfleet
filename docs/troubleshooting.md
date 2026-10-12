@@ -23,6 +23,11 @@
   Claude session with the `resumeCommand` from `get_run` if you want to continue the work.
 - **Two DuskFleet processes, schedules fire once**: that is the SQLite lease at work. The
   dashboard's Schedules page and `doctor` show the holder and its kind (`serve`, `mcp`).
+- **"Ticking from an unknown process", Run now never fires, the service is running**: a
+  `packages/mcp/dist/index.js` started before your last build (an MCP host keeps it alive)
+  holds the lease with old code. Since the `serve` role preempts such holders, `install-service`
+  (which restarts the service) fixes it; on a service older than that, kill the stale
+  `index.js` processes or restart the hosts that spawned them.
 - **Schedules stop when Claude Desktop closes**: only the MCP server was ticking. Install the
   service once with `npm run cli -- install-service`; `doctor` reports `scheduler.service`.
   If the service is running but nothing fires, read `data/logs/serve.log` (the service writes

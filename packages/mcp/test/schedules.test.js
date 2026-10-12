@@ -209,6 +209,53 @@ test("a run request (dashboard 'Run now') is fired by the lease holder on its ne
   }
 });
 
+test("`serve` takes the lease from a live mcp / role-less holder; the displaced holder stands by; mcp never preempts", async () => {
+  const { root, configDir } = makeRoot();
+  const config = loadConfig(configDir);
+  const db = openDatabase(config.dataDir);
+  const runs = new RunManager(config, new RunRepository(db), new ClaudeCodeExecutor({ binary: config.claude.binary, strictMcpConfig: true, allowBypassPermissions: false }));
+  const repo = new ScheduleRepository(db);
+  const stale = new Scheduler(repo, runs, { tickMs: 1000, holder: "host:523" }); // pre-role build, still ticking
+  const mcp = new Scheduler(repo, runs, { tickMs: 1000, role: "mcp" });
+  const serve = new Scheduler(repo, runs, { tickMs: 1000, role: "serve" });
+  const serve2 = new Scheduler(repo, runs, { tickMs: 1000, holder: "serve@other:2" });
+  try {
+    await stale.tick();
+    assert.equal(stale.status().leaseHeldByThisProcess, true);
+
+    // serve does not wait for the stale holder's lease to expire
+    await serve.tick();
+    assert.equal(serve.status().leaseHeldByThisProcess, true);
+    assert.equal(repo.leaseInfo().holder, serve.status().holder);
+
+    // the displaced holder's renewal fails and it stops ticking
+    await stale.tick();
+    assert.equal(stale.status().leaseHeldByThisProcess, false);
+    await mcp.tick();
+    assert.equal(mcp.status().leaseHeldByThisProcess, false, "mcp never preempts a live serve");
+
+    // one serve does not steal from another live serve
+    await serve2.tick();
+    assert.equal(serve2.status().leaseHeldByThisProcess, false);
+    assert.equal(repo.leaseInfo().holder, serve.status().holder);
+
+    // serve gone: mcp takes over once the lease expires, as before
+    serve.stop();
+    assert.equal(serve.status().leaseHeldByThisProcess, false, "stop releases the lease");
+    await mcp.tick();
+    assert.equal(mcp.status().leaseHeldByThisProcess, true);
+  } finally {
+    stale.stop();
+    mcp.stop();
+    serve.stop();
+    serve2.stop();
+    runs.shutdown();
+    await new Promise((r) => setTimeout(r, 300));
+    db.close();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("`duskfleet serve` stays alive past its first tick and holds the lease until SIGTERM", async () => {
   const { spawn } = await import("node:child_process");
   const { root, configDir } = makeRoot();

@@ -8,7 +8,10 @@
  *  - Busy is a skip, never a queue. RunManager's per-agent / per-project guards
  *    throw; the firing is recorded as `skipped_busy`.
  *  - Only one process ticks: the SQLite lease (see ScheduleRepository) is renewed
- *    every tick and expires after 3 ticks without renewal.
+ *    every tick and expires after 3 ticks without renewal. The `serve` role takes
+ *    it from any other holder (`mcp`, `cli`, role-less) on its first tick: the
+ *    installed service runs the latest build, an MCP server a host keeps alive
+ *    may not, and it must never hold the lease for days.
  *  - A process without a RunManager (the dashboard) triggers a schedule by setting
  *    `run_requested_at`; the lease holder fires it on its next tick, paused or not.
  */
@@ -16,7 +19,7 @@ import { hostname } from "node:os";
 import type { RunManager } from "../orchestration/run-manager.js";
 import type { ScheduleRepository } from "../storage/schedules.js";
 import { logger } from "../util/log.js";
-import { createSchedule, formatHolder, nextRunAtFor, updateSchedule, type SchedulerRole } from "./crud.js";
+import { createSchedule, formatHolder, nextRunAtFor, parseHolder, updateSchedule, type SchedulerRole } from "./crud.js";
 import type { Schedule, ScheduleInput, ScheduleOutcome, SchedulePatch } from "./types.js";
 
 const log = logger("scheduler");
@@ -48,6 +51,8 @@ export class Scheduler {
   private lastTickAt: string | null = null;
   private leaseHeld = false;
   private ticking = false;
+  /** `serve` takes the lease from `mcp` / `cli` / role-less holders instead of waiting for it to expire. */
+  private readonly preempts: boolean;
 
   constructor(
     private readonly repo: ScheduleRepository,
@@ -56,6 +61,7 @@ export class Scheduler {
   ) {
     this.tickMs = options.tickMs ?? 30_000;
     this.holder = options.holder ?? formatHolder(options.role ?? "unknown", hostname(), process.pid);
+    this.preempts = parseHolder(this.holder).role === "serve";
     this.now = options.now ?? (() => new Date());
   }
 
@@ -137,8 +143,13 @@ export class Scheduler {
         this.leaseHeld = false;
         return;
       }
-      this.leaseHeld = this.repo.acquireLease(this.holder, this.tickMs * 3);
-      if (!this.leaseHeld) return;
+      const hadLease = this.leaseHeld;
+      this.leaseHeld = this.repo.acquireLease(this.holder, this.tickMs * 3, this.preempts);
+      if (!this.leaseHeld) {
+        if (hadLease) log.info("lease lost", { holder: this.holder, to: this.repo.leaseInfo()?.holder ?? null });
+        return;
+      }
+      if (!hadLease) log.info("lease acquired", { holder: this.holder });
 
       // Manual "run now" requests (dashboard) first: they fire even when paused, like fireNow.
       for (const s of this.repo.takeRunRequests()) {
