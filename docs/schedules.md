@@ -59,6 +59,11 @@ Things to know:
   `data/logs/serve.log` if `doctor` reports the task running but nothing fires.
 - The MCP server keeps ticking as a fallback: stop the service and it takes over after three
   ticks (90 s by default).
+- The lease has no priority: whoever ticks first after it expires holds it. An MCP server
+  started before your last `npm run build` keeps running the old code and can hold the lease
+  for days (the dashboard badge shows `host:pid` without a role for such old processes). After a
+  build, restart the hosts that spawned the MCP server (Claude Desktop, Claude Code sessions) or
+  kill the stale `packages/mcp/dist/index.js` processes, then `install-service`.
 
 ## Policies
 

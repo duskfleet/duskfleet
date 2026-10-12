@@ -208,3 +208,29 @@ test("a run request (dashboard 'Run now') is fired by the lease holder on its ne
     rmSync(root, { recursive: true, force: true });
   }
 });
+
+test("`duskfleet serve` stays alive past its first tick and holds the lease until SIGTERM", async () => {
+  const { spawn } = await import("node:child_process");
+  const { root, configDir } = makeRoot();
+  const cliEntry = path.join(here, "..", "dist", "cli.js");
+  const child = spawn(process.execPath, [cliEntry, "serve"], { env: { ...process.env, DUSKFLEET_CONFIG: configDir }, stdio: ["ignore", "pipe", "pipe"] });
+  let stderr = "";
+  child.stderr.on("data", (d) => (stderr += d));
+  let exited = null;
+  child.on("exit", (code) => (exited = code));
+  try {
+    // long enough for bootstrap + the first tick to finish (it used to exit with 0 right after it)
+    await new Promise((r) => setTimeout(r, 2500));
+    assert.equal(exited, null, `serve exited early with ${exited}: ${stderr}`);
+    assert.match(stderr, /scheduler ticking every/);
+    const db = openDatabase(loadConfig(configDir).dataDir);
+    const lease = new ScheduleRepository(db).leaseInfo();
+    db.close();
+    assert.ok(lease && /^serve@/.test(lease.holder), `lease held by serve, got ${JSON.stringify(lease)}`);
+    assert.ok(new Date(lease.expiresAt).getTime() > Date.now(), "lease is live");
+  } finally {
+    child.kill("SIGTERM");
+    await new Promise((r) => child.on("exit", r));
+    rmSync(root, { recursive: true, force: true });
+  }
+});

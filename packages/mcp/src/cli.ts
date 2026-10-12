@@ -196,7 +196,14 @@ async function main(): Promise<void> {
       // only the lease holder fires. Stop with SIGINT/SIGTERM.
       app.scheduler.start();
       process.stderr.write(`duskfleet serve: scheduler ticking every ${app.config.scheduler.tickSeconds}s (holder ${app.scheduler.status().holder}); Ctrl-C to stop\n`);
+      // The scheduler's own interval is unref'd (it must not keep the MCP server alive) and a
+      // pending promise does not hold the event loop either, so without a ref'd handle this
+      // process exited with 0 right after its first tick and launchd restarted it every 10 s
+      // (it never held the lease long enough to fire anything). This handle is what keeps
+      // `serve` alive until SIGINT/SIGTERM.
+      const keepAlive = setInterval(() => {}, 60_000);
       const stop = () => {
+        clearInterval(keepAlive);
         app.close();
         process.exit(0);
       };
