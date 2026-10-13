@@ -117,6 +117,10 @@ npm workspaces, one `config/` and one SQLite database shared by three deliverabl
   `.claude/agents/<name>.md`; DuskFleet owns only the unattended envelope). A folder that is
   not a project yet is registered in the private registry by `create_agent`. `create_agent` requires `kind` and `assertAgentKind` in core validates the
   combination before any file is written. Prefer link when the project already has the agent.
+  **A link is prompted as the agent, never as its caller**: "run your loop", not "run
+  /pickup-x" when that command invokes the same agent (it would invoke itself as a subagent,
+  verified 2026-10-13). And the project agent's `tools:` must use the `mcp__claude_ai_*`
+  names, or its preflight finds no Jira tools.
 - **Concurrency guards live in `RunManager.startRun`**: one run per project directory and
   one per agent by default (`max_concurrent_per_project`, `max_concurrent_per_agent`).
   Per agent, `max_concurrent: n` overrides the agent limit and `isolated: true` (a promise
