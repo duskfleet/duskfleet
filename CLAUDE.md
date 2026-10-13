@@ -17,7 +17,7 @@ npm test             # packages/mcp/test/*.test.js, node --test, ~25 s, no netwo
 npm run cli -- doctor | agents | projects | run | runs | run-info | schedules
 npm run cli -- serve  # long-running scheduler process; the MCP server also ticks
 npm run cli -- install-service [--print] | uninstall-service   # register `serve` with launchd / systemd --user / Task Scheduler
-npm run cli -- run --project <abs path> --agent <agent id> --model haiku -- "task"
+npm run cli -- run --project <project id or abs path> --agent <agent id> --model haiku -- "task"
 npm run web          # Next.js dashboard, http://localhost:4777
 ```
 

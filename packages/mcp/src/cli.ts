@@ -5,7 +5,7 @@
  *
  *   duskfleet agents
  *   duskfleet projects
- *   duskfleet run --project <path> [--agent <id>] [--model <m>] [--no-wait] -- "<prompt>"
+ *   duskfleet run --project <id or path> [--agent <id>] [--model <m>] [--no-wait] -- "<prompt>"
  *   duskfleet runs [--status <s>] [--limit <n>]
  *   duskfleet run-info <run_id> [--events]
  *   duskfleet schedules
@@ -34,7 +34,7 @@ function usage(): never {
       "Usage:",
       "  duskfleet agents",
       "  duskfleet projects",
-      '  duskfleet run --project <path> [--agent <id>] [--model <m>] [--no-wait] -- "<prompt>"',
+      '  duskfleet run --project <id or path> [--agent <id>] [--model <m>] [--no-wait] -- "<prompt>"',
       "  duskfleet runs [--status <status>] [--limit <n>]",
       "  duskfleet run-info <run_id> [--events]",
       "  duskfleet schedules",
@@ -159,7 +159,11 @@ async function main(): Promise<void> {
       if (!prompt || (!values.project && !values["project-id"])) usage();
 
       const input: Parameters<typeof app.runs.startRun>[0] = { prompt };
-      if (values.project) input.projectPath = values.project;
+      // --project takes a registered id or an absolute path; --project-id is kept as an explicit form.
+      if (values.project) {
+        if (app.config.projects.has(values.project)) input.projectId = values.project;
+        else input.projectPath = values.project;
+      }
       if (values["project-id"]) input.projectId = values["project-id"];
       if (values.agent) input.agentId = values.agent;
       if (values.model) input.model = values.model;

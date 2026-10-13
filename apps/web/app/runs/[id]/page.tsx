@@ -34,7 +34,7 @@ export default async function RunPage({ params }: { params: Promise<{ id: string
   const fullCommand = `${run.command.binary} ${run.command.argv.map((a) => shellQuote(a, 160)).join(" ")}`;
   const again = [
     "npm run cli -- run",
-    `--project ${shellQuote(run.projectPath)}`,
+    `--project ${run.projectId ?? shellQuote(run.projectPath)}`,
     `--agent ${run.agentId}`,
     run.modelRequested ? `--model ${run.modelRequested}` : null,
     `-- ${shellQuote(run.prompt)}`,
