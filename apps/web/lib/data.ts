@@ -47,6 +47,8 @@ export interface LinkedAgentInfo {
   found: boolean;
   model: string | null;
   path: string | null;
+  /** The project agent's own frontmatter description (what `claude --agent` actually runs as). */
+  description: string | null;
 }
 
 export function listAgents() {
@@ -55,7 +57,7 @@ export function listAgents() {
   const projectAgents = new Map<string, ProjectAgentInfo[]>();
   const resolveLink = (projectId: string | undefined, name: string): LinkedAgentInfo => {
     const project = projectId ? cfg.projects.get(projectId) : undefined;
-    if (!project) return { name, found: false, model: null, path: null };
+    if (!project) return { name, found: false, model: null, path: null, description: null };
     let list = projectAgents.get(project.id);
     if (!list) {
       try {
@@ -66,7 +68,9 @@ export function listAgents() {
       projectAgents.set(project.id, list);
     }
     const hit = list.find((p) => p.name === name);
-    return hit ? { name, found: true, model: hit.model, path: hit.path } : { name, found: false, model: null, path: null };
+    return hit
+      ? { name, found: true, model: hit.model, path: hit.path, description: hit.description || null }
+      : { name, found: false, model: null, path: null, description: null };
   };
 
   return [...cfg.agents.values()].map(({ systemPrompt, ...a }) => {
