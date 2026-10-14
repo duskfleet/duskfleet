@@ -25,11 +25,11 @@ export {
 export * from "./observability/run.js";
 
 export { openDatabase } from "./storage/db.js";
-export { RunRepository, type ListRunsFilter, type RunPatch } from "./storage/runs.js";
+export { RunRepository, NEEDS_REVIEW_SQL, type ListRunsFilter, type RunPatch } from "./storage/runs.js";
 
 export * from "./execution/types.js";
 export { ClaudeCodeExecutor, resolveClaudeBinary, type ClaudeCodeExecutorOptions } from "./execution/claude-code.js";
-export { ingestLine, createStreamState, looksLikeContextExhaustion, isBudgetExhausted, type ParsedResult, type StreamState } from "./execution/stream-json.js";
+export { ingestLine, createStreamState, looksLikeContextExhaustion, type ParsedResult, type StreamState } from "./execution/stream-json.js";
 
 export { RunManager, mcpToolPrefix, budgetPlan, mergeResults, WRAP_UP_PROMPT, type StartRunInput } from "./orchestration/run-manager.js";
 export { summarizeToolInput } from "./orchestration/tool-summary.js";

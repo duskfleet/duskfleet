@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { isBudgetExhausted, wrapUpPhase } from "@duskfleet/core";
 import type { RunWithProject } from "@/lib/data";
 import { RunRow } from "./RunRow";
 import { StatusBadge } from "./StatusBadge";
@@ -60,7 +61,19 @@ export function RunTable({ runs, emptyText }: { runs: RunWithProject[]; emptyTex
                       <Link href={issues} className="flag bad badge-link">context exhausted</Link>
                     </span>
                   )}
-                  {r.error && r.status !== "completed" && (
+                  {isBudgetExhausted(r.terminationReason) && (
+                    <span className="flags">
+                      <Link href={issues} className="flag bad badge-link" title={wrapUpPhase(r) ? "The main pass ran out of budget; a wrap-up pass recorded where it stopped" : "The run ran out of budget mid-action and left no wrap-up trace"}>
+                        budget exhausted{wrapUpPhase(r) ? " · wrapped up" : ""}
+                      </Link>
+                    </span>
+                  )}
+                  {r.error?.startsWith("orphaned") && (
+                    <span className="flags">
+                      <Link href={issues} className="flag bad badge-link" title={r.error}>orphaned</Link>
+                    </span>
+                  )}
+                  {r.error && r.status !== "completed" && !isBudgetExhausted(r.terminationReason) && !r.error.startsWith("orphaned") && (
                     <span className="flags">
                       <Link href={issues} className="flag bad badge-link" title={r.error}>error</Link>
                     </span>

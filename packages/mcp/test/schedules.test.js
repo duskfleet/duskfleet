@@ -94,6 +94,34 @@ test("schedules over MCP: create, list, update, run now, delete; validation erro
     assert.match(skipped.error, /agent busy|project busy/);
     assert.equal(skipped.schedule.skips, 1);
 
+    // The row says how the last run ended, not only that it started: a budget-exhausted
+    // run is "needs review" right on the schedule (on 2026-10-14 one stayed green for 11 hours).
+    ok(await client.callTool({ name: "update_schedule", arguments: { id: created.schedule.id, prompt: "budget" } }));
+    for (let i = 0; i < 50; i++) {
+      const r = ok(await client.callTool({ name: "get_run", arguments: { run_id: fired.runId } }));
+      if (r.status !== "running") break;
+      await new Promise((res) => setTimeout(res, 100));
+    }
+    const budgetFire = ok(await client.callTool({ name: "run_schedule_now", arguments: { id: created.schedule.id } }));
+    assert.equal(budgetFire.outcome, "started");
+    assert.equal(budgetFire.schedule.lastRun.id, budgetFire.runId);
+    assert.equal(budgetFire.schedule.lastRun.status, "running");
+    assert.equal(budgetFire.schedule.lastRun.needsReview, false, "nothing to review while it runs");
+    let after;
+    for (let i = 0; i < 100; i++) {
+      after = ok(await client.callTool({ name: "list_schedules", arguments: {} })).schedules[0];
+      if (after.lastRun.status !== "running") break;
+      await new Promise((res) => setTimeout(res, 100));
+    }
+    assert.equal(after.lastOutcome, "started", "the tick outcome alone looks fine");
+    assert.equal(after.lastRun.status, "failed");
+    assert.equal(after.lastRun.needsReview, true);
+    assert.deepEqual(after.lastRun.reviewReasons, ["budget_exhausted", "nonzero_exit"]);
+    assert.equal(after.lastRun.terminationReason, "budget_exhausted");
+    assert.equal(after.lastRun.costUsd, 4.52, "main pass plus wrap-up pass");
+    const listed2 = ok(await client.callTool({ name: "list_runs", arguments: { limit: 1 } }));
+    assert.equal(listed2.runs[0].needsReview, true);
+
     const deleted = ok(await client.callTool({ name: "delete_schedule", arguments: { id: created.schedule.id } }));
     assert.equal(deleted.deleted, true);
     fails(await client.callTool({ name: "delete_schedule", arguments: { id: created.schedule.id } }), /not found/);

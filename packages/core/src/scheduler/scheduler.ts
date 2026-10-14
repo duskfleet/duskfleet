@@ -17,6 +17,7 @@
  */
 import { hostname } from "node:os";
 import type { RunManager } from "../orchestration/run-manager.js";
+import { lastRunSummary, type LastRunSummary } from "../observability/run.js";
 import type { ScheduleRepository } from "../storage/schedules.js";
 import { logger } from "../util/log.js";
 import { createSchedule, formatHolder, nextRunAtFor, parseHolder, updateSchedule, type SchedulerRole } from "./crud.js";
@@ -85,6 +86,11 @@ export class Scheduler {
 
   list(): Schedule[] {
     return this.repo.list();
+  }
+
+  /** Schedules with the state of the run each last started (null before the first firing). */
+  listWithLastRun(): Array<Schedule & { lastRun: LastRunSummary | null }> {
+    return this.repo.list().map((s) => ({ ...s, lastRun: lastRunSummary(s.lastRunId ? this.runs.getRun(s.lastRunId) : null) }));
   }
 
   get(id: string): Schedule | null {

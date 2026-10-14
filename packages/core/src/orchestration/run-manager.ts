@@ -11,8 +11,7 @@ import { listProjectAgents, projectAgentDefinitionHash } from "../config/agent-f
 import { summarizeToolInput } from "./tool-summary.js";
 import type { AgentDefinition, DuskFleetConfig, ProjectDefinition } from "../config/types.js";
 import type { ExecutionEvent, ExecutionHandle, ExecutionRequest, ExecutionResult, Executor, McpServerInfo, SubagentRecord, TokenUsage } from "../execution/types.js";
-import { isBudgetExhausted } from "../execution/stream-json.js";
-import { isTerminal, type Run, type RunAgent, type RunPhase, type RunStatus } from "../observability/run.js";
+import { isBudgetExhausted, isTerminal, type Run, type RunAgent, type RunPhase, type RunStatus } from "../observability/run.js";
 import type { RunRepository, ListRunsFilter } from "../storage/runs.js";
 import { logger } from "../util/log.js";
 import { validateProjectPath } from "./project-validation.js";

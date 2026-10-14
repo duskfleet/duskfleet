@@ -113,6 +113,81 @@ export interface RunAgent extends SubagentRecord {
   definitionHash: string | null;
 }
 
+/**
+ * Why a run needs a human to look at it. Anything that stopped the run before the agent
+ * chose to stop, or that silently narrowed what it could do, counts: a run that failed
+ * but looked green in a list is how a budget stop on 2026-10-14 went unnoticed for 11 hours.
+ * `cancelled` is not a reason (a person did it); running runs have none yet.
+ */
+export type ReviewReason =
+  | "budget_exhausted"
+  | "timed_out"
+  | "orphaned"
+  | "nonzero_exit"
+  | "failed"
+  | "permission_denied"
+  | "context_exhausted"
+  | "mcp_missing";
+
+export const REVIEW_REASON_LABELS: Record<ReviewReason, string> = {
+  budget_exhausted: "budget exhausted",
+  timed_out: "timed out",
+  orphaned: "orphaned by a restart",
+  nonzero_exit: "non-zero exit code",
+  failed: "failed",
+  permission_denied: "permission denied",
+  context_exhausted: "context exhausted",
+  mcp_missing: "allow-listed MCP server not mounted",
+};
+
+/** The run stopped because `--max-budget-usd` was reached (`terminal_reason: budget_exhausted`, `subtype: error_max_budget_usd`; verified 2026-10-14 on CLI 2.1.299). */
+export function isBudgetExhausted(terminationReason: string | null | undefined): boolean {
+  return typeof terminationReason === "string" && /budget/i.test(terminationReason);
+}
+
+type ReviewInput = Pick<Run, "status" | "terminationReason" | "error" | "exitCode" | "humanIntervention" | "permissionDenials" | "contextExhausted"> & { mcp?: Pick<RunMcpInfo, "allowListedMissing"> | null };
+
+export function reviewReasons(run: ReviewInput): ReviewReason[] {
+  const reasons: ReviewReason[] = [];
+  if (isBudgetExhausted(run.terminationReason)) reasons.push("budget_exhausted");
+  if (run.status === "timed_out") reasons.push("timed_out");
+  if (run.error?.startsWith("orphaned")) reasons.push("orphaned");
+  if (run.exitCode !== null && run.exitCode !== 0) reasons.push("nonzero_exit");
+  if (run.status === "failed" && reasons.length === 0) reasons.push("failed");
+  if (run.humanIntervention || (run.permissionDenials ?? 0) > 0) reasons.push("permission_denied");
+  if (run.contextExhausted) reasons.push("context_exhausted");
+  if ((run.mcp?.allowListedMissing ?? []).length > 0) reasons.push("mcp_missing");
+  return reasons;
+}
+
+export function needsReview(run: ReviewInput): boolean {
+  return reviewReasons(run).length > 0;
+}
+
+/** What a schedule row says about the run it last started: enough to see a failure without opening it. */
+export interface LastRunSummary {
+  id: string;
+  status: RunStatus;
+  needsReview: boolean;
+  reviewReasons: ReviewReason[];
+  terminationReason: string | null;
+  costUsd: number | null;
+  endedAt: string | null;
+}
+
+export function lastRunSummary(run: Run | null): LastRunSummary | null {
+  if (!run) return null;
+  return {
+    id: run.id,
+    status: run.status,
+    needsReview: needsReview(run),
+    reviewReasons: reviewReasons(run),
+    terminationReason: run.terminationReason,
+    costUsd: run.costUsd,
+    endedAt: run.endedAt,
+  };
+}
+
 /** Compact view used by list_runs. */
 export function summarizeRun(run: Run) {
   return {
@@ -132,7 +207,8 @@ export function summarizeRun(run: Run) {
     toolCalls: run.toolCalls,
     deniedTools: run.deniedTools,
     mcpAllowListedMissing: run.mcp.allowListedMissing,
-    needsReview: run.humanIntervention || run.contextExhausted || run.mcp.allowListedMissing.length > 0,
+    needsReview: needsReview(run),
+    reviewReasons: reviewReasons(run),
     humanIntervention: run.humanIntervention,
     contextExhausted: run.contextExhausted,
     terminationReason: run.terminationReason,
