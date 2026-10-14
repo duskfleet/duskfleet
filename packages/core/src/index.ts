@@ -29,7 +29,8 @@ export { RunRepository, NEEDS_REVIEW_SQL, type ListRunsFilter, type RunPatch } f
 
 export * from "./execution/types.js";
 export { ClaudeCodeExecutor, resolveClaudeBinary, type ClaudeCodeExecutorOptions } from "./execution/claude-code.js";
-export { ingestLine, createStreamState, looksLikeContextExhaustion, type ParsedResult, type StreamState } from "./execution/stream-json.js";
+export { ingestLine, createStreamState, looksLikeContextExhaustion, cleanHandBack, type ParsedResult, type StreamState } from "./execution/stream-json.js";
+export { subagentsFromLog, needsRepair, mergeSubagent } from "./execution/log-replay.js";
 
 export { RunManager, mcpToolPrefix, budgetPlan, mergeResults, resumePrompt, WRAP_UP_PROMPT, type StartRunInput, type ResumeRunInput } from "./orchestration/run-manager.js";
 export { summarizeToolInput } from "./orchestration/tool-summary.js";

@@ -189,7 +189,15 @@ that did part of the work:
 - `definitionHash`: a short hash of the project agent file at start time, so evals can tell
   which version of a persona produced a result.
 
-`get_run` returns them as `subagents`; `run-info` on the CLI does the same. Tool-use
+`get_run` returns them as `subagents`, each with `type`, `brief` and `report` as plain-language
+aliases of `subagentType`, `prompt` and `resultText`; `run-info` on the CLI does the same. The
+report is stored as the subagent wrote it: Claude Code's hand-back frame (provenance preamble,
+two-space indent, `agentId` / `<usage>` footer) is stripped. When a stream lacks the
+`task_started` or nested lines, the hand-back's `tool_use_result` (`agentType`, `prompt`,
+`resolvedModel`, `totalDurationMs`, `totalTokens`, `totalToolUseCount`) and the parent's
+`Agent` call input still fill the row; the harness totals win over counted figures. Rows of a
+finished run that miss any of these, or still hold a raw frame, are repaired once from the
+run's `data/logs/<run_id>.jsonl` when read and written back. Tool-use
 events in the timeline carry the `agentId` they belong to (null for the main session).
 Nothing is spawned differently: the data comes from the `task_started` /
 `task_notification` lines and the `agent_id` field of nested messages in Claude Code's
