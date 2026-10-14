@@ -1,3 +1,4 @@
+import { isBudgetExhausted, wrapUpPhase } from "@duskfleet/core";
 import Link from "next/link";
 import type { RunWithProject } from "@/lib/data";
 import { elapsedSince, fmtCost, fmtDuration, fmtRelative, fmtTime, runTitle, shortModel } from "@/lib/format";
@@ -76,13 +77,38 @@ export function RunTable({ runs, emptyText }: { runs: RunWithProject[]; emptyTex
                       </Link>
                     </span>
                   )}
-                  {r.error && r.status !== "completed" && (
+                  {isBudgetExhausted(r.terminationReason) && (
                     <span className="flags">
-                      <Link href={issues} className="flag bad badge-link" title={r.error}>
-                        error
+                      <Link
+                        href={issues}
+                        className="flag bad badge-link"
+                        title={
+                          wrapUpPhase(r)
+                            ? "The main pass ran out of budget; a wrap-up pass recorded where it stopped"
+                            : "The run ran out of budget mid-action and left no wrap-up trace"
+                        }
+                      >
+                        budget exhausted{wrapUpPhase(r) ? " · wrapped up" : ""}
                       </Link>
                     </span>
                   )}
+                  {r.error?.startsWith("orphaned") && (
+                    <span className="flags">
+                      <Link href={issues} className="flag bad badge-link" title={r.error}>
+                        orphaned
+                      </Link>
+                    </span>
+                  )}
+                  {r.error &&
+                    r.status !== "completed" &&
+                    !isBudgetExhausted(r.terminationReason) &&
+                    !r.error.startsWith("orphaned") && (
+                      <span className="flags">
+                        <Link href={issues} className="flag bad badge-link" title={r.error}>
+                          error
+                        </Link>
+                      </span>
+                    )}
                 </div>
               </td>
               <td className="col-model">

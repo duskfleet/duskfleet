@@ -166,6 +166,18 @@ const PATCH_COLUMNS: Record<keyof RunPatch, string> = {
   phases: "phases_json",
 };
 
+/**
+ * SQL twin of `reviewReasons()` (observability/run.ts) for aggregate queries; keep the
+ * two in step. Usable as a boolean expression over the `runs` table.
+ */
+export const NEEDS_REVIEW_SQL = `(
+  human_intervention = 1 OR context_exhausted = 1
+  OR status IN ('failed', 'timed_out')
+  OR (exit_code IS NOT NULL AND exit_code <> 0)
+  OR LOWER(COALESCE(termination_reason, '')) LIKE '%budget%'
+  OR json_array_length(json_extract(COALESCE(mcp_json, '{}'), '$.allowListedMissing')) > 0
+)`;
+
 export class RunRepository {
   constructor(private readonly db: DatabaseSync) {}
 

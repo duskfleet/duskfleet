@@ -73,7 +73,11 @@ Things to know:
 - A tick whose agent or project is still busy is recorded as `skipped_busy`, never queued.
 - Missed ticks (nobody running) are not caught up.
 - `scheduler.enabled: false` in `duskfleet.yaml` is the kill switch, re-read every tick.
-- Every run started by a schedule carries its `scheduleId`.
+- Every run started by a schedule carries its `scheduleId`, and the schedule carries the
+  state of the run it last started (`lastRun` in `list_schedules` and `duskfleet schedules`,
+  a badge on the dashboard row): `started` is only the outcome of the tick; a run that then
+  failed, timed out or ran out of budget is **needs review** right on the row (see
+  [dashboard](dashboard.md#needs-review)).
 - New schedules are best created paused (`enabled: false`), tried once with `run_schedule_now`
   or the dashboard's **Run now**, checked on the dashboard (denials, missing MCP servers, cost)
   and only then enabled.

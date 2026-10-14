@@ -154,7 +154,7 @@ export default async function RunsPage({ searchParams }: { searchParams: Promise
         </div>
         <div
           className="stat"
-          title="Completed without permission denials or context exhaustion, over all finished runs"
+          title="Completed with nothing to review (no denial, context or budget exhaustion, MCP mismatch), over all finished runs"
         >
           <div className="label">Clean runs</div>
           <div className="value">{fmtPct(o.clean, o.finished)}</div>
@@ -165,7 +165,7 @@ export default async function RunsPage({ searchParams }: { searchParams: Promise
         <div className="stat">
           <div className="label">Needs review</div>
           <div className={`value ${o.needsReview ? "warn" : ""}`}>{o.needsReview}</div>
-          <div className="sub">hit a permission denial or ran out of context</div>
+          <div className="sub">failed, timed out, out of budget or context, orphaned, or denied a tool</div>
         </div>
         <div className="stat">
           <div className="label">Spent</div>

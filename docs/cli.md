@@ -40,3 +40,6 @@ after a budget exhaustion, the [wrap-up pass](agents.md#budget-reserve-and-wrap-
 
 `contextExhausted` comes only from structured signals (termination reason, result subtype,
 stop reason, or the error text of a failed run), never from scanning the result's prose.
+
+`duskfleet runs` adds `needsReview` and `reviewReasons` per run (see
+[dashboard](dashboard.md#needs-review)); `duskfleet schedules` adds `lastRun` per schedule.

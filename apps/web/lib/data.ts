@@ -15,8 +15,10 @@ import {
   type DuskFleetConfig,
   describeCron,
   findRepoRoot,
+  lastRunSummary,
   listProjectAgents,
   loadConfig,
+  NEEDS_REVIEW_SQL,
   nextFire,
   openDatabase,
   type ProjectAgentInfo,
@@ -250,7 +252,7 @@ export function agentStats(): AgentStats[] {
               SUM(status = 'running')                           AS running,
               SUM(status = 'completed')                         AS completed,
               SUM(status IN ('failed','timed_out','cancelled')) AS failed,
-              SUM(human_intervention = 1)                       AS needs_review,
+              SUM(${NEEDS_REVIEW_SQL})                          AS needs_review,
               COALESCE(SUM(cost_usd), 0)                        AS cost_usd,
               AVG(duration_ms)                                  AS avg_duration_ms,
               MAX(created_at)                                   AS last_run_at,
@@ -355,9 +357,9 @@ export function overview(filter: Pick<RunsFilter, "agentId" | "projectPath"> = {
               SUM(status = 'running')                                   AS running,
               SUM(status IN ('completed','failed','timed_out','cancelled')) AS finished,
               SUM(status = 'completed')                                 AS completed,
-              SUM(status = 'completed' AND human_intervention = 0 AND context_exhausted = 0) AS clean,
+              SUM(status = 'completed' AND NOT ${NEEDS_REVIEW_SQL})     AS clean,
               SUM(status IN ('failed','timed_out','cancelled'))         AS failed,
-              SUM(human_intervention = 1 OR (status = 'completed' AND context_exhausted = 1)) AS needs_review,
+              SUM(${NEEDS_REVIEW_SQL})                                  AS needs_review,
               COALESCE(SUM(cost_usd), 0)                                AS cost_usd,
               COALESCE(SUM(CASE WHEN created_at >= ? THEN cost_usd END), 0) AS cost_24h
        FROM runs ${where.length ? "WHERE " + where.join(" AND ") : ""}`,
@@ -387,7 +389,7 @@ export function overview(filter: Pick<RunsFilter, "agentId" | "projectPath"> = {
 }
 
 export function listSchedules() {
-  const { schedules } = services();
+  const { schedules, runs } = services();
   const now = new Date();
   return schedules.list().map((s) => {
     let cronHuman = s.cron;
@@ -399,7 +401,9 @@ export function listSchedules() {
     } catch {
       // keep raw
     }
-    return { ...s, cronHuman, theoreticalNextAt };
+    // How the run it last started ended: the tick outcome alone ("started") hides a failed run.
+    const lastRun = lastRunSummary(s.lastRunId ? runs.get(s.lastRunId) : null);
+    return { ...s, cronHuman, theoreticalNextAt, lastRun };
   });
 }
 

@@ -9,7 +9,6 @@ import path from "node:path";
 import { listProjectAgents, projectAgentDefinitionHash } from "../config/agent-files.js";
 import { loadConfig } from "../config/loader.js";
 import type { AgentDefinition, DuskFleetConfig, ProjectDefinition } from "../config/types.js";
-import { isBudgetExhausted } from "../execution/stream-json.js";
 import type {
   ExecutionEvent,
   ExecutionHandle,
@@ -20,7 +19,14 @@ import type {
   SubagentRecord,
   TokenUsage,
 } from "../execution/types.js";
-import { isTerminal, type Run, type RunAgent, type RunPhase, type RunStatus } from "../observability/run.js";
+import {
+  isBudgetExhausted,
+  isTerminal,
+  type Run,
+  type RunAgent,
+  type RunPhase,
+  type RunStatus,
+} from "../observability/run.js";
 import { parseHolder, processIdentity } from "../scheduler/crud.js";
 import type { ListRunsFilter, RunRepository } from "../storage/runs.js";
 import { logger } from "../util/log.js";

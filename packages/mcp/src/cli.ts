@@ -197,7 +197,7 @@ async function main(): Promise<void> {
       return done();
     }
     case "schedules": {
-      print({ scheduler: app.scheduler.status(), schedules: app.scheduler.list() });
+      print({ scheduler: app.scheduler.status(), schedules: app.scheduler.listWithLastRun() });
       return done();
     }
     case "serve": {

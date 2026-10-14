@@ -1,16 +1,19 @@
-import { describeCron, parseCron, type Schedule } from "@duskfleet/core";
+import { describeCron, type LastRunSummary, lastRunSummary, parseCron, type Schedule } from "@duskfleet/core";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { errorResult, jsonResult, type ToolContext } from "../server.js";
 
-function present(s: Schedule) {
+function present(ctx: ToolContext, s: Schedule & { lastRun?: LastRunSummary | null }) {
   let human = s.cron;
   try {
     human = describeCron(parseCron(s.cron));
   } catch {
     // keep the raw expression
   }
-  return { ...s, cronHuman: human };
+  // The outcome of the last tick says whether a run *started*; lastRun says how that run *ended*.
+  const lastRun =
+    s.lastRun !== undefined ? s.lastRun : lastRunSummary(s.lastRunId ? ctx.runs.getRun(s.lastRunId) : null);
+  return { ...s, cronHuman: human, lastRun };
 }
 
 const scheduleFields = {
@@ -39,11 +42,15 @@ export function registerScheduleTools(server: McpServer, ctx: ToolContext): void
     {
       title: "List schedules",
       description:
-        "List cron schedules with next/last firing, outcome of the last tick (started | skipped_busy | error) and scheduler status " +
+        "List cron schedules with next/last firing, outcome of the last tick (started | skipped_busy | error), lastRun (status, needsReview and reviewReasons of the run it last started: a schedule whose run failed or ran out of budget shows it here) and scheduler status " +
         "(kill switch, which process holds the lease). A busy agent or project makes a tick skip, never queue.",
       inputSchema: {},
     },
-    async () => jsonResult({ scheduler: ctx.scheduler.status(), schedules: ctx.scheduler.list().map(present) }),
+    async () =>
+      jsonResult({
+        scheduler: ctx.scheduler.status(),
+        schedules: ctx.scheduler.listWithLastRun().map((s) => present(ctx, s)),
+      }),
   );
 
   server.registerTool(
@@ -71,7 +78,7 @@ export function registerScheduleTools(server: McpServer, ctx: ToolContext): void
         if (args.project_id !== undefined) input.projectId = args.project_id;
         if (args.model !== undefined) input.model = args.model;
         if (args.enabled !== undefined) input.enabled = args.enabled;
-        return jsonResult({ created: true, schedule: present(ctx.scheduler.create(input)) });
+        return jsonResult({ created: true, schedule: present(ctx, ctx.scheduler.create(input)) });
       } catch (err) {
         return errorResult(err);
       }
@@ -109,7 +116,7 @@ export function registerScheduleTools(server: McpServer, ctx: ToolContext): void
         if (args.model !== undefined) patch.model = args.model;
         if (args.clear_model) patch.model = null;
         if (args.enabled !== undefined) patch.enabled = args.enabled;
-        return jsonResult({ updated: true, schedule: present(ctx.scheduler.update(args.id, patch)) });
+        return jsonResult({ updated: true, schedule: present(ctx, ctx.scheduler.update(args.id, patch)) });
       } catch (err) {
         return errorResult(err);
       }
@@ -147,7 +154,7 @@ export function registerScheduleTools(server: McpServer, ctx: ToolContext): void
     async (args) => {
       try {
         const result = await ctx.scheduler.fireNow(args.id);
-        return jsonResult({ ...result, schedule: present(ctx.scheduler.get(args.id)!) });
+        return jsonResult({ ...result, schedule: present(ctx, ctx.scheduler.get(args.id)!) });
       } catch (err) {
         return errorResult(err);
       }

@@ -17,6 +17,8 @@
  *  - The lease holder also sweeps orphaned runs (owner process gone) at most once a
  *    minute, so a crashed process's runs close without waiting for the next start.
  */
+
+import { type LastRunSummary, lastRunSummary } from "../observability/run.js";
 import type { RunManager } from "../orchestration/run-manager.js";
 import type { ScheduleRepository } from "../storage/schedules.js";
 import { logger } from "../util/log.js";
@@ -102,6 +104,13 @@ export class Scheduler {
 
   list(): Schedule[] {
     return this.repo.list();
+  }
+
+  /** Schedules with the state of the run each last started (null before the first firing). */
+  listWithLastRun(): Array<Schedule & { lastRun: LastRunSummary | null }> {
+    return this.repo
+      .list()
+      .map((s) => ({ ...s, lastRun: lastRunSummary(s.lastRunId ? this.runs.getRun(s.lastRunId) : null) }));
   }
 
   get(id: string): Schedule | null {

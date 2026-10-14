@@ -89,7 +89,10 @@ npm workspaces, one `config/` and one SQLite database shared by three deliverabl
   which can be 100x more expensive.
 - Dashboard: no component library, design tokens live in `apps/web/app/globals.css`
   (dark and light). A completed run that hit a permission denial is "needs review"
-  (amber), never plain green.
+  (amber), never plain green. One rule decides needs-review everywhere (`reviewReasons`
+  in `core/src/observability/run.ts`, `NEEDS_REVIEW_SQL` for aggregates): budget
+  exhausted, timed out, orphaned, non-zero exit, failed, denial, context, MCP mismatch.
+  Schedule rows show how the last run *ended*, not only that the tick started it.
 
 ## Things that bite
 

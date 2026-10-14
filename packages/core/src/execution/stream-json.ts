@@ -371,15 +371,6 @@ function parseResult(msg: Json): ParsedResult {
 }
 
 /**
- * The run stopped because `--max-budget-usd` was reached. Claude Code reports it as
- * `terminal_reason: "budget_exhausted"` with `subtype: "error_max_budget_usd"` (verified
- * 2026-10-14 on CLI 2.1.299); either is enough.
- */
-export function isBudgetExhausted(terminationReason: string | null | undefined): boolean {
-  return typeof terminationReason === "string" && /budget/i.test(terminationReason);
-}
-
-/**
  * Only structured signals count: terminal reason, result subtype, stop reason, and
  * the result text *when the run is an error*. Scanning a successful run's prose
  * produced false positives (a reviewer writing "context" and "limitation" was

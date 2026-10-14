@@ -1,4 +1,4 @@
-import { type RunEvent, wrapUpPhase } from "@duskfleet/core";
+import { REVIEW_REASON_LABELS, type RunEvent, reviewReasons, wrapUpPhase } from "@duskfleet/core";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { AutoRefresh } from "@/components/AutoRefresh";
@@ -42,12 +42,9 @@ export default async function RunPage({ params }: { params: Promise<{ id: string
   const mcpMissing = run.mcp?.allowListedMissing ?? [];
   const wrapUp = wrapUpPhase(run);
   const mainPhase = run.phases.find((p) => p.phase === "main") ?? null;
-  const hasIssues =
-    denials > 0 || mcpMissing.length > 0 || run.contextExhausted || Boolean(run.error) || wrapUp !== null;
-  const needsAttention =
-    run.status === "failed" ||
-    run.status === "timed_out" ||
-    (run.status === "completed" && (run.humanIntervention || run.contextExhausted));
+  const reasons = reviewReasons(run);
+  const needsAttention = reasons.length > 0;
+  const hasIssues = needsAttention || Boolean(run.error) || wrapUp !== null;
   const resume = run.claudeSessionId
     ? `cd ${shellQuote(run.projectPath)} && claude --resume ${run.claudeSessionId}`
     : null;
@@ -170,6 +167,31 @@ export default async function RunPage({ params }: { params: Promise<{ id: string
       </div>
 
       <div id="issues">
+        {needsAttention && (
+          <div className="callout warn" style={{ marginBottom: 8 }}>
+            <span className="icon">!</span>
+            <div>
+              <strong>Needs review:</strong> {reasons.map((r) => REVIEW_REASON_LABELS[r]).join(" · ")}.
+              {run.status === "timed_out" && (
+                <>
+                  {" "}
+                  The agent&apos;s <code>timeout_minutes</code> elapsed and the process was killed mid-action; nothing
+                  may have been recorded.
+                </>
+              )}
+              {reasons.includes("orphaned") && (
+                <> DuskFleet restarted while the run was in progress; its process was lost.</>
+              )}
+              {reasons.includes("budget_exhausted") && !wrapUp && (
+                <>
+                  {" "}
+                  The run hit <code>max_budget_usd</code> mid-action and no wrap-up pass ran (see{" "}
+                  <code>wrap_up_reserve_usd</code>): whatever it was doing may be half-done and unrecorded.
+                </>
+              )}
+            </div>
+          </div>
+        )}
         {denials > 0 && (
           <div className="callout warn">
             <span className="icon">!</span>
