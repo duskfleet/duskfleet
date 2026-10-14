@@ -28,6 +28,12 @@ export interface AgentDefinition {
   timeoutMinutes?: number;
   maxBudgetUsd?: number;
   /**
+   * Dollars held back from `maxBudgetUsd` for a wrap-up pass: when the main pass ends
+   * `budget_exhausted`, the session is resumed with this budget and told to record where it
+   * stopped. Default 10% of the budget, at least $0.50, never more than half of it. 0 disables.
+   */
+  wrapUpReserveUsd?: number;
+  /**
    * Let runs see the MCP servers of the user running DuskFleet (claude.ai
    * connectors such as Atlassian or Figma, user/project .mcp.json). Default
    * false: runs start with --strict-mcp-config and no MCP at all.

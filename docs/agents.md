@@ -43,12 +43,45 @@ permission_mode: acceptEdits      # acceptEdits | dontAsk | auto | manual  (plan
 # effort: high
 timeout_minutes: 30
 max_budget_usd: 5
+# wrap_up_reserve_usd: 0.5     # part of max_budget_usd kept for the wrap-up pass; default 10%, min $0.50, 0 = off
 ---
 You are running unattended. Finish the task end to end and summarise what you changed.
 ```
 
 An agent without `model` uses the Claude Code default, which can be far more expensive than
 `haiku` or `sonnet`. The dashboard warns when a model is not set.
+
+## Budget reserve and wrap-up pass
+
+A run that hits `max_budget_usd` is killed mid-action. On 2026-10-14 a scheduled run spent
+its whole $5 on two subagents and died while writing the ticket comment that recorded its
+work: the ticket stayed In Progress with no trace, and the agent's WIP limit then blocked the
+next eleven hourly ticks. To make a budget stop leave a trace, DuskFleet splits the budget:
+
+- the **main pass** is launched with `--max-budget-usd` = `max_budget_usd` − reserve;
+- when it ends `budget_exhausted` (and only then), one **wrap-up pass** resumes the same
+  session (`claude --resume <session>`) with `--max-budget-usd` = reserve and this prompt:
+
+  > Your budget is exhausted. Do not start new work or call subagents. Record exactly where
+  > you stopped and why, in the place your instructions say (ticket comment, PR comment, or
+  > final message), then stop.
+
+The reserve is `wrap_up_reserve_usd` when set, otherwise 10% of `max_budget_usd` with a
+$0.50 floor; it is never more than half of the budget, and `0` disables the wrap-up pass.
+`list_agents` and the Agents page show the effective value.
+
+The wrap-up pass is **not a separate run**. The run keeps one id and one session; its
+`phases` list the two processes (`main`, `wrap_up`) with their own outcome, budget, cost,
+turns and tool calls; cost, turns, tokens and tool calls are summed into the run; the
+timeline carries `phase` events around the wrap-up's own tool calls; the run's `resultText`
+is the wrap-up's final message (where it stopped), and the log file holds both passes with
+a `#resume` marker between them. The run's **status is still `failed`** with
+`terminationReason: budget_exhausted`: the task was not done. Only a wrap-up cancelled by
+`cancel_run` turns the run `cancelled`. A wrap-up pass that exhausts the reserve too ends
+there: there is never a third pass, and the run never spends more than `max_budget_usd`.
+The wrap-up pass has at most ten minutes (less when the agent's `timeout_minutes` is shorter)
+and runs with the same permissions, tools and MCP servers as the main pass, so a ticket
+comment it needs to write must already be allow-listed.
 
 ## Permissions in unattended runs
 

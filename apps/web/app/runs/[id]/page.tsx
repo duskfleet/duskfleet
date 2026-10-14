@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import type { RunEvent } from "@duskfleet/core";
+import { wrapUpPhase, type RunEvent } from "@duskfleet/core";
 import { AutoRefresh } from "@/components/AutoRefresh";
 import { CopyButton } from "@/components/CopyButton";
 import { Expandable } from "@/components/Expandable";
@@ -27,7 +27,9 @@ export default async function RunPage({ params }: { params: Promise<{ id: string
   const duration = live ? elapsedSince(run.startedAt) : run.durationMs;
   const denials = run.permissionDenials ?? 0;
   const mcpMissing = run.mcp?.allowListedMissing ?? [];
-  const hasIssues = denials > 0 || mcpMissing.length > 0 || run.contextExhausted || Boolean(run.error);
+  const wrapUp = wrapUpPhase(run);
+  const mainPhase = run.phases.find((p) => p.phase === "main") ?? null;
+  const hasIssues = denials > 0 || mcpMissing.length > 0 || run.contextExhausted || Boolean(run.error) || wrapUp !== null;
   const needsAttention = run.status === "failed" || run.status === "timed_out" || (run.status === "completed" && (run.humanIntervention || run.contextExhausted));
   const resume = run.claudeSessionId ? `cd ${shellQuote(run.projectPath)} && claude --resume ${run.claudeSessionId}` : null;
   const t0 = new Date(run.startedAt ?? run.createdAt).getTime();
@@ -141,6 +143,17 @@ export default async function RunPage({ params }: { params: Promise<{ id: string
           <div className="callout bad">
             <span className="icon">×</span>
             <div><strong>Error.</strong> {tildeText(run.error, home)}</div>
+          </div>
+        )}
+        {wrapUp && (
+          <div className={`callout ${wrapUp.outcome === "completed" ? "warn" : "bad"}`}>
+            <span className="icon">!</span>
+            <div>
+              <strong>Budget exhausted{mainPhase ? ` after ${fmtCost(mainPhase.costUsd)} of ${fmtCost(mainPhase.budgetUsd)}` : ""}.</strong>{" "}
+              A wrap-up pass resumed the session with the {fmtCost(wrapUp.budgetUsd)} reserve and {wrapUp.outcome === "completed" ? "recorded where it stopped" : `ended ${wrapUp.outcome.replace("_", " ")}${wrapUp.terminationReason ? ` (${wrapUp.terminationReason})` : ""}`}:
+              {" "}{fmtCost(wrapUp.costUsd)}, {fmtDuration(wrapUp.durationMs)}, {fmtInt(wrapUp.numTurns)} turn{wrapUp.numTurns === 1 ? "" : "s"}.
+              {wrapUp.outcome === "completed" ? " Its final message is the result below; the task itself was not finished." : " The task was not finished and nothing may have been recorded: check the result and the place the agent reports to."}
+            </div>
           </div>
         )}
       </div>
@@ -382,6 +395,14 @@ function toRow(t0: number, cwd: string, home: string) {
         return { ...base, icon: "×", iconCls: "err", name: "error", detail: tildeText(String(p["parseError"] ?? p["message"] ?? JSON.stringify(p)), home) };
       case "note":
         return { ...base, icon: "·", iconCls: "", name: "note", detail: tildeText(String(p["message"] ?? JSON.stringify(p)), home), mono: false };
+      case "phase": {
+        const started = p["status"] === "started";
+        const name = `${String(p["phase"] ?? "phase").replace("_", "-")} ${started ? "started" : "ended"}`;
+        const detail = started
+          ? [p["budgetUsd"] !== undefined ? `budget ${fmtCost(Number(p["budgetUsd"]))}` : null, p["mainCostUsd"] !== undefined ? `main pass spent ${fmtCost(Number(p["mainCostUsd"]))}` : null, p["reason"] ? String(p["reason"]) : null].filter(Boolean).join(" · ")
+          : [p["outcome"] ? String(p["outcome"]) : null, p["costUsd"] !== undefined ? fmtCost(Number(p["costUsd"])) : null, p["durationMs"] !== undefined ? fmtDuration(Number(p["durationMs"])) : null].filter(Boolean).join(" · ");
+        return { ...base, icon: "◆", iconCls: "status", name, detail, mono: false, isStatus: true };
+      }
       default:
         return { ...base, icon: "·", iconCls: "", name: String(e.type), detail: JSON.stringify(p) };
     }

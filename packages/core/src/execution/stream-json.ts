@@ -30,6 +30,8 @@ export interface ParsedResult {
   stopReason: string | null;
   sessionId: string | null;
   resultText: string | null;
+  /** The `errors` array joined, when the result carries one (a budget stop has no `result` text, verified 2026-10-14). */
+  errorText: string | null;
   numTurns: number | null;
   durationMs: number | null;
   costUsd: number | null;
@@ -326,6 +328,7 @@ function parseResult(msg: Json): ParsedResult {
     stopReason: str(msg["stop_reason"]),
     sessionId: str(msg["session_id"]),
     resultText: str(msg["result"]),
+    errorText: Array.isArray(msg["errors"]) && msg["errors"].length ? msg["errors"].filter((e): e is string => typeof e === "string").join("; ") || null : null,
     numTurns: num(msg["num_turns"]),
     durationMs: num(msg["duration_ms"]),
     costUsd: num(msg["total_cost_usd"]),
@@ -340,6 +343,15 @@ function parseResult(msg: Json): ParsedResult {
     modelUsed,
     raw: msg,
   };
+}
+
+/**
+ * The run stopped because `--max-budget-usd` was reached. Claude Code reports it as
+ * `terminal_reason: "budget_exhausted"` with `subtype: "error_max_budget_usd"` (verified
+ * 2026-10-14 on CLI 2.1.299); either is enough.
+ */
+export function isBudgetExhausted(terminationReason: string | null | undefined): boolean {
+  return typeof terminationReason === "string" && /budget/i.test(terminationReason);
 }
 
 /**

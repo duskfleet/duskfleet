@@ -162,6 +162,11 @@ export default function AgentsPage() {
                     <dt>limits</dt>
                     <dd className="muted">
                       {a.timeoutMinutes} min · {fmtCost(a.maxBudgetUsd)} per run
+                      {a.wrapUpReserveUsd > 0 ? (
+                        <span title={`${fmtCost(a.wrapUpReserveUsd)} of the budget is kept for a wrap-up pass: when the main pass runs out, the session is resumed with it and told to record where it stopped (wrap_up_reserve_usd)`}> · {fmtCost(a.wrapUpReserveUsd)} wrap-up reserve</span>
+                      ) : (
+                        <span title="wrap_up_reserve_usd: 0 — a budget-exhausted run leaves no trace of where it stopped"> · no wrap-up reserve</span>
+                      )}
                       {a.addDirs && a.addDirs.length > 0 && <> · also reads {a.addDirs.map(shortPath).join(", ")}</>}
                     </dd>
                   </dl>

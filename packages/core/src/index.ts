@@ -29,9 +29,9 @@ export { RunRepository, type ListRunsFilter, type RunPatch } from "./storage/run
 
 export * from "./execution/types.js";
 export { ClaudeCodeExecutor, resolveClaudeBinary, type ClaudeCodeExecutorOptions } from "./execution/claude-code.js";
-export { ingestLine, createStreamState, looksLikeContextExhaustion, type ParsedResult, type StreamState } from "./execution/stream-json.js";
+export { ingestLine, createStreamState, looksLikeContextExhaustion, isBudgetExhausted, type ParsedResult, type StreamState } from "./execution/stream-json.js";
 
-export { RunManager, mcpToolPrefix, type StartRunInput } from "./orchestration/run-manager.js";
+export { RunManager, mcpToolPrefix, budgetPlan, mergeResults, WRAP_UP_PROMPT, type StartRunInput } from "./orchestration/run-manager.js";
 export { summarizeToolInput } from "./orchestration/tool-summary.js";
 export { validateProjectPath, ProjectValidationError } from "./orchestration/project-validation.js";
 export { assertTransition, IllegalTransitionError } from "./orchestration/run-state.js";

@@ -4,6 +4,7 @@ import {
   AGENT_ID_PATTERN,
   agentKind,
   assertAgentKind,
+  budgetPlan,
   EFFORT_LEVELS,
   PERMISSION_MODES,
   agentSpecSchema,
@@ -95,6 +96,8 @@ function presentAgent(a: AgentDefinition, config: DuskFleetConfig) {
     effort: a.effort ?? null,
     timeoutMinutes: a.timeoutMinutes ?? config.claude.defaultTimeoutMinutes,
     maxBudgetUsd: a.maxBudgetUsd ?? config.claude.defaultMaxBudgetUsd,
+    /** Dollars of maxBudgetUsd kept for the wrap-up pass after a budget exhaustion (0 = no wrap-up). */
+    wrapUpReserveUsd: budgetPlan(a, config).reserve,
     inheritMcp: a.inheritMcp ?? false,
     addDirs: a.addDirs ?? [],
     claudeAgent: a.claudeAgent ?? null,
@@ -114,6 +117,13 @@ const agentFields = {
   effort: z.enum(EFFORT_LEVELS).optional().describe("Claude Code --effort level; omit for the CLI default"),
   timeout_minutes: z.number().positive().optional().describe("Kill the run after this many minutes; defaults to claude.default_timeout_minutes"),
   max_budget_usd: z.number().positive().optional().describe("Stop the run when its cost reaches this amount; defaults to claude.default_max_budget_usd"),
+  wrap_up_reserve_usd: z
+    .number()
+    .nonnegative()
+    .optional()
+    .describe(
+      "Part of max_budget_usd held back for a wrap-up pass: when the main pass runs out of budget the session is resumed with this amount and told to record where it stopped. Default 10% of the budget, at least $0.50, at most half of it; 0 disables",
+    ),
   inherit_mcp: z
     .boolean()
     .optional()
@@ -232,7 +242,7 @@ export function registerAgentTools(server: McpServer, ctx: ToolContext): void {
         kind: z.enum(["own", "link"]).optional().describe("Change the kind; the resulting agent is validated like create_agent"),
         ...agentFields,
         clear: z
-          .array(z.enum(["model", "allowed_tools", "disallowed_tools", "effort", "timeout_minutes", "max_budget_usd", "inherit_mcp", "add_dirs", "claude_agent", "project"]))
+          .array(z.enum(["model", "allowed_tools", "disallowed_tools", "effort", "timeout_minutes", "max_budget_usd", "wrap_up_reserve_usd", "inherit_mcp", "add_dirs", "claude_agent", "project"]))
           .optional()
           .describe("Optional fields to remove entirely (fall back to agent/CLI defaults)"),
       },

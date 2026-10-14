@@ -6,7 +6,7 @@
  * schedule rows (app/schedules/actions.ts), both on the core API.
  */
 import "server-only";
-import { describeCron, findRepoRoot, listProjectAgents, loadConfig, nextFire, openDatabase, parseCron, resolveClaudeBinary, resolveConfigDir, RunRepository, ScheduleRepository, type DuskFleetConfig, type ProjectAgentInfo, type Run, type RunStatus } from "@duskfleet/core";
+import { budgetPlan, describeCron, findRepoRoot, listProjectAgents, loadConfig, nextFire, openDatabase, parseCron, resolveClaudeBinary, resolveConfigDir, RunRepository, ScheduleRepository, type DuskFleetConfig, type ProjectAgentInfo, type Run, type RunStatus } from "@duskfleet/core";
 import { homedir } from "node:os";
 import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
@@ -81,6 +81,8 @@ export function listAgents() {
       systemPromptLength: systemPrompt.length,
       timeoutMinutes: a.timeoutMinutes ?? cfg.claude.defaultTimeoutMinutes,
       maxBudgetUsd: a.maxBudgetUsd ?? cfg.claude.defaultMaxBudgetUsd,
+      /** Dollars of the budget held back for the wrap-up pass after a budget exhaustion (0 = disabled). */
+      wrapUpReserveUsd: budgetPlan(a, cfg).reserve,
       isDefault: a.id === cfg.defaultAgent,
       linked,
       effectiveModel,

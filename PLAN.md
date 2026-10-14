@@ -41,7 +41,7 @@ These are the only flags the executor uses. Each one was checked against the ins
 | `--effort <level>` | Optional per-agent effort |
 | `--strict-mcp-config` | Optional: isolate the child from user-level MCP servers (default on, configurable) |
 | `--setting-sources <list>` | Optional: restrict which settings files the child loads (`claude.setting_sources`) |
-| `-r, --resume <id>` | Not used by the executor, but surfaced to the user as the "resume this run" command |
+| `-r, --resume <id>` | Surfaced to the user as the "resume this run" command; since 2026-10-14 also used by the executor for the wrap-up pass after a budget exhaustion (same session, reserve budget, fixed prompt; `docs/agents.md`) |
 
 ### Verified `stream-json` event shapes
 
