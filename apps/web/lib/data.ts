@@ -11,6 +11,7 @@ import { homedir } from "node:os";
 import path from "node:path";
 import type { DatabaseSync } from "node:sqlite";
 import {
+  budgetPlan,
   type DuskFleetConfig,
   describeCron,
   findRepoRoot,
@@ -99,6 +100,8 @@ export function listAgents() {
       systemPromptLength: systemPrompt.length,
       timeoutMinutes: a.timeoutMinutes ?? cfg.claude.defaultTimeoutMinutes,
       maxBudgetUsd: a.maxBudgetUsd ?? cfg.claude.defaultMaxBudgetUsd,
+      /** Dollars of the budget held back for the wrap-up pass after a budget exhaustion (0 = disabled). */
+      wrapUpReserveUsd: budgetPlan(a, cfg).reserve,
       isDefault: a.id === cfg.defaultAgent,
       linked,
       effectiveModel,

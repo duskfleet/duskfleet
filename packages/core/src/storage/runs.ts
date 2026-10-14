@@ -1,6 +1,6 @@
 import type { DatabaseSync } from "node:sqlite";
 import type { DeniedTool, RunMcpInfo, SubagentRecord, SubagentStatus } from "../execution/types.js";
-import type { Run, RunAgent, RunEvent, RunStatus } from "../observability/run.js";
+import type { Run, RunAgent, RunEvent, RunPhase, RunStatus } from "../observability/run.js";
 
 /** Row shape as SQLite returns it. */
 interface RunRow {
@@ -40,6 +40,7 @@ interface RunRow {
   raw_result_json: string | null;
   schedule_id: string | null;
   owner: string | null;
+  phases_json: string | null;
 }
 
 function rowToRun(r: RunRow): Run {
@@ -80,7 +81,18 @@ function rowToRun(r: RunRow): Run {
     rawResultJson: r.raw_result_json,
     scheduleId: r.schedule_id ?? null,
     owner: r.owner ?? null,
+    phases: parsePhases(r.phases_json),
   };
+}
+
+function parsePhases(json: string | null | undefined): RunPhase[] {
+  if (!json) return [];
+  try {
+    const v = JSON.parse(json);
+    return Array.isArray(v) ? (v as RunPhase[]) : [];
+  } catch {
+    return [];
+  }
 }
 
 export interface ListRunsFilter {
@@ -120,6 +132,7 @@ export type RunPatch = Partial<
     | "logPath"
     | "rawResultJson"
     | "command"
+    | "phases"
   >
 >;
 
@@ -150,6 +163,7 @@ const PATCH_COLUMNS: Record<keyof RunPatch, string> = {
   logPath: "log_path",
   rawResultJson: "raw_result_json",
   command: "command_json",
+  phases: "phases_json",
 };
 
 export class RunRepository {
@@ -162,8 +176,8 @@ export class RunRepository {
            created_at, started_at, ended_at, duration_ms, claude_session_id, permission_mode, command_json,
            exit_code, termination_reason, error, result_text, num_turns, tool_calls, input_tokens, output_tokens,
            cache_read_tokens, cache_creation_tokens, cost_usd, permission_denials, denied_tools_json, mcp_json, human_intervention,
-           context_exhausted, retries, log_path, raw_result_json, schedule_id, owner)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+           context_exhausted, retries, log_path, raw_result_json, schedule_id, owner, phases_json)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         run.id,
@@ -202,6 +216,7 @@ export class RunRepository {
         run.rawResultJson,
         run.scheduleId,
         run.owner,
+        JSON.stringify(run.phases ?? []),
       );
   }
 

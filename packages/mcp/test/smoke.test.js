@@ -5,7 +5,7 @@
  *   npm run build && npm test
  */
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { test } from "node:test";
@@ -14,6 +14,7 @@ import { fileURLToPath } from "node:url";
 import "./helpers.js"; // before @duskfleet/core: drops an inherited CLAUDE_BIN
 
 import {
+  budgetPlan,
   ClaudeCodeExecutor,
   loadConfig,
   looksLikeContextExhaustion,
@@ -21,6 +22,7 @@ import {
   RunManager,
   RunRepository,
   summarizeRun,
+  WRAP_UP_PROMPT,
 } from "@duskfleet/core";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -38,6 +40,11 @@ function makeApp() {
     `data_dir: ../data\nallowed_project_roots: ["${root}"]\ndefault_agent: coder\nclaude:\n  binary: "${fakeBinary}"\n  default_timeout_minutes: 0.05\n`,
   );
   writeFileSync(path.join(configDir, "agents", "coder.md"), `---\npermission_mode: acceptEdits\n---\nBe brief.\n`);
+  writeFileSync(
+    path.join(configDir, "agents", "no-reserve.md"),
+    `---\nmax_budget_usd: 2\nwrap_up_reserve_usd: 0\n---\nNo wrap-up.\n`,
+  );
+  writeFileSync(path.join(configDir, "agents", "tiny.md"), `---\nmax_budget_usd: 0.6\n---\nTiny budget.\n`);
   writeFileSync(
     path.join(configDir, "agents", "connected.md"),
     `---\npermission_mode: dontAsk\ninherit_mcp: true\nadd_dirs: ["${root}/extra"]\nallowed_tools: ["mcp__claude_ai_Figma", "mcp__plugin_productivity_atlassian", "mcp__claude_ai_Figma__get_metadata"]\n---\nUse MCP.\n`,
@@ -394,6 +401,202 @@ test("MCP servers mounted and allow-list mismatches are recorded on the run", as
     assert.equal(summary.needsReview, true);
     assert.deepEqual(summary.mcpAllowListedMissing, ["mcp__plugin_productivity_atlassian"]);
   } finally {
+    await app.cleanup();
+  }
+});
+
+test("the budget is split: main pass gets budget minus reserve, reserve defaults to 10% with a $0.50 floor and a half cap", () => {
+  const claude = { defaultMaxBudgetUsd: 5 };
+  assert.deepEqual(budgetPlan({}, { claude }), { total: 5, main: 4.5, reserve: 0.5 });
+  assert.deepEqual(budgetPlan({ maxBudgetUsd: 20 }, { claude }), { total: 20, main: 18, reserve: 2 });
+  assert.deepEqual(
+    budgetPlan({ maxBudgetUsd: 0.6 }, { claude }),
+    { total: 0.6, main: 0.3, reserve: 0.3 },
+    "the floor never takes more than half",
+  );
+  assert.deepEqual(budgetPlan({ maxBudgetUsd: 5, wrapUpReserveUsd: 1 }, { claude }), { total: 5, main: 4, reserve: 1 });
+  assert.deepEqual(
+    budgetPlan({ maxBudgetUsd: 2, wrapUpReserveUsd: 0 }, { claude }),
+    { total: 2, main: 2, reserve: 0 },
+    "0 disables the wrap-up",
+  );
+  assert.deepEqual(
+    budgetPlan({ maxBudgetUsd: 2, wrapUpReserveUsd: 5 }, { claude }),
+    { total: 2, main: 1, reserve: 1 },
+    "an oversized reserve is capped",
+  );
+});
+
+test("a budget-exhausted main pass is followed by a wrap-up pass on the same session, recorded on the same run", async () => {
+  const app = makeApp();
+  try {
+    const started = await app.runs.startRun({ prompt: "budget", projectPath: app.project, model: "haiku" });
+    const i = started.command.argv.indexOf("--max-budget-usd");
+    assert.equal(started.command.argv[i + 1], "4.5", "the main pass is launched with budget minus reserve");
+    assert.ok(started.command.argv.includes("--session-id"));
+
+    const run = await app.runs.waitForRun(started.id, 15_000);
+    assert.equal(run.status, "failed", "the task was not finished: the run is still a failure");
+    assert.equal(run.terminationReason, "budget_exhausted");
+    assert.match(
+      run.error,
+      /Reached maximum budget \(\$4\.5\)/,
+      "the errors[] text replaces the useless 'exit code 1'",
+    );
+    assert.equal(
+      run.resultText,
+      "Stopped after step 2 of 4 (budget); progress recorded in STATUS.md.",
+      "the wrap-up's final message is the run's result",
+    );
+    assert.equal(run.costUsd, 4.52, "main cost + wrap-up cost");
+    assert.equal(run.numTurns, 4);
+    assert.equal(run.toolCalls, 2);
+    assert.equal(run.inputTokens, 33);
+    assert.equal(run.claudeSessionId, started.claudeSessionId, "resumed, not forked");
+    assert.equal(app.runs.activeCount(), 0);
+
+    assert.equal(run.phases.length, 2);
+    const [main, wrap] = run.phases;
+    assert.equal(main.phase, "main");
+    assert.equal(main.outcome, "failed");
+    assert.equal(main.terminationReason, "budget_exhausted");
+    assert.equal(main.budgetUsd, 4.5);
+    assert.equal(main.costUsd, 4.5);
+    assert.equal(wrap.phase, "wrap_up");
+    assert.equal(wrap.outcome, "completed");
+    assert.equal(wrap.budgetUsd, 0.5);
+    assert.equal(wrap.costUsd, 0.02);
+    assert.equal(wrap.numTurns, 1);
+    assert.ok(Date.parse(wrap.startedAt) >= Date.parse(main.endedAt));
+
+    const summary = summarizeRun(run);
+    assert.deepEqual(summary.wrapUp, { outcome: "completed", costUsd: 0.02, durationMs: wrap.durationMs });
+    assert.equal(summary.terminationReason, "budget_exhausted");
+
+    const events = app.runs.events(run.id);
+    assert.deepEqual(
+      events.map((e) => e.type),
+      ["status_change", "status_change", "init", "tool_use", "phase", "init", "tool_use", "phase", "status_change"],
+      "wrap-up pass: phase started, its own init and tool calls, phase ended; then the single final status change",
+    );
+    const phases = events.filter((e) => e.type === "phase").map((e) => e.payload);
+    assert.deepEqual(phases[0], {
+      phase: "wrap_up",
+      status: "started",
+      budgetUsd: 0.5,
+      mainCostUsd: 4.5,
+      reason: "budget_exhausted",
+    });
+    assert.equal(phases[1].status, "ended");
+    assert.equal(phases[1].outcome, "completed");
+    assert.equal(phases[1].costUsd, 0.02);
+
+    // The log holds both passes, with a marker where the resumed one begins.
+    const log = readFileSync(run.logPath, "utf8").split("\n");
+    const marker = log.findIndex((l) => l.startsWith(`#resume ${run.claudeSessionId} `));
+    assert.ok(marker > 0, "resume marker written");
+    assert.equal(log.filter((l) => l.includes('"type":"result"')).length, 2);
+  } finally {
+    await app.cleanup();
+  }
+});
+
+test("the wrap-up pass runs claude --resume with the reserve budget and the fixed wrap-up prompt", async () => {
+  const app = makeApp();
+  try {
+    const seen = [];
+    const original = app.runs["executor"].execute.bind(app.runs["executor"]);
+    app.runs["executor"].execute = (req, onEvent) => {
+      seen.push(req);
+      return original(req, onEvent);
+    };
+    const started = await app.runs.startRun({ prompt: "budget", projectPath: app.project });
+    await app.runs.waitForRun(started.id, 15_000);
+    assert.equal(seen.length, 2);
+    const wrap = seen[1];
+    assert.equal(wrap.resumeSessionId, started.claudeSessionId);
+    assert.equal(wrap.prompt, WRAP_UP_PROMPT);
+    assert.equal(wrap.maxBudgetUsd, 0.5);
+    assert.equal(wrap.cwd, app.project);
+    assert.equal(wrap.permissionMode, seen[0].permissionMode);
+    assert.equal(wrap.appendSystemPrompt, seen[0].appendSystemPrompt, "same envelope as the main pass");
+    assert.ok(wrap.timeoutMs <= 10 * 60_000);
+    const argv = app.runs["executor"].buildArgv(wrap);
+    const r = argv.indexOf("--resume");
+    assert.equal(argv[r + 1], started.claudeSessionId);
+    assert.ok(!argv.includes("--session-id"), "a resumed pass never passes --session-id");
+    assert.equal(argv[argv.indexOf("--max-budget-usd") + 1], "0.5");
+    assert.equal(argv[argv.length - 1], WRAP_UP_PROMPT);
+  } finally {
+    await app.cleanup();
+  }
+});
+
+test("a wrap-up pass that exhausts the reserve too ends the run once; no third pass", async () => {
+  const app = makeApp();
+  process.env.FAKE_CLAUDE_RESUME = "budget";
+  try {
+    const started = await app.runs.startRun({ prompt: "budget", projectPath: app.project });
+    const run = await app.runs.waitForRun(started.id, 15_000);
+    assert.equal(run.status, "failed");
+    assert.equal(run.phases.length, 2);
+    assert.equal(run.phases[1].outcome, "failed");
+    assert.equal(run.phases[1].terminationReason, "budget_exhausted");
+    assert.equal(run.costUsd, 5, "main 4.5 + reserve 0.5: never more than max_budget_usd");
+    assert.equal(
+      run.resultText,
+      "Budget is nearly exhausted; about to record progress.",
+      "no result text in a budget stop: last assistant text",
+    );
+    assert.equal(app.runs.activeCount(), 0);
+  } finally {
+    delete process.env.FAKE_CLAUDE_RESUME;
+    await app.cleanup();
+  }
+});
+
+test("wrap_up_reserve_usd: 0 disables the wrap-up pass; the whole budget goes to the main pass", async () => {
+  const app = makeApp();
+  try {
+    const started = await app.runs.startRun({ prompt: "budget", projectPath: app.project, agentId: "no-reserve" });
+    assert.equal(started.command.argv[started.command.argv.indexOf("--max-budget-usd") + 1], "2");
+    const run = await app.runs.waitForRun(started.id, 15_000);
+    assert.equal(run.status, "failed");
+    assert.equal(run.terminationReason, "budget_exhausted");
+    assert.equal(run.costUsd, 2);
+    assert.deepEqual(
+      run.phases.map((p) => p.phase),
+      ["main"],
+    );
+    assert.equal(
+      app.runs.events(run.id).filter((e) => e.type === "phase").length,
+      0,
+      "no phase events for single-pass runs",
+    );
+  } finally {
+    await app.cleanup();
+  }
+});
+
+test("cancelling during the wrap-up pass records the run as cancelled", async () => {
+  const app = makeApp();
+  process.env.FAKE_CLAUDE_RESUME = "hang";
+  try {
+    const started = await app.runs.startRun({ prompt: "budget", projectPath: app.project });
+    await new Promise((r) => setTimeout(r, 800)); // main pass done, wrap-up hanging
+    assert.equal(app.runs.activeCount(), 1, "the run is still active while the wrap-up pass runs");
+    app.runs.cancelRun(started.id);
+    const run = await app.runs.waitForRun(started.id, 15_000);
+    assert.equal(run.status, "cancelled");
+    assert.deepEqual(
+      run.phases.map((p) => [p.phase, p.outcome]),
+      [
+        ["main", "failed"],
+        ["wrap_up", "cancelled"],
+      ],
+    );
+  } finally {
+    delete process.env.FAKE_CLAUDE_RESUME;
     await app.cleanup();
   }
 });

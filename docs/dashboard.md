@@ -17,13 +17,17 @@ in the nav); the other pages are static.
   by a short title (first line of the prompt); the whole row links to the detail.
 - **Run detail**: short title, status line, duration / cost / turns / tool calls / tokens, the
   issues (denied calls highlighted in the timeline, missing MCP servers, context exhaustion),
-  final message (long results collapse), event timeline with legend and grouped repeats,
+  final message (long results collapse), a callout when a budget exhaustion was followed by a
+  wrap-up pass (what the main pass spent, what the wrap-up cost and whether it recorded where
+  it stopped; the wrap-up's own tool calls sit between `wrap-up started` / `wrap-up ended`
+  rows of the timeline), event timeline with legend and grouped repeats,
   previous / next run of the same agent, a "run again" CLI command, the `claude --resume`
   command and the exact command executed. Home paths print as `~/…`; Copy buttons give the
   full value.
 - **Agents**: every agent grouped by project ("Any project" first) with kind ("link → name" or
   "own prompt"), model (with a warning when not set), permission mode, allow-lists (collapsed
-  past 4 entries), limits, prompt preview and aggregate stats. User agents can be deleted or
+  past 4 entries), limits (timeout, budget and the wrap-up reserve), prompt preview and
+  aggregate stats. User agents can be deleted or
   unlinked from here, with an inline confirmation; builtins are read-only.
 - **Schedules**: state, cron (human and raw), next tick (theoretical one for paused schedules),
   last outcome and firing history. Each row can be run now, paused / resumed, have its cron and

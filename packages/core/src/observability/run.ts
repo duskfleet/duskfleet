@@ -21,6 +21,26 @@ export interface RecordedCommand {
   cwd: string;
 }
 
+/**
+ * One Claude Code process of a run. Most runs have a single `main` phase; a run whose
+ * main pass ended `budget_exhausted` gets a `wrap_up` phase (the same session resumed
+ * with the reserve budget) whose cost, turns and tokens are folded into the run.
+ */
+export interface RunPhase {
+  phase: "main" | "wrap_up";
+  startedAt: string;
+  endedAt: string;
+  durationMs: number;
+  /** Outcome of this process alone; the run's status comes from the main phase. */
+  outcome: "completed" | "failed" | "cancelled" | "timed_out";
+  terminationReason: string | null;
+  /** The --max-budget-usd this phase was launched with. */
+  budgetUsd: number | null;
+  costUsd: number | null;
+  numTurns: number | null;
+  toolCalls: number;
+}
+
 export interface Run {
   id: string;
   agentId: string;
@@ -66,13 +86,20 @@ export interface Run {
   scheduleId: string | null;
   /** Process supervising the run, `role@host:pid`; null for runs recorded before ownership existed. */
   owner: string | null;
+  /** The processes behind this run, in order (see RunPhase). Empty for runs recorded before migration 8. */
+  phases: RunPhase[];
+}
+
+/** The wrap-up phase of a run, when there was one. */
+export function wrapUpPhase(run: Pick<Run, "phases">): RunPhase | null {
+  return run.phases.find((p) => p.phase === "wrap_up") ?? null;
 }
 
 export interface RunEvent {
   id: number;
   runId: string;
   ts: string;
-  type: "status_change" | "init" | "tool_use" | "error" | "note" | "subagent_start" | "subagent_end";
+  type: "status_change" | "init" | "tool_use" | "error" | "note" | "subagent_start" | "subagent_end" | "phase";
   payload: unknown;
   /** Subagent (Claude Code task id) the event belongs to; null for the main session. */
   agentId: string | null;
@@ -110,6 +137,16 @@ export function summarizeRun(run: Run) {
     needsReview: run.humanIntervention || run.contextExhausted || run.mcp.allowListedMissing.length > 0,
     humanIntervention: run.humanIntervention,
     contextExhausted: run.contextExhausted,
+    terminationReason: run.terminationReason,
+    /** Outcome and cost of the wrap-up pass after a budget exhaustion; null when there was none. */
+    wrapUp: summarizeWrapUp(run),
     error: run.error,
   };
+}
+
+export function summarizeWrapUp(
+  run: Pick<Run, "phases">,
+): { outcome: RunPhase["outcome"]; costUsd: number | null; durationMs: number } | null {
+  const w = wrapUpPhase(run);
+  return w ? { outcome: w.outcome, costUsd: w.costUsd, durationMs: w.durationMs } : null;
 }

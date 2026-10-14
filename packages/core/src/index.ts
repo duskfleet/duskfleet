@@ -41,6 +41,7 @@ export { ClaudeCodeExecutor, type ClaudeCodeExecutorOptions, resolveClaudeBinary
 export {
   createStreamState,
   ingestLine,
+  isBudgetExhausted,
   looksLikeContextExhaustion,
   type ParsedResult,
   type StreamState,
@@ -51,10 +52,13 @@ export * from "./observability/run.js";
 export { ProjectValidationError, validateProjectPath } from "./orchestration/project-validation.js";
 
 export {
+  budgetPlan,
   mcpToolPrefix,
+  mergeResults,
   RunManager,
   type RunManagerOptions,
   type StartRunInput,
+  WRAP_UP_PROMPT,
 } from "./orchestration/run-manager.js";
 export { assertTransition, IllegalTransitionError } from "./orchestration/run-state.js";
 export { summarizeToolInput } from "./orchestration/tool-summary.js";

@@ -7,6 +7,7 @@ import {
   agentSpecSchema,
   agentToSpec,
   assertAgentKind,
+  budgetPlan,
   type DuskFleetConfig,
   deleteAgentFile,
   EFFORT_LEVELS,
@@ -114,6 +115,8 @@ function presentAgent(a: AgentDefinition, config: DuskFleetConfig) {
     effort: a.effort ?? null,
     timeoutMinutes: a.timeoutMinutes ?? config.claude.defaultTimeoutMinutes,
     maxBudgetUsd: a.maxBudgetUsd ?? config.claude.defaultMaxBudgetUsd,
+    /** Dollars of maxBudgetUsd kept for the wrap-up pass after a budget exhaustion (0 = no wrap-up). */
+    wrapUpReserveUsd: budgetPlan(a, config).reserve,
     inheritMcp: a.inheritMcp ?? false,
     addDirs: a.addDirs ?? [],
     claudeAgent: a.claudeAgent ?? null,
@@ -155,6 +158,13 @@ const agentFields = {
     .positive()
     .optional()
     .describe("Stop the run when its cost reaches this amount; defaults to claude.default_max_budget_usd"),
+  wrap_up_reserve_usd: z
+    .number()
+    .nonnegative()
+    .optional()
+    .describe(
+      "Part of max_budget_usd held back for a wrap-up pass: when the main pass runs out of budget the session is resumed with this amount and told to record where it stopped. Default 10% of the budget, at least $0.50, at most half of it; 0 disables",
+    ),
   inherit_mcp: z
     .boolean()
     .optional()
@@ -300,6 +310,7 @@ export function registerAgentTools(server: McpServer, ctx: ToolContext): void {
               "effort",
               "timeout_minutes",
               "max_budget_usd",
+              "wrap_up_reserve_usd",
               "inherit_mcp",
               "add_dirs",
               "claude_agent",

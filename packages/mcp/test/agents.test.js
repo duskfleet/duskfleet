@@ -98,7 +98,9 @@ test("agents can be created, updated, run and deleted over MCP without touching 
     assert.equal(run.agentId, "test-fixer");
     assert.ok(run.command.argv.includes("--allowedTools"));
     assert.ok(run.command.argv.includes("Bash(npm test:*)"));
-    assert.ok(run.command.argv.includes("--max-budget-usd") && run.command.argv.includes("1"));
+    // max_budget_usd 1 → $0.50 for the main pass, $0.50 reserve for the wrap-up pass (10% floored at $0.50, capped at half)
+    assert.equal(run.command.argv[run.command.argv.indexOf("--max-budget-usd") + 1], "0.5");
+    assert.equal(created.agent.wrapUpReserveUsd, 0.5, "list/create report the effective reserve");
 
     assert.equal(created.kind, "own");
     assert.equal(created.agent.kind, "own");

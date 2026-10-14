@@ -57,7 +57,7 @@ recurse into itself.
 | Tool | What it does |
 |---|---|
 | `list_agents` | Builtin (`config/agents`) and user (`user_agents_dir`) agents with their `source` and `kind`, grouped in `byProject` |
-| `create_agent` | Write a user agent. **`kind` is required**: `own` (new persona, `system_prompt` required) or `link` (reuse an agent from a project folder: `claude_agent` + `project_path` or `project`, target verified; a new folder is registered in `data/projects.yaml`). Then `id`, optional `name`, `description`, `model`, `permission_mode`, `allowed_tools`, `disallowed_tools`, `effort`, `timeout_minutes`, `max_budget_usd`, `system_prompt`, `inherit_mcp`, `add_dirs`, `claude_agent`, `project`. `overwrite: true` replaces a user agent or overrides a builtin. `bypassPermissions` is not offered. |
+| `create_agent` | Write a user agent. **`kind` is required**: `own` (new persona, `system_prompt` required) or `link` (reuse an agent from a project folder: `claude_agent` + `project_path` or `project`, target verified; a new folder is registered in `data/projects.yaml`). Then `id`, optional `name`, `description`, `model`, `permission_mode`, `allowed_tools`, `disallowed_tools`, `effort`, `timeout_minutes`, `max_budget_usd`, `wrap_up_reserve_usd` (see [budget reserve](agents.md#budget-reserve-and-wrap-up-pass)), `system_prompt`, `inherit_mcp`, `add_dirs`, `claude_agent`, `project`. `overwrite: true` replaces a user agent or overrides a builtin. `bypassPermissions` is not offered. |
 | `list_project_agents` | Agents a project defines in `.claude/agents/*.md` (name, description, tools, model), to reuse via `claude_agent` |
 | `update_agent` | Merge fields into a user agent; `clear: [...]` removes optional fields. Pass `kind` to convert: `link` (with `claude_agent`) or `own` (with a `system_prompt`); `clear: ["claude_agent"]` unlinks and therefore needs a prompt. Builtins are read-only (override them instead). |
 | `delete_agent` | Remove a user agent file; the builtin with the same id, if any, takes over again |
@@ -68,8 +68,8 @@ recurse into itself.
 | `delete_schedule` | Remove a schedule |
 | `run_schedule_now` | Fire a schedule immediately, same busy rules as a tick |
 | `run_agent` | Start a run. `prompt` + (`project_path` \| `project_id`; a `project_path` that is not path-like, such as `my-app`, is read as a project id), optional `agent_id`, `model`, `wait_seconds` (≤300). Returns the run immediately unless waiting. |
-| `get_run` | Full run record incl. `claudeSessionId`, `resumeCommand`, tokens, cost, status, and `subagents` (one per Agent call: type, brief, report, tools, model, tokens; see [agents](agents.md#subagents-inside-runs)). `include_output: true` adds the final message, untruncated briefs and reports, and the event timeline. |
-| `list_runs` | Recent runs with filters (`status`, `agent_id`, `project_path`, `limit`); `needsReview` per run |
+| `get_run` | Full run record incl. `claudeSessionId`, `resumeCommand`, tokens, cost, status, `phases` (the main pass and, after a budget exhaustion, the wrap-up pass: outcome, budget, cost, turns; see [budget reserve](agents.md#budget-reserve-and-wrap-up-pass)) and `subagents` (one per Agent call: type, brief, report, tools, model, tokens; see [agents](agents.md#subagents-inside-runs)). `include_output: true` adds the final message, untruncated briefs and reports, and the event timeline. |
+| `list_runs` | Recent runs with filters (`status`, `agent_id`, `project_path`, `limit`); `needsReview`, `terminationReason` and `wrapUp` (outcome and cost of the wrap-up pass, or null) per run |
 | `cancel_run` | SIGTERM (then SIGKILL) the run's process; recorded as `cancelled` |
 
 `create_agent` and `update_agent` validate the spec before writing and roll the file back if

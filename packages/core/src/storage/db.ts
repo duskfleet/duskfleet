@@ -169,6 +169,12 @@ const MIGRATIONS: ReadonlyArray<{ version: number; sql: string }> = [
     version: 7,
     sql: `ALTER TABLE runs ADD COLUMN owner TEXT;`,
   },
+  {
+    // The processes behind a run (see RunPhase): the main pass and, after a budget
+    // exhaustion, the wrap-up pass that resumed the session with the reserve budget.
+    version: 8,
+    sql: `ALTER TABLE runs ADD COLUMN phases_json TEXT NOT NULL DEFAULT '[]';`,
+  },
 ];
 
 /**
