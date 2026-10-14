@@ -168,6 +168,18 @@ const MIGRATIONS: ReadonlyArray<{ version: number; sql: string }> = [
     version: 7,
     sql: `ALTER TABLE runs ADD COLUMN phases_json TEXT NOT NULL DEFAULT '[]';`,
   },
+  {
+    // Resume-once on failure: a schedule (or its agent) may resume the session of a run that
+    // ended budget_exhausted / timed_out on the next tick, once. The retry run points at the
+    // run it resumed; the original is found through the index.
+    version: 8,
+    sql: `
+      ALTER TABLE schedules ADD COLUMN on_failure TEXT;
+      ALTER TABLE schedules ADD COLUMN resume_budget_usd REAL;
+      ALTER TABLE runs ADD COLUMN resumed_from_run_id TEXT;
+      CREATE INDEX IF NOT EXISTS idx_runs_resumed_from ON runs(resumed_from_run_id);
+    `,
+  },
 ];
 
 export function openDatabase(dataDir: string): DatabaseSync {

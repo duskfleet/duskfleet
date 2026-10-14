@@ -1,6 +1,6 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
-import { describeCron, lastRunSummary, parseCron, type LastRunSummary, type Schedule } from "@duskfleet/core";
+import { describeCron, effectiveOnFailure, lastRunSummary, ON_FAILURE_POLICIES, parseCron, type LastRunSummary, type Schedule } from "@duskfleet/core";
 import { errorResult, jsonResult, type ToolContext } from "../server.js";
 
 function present(ctx: ToolContext, s: Schedule & { lastRun?: LastRunSummary | null }) {
@@ -12,7 +12,11 @@ function present(ctx: ToolContext, s: Schedule & { lastRun?: LastRunSummary | nu
   }
   // The outcome of the last tick says whether a run *started*; lastRun says how that run *ended*.
   const lastRun = s.lastRun !== undefined ? s.lastRun : lastRunSummary(s.lastRunId ? ctx.runs.getRun(s.lastRunId) : null);
-  return { ...s, cronHuman: human, lastRun };
+  /** The policy that applies on the next tick: the schedule's own on_failure, else the agent's. */
+  const effectiveOnFailurePolicy = effectiveOnFailure(s, ctx.config.agents.get(s.agentId));
+  /** Set when the next fire will resume the last run instead of starting fresh. */
+  const willResumeRunId = ctx.scheduler.resumeCandidate(s)?.id ?? null;
+  return { ...s, cronHuman: human, lastRun, effectiveOnFailure: effectiveOnFailurePolicy, willResumeRunId };
 }
 
 const scheduleFields = {
@@ -23,6 +27,13 @@ const scheduleFields = {
   project_id: z.string().min(1).optional().describe("Required unless the agent is bound to a project"),
   model: z.string().min(1).optional().describe("Model alias/id override for scheduled runs"),
   enabled: z.boolean().optional().describe("Default true"),
+  on_failure: z
+    .enum(ON_FAILURE_POLICIES)
+    .optional()
+    .describe(
+      "What the next tick does after a run ended budget_exhausted or timed_out: resume_once resumes that session (claude --resume, once; a second failure is final), none starts fresh. Omit to inherit the agent's on_failure",
+    ),
+  resume_budget_usd: z.number().positive().optional().describe("Budget of the resumed run; defaults to the agent's resume_budget_usd, else its max_budget_usd"),
 };
 
 export function registerScheduleTools(server: McpServer, ctx: ToolContext): void {
@@ -55,6 +66,8 @@ export function registerScheduleTools(server: McpServer, ctx: ToolContext): void
         if (args.project_id !== undefined) input.projectId = args.project_id;
         if (args.model !== undefined) input.model = args.model;
         if (args.enabled !== undefined) input.enabled = args.enabled;
+        if (args.on_failure !== undefined) input.onFailure = args.on_failure;
+        if (args.resume_budget_usd !== undefined) input.resumeBudgetUsd = args.resume_budget_usd;
         return jsonResult({ created: true, schedule: present(ctx, ctx.scheduler.create(input)) });
       } catch (err) {
         return errorResult(err);
@@ -77,12 +90,21 @@ export function registerScheduleTools(server: McpServer, ctx: ToolContext): void
         project_id: scheduleFields.project_id,
         model: scheduleFields.model,
         enabled: scheduleFields.enabled,
+        on_failure: scheduleFields.on_failure,
+        resume_budget_usd: scheduleFields.resume_budget_usd,
         clear_model: z.boolean().optional().describe("Remove the model override"),
+        clear_on_failure: z.boolean().optional().describe("Remove the schedule's on_failure and resume_budget_usd: the agent's apply again"),
       },
     },
     async (args) => {
       try {
         const patch: Parameters<typeof ctx.scheduler.update>[1] = {};
+        if (args.on_failure !== undefined) patch.onFailure = args.on_failure;
+        if (args.resume_budget_usd !== undefined) patch.resumeBudgetUsd = args.resume_budget_usd;
+        if (args.clear_on_failure) {
+          patch.onFailure = null;
+          patch.resumeBudgetUsd = null;
+        }
         if (args.name !== undefined) patch.name = args.name;
         if (args.agent_id !== undefined) patch.agentId = args.agent_id;
         if (args.prompt !== undefined) patch.prompt = args.prompt;

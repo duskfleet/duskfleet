@@ -6,7 +6,7 @@
  * schedule rows (app/schedules/actions.ts), both on the core API.
  */
 import "server-only";
-import { budgetPlan, describeCron, findRepoRoot, lastRunSummary, listProjectAgents, loadConfig, NEEDS_REVIEW_SQL, nextFire, openDatabase, parseCron, resolveClaudeBinary, resolveConfigDir, RunRepository, ScheduleRepository, type DuskFleetConfig, type ProjectAgentInfo, type Run, type RunStatus } from "@duskfleet/core";
+import { budgetPlan, describeCron, effectiveOnFailure, findRepoRoot, lastRunSummary, listProjectAgents, loadConfig, NEEDS_REVIEW_SQL, nextFire, openDatabase, parseCron, resolveClaudeBinary, resolveConfigDir, RunRepository, ScheduleRepository, willResume, type DuskFleetConfig, type ProjectAgentInfo, type Run, type RunStatus } from "@duskfleet/core";
 import { homedir } from "node:os";
 import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
@@ -102,8 +102,8 @@ export interface RunsFilter {
   limit?: number;
 }
 
-/** A run plus the label the UI shows for its project: registry id when known, else the folder name. */
-export type RunWithProject = Run & { projectLabel: string };
+/** A run plus the label the UI shows for its project (registry id when known, else the folder name) and its linked retry, if any. */
+export type RunWithProject = Run & { projectLabel: string; resumedByRunId: string | null };
 
 /**
  * Older runs were recorded without `projectId` even when the path is a registered
@@ -131,7 +131,8 @@ export function listRuns(filter: RunsFilter = {}): RunWithProject[] {
   }
   if (inMemory) list = list.slice(0, limit);
   const label = projectLabeller();
-  return list.map((r) => ({ ...r, projectLabel: label(r) }));
+  const resumedBy = runs.resumedByMany(list.map((r) => r.id));
+  return list.map((r) => ({ ...r, projectLabel: label(r), resumedByRunId: resumedBy.get(r.id) ?? null }));
 }
 
 /** Label for a single run (detail page). */
@@ -164,7 +165,11 @@ export function listProjects() {
 export function getRun(id: string) {
   const { runs } = services();
   const run = runs.get(id);
-  return run ? { run, events: runs.events(id) } : null;
+  if (!run) return null;
+  // Linked retry (on_failure: resume_once): the run this one resumed, and the one that resumed it.
+  const resumedFrom = run.resumedFromRunId ? runs.get(run.resumedFromRunId) : null;
+  const resumedBy = runs.resumedBy(id);
+  return { run, events: runs.events(id), resumedFrom, resumedBy };
 }
 
 export interface AgentStats {
@@ -298,6 +303,7 @@ export function overview(filter: Pick<RunsFilter, "agentId" | "projectPath"> = {
 
 export function listSchedules() {
   const { schedules, runs } = services();
+  const cfg = config();
   const now = new Date();
   return schedules.list().map((s) => {
     let cronHuman = s.cron;
@@ -310,8 +316,12 @@ export function listSchedules() {
       // keep raw
     }
     // How the run it last started ended: the tick outcome alone ("started") hides a failed run.
-    const lastRun = lastRunSummary(s.lastRunId ? runs.get(s.lastRunId) : null);
-    return { ...s, cronHuman, theoreticalNextAt, lastRun };
+    const last = s.lastRunId ? runs.get(s.lastRunId) : null;
+    const lastRun = lastRunSummary(last);
+    const agent = cfg.agents.get(s.agentId);
+    const onFailure = effectiveOnFailure(s, agent);
+    const willResumeRunId = last && willResume(s, agent, last, runs.resumedBy(last.id) !== null) ? last.id : null;
+    return { ...s, cronHuman, theoreticalNextAt, lastRun, effectiveOnFailure: onFailure, onFailureSource: s.onFailure ? "schedule" : agent?.onFailure ? "agent" : "default", willResumeRunId };
   });
 }
 

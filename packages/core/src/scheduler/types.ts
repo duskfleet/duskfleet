@@ -5,7 +5,10 @@
  * is still busy is recorded as `skipped_busy`, never queued.
  */
 
-export type ScheduleOutcome = "started" | "skipped_busy" | "skipped_disabled" | "error";
+import type { OnFailurePolicy } from "../config/types.js";
+
+/** `resumed` = started as a resume of the previous run (on_failure: resume_once); counts as a fire. */
+export type ScheduleOutcome = "started" | "resumed" | "skipped_busy" | "skipped_disabled" | "error";
 
 export interface Schedule {
   id: string;
@@ -36,6 +39,14 @@ export interface Schedule {
    * schedule on its next tick, outside its cron and even when paused, and clears it.
    */
   runRequestedAt: string | null;
+  /**
+   * What the next tick does after a run ended `budget_exhausted` or `timed_out`:
+   * `resume_once` resumes that session (one retry, a second failure is final), `none`
+   * starts fresh. null = the agent's `on_failure` (default none).
+   */
+  onFailure: OnFailurePolicy | null;
+  /** Budget of the resumed run; null = the agent's `resume_budget_usd`, else its `max_budget_usd`. */
+  resumeBudgetUsd: number | null;
 }
 
 export interface ScheduleInput {
@@ -47,6 +58,8 @@ export interface ScheduleInput {
   cron: string;
   timeZone?: string;
   enabled?: boolean;
+  onFailure?: OnFailurePolicy | null;
+  resumeBudgetUsd?: number | null;
 }
 
 export type SchedulePatch = Partial<ScheduleInput>;

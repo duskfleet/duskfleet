@@ -27,6 +27,8 @@ interface ScheduleRow {
   fires: number;
   skips: number;
   run_requested_at: string | null;
+  on_failure: string | null;
+  resume_budget_usd: number | null;
 }
 
 function rowToSchedule(r: ScheduleRow): Schedule {
@@ -50,6 +52,8 @@ function rowToSchedule(r: ScheduleRow): Schedule {
     fires: r.fires,
     skips: r.skips,
     runRequestedAt: r.run_requested_at ?? null,
+    onFailure: (r.on_failure as Schedule["onFailure"]) ?? null,
+    resumeBudgetUsd: r.resume_budget_usd ?? null,
   };
 }
 
@@ -85,8 +89,8 @@ export class ScheduleRepository {
     this.db
       .prepare(
         `INSERT INTO schedules (id, name, agent_id, project_id, prompt, model, cron, time_zone, enabled, created_at, updated_at, next_run_at,
-           last_fired_at, last_outcome, last_error, last_run_id, fires, skips)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, NULL, NULL, 0, 0)`,
+           last_fired_at, last_outcome, last_error, last_run_id, fires, skips, on_failure, resume_budget_usd)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, NULL, NULL, 0, 0, ?, ?)`,
       )
       .run(
         id,
@@ -101,6 +105,8 @@ export class ScheduleRepository {
         now,
         now,
         input.nextRunAt,
+        input.onFailure ?? null,
+        input.resumeBudgetUsd ?? null,
       );
     return this.get(id)!;
   }
@@ -118,11 +124,13 @@ export class ScheduleRepository {
       timeZone: "time_zone",
       enabled: "enabled",
       nextRunAt: "next_run_at",
+      onFailure: "on_failure",
+      resumeBudgetUsd: "resume_budget_usd",
     };
     for (const [k, v] of Object.entries(patch)) {
       if (v === undefined || !(k in map)) continue;
       sets.push(`${map[k]} = ?`);
-      values.push(typeof v === "boolean" ? (v ? 1 : 0) : (v as string | null));
+      values.push(typeof v === "boolean" ? (v ? 1 : 0) : (v as string | number | null));
     }
     values.push(id);
     this.db.prepare(`UPDATE schedules SET ${sets.join(", ")} WHERE id = ?`).run(...values);
@@ -161,7 +169,7 @@ export class ScheduleRepository {
         `UPDATE schedules SET last_fired_at = ?, last_outcome = ?, last_error = ?, last_run_id = COALESCE(?, last_run_id),
            fires = fires + ?, skips = skips + ?, next_run_at = ?, updated_at = ? WHERE id = ?`,
       )
-      .run(now, outcome, error, runId, outcome === "started" ? 1 : 0, outcome === "started" ? 0 : 1, nextRunAt, now, id);
+      .run(now, outcome, error, runId, outcome === "started" || outcome === "resumed" ? 1 : 0, outcome === "started" || outcome === "resumed" ? 0 : 1, nextRunAt, now, id);
   }
 
   firings(scheduleId: string, limit = 20): ScheduleFiring[] {

@@ -68,6 +68,32 @@ Things to know:
   upgraded in place: after a build, restart the hosts that spawned it or kill the stale
   `packages/mcp/dist/index.js` processes, then `install-service`.
 
+## Resume once on failure
+
+By default a schedule whose run died out of budget or out of time starts fresh on its next
+tick, and whatever the dead run half-did is left to the new one to discover. With
+`on_failure: resume_once` (on the schedule, or inherited from the agent's frontmatter) the next
+tick instead **resumes the session** of the run it last started, once:
+
+- it applies when that run ended `budget_exhausted` or `timed_out`; a plain failure, a
+  cancel or an orphan start fresh;
+- the retry is a normal run of the schedule (`scheduleId`, WIP guards, `skipped_busy` if the
+  agent is still busy), recorded in the firing log as `resumed` and counted as a fire; it
+  runs `claude --resume <session>` with `resume_budget_usd` (schedule, else agent, else
+  `max_budget_usd`) and a prompt that says to check what was already done, finish, and
+  record the outcome;
+- **once**: a retry that fails again is final, the tick after starts fresh; a retry that
+  completes is followed by fresh runs as usual;
+- `list_schedules` shows the policy in force (`effectiveOnFailure`) and, when the next fire
+  will be a resume, the run it resumes (`willResumeRunId`); the dashboard row shows "resume
+  once on failure" and a "next: resume" badge; `run_schedule_now` and the dashboard's **Run
+  now** follow the same decision.
+
+Set it with `create_schedule` / `update_schedule` (`on_failure: resume_once | none`,
+`resume_budget_usd`; `clear_on_failure: true` goes back to the agent's policy). It pairs with
+the [wrap-up pass](agents.md#budget-reserve-and-wrap-up-pass): the wrap-up records where the
+run stopped, the resume picks it up from there.
+
 ## Policies
 
 - A tick whose agent or project is still busy is recorded as `skipped_busy`, never queued.

@@ -27,7 +27,31 @@ function makeRoot() {
   writeFileSync(path.join(configDir, "projects.yaml"), `projects:\n  demo:\n    path: ${project}\n`);
   writeFileSync(path.join(configDir, "agents", "coder.md"), `---\nproject: demo\n---\nBe brief.\n`);
   writeFileSync(path.join(configDir, "agents", "free.md"), `---\n---\nUnbound.\n`);
+  writeFileSync(path.join(configDir, "agents", "resumer.md"), `---\nproject: demo\nmax_budget_usd: 2\nwrap_up_reserve_usd: 0\non_failure: resume_once\nresume_budget_usd: 3\n---\nRetry once.\n`);
   return { root, configDir, project: realpathSync(project) };
+}
+
+function makeScheduler(configDir) {
+  const config = loadConfig(configDir);
+  const db = openDatabase(config.dataDir);
+  const runs = new RunManager(config, new RunRepository(db), new ClaudeCodeExecutor({ binary: config.claude.binary, strictMcpConfig: true, allowBypassPermissions: false }));
+  const repo = new ScheduleRepository(db);
+  const scheduler = new Scheduler(repo, runs, { tickMs: 1000, holder: "A" });
+  const due = (id) => repo.update(id, { nextRunAt: new Date(Date.now() - 1000).toISOString() });
+  const fireAndWait = async (id) => {
+    due(id);
+    await scheduler.tick();
+    const s = repo.get(id);
+    return runs.waitForRun(s.lastRunId, 15_000);
+  };
+  const close = async (root) => {
+    scheduler.stop();
+    runs.shutdown();
+    await new Promise((r) => setTimeout(r, 300));
+    db.close();
+    rmSync(root, { recursive: true, force: true });
+  };
+  return { config, db, runs, repo, scheduler, due, fireAndWait, close };
 }
 
 function ok(result) {
@@ -121,6 +145,32 @@ test("schedules over MCP: create, list, update, run now, delete; validation erro
     assert.equal(after.lastRun.costUsd, 4.52, "main pass plus wrap-up pass");
     const listed2 = ok(await client.callTool({ name: "list_runs", arguments: { limit: 1 } }));
     assert.equal(listed2.runs[0].needsReview, true);
+
+    // on_failure: resume_once on the schedule: the next fire resumes that run, and both runs link to each other
+    const withPolicy = ok(await client.callTool({ name: "update_schedule", arguments: { id: created.schedule.id, on_failure: "resume_once", resume_budget_usd: 2 } }));
+    assert.equal(withPolicy.schedule.onFailure, "resume_once");
+    assert.equal(withPolicy.schedule.effectiveOnFailure, "resume_once");
+    assert.equal(withPolicy.schedule.willResumeRunId, budgetFire.runId, "list_schedules says what the next tick will do");
+    const resumedFire = ok(await client.callTool({ name: "run_schedule_now", arguments: { id: created.schedule.id } }));
+    assert.equal(resumedFire.outcome, "resumed");
+    let retry;
+    for (let i = 0; i < 100; i++) {
+      retry = ok(await client.callTool({ name: "get_run", arguments: { run_id: resumedFire.runId } }));
+      if (retry.status !== "running") break;
+      await new Promise((res) => setTimeout(res, 100));
+    }
+    assert.equal(retry.resumedFromRunId, budgetFire.runId);
+    assert.equal(retry.status, "completed");
+    const original = ok(await client.callTool({ name: "get_run", arguments: { run_id: budgetFire.runId } }));
+    assert.equal(original.resumedByRunId, retry.id, "get_run links the original to its retry");
+    const both = ok(await client.callTool({ name: "list_runs", arguments: { limit: 2 } })).runs;
+    assert.equal(both[0].id, retry.id);
+    assert.equal(both[0].resumedFromRunId, budgetFire.runId);
+    assert.equal(both[1].resumedByRunId, retry.id, "list_runs links both ways");
+    const cleared = ok(await client.callTool({ name: "update_schedule", arguments: { id: created.schedule.id, clear_on_failure: true } }));
+    assert.equal(cleared.schedule.onFailure, null);
+    assert.equal(cleared.schedule.effectiveOnFailure, "none", "back to the agent's policy");
+    assert.equal(cleared.schedule.willResumeRunId, null);
 
     const deleted = ok(await client.callTool({ name: "delete_schedule", arguments: { id: created.schedule.id } }));
     assert.equal(deleted.deleted, true);
@@ -307,5 +357,98 @@ test("`duskfleet serve` stays alive past its first tick and holds the lease unti
     child.kill("SIGTERM");
     await new Promise((r) => child.on("exit", r));
     rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("on_failure: resume_once resumes a budget-exhausted run on the next tick, once; a second failure is final", async () => {
+  const { root, configDir } = makeRoot();
+  const t = makeScheduler(configDir);
+  try {
+    const s = t.scheduler.create({ name: "resume me", agentId: "resumer", prompt: "budget", cron: "* * * * *" });
+    assert.equal(t.scheduler.resumeCandidate(t.repo.get(s.id)), null, "nothing to resume before the first run");
+
+    const first = await t.fireAndWait(s.id);
+    assert.equal(first.status, "failed");
+    assert.equal(first.terminationReason, "budget_exhausted");
+    assert.equal(first.resumedFromRunId, null);
+    assert.equal(t.repo.get(s.id).lastOutcome, "started");
+    assert.equal(t.scheduler.resumeCandidate(t.repo.get(s.id)).id, first.id, "the next fire will resume it");
+
+    const second = await t.fireAndWait(s.id);
+    assert.notEqual(second.id, first.id);
+    assert.equal(second.resumedFromRunId, first.id, "linked to the run it resumed");
+    assert.equal(second.retries, 1);
+    assert.equal(second.claudeSessionId, first.claudeSessionId, "same session");
+    assert.equal(second.scheduleId, s.id);
+    assert.equal(second.agentId, "resumer");
+    const argv = second.command.argv;
+    assert.equal(argv[argv.indexOf("--resume") + 1], first.claudeSessionId);
+    assert.ok(!argv.includes("--session-id"));
+    assert.equal(argv[argv.indexOf("--max-budget-usd") + 1], "3", "resume_budget_usd, with the agent's wrap-up reserve of 0");
+    assert.match(second.prompt, /^Your previous session ended early \(budget exhausted\)/);
+    assert.equal(second.status, "completed", "the fake's --resume branch finishes the job");
+    assert.equal(t.runs.resumedBy(first.id).id, second.id);
+    const sched = t.repo.get(s.id);
+    assert.equal(sched.lastOutcome, "resumed");
+    assert.equal(sched.fires, 2, "a resume is a fire");
+    assert.deepEqual(t.repo.firings(s.id).map((f) => f.outcome), ["resumed", "started"]);
+    const notes = t.runs.events(first.id).filter((e) => e.type === "note").map((e) => e.payload.message);
+    assert.ok(notes.some((m) => m === `resumed by run ${second.id}`), "the original run's timeline links to the retry");
+    assert.ok(t.runs.events(second.id).some((e) => e.type === "note" && e.payload.resumedFromRunId === first.id));
+
+    // the resumed run completed: the next tick starts fresh
+    const third = await t.fireAndWait(s.id);
+    assert.equal(third.resumedFromRunId, null);
+    assert.ok(third.command.argv.includes("--session-id"));
+    assert.equal(third.prompt, "budget", "the schedule's own prompt again");
+
+    // ...and when the resume fails too, that is final: the tick after starts fresh, no third attempt on that session
+    process.env.FAKE_CLAUDE_RESUME = "budget";
+    const fourth = await t.fireAndWait(s.id);
+    assert.equal(fourth.resumedFromRunId, third.id);
+    assert.equal(fourth.status, "failed");
+    assert.equal(fourth.terminationReason, "budget_exhausted");
+    assert.equal(t.scheduler.resumeCandidate(t.repo.get(s.id)), null, "a failed resume is not resumed again");
+    const fifth = await t.fireAndWait(s.id);
+    assert.equal(fifth.resumedFromRunId, null, "fresh start after the final failure");
+    assert.equal(t.runs.resumedBy(fourth.id), null);
+    await assert.rejects(() => t.runs.resumeRun({ runId: third.id }), /already resumed once/);
+    await assert.rejects(() => t.runs.resumeRun({ runId: second.id }), /cannot be resumed: it is completed/);
+  } finally {
+    delete process.env.FAKE_CLAUDE_RESUME;
+    await t.close(root);
+  }
+});
+
+test("a timed-out run is resumed too; a schedule's on_failure overrides the agent's in both directions", async () => {
+  const { root, configDir } = makeRoot();
+  const t = makeScheduler(configDir);
+  try {
+    // agent says resume_once, schedule says none → fresh
+    const off = t.scheduler.create({ name: "no retry", agentId: "resumer", prompt: "budget", cron: "* * * * *", onFailure: "none" });
+    const offFirst = await t.fireAndWait(off.id);
+    assert.equal(offFirst.status, "failed");
+    assert.equal(t.scheduler.resumeCandidate(t.repo.get(off.id)), null);
+    const offSecond = await t.fireAndWait(off.id);
+    assert.equal(offSecond.resumedFromRunId, null);
+
+    // agent says nothing, schedule says resume_once with its own budget → resumed after a timeout
+    const on = t.scheduler.create({ name: "retry hang", agentId: "coder", prompt: "hang", cron: "* * * * *", onFailure: "resume_once", resumeBudgetUsd: 1 });
+    const hung = await t.fireAndWait(on.id); // default_timeout_minutes 0.05 = 3 s
+    assert.equal(hung.status, "timed_out");
+    assert.equal(t.scheduler.resumeCandidate(t.repo.get(on.id)).id, hung.id);
+    const resumed = await t.fireAndWait(on.id);
+    assert.equal(resumed.resumedFromRunId, hung.id);
+    assert.match(resumed.prompt, /\(timed out\)/);
+    assert.equal(resumed.command.argv[resumed.command.argv.indexOf("--max-budget-usd") + 1], "0.5", "$1 resume budget minus the default $0.50 reserve");
+    assert.equal(resumed.status, "completed");
+
+    // clearing the schedule's policy falls back to the agent's (none for coder)
+    t.scheduler.update(on.id, { onFailure: null, resumeBudgetUsd: null });
+    assert.equal(t.repo.get(on.id).onFailure, null);
+    assert.throws(() => t.scheduler.create({ name: "bad", agentId: "coder", prompt: "x", cron: "* * * * *", onFailure: "retry_forever" }), /on_failure must be one of/);
+    assert.throws(() => t.scheduler.create({ name: "bad2", agentId: "coder", prompt: "x", cron: "* * * * *", resumeBudgetUsd: -1 }), /resume_budget_usd must be/);
+  } finally {
+    await t.close(root);
   }
 });

@@ -11,7 +11,7 @@ import { listProjectAgents, projectAgentDefinitionHash } from "../config/agent-f
 import { summarizeToolInput } from "./tool-summary.js";
 import type { AgentDefinition, DuskFleetConfig, ProjectDefinition } from "../config/types.js";
 import type { ExecutionEvent, ExecutionHandle, ExecutionRequest, ExecutionResult, Executor, McpServerInfo, SubagentRecord, TokenUsage } from "../execution/types.js";
-import { isBudgetExhausted, isTerminal, type Run, type RunAgent, type RunPhase, type RunStatus } from "../observability/run.js";
+import { isBudgetExhausted, isResumable, isTerminal, type Run, type RunAgent, type RunPhase, type RunStatus } from "../observability/run.js";
 import type { RunRepository, ListRunsFilter } from "../storage/runs.js";
 import { logger } from "../util/log.js";
 import { validateProjectPath } from "./project-validation.js";
@@ -27,6 +27,25 @@ export interface StartRunInput {
   model?: string;
   /** Set by the scheduler. */
   scheduleId?: string;
+  /** Internal: continue the session of an earlier run instead of starting a new one (see resumeRun). */
+  resume?: { fromRun: Run; budgetUsd: number };
+}
+
+export interface ResumeRunInput {
+  /** The run whose session to continue; it must have ended budget_exhausted or timed_out and not been resumed before. */
+  runId: string;
+  scheduleId?: string;
+  /** Budget of the resumed run; defaults to the agent's resume_budget_usd, else its max_budget_usd. */
+  budgetUsd?: number;
+}
+
+/** What a resumed run is told. The session already holds the task and everything done so far. */
+export function resumePrompt(reason: string): string {
+  return (
+    `Your previous session ended early (${reason}) before the task was finished. Continue from where you stopped: ` +
+    "first check what was already done so you do not redo or undo it, then finish the task and record the outcome " +
+    "where your instructions say. If it cannot be finished, record exactly where you stopped and why, then stop."
+  );
 }
 
 interface ActiveRun {
@@ -158,6 +177,16 @@ export class RunManager {
     return this.runs.agents(runId);
   }
 
+  /** The run that resumed `runId` (on_failure: resume_once), if any. */
+  resumedBy(runId: string): Run | null {
+    return this.runs.resumedBy(runId);
+  }
+
+  /** id → id of the resuming run, for the ids that have one (list views). */
+  resumedByMany(ids: string[]): Map<string, string> {
+    return this.runs.resumedByMany(ids);
+  }
+
   /**
    * Creates and launches a run. Returns as soon as the process has been
    * spawned; completion is observed via getRun()/waitForRun().
@@ -198,10 +227,12 @@ export class RunManager {
     }
 
     const runId = randomUUID();
-    const sessionId = randomUUID();
+    const resume = input.resume ?? null;
+    // A resumed run continues the earlier run's session under its own run id and log.
+    const sessionId = resume?.fromRun.claudeSessionId ?? randomUUID();
     const model = input.model ?? agent.model;
     const timeoutMinutes = agent.timeoutMinutes ?? this.config.claude.defaultTimeoutMinutes;
-    const budget = budgetPlan(agent, this.config);
+    const budget = budgetPlan(resume ? { ...agent, maxBudgetUsd: resume.budgetUsd } : agent, this.config);
     const logPath = path.join(this.config.dataDir, "logs", `${runId}.jsonl`);
 
     const request: ExecutionRequest = {
@@ -213,6 +244,7 @@ export class RunManager {
       maxBudgetUsd: budget.main,
       logPath,
     };
+    if (resume) request.resumeSessionId = sessionId;
     if (model) request.model = model;
     if (agent.allowedTools) request.allowedTools = agent.allowedTools;
     if (agent.disallowedTools) request.disallowedTools = agent.disallowedTools;
@@ -265,16 +297,21 @@ export class RunManager {
       mcp: { mounted: [], used: [], allowListedMissing: [] },
       humanIntervention: false,
       contextExhausted: false,
-      retries: 0,
+      retries: resume ? resume.fromRun.retries + 1 : 0,
       logPath,
       rawResultJson: null,
       scheduleId: input.scheduleId ?? null,
       phases: [],
+      resumedFromRunId: resume?.fromRun.id ?? null,
     };
 
     // Insert first so that events emitted by the executor always find the row.
     this.runs.insert(run);
     this.runs.addEvent(runId, "status_change", { from: null, to: "pending" });
+    if (resume) {
+      this.runs.addEvent(runId, "note", { message: `resumes run ${resume.fromRun.id} (${resume.fromRun.status}, ${resume.fromRun.terminationReason ?? "no termination reason"}) with a ${budget.total} USD budget`, resumedFromRunId: resume.fromRun.id });
+      this.runs.addEvent(resume.fromRun.id, "note", { message: `resumed by run ${runId}`, resumedByRunId: runId });
+    }
 
     let handle: ExecutionHandle;
     try {
@@ -305,6 +342,33 @@ export class RunManager {
     void handle.done.then((result) => this.onPhaseFinished(runId, result));
 
     return this.runs.get(runId)!;
+  }
+
+  /**
+   * Start a run that continues the session of a run that ended `budget_exhausted` or
+   * `timed_out` (`on_failure: resume_once`). Same agent, project and envelope; the prompt
+   * says to pick up where it stopped. Refused when the run cannot be resumed or already was:
+   * a resume is tried once, a second failure is final.
+   */
+  async resumeRun(input: ResumeRunInput): Promise<Run> {
+    const fromRun = this.runs.get(input.runId);
+    if (!fromRun) throw new Error(`run not found: ${input.runId}`);
+    if (!isResumable(fromRun)) {
+      throw new Error(`run ${fromRun.id} cannot be resumed: it is ${fromRun.status}${fromRun.terminationReason ? ` (${fromRun.terminationReason})` : ""}; only budget_exhausted and timed_out runs with a session are`);
+    }
+    const already = this.runs.resumedBy(fromRun.id);
+    if (already) throw new Error(`run ${fromRun.id} was already resumed once by run ${already.id} (${already.status}); a second failure is final`);
+    this.reloadConfig();
+    const agent = this.resolveAgent(fromRun.agentId);
+    const budgetUsd = input.budgetUsd ?? agent.resumeBudgetUsd ?? agent.maxBudgetUsd ?? this.config.claude.defaultMaxBudgetUsd;
+    const reason = fromRun.status === "timed_out" ? "timed out" : "budget exhausted";
+    // The original run's project: by id when it had one (the registry path may be a symlink of the resolved one).
+    const startInput: StartRunInput = fromRun.projectId
+      ? { prompt: resumePrompt(reason), agentId: fromRun.agentId, projectId: fromRun.projectId, resume: { fromRun, budgetUsd } }
+      : { prompt: resumePrompt(reason), agentId: fromRun.agentId, projectPath: fromRun.projectPath, resume: { fromRun, budgetUsd } };
+    if (fromRun.modelRequested) startInput.model = fromRun.modelRequested;
+    if (input.scheduleId) startInput.scheduleId = input.scheduleId;
+    return this.startRun(startInput);
   }
 
   cancelRun(id: string): Run {
