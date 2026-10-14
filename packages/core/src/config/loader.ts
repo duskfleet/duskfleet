@@ -7,6 +7,7 @@ import { z } from "zod";
 import { AGENT_ID_PATTERN } from "./agent-files.js";
 import {
   EFFORT_LEVELS,
+  ON_FAILURE_POLICIES,
   PERMISSION_MODES,
   type AgentDefinition,
   type AgentSource,
@@ -90,6 +91,8 @@ const agentFrontmatterSchema = z.object({
   timeout_minutes: z.number().positive().optional(),
   max_budget_usd: z.number().positive().optional(),
   wrap_up_reserve_usd: z.number().nonnegative().optional(),
+  on_failure: z.enum(ON_FAILURE_POLICIES).optional(),
+  resume_budget_usd: z.number().positive().optional(),
   inherit_mcp: z.boolean().optional(),
   add_dirs: z.array(z.string()).optional(),
   claude_agent: z.string().min(1).optional(),
@@ -214,6 +217,8 @@ export function loadAgents(agentsDir: string, source: AgentSource = "builtin"): 
     if (fm.timeout_minutes !== undefined) agent.timeoutMinutes = fm.timeout_minutes;
     if (fm.max_budget_usd !== undefined) agent.maxBudgetUsd = fm.max_budget_usd;
     if (fm.wrap_up_reserve_usd !== undefined) agent.wrapUpReserveUsd = fm.wrap_up_reserve_usd;
+    if (fm.on_failure !== undefined) agent.onFailure = fm.on_failure;
+    if (fm.resume_budget_usd !== undefined) agent.resumeBudgetUsd = fm.resume_budget_usd;
     if (fm.inherit_mcp !== undefined) agent.inheritMcp = fm.inherit_mcp;
     if (fm.add_dirs !== undefined) agent.addDirs = fm.add_dirs.map(expandHome);
     if (fm.claude_agent !== undefined) agent.claudeAgent = fm.claude_agent;

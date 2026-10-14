@@ -17,10 +17,10 @@
  */
 import { hostname } from "node:os";
 import type { RunManager } from "../orchestration/run-manager.js";
-import { lastRunSummary, type LastRunSummary } from "../observability/run.js";
+import { lastRunSummary, type LastRunSummary, type Run } from "../observability/run.js";
 import type { ScheduleRepository } from "../storage/schedules.js";
 import { logger } from "../util/log.js";
-import { createSchedule, formatHolder, nextRunAtFor, parseHolder, updateSchedule, type SchedulerRole } from "./crud.js";
+import { createSchedule, formatHolder, nextRunAtFor, parseHolder, updateSchedule, willResume, type SchedulerRole } from "./crud.js";
 import type { Schedule, ScheduleInput, ScheduleOutcome, SchedulePatch } from "./types.js";
 
 const log = logger("scheduler");
@@ -181,6 +181,15 @@ export class Scheduler {
       return { outcome: "skipped_disabled", runId: null, error: null };
     }
     try {
+      const resumable = this.resumeCandidate(s);
+      if (resumable) {
+        const input: Parameters<RunManager["resumeRun"]>[0] = { runId: resumable.id, scheduleId: s.id };
+        if (s.resumeBudgetUsd !== null) input.budgetUsd = s.resumeBudgetUsd;
+        const run = await this.runs.resumeRun(input);
+        this.repo.recordFiring(s.id, "resumed", run.id, null, nextRunAt);
+        log.info("schedule fired as a resume", { schedule: s.name, runId: run.id, resumedFrom: resumable.id, manual });
+        return { outcome: "resumed", runId: run.id, error: null };
+      }
       const input: Parameters<RunManager["startRun"]>[0] = { prompt: s.prompt, agentId: s.agentId, scheduleId: s.id };
       if (s.projectId) input.projectId = s.projectId;
       if (s.model) input.model = s.model;
@@ -196,6 +205,19 @@ export class Scheduler {
       (busy ? log.info : log.warn)("schedule not started", { schedule: s.name, outcome, message });
       return { outcome, runId: null, error: message };
     }
+  }
+
+  /**
+   * The run to resume instead of starting fresh, when the schedule's policy (its own
+   * `on_failure`, else the agent's) is `resume_once`, the run it last started ended
+   * `budget_exhausted` or `timed_out`, and that run was not itself a resume: one retry,
+   * a second failure is final and the next tick starts fresh.
+   */
+  resumeCandidate(s: Schedule): Run | null {
+    if (!s.lastRunId) return null;
+    const last = this.runs.getRun(s.lastRunId);
+    if (!last) return null;
+    return willResume(s, this.runs.config.agents.get(s.agentId), last, this.runs.resumedBy(last.id) !== null) ? last : null;
   }
 
   private computeNext(cron: string, timeZone: string): string | null {

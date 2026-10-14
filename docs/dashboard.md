@@ -17,6 +17,8 @@ in the nav); the other pages are static.
   by a short title (first line of the prompt); the whole row links to the detail.
 - **Run detail**: short title, status line, duration / cost / turns / tool calls / tokens, the
   issues (denied calls highlighted in the timeline, missing MCP servers, context exhaustion),
+  the linked retry when the run resumed an earlier one or was resumed by a later one
+  (`on_failure: resume_once`; the list shows "resumes ↗" / "retried ↗" flags),
   final message (long results collapse), a callout when a budget exhaustion was followed by a
   wrap-up pass (what the main pass spent, what the wrap-up cost and whether it recorded where
   it stopped; the wrap-up's own tool calls sit between `wrap-up started` / `wrap-up ended`
@@ -30,7 +32,8 @@ in the nav); the other pages are static.
   aggregate stats. User agents can be deleted or
   unlinked from here, with an inline confirmation; builtins are read-only.
 - **Schedules**: state, cron (human and raw), next tick (theoretical one for paused schedules),
-  last outcome and firing history. Each row can be run now, paused / resumed, have its cron and
+  last outcome and firing history, the state of the run it last started, the on-failure policy
+  in force and a "next: resume" badge when the next fire will resume that run. Each row can be run now, paused / resumed, have its cron and
   time zone edited, or be deleted (inline confirmation); the changes go through the same
   validation as `update_schedule`. **Run now** does not start Claude from the dashboard: it marks
   the row and the process that holds the scheduler lease fires it on its next tick (within

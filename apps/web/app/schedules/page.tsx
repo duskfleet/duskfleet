@@ -19,6 +19,7 @@ export const metadata = { title: "Schedules · DuskFleet" };
 
 const OUTCOME_CLASS: Record<string, string> = {
   started: "completed",
+  resumed: "completed",
   skipped_busy: "attention",
   skipped_disabled: "cancelled",
   error: "failed",
@@ -132,6 +133,13 @@ export default function SchedulesPage() {
                         </span>
                       </div>
                     )}
+                    {s.willResumeRunId && (
+                      <div style={{ marginTop: 4 }}>
+                        <Link href={`/runs/${s.willResumeRunId}`} className="badge attention" title={`on_failure: resume_once (${s.onFailureSource}): the next fire resumes the session of run ${s.willResumeRunId} instead of starting fresh. Once; a second failure is final.`}>
+                          next: resume
+                        </Link>
+                      </div>
+                    )}
                   </td>
                   <td className="what">
                     <div className="prompt" title={s.prompt}>{s.name}</div>
@@ -151,6 +159,14 @@ export default function SchedulesPage() {
                       )}
                       <span className="sep">·</span>
                       <Link href={`/?schedule=${encodeURIComponent(s.id)}`} title="Runs started by this schedule">runs →</Link>
+                      {s.effectiveOnFailure === "resume_once" && (
+                        <>
+                          <span className="sep">·</span>
+                          <span className="muted" title={`on_failure: resume_once from the ${s.onFailureSource}${s.resumeBudgetUsd !== null ? ` · resume budget $${s.resumeBudgetUsd}` : ""}: after a budget or timeout failure the next tick resumes the session once`}>
+                            resume once on failure
+                          </span>
+                        </>
+                      )}
                     </div>
                     <div className="muted" style={{ fontSize: "0.8rem", marginTop: 4, maxWidth: 520 }} title={s.prompt}>
                       {runTitle(s.prompt, 90)}

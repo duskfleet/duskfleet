@@ -68,6 +68,16 @@ export function RunTable({ runs, emptyText }: { runs: RunWithProject[]; emptyTex
                       </Link>
                     </span>
                   )}
+                  {r.resumedFromRunId && (
+                    <span className="flags">
+                      <Link href={`/runs/${r.resumedFromRunId}`} className="flag warn badge-link" title={`Retry: this run resumed the session of run ${r.resumedFromRunId} (on_failure: resume_once)`}>resumes ↗</Link>
+                    </span>
+                  )}
+                  {r.resumedByRunId && (
+                    <span className="flags">
+                      <Link href={`/runs/${r.resumedByRunId}`} className="flag warn badge-link" title={`This run's session was resumed by run ${r.resumedByRunId} (on_failure: resume_once)`}>retried ↗</Link>
+                    </span>
+                  )}
                   {r.error?.startsWith("orphaned") && (
                     <span className="flags">
                       <Link href={issues} className="flag bad badge-link" title={r.error}>orphaned</Link>

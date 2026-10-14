@@ -4,7 +4,8 @@
  * here so a schedule edited from the dashboard obeys exactly the same rules
  * as one edited over MCP.
  */
-import type { DuskFleetConfig } from "../config/types.js";
+import { ON_FAILURE_POLICIES, type AgentDefinition, type DuskFleetConfig, type OnFailurePolicy } from "../config/types.js";
+import { isResumable, type Run } from "../observability/run.js";
 import type { ScheduleRepository } from "../storage/schedules.js";
 import { CronError, assertTimeZone, nextFire, parseCron } from "./cron.js";
 import type { Schedule, ScheduleInput, SchedulePatch } from "./types.js";
@@ -37,6 +38,32 @@ export function validateScheduleInput(config: DuskFleetConfig, input: ScheduleIn
   if (input.projectId && agent.project && agent.project !== input.projectId) {
     throw new Error(`agent "${input.agentId}" belongs to project "${agent.project}", cannot schedule it on "${input.projectId}"`);
   }
+  if (input.onFailure != null && !(ON_FAILURE_POLICIES as readonly string[]).includes(input.onFailure)) {
+    throw new Error(`on_failure must be one of ${ON_FAILURE_POLICIES.join(", ")}`);
+  }
+  if (input.resumeBudgetUsd != null && !(Number.isFinite(input.resumeBudgetUsd) && input.resumeBudgetUsd > 0)) {
+    throw new Error("resume_budget_usd must be a positive number");
+  }
+}
+
+/** The policy a schedule applies after a failed run: its own, else its agent's, else none. */
+export function effectiveOnFailure(schedule: Pick<Schedule, "onFailure">, agent: Pick<AgentDefinition, "onFailure"> | undefined): OnFailurePolicy {
+  return schedule.onFailure ?? agent?.onFailure ?? "none";
+}
+
+/**
+ * Whether the schedule's next fire resumes `lastRun` (the run it last started) instead of
+ * starting fresh: policy `resume_once`, the run ended budget_exhausted or timed_out, it is
+ * not itself a resume, and nothing resumed it yet. One retry; a second failure is final.
+ */
+export function willResume(
+  schedule: Pick<Schedule, "onFailure">,
+  agent: Pick<AgentDefinition, "onFailure"> | undefined,
+  lastRun: Pick<Run, "status" | "terminationReason" | "claudeSessionId" | "resumedFromRunId"> | null,
+  alreadyResumed: boolean,
+): boolean {
+  if (!lastRun || effectiveOnFailure(schedule, agent) !== "resume_once") return false;
+  return isResumable(lastRun) && lastRun.resumedFromRunId === null && !alreadyResumed;
 }
 
 export function createSchedule(repo: ScheduleRepository, config: DuskFleetConfig, input: ScheduleInput, now: Date = new Date()): Schedule {
@@ -60,6 +87,8 @@ export function updateSchedule(repo: ScheduleRepository, config: DuskFleetConfig
     cron: patch.cron ?? existing.cron,
     timeZone: patch.timeZone ?? existing.timeZone,
     enabled: patch.enabled ?? existing.enabled,
+    onFailure: patch.onFailure === undefined ? existing.onFailure : patch.onFailure,
+    resumeBudgetUsd: patch.resumeBudgetUsd === undefined ? existing.resumeBudgetUsd : patch.resumeBudgetUsd,
   };
   validateScheduleInput(config, merged);
   if (merged.name !== existing.name && repo.findByName(merged.name)) throw new Error(`a schedule named "${merged.name}" already exists`);
