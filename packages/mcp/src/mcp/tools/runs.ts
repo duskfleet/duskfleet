@@ -24,7 +24,8 @@ function presentRun(run: Run, includeOutput: boolean) {
 /** Subagent rows are small except for prompt and report; those are shortened unless output was asked for. */
 function presentSubagent(s: RunAgent, includeOutput: boolean) {
   const clip = (t: string | null) => (includeOutput || !t || t.length <= 300 ? t : t.slice(0, 297) + "...");
-  return { ...s, prompt: clip(s.prompt), resultText: clip(s.resultText) };
+  // type / brief / report are what a reader asks for; subagentType / prompt / resultText are the stored names.
+  return { type: s.subagentType, brief: clip(s.prompt), report: clip(s.resultText), ...s, prompt: clip(s.prompt), resultText: clip(s.resultText) };
 }
 
 export function registerRunTools(server: McpServer, ctx: ToolContext): void {
