@@ -33,6 +33,7 @@ export const agentSpecSchema = z.object({
   effort: z.enum(EFFORT_LEVELS).optional(),
   timeout_minutes: z.number().positive().optional(),
   max_budget_usd: z.number().positive().optional(),
+  wrap_up_reserve_usd: z.number().nonnegative().optional(),
   inherit_mcp: z.boolean().optional(),
   add_dirs: z.array(z.string().min(1)).optional(),
   claude_agent: z.string().min(1).optional(),
@@ -84,6 +85,7 @@ export function agentToSpec(a: AgentDefinition): AgentSpec {
   if (a.effort !== undefined) spec.effort = a.effort;
   if (a.timeoutMinutes !== undefined) spec.timeout_minutes = a.timeoutMinutes;
   if (a.maxBudgetUsd !== undefined) spec.max_budget_usd = a.maxBudgetUsd;
+  if (a.wrapUpReserveUsd !== undefined) spec.wrap_up_reserve_usd = a.wrapUpReserveUsd;
   if (a.inheritMcp !== undefined) spec.inherit_mcp = a.inheritMcp;
   if (a.addDirs !== undefined) spec.add_dirs = a.addDirs;
   if (a.claudeAgent !== undefined) spec.claude_agent = a.claudeAgent;

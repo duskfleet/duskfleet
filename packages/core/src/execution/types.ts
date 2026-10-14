@@ -11,6 +11,12 @@ export interface ExecutionRequest {
   prompt: string;
   /** Session id chosen by the caller so it is known before the process starts. */
   sessionId: string;
+  /**
+   * Continue an existing session (`claude --resume <id>`) instead of starting one with
+   * `--session-id`. Used by the wrap-up pass after a budget exhaustion. The log file is
+   * appended, not replaced.
+   */
+  resumeSessionId?: string;
   permissionMode: PermissionMode;
   model?: string;
   allowedTools?: string[];

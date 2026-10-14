@@ -89,6 +89,7 @@ const agentFrontmatterSchema = z.object({
   effort: z.enum(EFFORT_LEVELS).optional(),
   timeout_minutes: z.number().positive().optional(),
   max_budget_usd: z.number().positive().optional(),
+  wrap_up_reserve_usd: z.number().nonnegative().optional(),
   inherit_mcp: z.boolean().optional(),
   add_dirs: z.array(z.string()).optional(),
   claude_agent: z.string().min(1).optional(),
@@ -212,6 +213,7 @@ export function loadAgents(agentsDir: string, source: AgentSource = "builtin"): 
     if (fm.effort !== undefined) agent.effort = fm.effort;
     if (fm.timeout_minutes !== undefined) agent.timeoutMinutes = fm.timeout_minutes;
     if (fm.max_budget_usd !== undefined) agent.maxBudgetUsd = fm.max_budget_usd;
+    if (fm.wrap_up_reserve_usd !== undefined) agent.wrapUpReserveUsd = fm.wrap_up_reserve_usd;
     if (fm.inherit_mcp !== undefined) agent.inheritMcp = fm.inherit_mcp;
     if (fm.add_dirs !== undefined) agent.addDirs = fm.add_dirs.map(expandHome);
     if (fm.claude_agent !== undefined) agent.claudeAgent = fm.claude_agent;
