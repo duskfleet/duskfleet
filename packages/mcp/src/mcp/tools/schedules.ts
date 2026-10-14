@@ -1,9 +1,9 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
-import { describeCron, effectiveOnFailure, lastRunSummary, ON_FAILURE_POLICIES, parseCron, type LastRunSummary, type Schedule } from "@duskfleet/core";
+import { describeCron, effectiveOnFailure, lastRunSummary, ON_FAILURE_POLICIES, parseCron, type IdleStats, type LastRunSummary, type Schedule } from "@duskfleet/core";
 import { errorResult, jsonResult, type ToolContext } from "../server.js";
 
-function present(ctx: ToolContext, s: Schedule & { lastRun?: LastRunSummary | null }) {
+function present(ctx: ToolContext, s: Schedule & { lastRun?: LastRunSummary | null; idle7d?: IdleStats }) {
   let human = s.cron;
   try {
     human = describeCron(parseCron(s.cron));
@@ -16,7 +16,9 @@ function present(ctx: ToolContext, s: Schedule & { lastRun?: LastRunSummary | nu
   const effectiveOnFailurePolicy = effectiveOnFailure(s, ctx.config.agents.get(s.agentId));
   /** Set when the next fire will resume the last run instead of starting fresh. */
   const willResumeRunId = ctx.scheduler.resumeCandidate(s)?.id ?? null;
-  return { ...s, cronHuman: human, lastRun, effectiveOnFailure: effectiveOnFailurePolicy, willResumeRunId };
+  /** Last 7 days: ticks, fires, runs, runs whose final message matched the no-op marker, and what they cost. */
+  const idle7d = s.idle7d ?? ctx.scheduler.idleStats(s);
+  return { ...s, cronHuman: human, lastRun, effectiveOnFailure: effectiveOnFailurePolicy, willResumeRunId, idle7d };
 }
 
 const scheduleFields = {
@@ -34,6 +36,11 @@ const scheduleFields = {
       "What the next tick does after a run ended budget_exhausted or timed_out: resume_once resumes that session (claude --resume, once; a second failure is final), none starts fresh. Omit to inherit the agent's on_failure",
     ),
   resume_budget_usd: z.number().positive().optional().describe("Budget of the resumed run; defaults to the agent's resume_budget_usd, else its max_budget_usd"),
+  noop_pattern: z
+    .string()
+    .min(1)
+    .optional()
+    .describe('What this schedule\'s agent says when it finds no work, for the idle-cost stats (idle7d): a regex literal "/.../flags" or a plain case-insensitive regex. Default scheduler.noop_pattern ("/nothing to do|no .* in ready/i")'),
 };
 
 export function registerScheduleTools(server: McpServer, ctx: ToolContext): void {
@@ -68,6 +75,7 @@ export function registerScheduleTools(server: McpServer, ctx: ToolContext): void
         if (args.enabled !== undefined) input.enabled = args.enabled;
         if (args.on_failure !== undefined) input.onFailure = args.on_failure;
         if (args.resume_budget_usd !== undefined) input.resumeBudgetUsd = args.resume_budget_usd;
+        if (args.noop_pattern !== undefined) input.noopPattern = args.noop_pattern;
         return jsonResult({ created: true, schedule: present(ctx, ctx.scheduler.create(input)) });
       } catch (err) {
         return errorResult(err);
@@ -92,6 +100,8 @@ export function registerScheduleTools(server: McpServer, ctx: ToolContext): void
         enabled: scheduleFields.enabled,
         on_failure: scheduleFields.on_failure,
         resume_budget_usd: scheduleFields.resume_budget_usd,
+        noop_pattern: scheduleFields.noop_pattern,
+        clear_noop_pattern: z.boolean().optional().describe("Remove the schedule's noop_pattern: scheduler.noop_pattern applies again"),
         clear_model: z.boolean().optional().describe("Remove the model override"),
         clear_on_failure: z.boolean().optional().describe("Remove the schedule's on_failure and resume_budget_usd: the agent's apply again"),
       },
@@ -101,6 +111,8 @@ export function registerScheduleTools(server: McpServer, ctx: ToolContext): void
         const patch: Parameters<typeof ctx.scheduler.update>[1] = {};
         if (args.on_failure !== undefined) patch.onFailure = args.on_failure;
         if (args.resume_budget_usd !== undefined) patch.resumeBudgetUsd = args.resume_budget_usd;
+        if (args.noop_pattern !== undefined) patch.noopPattern = args.noop_pattern;
+        if (args.clear_noop_pattern) patch.noopPattern = null;
         if (args.clear_on_failure) {
           patch.onFailure = null;
           patch.resumeBudgetUsd = null;

@@ -6,7 +6,7 @@
  * schedule rows (app/schedules/actions.ts), both on the core API.
  */
 import "server-only";
-import { budgetPlan, describeCron, effectiveOnFailure, findRepoRoot, lastRunSummary, listProjectAgents, loadConfig, NEEDS_REVIEW_SQL, nextFire, openDatabase, parseCron, resolveClaudeBinary, resolveConfigDir, RunRepository, ScheduleRepository, willResume, type DuskFleetConfig, type ProjectAgentInfo, type Run, type RunStatus } from "@duskfleet/core";
+import { budgetPlan, describeCron, effectiveOnFailure, findRepoRoot, lastRunSummary, listProjectAgents, loadConfig, NEEDS_REVIEW_SQL, nextFire, openDatabase, parseCron, resolveClaudeBinary, resolveConfigDir, RunRepository, scheduleIdleStats, ScheduleRepository, willResume, type DuskFleetConfig, type ProjectAgentInfo, type Run, type RunStatus } from "@duskfleet/core";
 import { homedir } from "node:os";
 import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
@@ -321,7 +321,8 @@ export function listSchedules() {
     const agent = cfg.agents.get(s.agentId);
     const onFailure = effectiveOnFailure(s, agent);
     const willResumeRunId = last && willResume(s, agent, last, runs.resumedBy(last.id) !== null) ? last.id : null;
-    return { ...s, cronHuman, theoreticalNextAt, lastRun, effectiveOnFailure: onFailure, onFailureSource: s.onFailure ? "schedule" : agent?.onFailure ? "agent" : "default", willResumeRunId };
+    const idle7d = scheduleIdleStats(schedules, s, cfg.scheduler.noopPattern, now);
+    return { ...s, cronHuman, theoreticalNextAt, lastRun, idle7d, effectiveOnFailure: onFailure, onFailureSource: s.onFailure ? "schedule" : agent?.onFailure ? "agent" : "default", willResumeRunId };
   });
 }
 

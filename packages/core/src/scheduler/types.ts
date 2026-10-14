@@ -47,6 +47,8 @@ export interface Schedule {
   onFailure: OnFailurePolicy | null;
   /** Budget of the resumed run; null = the agent's `resume_budget_usd`, else its `max_budget_usd`. */
   resumeBudgetUsd: number | null;
+  /** Marker in a run's final message that means "nothing to do" (idle-cost stats); null = `scheduler.noop_pattern`. */
+  noopPattern: string | null;
 }
 
 export interface ScheduleInput {
@@ -60,6 +62,7 @@ export interface ScheduleInput {
   enabled?: boolean;
   onFailure?: OnFailurePolicy | null;
   resumeBudgetUsd?: number | null;
+  noopPattern?: string | null;
 }
 
 export type SchedulePatch = Partial<ScheduleInput>;

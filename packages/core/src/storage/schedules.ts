@@ -6,6 +6,7 @@
 import type { DatabaseSync } from "node:sqlite";
 import { randomUUID } from "node:crypto";
 import type { Schedule, ScheduleFiring, ScheduleInput, ScheduleOutcome, SchedulePatch } from "../scheduler/types.js";
+import type { Run } from "../observability/run.js";
 
 interface ScheduleRow {
   id: string;
@@ -29,6 +30,7 @@ interface ScheduleRow {
   run_requested_at: string | null;
   on_failure: string | null;
   resume_budget_usd: number | null;
+  noop_pattern: string | null;
 }
 
 function rowToSchedule(r: ScheduleRow): Schedule {
@@ -54,6 +56,7 @@ function rowToSchedule(r: ScheduleRow): Schedule {
     runRequestedAt: r.run_requested_at ?? null,
     onFailure: (r.on_failure as Schedule["onFailure"]) ?? null,
     resumeBudgetUsd: r.resume_budget_usd ?? null,
+    noopPattern: r.noop_pattern ?? null,
   };
 }
 
@@ -89,8 +92,8 @@ export class ScheduleRepository {
     this.db
       .prepare(
         `INSERT INTO schedules (id, name, agent_id, project_id, prompt, model, cron, time_zone, enabled, created_at, updated_at, next_run_at,
-           last_fired_at, last_outcome, last_error, last_run_id, fires, skips, on_failure, resume_budget_usd)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, NULL, NULL, 0, 0, ?, ?)`,
+           last_fired_at, last_outcome, last_error, last_run_id, fires, skips, on_failure, resume_budget_usd, noop_pattern)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, NULL, NULL, 0, 0, ?, ?, ?)`,
       )
       .run(
         id,
@@ -107,6 +110,7 @@ export class ScheduleRepository {
         input.nextRunAt,
         input.onFailure ?? null,
         input.resumeBudgetUsd ?? null,
+        input.noopPattern ?? null,
       );
     return this.get(id)!;
   }
@@ -126,6 +130,7 @@ export class ScheduleRepository {
       nextRunAt: "next_run_at",
       onFailure: "on_failure",
       resumeBudgetUsd: "resume_budget_usd",
+      noopPattern: "noop_pattern",
     };
     for (const [k, v] of Object.entries(patch)) {
       if (v === undefined || !(k in map)) continue;
@@ -170,6 +175,23 @@ export class ScheduleRepository {
            fires = fires + ?, skips = skips + ?, next_run_at = ?, updated_at = ? WHERE id = ?`,
       )
       .run(now, outcome, error, runId, outcome === "started" || outcome === "resumed" ? 1 : 0, outcome === "started" || outcome === "resumed" ? 0 : 1, nextRunAt, now, id);
+  }
+
+  /** Ticks considered since `sinceIso`, by outcome. */
+  firingCountsSince(scheduleId: string, sinceIso: string): Record<string, number> {
+    const rows = this.db
+      .prepare("SELECT outcome, COUNT(*) AS n FROM schedule_firings WHERE schedule_id = ? AND fired_at >= ? GROUP BY outcome")
+      .all(scheduleId, sinceIso) as Array<{ outcome: string; n: number }>;
+    return Object.fromEntries(rows.map((r) => [r.outcome, r.n]));
+  }
+
+  /** Finished-or-not runs a schedule started since `sinceIso`: just what the idle stats read. */
+  runOutcomesSince(scheduleId: string, sinceIso: string): Array<{ status: Run["status"]; resultText: string | null; costUsd: number | null }> {
+    return (
+      this.db
+        .prepare("SELECT status, result_text, cost_usd FROM runs WHERE schedule_id = ? AND created_at >= ?")
+        .all(scheduleId, sinceIso) as Array<{ status: Run["status"]; result_text: string | null; cost_usd: number | null }>
+    ).map((r) => ({ status: r.status, resultText: r.result_text, costUsd: r.cost_usd }));
   }
 
   firings(scheduleId: string, limit = 20): ScheduleFiring[] {

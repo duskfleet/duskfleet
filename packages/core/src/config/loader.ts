@@ -5,6 +5,7 @@ import { fileURLToPath } from "node:url";
 import { parse as parseYaml } from "yaml";
 import { z } from "zod";
 import { AGENT_ID_PATTERN } from "./agent-files.js";
+import { DEFAULT_NOOP_PATTERN, parseNoopPattern } from "../scheduler/idle.js";
 import {
   EFFORT_LEVELS,
   ON_FAILURE_POLICIES,
@@ -75,6 +76,7 @@ const globalSchema = z.object({
       enabled: z.boolean().default(true),
       tick_seconds: z.number().int().min(5).max(300).default(30),
       default_time_zone: z.string().default("Europe/London"),
+      noop_pattern: z.string().min(1).default(DEFAULT_NOOP_PATTERN),
     })
     .prefault({}),
 });
@@ -175,6 +177,7 @@ export function loadConfig(configDir: string): DuskFleetConfig {
       enabled: g.scheduler.enabled,
       tickSeconds: g.scheduler.tick_seconds,
       defaultTimeZone: g.scheduler.default_time_zone,
+      noopPattern: (parseNoopPattern(g.scheduler.noop_pattern), g.scheduler.noop_pattern),
     },
     agents,
     projects,

@@ -151,7 +151,7 @@ if (resumeIdx >= 0) {
     duration_ms: 1234,
     duration_api_ms: 1000,
     num_turns: 2,
-    result: isError ? "API Error: something went wrong" : "Done: created hello.txt",
+    result: isError ? "API Error: something went wrong" : prompt === "noop" ? "Nothing to do: no tickets in Ready." : "Done: created hello.txt",
     session_id: sessionId,
     total_cost_usd: 0.0123,
     usage: { input_tokens: 22, output_tokens: 13, cache_creation_input_tokens: 328, cache_read_input_tokens: 24254 },

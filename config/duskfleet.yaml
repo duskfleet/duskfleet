@@ -39,6 +39,9 @@ scheduler:
   enabled: true            # kill switch, re-read every tick: false stops all firing
   tick_seconds: 30
   default_time_zone: Europe/London
+  # Final message of a scheduled run that found no work; feeds the 7-day idle-cost stats.
+  # A regex literal or a plain case-insensitive regex; a schedule can override it.
+  noop_pattern: "/nothing to do|no .* in ready/i"
 
 claude:
   # Path to the Claude Code binary. Resolution order: CLAUDE_BIN env var, this

@@ -420,6 +420,48 @@ test("on_failure: resume_once resumes a budget-exhausted run on the next tick, o
   }
 });
 
+test("idle cost: 7-day ticks, fires, no-op runs by marker and what they cost, per schedule", async () => {
+  const { root, configDir } = makeRoot();
+  const t = makeScheduler(configDir);
+  try {
+    const s = t.scheduler.create({ name: "idle", agentId: "coder", prompt: "noop", cron: "* * * * *" });
+    await t.fireAndWait(s.id);
+    await t.fireAndWait(s.id);
+    t.scheduler.update(s.id, { prompt: "ok" });
+    await t.fireAndWait(s.id);
+    t.scheduler.update(s.id, { prompt: "error" });
+    await t.fireAndWait(s.id);
+    // a skipped tick counts as a tick, not a fire
+    t.scheduler.update(s.id, { prompt: "hang" });
+    t.due(s.id);
+    await t.scheduler.tick();
+    t.due(s.id);
+    await t.scheduler.tick();
+
+    const [row] = t.scheduler.listWithLastRun();
+    const idle = row.idle7d;
+    assert.equal(idle.days, 7);
+    assert.equal(idle.ticks, 6);
+    assert.equal(idle.fires, 5);
+    assert.equal(idle.runs, 5);
+    assert.equal(idle.noopRuns, 2, "'Nothing to do: no tickets in Ready.' matches the default marker; 'Done' and the failed run do not");
+    assert.equal(idle.noopCostUsd, 0.0246);
+    assert.equal(idle.noopPattern, "/nothing to do|no .* in ready/i");
+    assert.ok(idle.costUsd >= 0.0369);
+
+    // A schedule-specific marker replaces the default; an invalid one is refused.
+    t.scheduler.update(s.id, { noopPattern: "created hello" });
+    assert.equal(t.scheduler.idleStats(t.repo.get(s.id)).noopRuns, 1);
+    assert.throws(() => t.scheduler.update(s.id, { noopPattern: "/(unclosed/" }), /invalid noop_pattern/);
+    // Outside the window nothing counts.
+    assert.equal(t.scheduler.idleStats(t.repo.get(s.id), 0).runs, 0);
+    const hung = t.runs.listRuns({ status: "running" })[0];
+    if (hung) t.runs.cancelRun(hung.id);
+  } finally {
+    await t.close(root);
+  }
+});
+
 test("a timed-out run is resumed too; a schedule's on_failure overrides the agent's in both directions", async () => {
   const { root, configDir } = makeRoot();
   const t = makeScheduler(configDir);

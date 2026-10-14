@@ -22,6 +22,7 @@ import type { ScheduleRepository } from "../storage/schedules.js";
 import { logger } from "../util/log.js";
 import { createSchedule, formatHolder, nextRunAtFor, parseHolder, updateSchedule, willResume, type SchedulerRole } from "./crud.js";
 import type { Schedule, ScheduleInput, ScheduleOutcome, SchedulePatch } from "./types.js";
+import { scheduleIdleStats, type IdleStats } from "./idle.js";
 
 const log = logger("scheduler");
 
@@ -88,9 +89,20 @@ export class Scheduler {
     return this.repo.list();
   }
 
-  /** Schedules with the state of the run each last started (null before the first firing). */
-  listWithLastRun(): Array<Schedule & { lastRun: LastRunSummary | null }> {
-    return this.repo.list().map((s) => ({ ...s, lastRun: lastRunSummary(s.lastRunId ? this.runs.getRun(s.lastRunId) : null) }));
+  /** Schedules with the state of the run each last started (null before the first firing) and their 7-day idle cost. */
+  listWithLastRun(): Array<Schedule & { lastRun: LastRunSummary | null; idle7d: IdleStats }> {
+    const pattern = this.runs.config.scheduler.noopPattern;
+    const now = this.now();
+    return this.repo.list().map((s) => ({
+      ...s,
+      lastRun: lastRunSummary(s.lastRunId ? this.runs.getRun(s.lastRunId) : null),
+      idle7d: scheduleIdleStats(this.repo, s, pattern, now),
+    }));
+  }
+
+  /** Idle stats of one schedule over the last `days`. */
+  idleStats(s: Schedule, days = 7): IdleStats {
+    return scheduleIdleStats(this.repo, s, this.runs.config.scheduler.noopPattern, this.now(), days);
   }
 
   get(id: string): Schedule | null {

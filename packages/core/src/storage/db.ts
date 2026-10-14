@@ -180,6 +180,16 @@ const MIGRATIONS: ReadonlyArray<{ version: number; sql: string }> = [
       CREATE INDEX IF NOT EXISTS idx_runs_resumed_from ON runs(resumed_from_run_id);
     `,
   },
+  {
+    // Idle cost: per-schedule no-op marker (null = scheduler.noop_pattern) and the indexes the
+    // 7-day stats read (runs by schedule and date, firings by schedule and date).
+    version: 9,
+    sql: `
+      ALTER TABLE schedules ADD COLUMN noop_pattern TEXT;
+      CREATE INDEX IF NOT EXISTS idx_runs_schedule_created ON runs(schedule_id, created_at);
+      CREATE INDEX IF NOT EXISTS idx_schedule_firings_time ON schedule_firings(schedule_id, fired_at);
+    `,
+  },
 ];
 
 export function openDatabase(dataDir: string): DatabaseSync {
