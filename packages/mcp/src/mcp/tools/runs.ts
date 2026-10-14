@@ -39,7 +39,7 @@ export function registerRunTools(server: McpServer, ctx: ToolContext): void {
         "Poll with get_run afterwards.",
       inputSchema: {
         prompt: z.string().min(1).describe("The task for the agent"),
-        project_path: z.string().optional().describe("Absolute path of the project (or ~/...). Mutually exclusive with project_id"),
+        project_path: z.string().optional().describe("Absolute path of the project (or ~/...); a registered project id is accepted too. Mutually exclusive with project_id"),
         project_id: z.string().optional().describe("Id of a project from list_projects. Optional when the agent is bound to a project (list_agents → project)"),
         agent_id: z.string().optional().describe("Agent id from list_agents; required unless duskfleet.yaml sets default_agent"),
         model: z.string().optional().describe("Claude model alias or id, e.g. 'sonnet', 'opus'. Omit to use the agent/CLI default"),

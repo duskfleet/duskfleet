@@ -230,7 +230,7 @@ Raw per-run event logs live in `data/logs/<run_id>.jsonl`, not in SQLite, so the
 | `list_agents` | — | builtin agents from `config/agents/*.md` plus user agents from `user_agents_dir` (default `data/agents`), with `source` |
 | `create_agent` / `update_agent` / `delete_agent` | agent spec fields | write/merge/remove `<user_agents_dir>/<id>.md`. Never touch `config/agents`; `bypassPermissions` not offered; a user agent overrides a builtin with the same id (added 2026-10-08) |
 | `list_projects` | — | named projects from `config/projects.yaml` plus allowed roots |
-| `run_agent` | `prompt`, `project_path` or `project_id`, optional `agent_id` (default from config), `model`, `wait_seconds` (0–300) | `run_id`, `status`, `claude_session_id`, and the full run when it finished within the wait |
+| `run_agent` | `prompt`, `project_path` or `project_id` (mutually exclusive; a `project_path` with no separator, `~` or drive letter is read as an id), optional `agent_id` (default from config), `model`, `wait_seconds` (0–300) | `run_id`, `status`, `claude_session_id`, and the full run when it finished within the wait |
 | `get_run` | `run_id`, optional `include_output` | full Run record, including the `claude --resume <session>` command |
 | `list_runs` | optional `status`, `agent_id`, `project_path`, `limit` | summaries |
 | `cancel_run` | `run_id` | updated status |

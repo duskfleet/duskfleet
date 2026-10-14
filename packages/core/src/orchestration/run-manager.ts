@@ -52,6 +52,11 @@ function summarizeSubagent(s: SubagentRecord) {
   };
 }
 
+/** A path separator, a leading ~ or a drive letter: anything else given as a project path is a project id. */
+function looksLikePath(value: string): boolean {
+  return /[\\/]/.test(value) || value.startsWith("~") || /^[A-Za-z]:/.test(value);
+}
+
 /** Claude Code derives MCP tool prefixes from the server name: "claude.ai Figma" → "mcp__claude_ai_Figma". */
 export function mcpToolPrefix(serverName: string): string {
   return "mcp__" + serverName.replace(/[^A-Za-z0-9_-]/g, "_");
@@ -397,10 +402,20 @@ export class RunManager {
   }
 
   private resolveProject(input: StartRunInput): { projectPath: string; projectId: string | null; project: ProjectDefinition | null } {
-    if (input.projectId) {
-      const project = this.config.projects.get(input.projectId);
+    if (input.projectId && input.projectPath) {
+      throw new Error("project_path and project_id are mutually exclusive");
+    }
+    // A project_path that is a registered id, or does not look like a path at all, is read as an id:
+    // `my-app` works everywhere (MCP, CLI, scheduler) and a typo gets "unknown project", not "must be absolute".
+    const projectIdOrNull =
+      input.projectId ??
+      (input.projectPath && (this.config.projects.has(input.projectPath) || !looksLikePath(input.projectPath))
+        ? input.projectPath
+        : null);
+    if (projectIdOrNull) {
+      const project = this.config.projects.get(projectIdOrNull);
       if (!project) {
-        throw new Error(`unknown project "${input.projectId}". Known projects: ${[...this.config.projects.keys()].join(", ")}`);
+        throw new Error(`unknown project "${projectIdOrNull}". Known projects: ${[...this.config.projects.keys()].join(", ")}`);
       }
       return { projectPath: validateProjectPath(project.path, this.config), projectId: project.id, project };
     }
