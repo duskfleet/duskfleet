@@ -60,6 +60,14 @@ export interface StreamState {
   countedMessages: Set<string>;
   /** Subagents whose startedAt was taken from a stream timestamp. */
   stamped: Set<string>;
+  /** Agent tool calls seen in any session, by tool_use id: what was delegated, from the call's input. */
+  agentCalls: Map<string, AgentCallInput>;
+}
+
+interface AgentCallInput {
+  subagentType: string | null;
+  description: string | null;
+  prompt: string | null;
 }
 
 export function createStreamState(): StreamState {
@@ -74,6 +82,7 @@ export function createStreamState(): StreamState {
     toolUseOwner: new Map(),
     countedMessages: new Set(),
     stamped: new Set(),
+    agentCalls: new Map(),
   };
 }
 
@@ -169,7 +178,10 @@ export function ingestLine(state: StreamState, line: string): ExecutionEvent[] {
           const usage = isObject(msg["usage"]) ? msg["usage"] : {};
           record.durationMs = num(usage["duration_ms"]) ?? record.durationMs;
           record.totalTokens = num(usage["total_tokens"]) ?? record.totalTokens;
-          if (record.resultText === null) record.resultText = str(msg["summary"]);
+          if (record.resultText === null) {
+            const summary = str(msg["summary"]);
+            record.resultText = summary === null ? null : cleanHandBack(summary);
+          }
           break;
         }
         default:
@@ -201,6 +213,17 @@ export function ingestLine(state: StreamState, line: string): ExecutionEvent[] {
           const name = str(block["name"]) ?? "unknown";
           const id = str(block["id"]);
           if (id) state.toolUseOwner.set(id, agentId);
+          // The Agent call's input is the authoritative brief: subagent_type, description, prompt.
+          if (id && (name === "Agent" || name === "Task") && isObject(block["input"])) {
+            const input = block["input"];
+            state.agentCalls.set(id, {
+              subagentType: str(input["subagent_type"]),
+              description: str(input["description"]),
+              prompt: str(input["prompt"]),
+            });
+            const existing = [...state.subagents.values()].find((s) => s.parentToolUseId === id);
+            if (existing) fillFromAgentCall(existing, state.agentCalls.get(id));
+          }
           if (record) {
             record.toolCalls += 1;
             if (!record.tools.includes(name)) record.tools.push(name);
@@ -231,13 +254,26 @@ export function ingestLine(state: StreamState, line: string): ExecutionEvent[] {
         } else if (block["type"] === "tool_result") {
           // The hand-back: a tool_result for the Agent call that spawned a subagent closes it.
           const toolUseId = str(block["tool_use_id"]);
-          const record = toolUseId
-            ? [...state.subagents.values()].find((s) => s.parentToolUseId === toolUseId)
-            : undefined;
+          if (!toolUseId) continue;
+          const handBack = isObject(msg["tool_use_result"]) ? msg["tool_use_result"] : null;
+          let record = [...state.subagents.values()].find((s) => s.parentToolUseId === toolUseId);
+          // No task_started and no nested lines (older CLI, or a stream without them): the
+          // hand-back alone still identifies the subagent through tool_use_result.agentId.
+          const handBackAgentId = handBack ? str(handBack["agentId"]) : null;
+          if (
+            !record &&
+            handBackAgentId &&
+            (state.agentCalls.has(toolUseId) || handBack?.["agentType"] !== undefined)
+          ) {
+            record = subagentFor(state, handBackAgentId, toolUseId, handBack?.["agentType"], null, events);
+          }
           if (!record || record.endedAt !== null) continue;
+          fillFromAgentCall(record, state.agentCalls.get(toolUseId));
+          if (handBack) fillFromHandBack(record, handBack);
           const text = toolResultText(block["content"]);
-          if (text) record.resultText = text;
-          if (record.status === "running") record.status = "completed";
+          if (text) record.resultText = cleanHandBack(text);
+          if (record.status === "running")
+            record.status = handBack && str(handBack["status"]) === "failed" ? "failed" : "completed";
           record.endedAt = str(msg["timestamp"]) ?? new Date().toISOString();
           if (record.durationMs === null)
             record.durationMs = Math.max(0, Date.parse(record.endedAt) - Date.parse(record.startedAt));
@@ -310,9 +346,53 @@ function subagentFor(
     usage: emptyUsage(),
     totalTokens: null,
   };
+  if (parent) fillFromAgentCall(record, state.agentCalls.get(parent));
   state.subagents.set(agentId, record);
   events.push({ type: "subagent_start", subagent: record });
   return record;
+}
+
+function fillFromAgentCall(record: SubagentRecord, call: AgentCallInput | undefined): void {
+  if (!call) return;
+  if (record.subagentType === "unknown" && call.subagentType) record.subagentType = call.subagentType;
+  if (record.description === null) record.description = call.description;
+  if (record.prompt === null) record.prompt = call.prompt;
+}
+
+/**
+ * The hand-back line's `tool_use_result` (verified 2026-10-14, CLI 2.1.299): agentType,
+ * prompt, resolvedModel, totalDurationMs, totalTokens, totalToolUseCount, status. Exact
+ * figures from the harness; they win over what was counted from forwarded lines, which
+ * misses lines the CLI does not forward.
+ */
+function fillFromHandBack(record: SubagentRecord, r: Json): void {
+  const type = str(r["agentType"]);
+  if (type && record.subagentType === "unknown") record.subagentType = type;
+  if (record.prompt === null) record.prompt = str(r["prompt"]);
+  if (record.model === null) record.model = str(r["resolvedModel"]);
+  record.durationMs = num(r["totalDurationMs"]) ?? record.durationMs;
+  record.totalTokens = num(r["totalTokens"]) ?? record.totalTokens;
+  const toolUses = num(r["totalToolUseCount"]);
+  if (toolUses !== null) record.toolCalls = Math.max(record.toolCalls, toolUses);
+}
+
+const HAND_BACK_PREAMBLE = /^\[Subagent hand-back\][\s\S]*?The report follows:\s*\n/;
+const HAND_BACK_FOOTER = /\n(?:agentId: [^\n]*\n)?<usage>[\s\S]*?<\/usage>\s*$/;
+
+/**
+ * The report as the subagent wrote it. Claude Code wraps it in a hand-back frame (a
+ * provenance preamble, every line indented by two spaces, an `agentId:` / `<usage>`
+ * footer); stored raw, the first 300 characters were all frame and no report.
+ */
+export function cleanHandBack(text: string): string {
+  const m = HAND_BACK_PREAMBLE.exec(text);
+  if (!m) return text.replace(HAND_BACK_FOOTER, "").trimEnd();
+  const body = text.slice(m[0].length).replace(HAND_BACK_FOOTER, "");
+  return body
+    .split("\n")
+    .map((l) => (l.startsWith("  ") ? l.slice(2) : l))
+    .join("\n")
+    .trim();
 }
 
 /** Text of a tool_result: a plain string or an array of text blocks. */

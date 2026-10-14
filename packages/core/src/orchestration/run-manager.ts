@@ -9,6 +9,7 @@ import path from "node:path";
 import { listProjectAgents, projectAgentDefinitionHash } from "../config/agent-files.js";
 import { loadConfig } from "../config/loader.js";
 import type { AgentDefinition, DuskFleetConfig, ProjectDefinition } from "../config/types.js";
+import { mergeSubagent, needsRepair, subagentsFromLog } from "../execution/log-replay.js";
 import type {
   ExecutionEvent,
   ExecutionHandle,
@@ -281,8 +282,21 @@ export class RunManager {
     return this.runs.events(runId);
   }
 
-  /** Subagent invocations recorded for a run (see RunAgent). */
+  /**
+   * Subagent invocations recorded for a run (see RunAgent). Rows of a finished run that miss
+   * type, brief, report or duration, or still hold the raw hand-back frame, are repaired once
+   * from the run's jsonl log with the current parser and written back.
+   */
   agents(runId: string): RunAgent[] {
+    const rows = this.runs.agents(runId);
+    if (this.active.has(runId) || !rows.some(needsRepair)) return rows;
+    const run = this.runs.get(runId);
+    const fromLog = new Map(subagentsFromLog(run?.logPath ?? null).map((s) => [s.agentId, s]));
+    for (const row of rows) {
+      if (!needsRepair(row)) continue;
+      const { runId: _r, definitionHash, ...stored } = row;
+      this.runs.upsertAgent(runId, mergeSubagent(stored, fromLog.get(row.agentId)), definitionHash);
+    }
     return this.runs.agents(runId);
   }
 

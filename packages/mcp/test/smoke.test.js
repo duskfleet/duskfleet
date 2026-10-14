@@ -193,7 +193,11 @@ test("subagent invocations are recorded as run_agents rows with the persona hash
     assert.equal(s.subagentType, "reviewer");
     assert.equal(s.description, "Review the diff");
     assert.equal(s.prompt, "Review the diff and report problems. Do not edit files.");
-    assert.equal(s.resultText, "[Subagent hand-back] Two findings: x is unused; y lacks a test.");
+    assert.equal(
+      s.resultText,
+      "Two findings:\n- x is unused\n- y lacks a test.",
+      "hand-back frame, indent and footer stripped",
+    );
     assert.equal(s.status, "completed");
     assert.equal(s.model, "claude-haiku-5-5");
     assert.equal(s.parentAgentId, null);
@@ -223,6 +227,43 @@ test("subagent invocations are recorded as run_agents rows with the persona hash
       ],
     );
     assert.equal(events[7].payload.status, "completed");
+  } finally {
+    await app.cleanup();
+  }
+});
+
+test("subagent rows recorded by an older parser are repaired from the jsonl log on read", async () => {
+  const app = makeApp();
+  try {
+    const started = await app.runs.startRun({ prompt: "subagent", projectPath: app.project });
+    const run = await app.runs.waitForRun(started.id, 10_000);
+    // What the 2026-10-14 run looked like to its reader: no type, no brief, raw report, no duration.
+    app.db
+      .prepare(
+        "UPDATE run_agents SET subagent_type = 'unknown', description = NULL, prompt = NULL, result_text = ?, duration_ms = NULL, total_tokens = NULL, tool_calls = 0 WHERE run_id = ?",
+      )
+      .run(
+        "[Subagent hand-back] frame. The report follows:\n  raw report\nagentId: x\n<usage>tool_uses: 2</usage>",
+        run.id,
+      );
+    const [s] = app.runs.agents(run.id);
+    assert.equal(s.subagentType, "reviewer");
+    assert.equal(s.description, "Review the diff");
+    assert.equal(s.prompt, "Review the diff and report problems. Do not edit files.");
+    assert.equal(
+      s.resultText,
+      "Two findings:\n- x is unused\n- y lacks a test.",
+      "the log's report replaces the raw one",
+    );
+    assert.equal(s.durationMs, 4500);
+    assert.equal(s.totalTokens, 865);
+    assert.equal(s.toolCalls, 2);
+    // Written back: a plain read of the table now has it too.
+    const row = app.db
+      .prepare("SELECT subagent_type, prompt, duration_ms FROM run_agents WHERE run_id = ?")
+      .get(run.id);
+    assert.equal(row.subagent_type, "reviewer");
+    assert.equal(row.duration_ms, 4500);
   } finally {
     await app.cleanup();
   }
