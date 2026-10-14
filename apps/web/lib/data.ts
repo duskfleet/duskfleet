@@ -258,6 +258,8 @@ export interface Overview {
   needsReview: number;
   costUsd: number;
   costLast24hUsd: number;
+  /** Part of costUsd spent by schedule gate agents (runs of kind 'gate'). */
+  costGatesUsd: number;
 }
 
 /** KPIs for the cards. With a filter, computed on the same subset the list shows. */
@@ -284,10 +286,11 @@ export function overview(filter: Pick<RunsFilter, "agentId" | "projectPath"> = {
               SUM(status IN ('failed','timed_out','cancelled'))         AS failed,
               SUM(${NEEDS_REVIEW_SQL})                                  AS needs_review,
               COALESCE(SUM(cost_usd), 0)                                AS cost_usd,
-              COALESCE(SUM(CASE WHEN created_at >= ? THEN cost_usd END), 0) AS cost_24h
+              COALESCE(SUM(CASE WHEN created_at >= ? THEN cost_usd END), 0) AS cost_24h,
+              COALESCE(SUM(CASE WHEN kind = 'gate' THEN cost_usd END), 0) AS cost_gates
        FROM runs ${where.length ? "WHERE " + where.join(" AND ") : ""}`,
     )
-    .get(...values) as { total: number; running: number | null; finished: number | null; completed: number | null; clean: number | null; failed: number | null; needs_review: number | null; cost_usd: number; cost_24h: number };
+    .get(...values) as { total: number; running: number | null; finished: number | null; completed: number | null; clean: number | null; failed: number | null; needs_review: number | null; cost_usd: number; cost_24h: number; cost_gates: number };
   return {
     total: r.total,
     running: r.running ?? 0,
@@ -298,6 +301,7 @@ export function overview(filter: Pick<RunsFilter, "agentId" | "projectPath"> = {
     needsReview: r.needs_review ?? 0,
     costUsd: r.cost_usd,
     costLast24hUsd: r.cost_24h,
+    costGatesUsd: r.cost_gates,
   };
 }
 

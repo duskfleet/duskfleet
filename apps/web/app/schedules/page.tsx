@@ -21,6 +21,7 @@ const OUTCOME_CLASS: Record<string, string> = {
   started: "completed",
   resumed: "completed",
   skipped_busy: "attention",
+  skipped_gate: "cancelled",
   skipped_disabled: "cancelled",
   error: "failed",
 };
@@ -160,6 +161,21 @@ export default function SchedulesPage() {
                       )}
                       <span className="sep">·</span>
                       <Link href={`/?schedule=${encodeURIComponent(s.id)}`} title="Runs started by this schedule">runs →</Link>
+                      {s.gate && (
+                        <>
+                          <span className="sep">·</span>
+                          <span
+                            className="muted"
+                            title={
+                              s.gate.command !== undefined
+                                ? `Gate: \`${s.gate.command}\` runs in the project first; exit 0 runs, non-zero skips`
+                                : `Gate: agent ${s.gate.agent?.agentId} checks first ($${s.gate.agent?.budgetUsd ?? 0.5} budget); "${s.gate.agent?.marker ?? "NO_WORK"}" in its answer skips`
+                            }
+                          >
+                            gate: {s.gate.command !== undefined ? "command" : `agent ${s.gate.agent?.agentId}`}
+                          </span>
+                        </>
+                      )}
                       {s.effectiveOnFailure === "resume_once" && (
                         <>
                           <span className="sep">·</span>
@@ -231,6 +247,11 @@ export default function SchedulesPage() {
                     className="num"
                     title={`Last ${s.idle7d.days} days: ${s.idle7d.ticks} ticks, ${s.idle7d.fires} fires, ${s.idle7d.runs} runs (${fmtCost(s.idle7d.costUsd)}). ${s.idle7d.noopRuns} reported no work (${fmtCost(s.idle7d.noopCostUsd)}), matched by ${s.idle7d.noopPattern}${s.noopPattern ? " (this schedule's noop_pattern)" : " (scheduler.noop_pattern)"}.`}
                   >
+                    {s.idle7d.gateChecks > 0 && (
+                      <div className="muted" style={{ fontSize: "0.8rem" }} title={`Gate checked ${s.idle7d.gateChecks} ticks, skipped ${s.idle7d.gateSkips}; spent on gates ${fmtCost(s.idle7d.gateCostUsd)} (not in the run cost)`}>
+                        gate {s.idle7d.gateSkips}/{s.idle7d.gateChecks} skipped · {fmtCost(s.idle7d.gateCostUsd)}
+                      </div>
+                    )}
                     {s.idle7d.runs === 0 ? (
                       <span className="faint">–</span>
                     ) : (

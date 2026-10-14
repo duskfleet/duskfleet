@@ -1,6 +1,6 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
-import { describeCron, effectiveOnFailure, lastRunSummary, ON_FAILURE_POLICIES, parseCron, type IdleStats, type LastRunSummary, type Schedule } from "@duskfleet/core";
+import { describeCron, effectiveOnFailure, lastRunSummary, ON_FAILURE_POLICIES, parseCron, type IdleStats, type LastRunSummary, type Schedule, type ScheduleGate } from "@duskfleet/core";
 import { errorResult, jsonResult, type ToolContext } from "../server.js";
 
 function present(ctx: ToolContext, s: Schedule & { lastRun?: LastRunSummary | null; idle7d?: IdleStats }) {
@@ -19,6 +19,37 @@ function present(ctx: ToolContext, s: Schedule & { lastRun?: LastRunSummary | nu
   /** Last 7 days: ticks, fires, runs, runs whose final message matched the no-op marker, and what they cost. */
   const idle7d = s.idle7d ?? ctx.scheduler.idleStats(s);
   return { ...s, cronHuman: human, lastRun, effectiveOnFailure: effectiveOnFailurePolicy, willResumeRunId, idle7d };
+}
+
+const gateSchema = z
+  .object({
+    command: z.string().min(1).optional().describe("Shell command run in the project directory before each run: exit 0 = work to do, run; non-zero = skip (stdout kept as the reason). Costs nothing"),
+    timeout_seconds: z.number().int().min(1).max(600).optional().describe("Command gate timeout, default 60. A timeout is an error, not a skip"),
+    agent: z
+      .object({
+        agent_id: z.string().min(1).describe("A cheap agent (e.g. one with model: haiku) that checks for work"),
+        prompt: z.string().min(1).describe("What the gate agent checks. Tell it to answer with the marker when there is no work"),
+        budget_usd: z.number().positive().optional().describe("--max-budget-usd of the gate run, default 0.5"),
+        model: z.string().min(1).optional().describe("Model override for the gate run"),
+        marker: z.string().min(1).optional().describe('Text in its final message that means no work; default "NO_WORK"'),
+      })
+      .optional(),
+  })
+  .describe("Skip a tick cheaply when there is no work: exactly one of command or agent. Skips are recorded as skipped_gate; agent gate cost is counted apart from run cost");
+
+/** MCP shape (snake_case) → core ScheduleGate. */
+function toGate(g: z.infer<typeof gateSchema>): ScheduleGate {
+  const gate: ScheduleGate = {};
+  if (g.command !== undefined) gate.command = g.command;
+  if (g.timeout_seconds !== undefined) gate.timeoutSeconds = g.timeout_seconds;
+  if (g.agent) {
+    const a: NonNullable<ScheduleGate["agent"]> = { agentId: g.agent.agent_id, prompt: g.agent.prompt };
+    if (g.agent.budget_usd !== undefined) a.budgetUsd = g.agent.budget_usd;
+    if (g.agent.model !== undefined) a.model = g.agent.model;
+    if (g.agent.marker !== undefined) a.marker = g.agent.marker;
+    gate.agent = a;
+  }
+  return gate;
 }
 
 const scheduleFields = {
@@ -41,6 +72,7 @@ const scheduleFields = {
     .min(1)
     .optional()
     .describe('What this schedule\'s agent says when it finds no work, for the idle-cost stats (idle7d): a regex literal "/.../flags" or a plain case-insensitive regex. Default scheduler.noop_pattern ("/nothing to do|no .* in ready/i")'),
+  gate: gateSchema.optional(),
 };
 
 export function registerScheduleTools(server: McpServer, ctx: ToolContext): void {
@@ -76,6 +108,7 @@ export function registerScheduleTools(server: McpServer, ctx: ToolContext): void
         if (args.on_failure !== undefined) input.onFailure = args.on_failure;
         if (args.resume_budget_usd !== undefined) input.resumeBudgetUsd = args.resume_budget_usd;
         if (args.noop_pattern !== undefined) input.noopPattern = args.noop_pattern;
+        if (args.gate !== undefined) input.gate = toGate(args.gate);
         return jsonResult({ created: true, schedule: present(ctx, ctx.scheduler.create(input)) });
       } catch (err) {
         return errorResult(err);
@@ -101,6 +134,8 @@ export function registerScheduleTools(server: McpServer, ctx: ToolContext): void
         on_failure: scheduleFields.on_failure,
         resume_budget_usd: scheduleFields.resume_budget_usd,
         noop_pattern: scheduleFields.noop_pattern,
+        gate: scheduleFields.gate,
+        clear_gate: z.boolean().optional().describe("Remove the gate: every tick starts the real run again"),
         clear_noop_pattern: z.boolean().optional().describe("Remove the schedule's noop_pattern: scheduler.noop_pattern applies again"),
         clear_model: z.boolean().optional().describe("Remove the model override"),
         clear_on_failure: z.boolean().optional().describe("Remove the schedule's on_failure and resume_budget_usd: the agent's apply again"),
@@ -113,6 +148,8 @@ export function registerScheduleTools(server: McpServer, ctx: ToolContext): void
         if (args.resume_budget_usd !== undefined) patch.resumeBudgetUsd = args.resume_budget_usd;
         if (args.noop_pattern !== undefined) patch.noopPattern = args.noop_pattern;
         if (args.clear_noop_pattern) patch.noopPattern = null;
+        if (args.gate !== undefined) patch.gate = toGate(args.gate);
+        if (args.clear_gate) patch.gate = null;
         if (args.clear_on_failure) {
           patch.onFailure = null;
           patch.resumeBudgetUsd = null;
@@ -150,12 +187,16 @@ export function registerScheduleTools(server: McpServer, ctx: ToolContext): void
     "run_schedule_now",
     {
       title: "Run schedule now",
-      description: "Fire a schedule immediately, outside its cron (also when disabled). Same busy rules as a tick. Returns the run id or why it was skipped.",
-      inputSchema: { id: z.string().min(1).describe("Schedule id from list_schedules. Fires now even if paused; WIP guards still apply") },
+      description:
+        "Fire a schedule immediately, outside its cron (also when disabled). Same busy and gate rules as a tick (an agent gate is waited for). Returns the run id or why it was skipped.",
+      inputSchema: {
+        id: z.string().min(1).describe("Schedule id from list_schedules. Fires now even if paused; WIP guards still apply"),
+        skip_gate: z.boolean().optional().describe("Start the real run without asking the schedule's gate"),
+      },
     },
     async (args) => {
       try {
-        const result = await ctx.scheduler.fireNow(args.id);
+        const result = await ctx.scheduler.fireNow(args.id, { skipGate: args.skip_gate ?? false });
         return jsonResult({ ...result, schedule: present(ctx, ctx.scheduler.get(args.id)!) });
       } catch (err) {
         return errorResult(err);

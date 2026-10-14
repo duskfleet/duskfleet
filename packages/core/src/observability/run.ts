@@ -92,7 +92,11 @@ export interface Run {
    * `RunRepository.resumedBy`.
    */
   resumedFromRunId: string | null;
+  /** `gate` = a schedule's gate agent deciding whether there is work; its cost is counted apart. `run` otherwise. */
+  kind: RunKind;
 }
+
+export type RunKind = "run" | "gate";
 
 /** The wrap-up phase of a run, when there was one. */
 export function wrapUpPhase(run: Pick<Run, "phases">): RunPhase | null {
@@ -198,6 +202,7 @@ export function lastRunSummary(run: Run | null): LastRunSummary | null {
 export function summarizeRun(run: Run) {
   return {
     id: run.id,
+    kind: run.kind,
     status: run.status,
     agentId: run.agentId,
     scheduleId: run.scheduleId,

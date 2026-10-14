@@ -40,7 +40,8 @@ export { assertTransition, IllegalTransitionError } from "./orchestration/run-st
 export * from "./evals/types.js";
 export * from "./scheduler/types.js";
 export { parseCron, nextFire, describeCron, localParts, assertTimeZone, CronError, type CronSpec } from "./scheduler/cron.js";
-export { Scheduler, type SchedulerOptions, type SchedulerStatus } from "./scheduler/scheduler.js";
+export { Scheduler, type FireResult, type SchedulerOptions, type SchedulerStatus } from "./scheduler/scheduler.js";
+export { evaluateGate, runCommandGate, validateGate, type GateVerdict } from "./scheduler/gate.js";
 export { createSchedule, updateSchedule, validateScheduleInput, nextRunAtFor, formatHolder, parseHolder, effectiveOnFailure, willResume, DEFAULT_TIME_ZONE, type SchedulerRole } from "./scheduler/crud.js";
 export { ScheduleRepository } from "./storage/schedules.js";
 export { DEFAULT_NOOP_PATTERN, parseNoopPattern, isNoopRun, computeIdleStats, scheduleIdleStats, type IdleStats } from "./scheduler/idle.js";

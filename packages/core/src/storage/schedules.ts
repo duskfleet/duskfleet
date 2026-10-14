@@ -5,7 +5,7 @@
  */
 import type { DatabaseSync } from "node:sqlite";
 import { randomUUID } from "node:crypto";
-import type { Schedule, ScheduleFiring, ScheduleInput, ScheduleOutcome, SchedulePatch } from "../scheduler/types.js";
+import type { Schedule, ScheduleFiring, ScheduleGate, ScheduleInput, ScheduleOutcome, SchedulePatch } from "../scheduler/types.js";
 import type { Run } from "../observability/run.js";
 
 interface ScheduleRow {
@@ -31,6 +31,17 @@ interface ScheduleRow {
   on_failure: string | null;
   resume_budget_usd: number | null;
   noop_pattern: string | null;
+  gate_json: string | null;
+}
+
+function parseGate(json: string | null | undefined): ScheduleGate | null {
+  if (!json) return null;
+  try {
+    const v = JSON.parse(json);
+    return v && typeof v === "object" ? (v as ScheduleGate) : null;
+  } catch {
+    return null;
+  }
 }
 
 function rowToSchedule(r: ScheduleRow): Schedule {
@@ -57,6 +68,7 @@ function rowToSchedule(r: ScheduleRow): Schedule {
     onFailure: (r.on_failure as Schedule["onFailure"]) ?? null,
     resumeBudgetUsd: r.resume_budget_usd ?? null,
     noopPattern: r.noop_pattern ?? null,
+    gate: parseGate(r.gate_json),
   };
 }
 
@@ -92,8 +104,8 @@ export class ScheduleRepository {
     this.db
       .prepare(
         `INSERT INTO schedules (id, name, agent_id, project_id, prompt, model, cron, time_zone, enabled, created_at, updated_at, next_run_at,
-           last_fired_at, last_outcome, last_error, last_run_id, fires, skips, on_failure, resume_budget_usd, noop_pattern)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, NULL, NULL, 0, 0, ?, ?, ?)`,
+           last_fired_at, last_outcome, last_error, last_run_id, fires, skips, on_failure, resume_budget_usd, noop_pattern, gate_json)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, NULL, NULL, 0, 0, ?, ?, ?, ?)`,
       )
       .run(
         id,
@@ -111,6 +123,7 @@ export class ScheduleRepository {
         input.onFailure ?? null,
         input.resumeBudgetUsd ?? null,
         input.noopPattern ?? null,
+        input.gate ? JSON.stringify(input.gate) : null,
       );
     return this.get(id)!;
   }
@@ -131,11 +144,14 @@ export class ScheduleRepository {
       onFailure: "on_failure",
       resumeBudgetUsd: "resume_budget_usd",
       noopPattern: "noop_pattern",
+      gate: "gate_json",
     };
     for (const [k, v] of Object.entries(patch)) {
       if (v === undefined || !(k in map)) continue;
       sets.push(`${map[k]} = ?`);
-      values.push(typeof v === "boolean" ? (v ? 1 : 0) : (v as string | number | null));
+      if (typeof v === "boolean") values.push(v ? 1 : 0);
+      else if (typeof v === "object" && v !== null) values.push(JSON.stringify(v));
+      else values.push(v as string | number | null);
     }
     values.push(id);
     this.db.prepare(`UPDATE schedules SET ${sets.join(", ")} WHERE id = ?`).run(...values);
@@ -165,10 +181,19 @@ export class ScheduleRepository {
     return Number(r.changes) > 0;
   }
 
-  /** Record a firing attempt and advance the schedule. */
-  recordFiring(id: string, outcome: ScheduleOutcome, runId: string | null, error: string | null, nextRunAt: string | null): void {
+  /** Record a firing attempt and advance the schedule. `gate` is set when a gate ran on this tick. */
+  recordFiring(
+    id: string,
+    outcome: ScheduleOutcome,
+    runId: string | null,
+    error: string | null,
+    nextRunAt: string | null,
+    gate: { runId: string | null; costUsd: number | null } | null = null,
+  ): void {
     const now = new Date().toISOString();
-    this.db.prepare("INSERT INTO schedule_firings (schedule_id, fired_at, outcome, run_id, error) VALUES (?, ?, ?, ?, ?)").run(id, now, outcome, runId, error);
+    this.db
+      .prepare("INSERT INTO schedule_firings (schedule_id, fired_at, outcome, run_id, error, gate_run_id, gate_cost_usd) VALUES (?, ?, ?, ?, ?, ?, ?)")
+      .run(id, now, outcome, runId, error, gate?.runId ?? null, gate ? (gate.costUsd ?? 0) : null);
     this.db
       .prepare(
         `UPDATE schedules SET last_fired_at = ?, last_outcome = ?, last_error = ?, last_run_id = COALESCE(?, last_run_id),
@@ -185,21 +210,29 @@ export class ScheduleRepository {
     return Object.fromEntries(rows.map((r) => [r.outcome, r.n]));
   }
 
-  /** Finished-or-not runs a schedule started since `sinceIso`: just what the idle stats read. */
+  /** Real runs (kind 'run') a schedule started since `sinceIso`: just what the idle stats read. Gate runs are counted apart. */
   runOutcomesSince(scheduleId: string, sinceIso: string): Array<{ status: Run["status"]; resultText: string | null; costUsd: number | null }> {
     return (
       this.db
-        .prepare("SELECT status, result_text, cost_usd FROM runs WHERE schedule_id = ? AND created_at >= ?")
+        .prepare("SELECT status, result_text, cost_usd FROM runs WHERE schedule_id = ? AND created_at >= ? AND kind = 'run'")
         .all(scheduleId, sinceIso) as Array<{ status: Run["status"]; result_text: string | null; cost_usd: number | null }>
     ).map((r) => ({ status: r.status, resultText: r.result_text, costUsd: r.cost_usd }));
+  }
+
+  /** Gate checks since `sinceIso`: how many ran and what the gate agent runs cost. */
+  gateSpendSince(scheduleId: string, sinceIso: string): { gateChecks: number; gateCostUsd: number } {
+    const r = this.db
+      .prepare("SELECT COUNT(gate_cost_usd) AS n, COALESCE(SUM(gate_cost_usd), 0) AS cost FROM schedule_firings WHERE schedule_id = ? AND fired_at >= ?")
+      .get(scheduleId, sinceIso) as { n: number; cost: number };
+    return { gateChecks: r.n, gateCostUsd: r.cost };
   }
 
   firings(scheduleId: string, limit = 20): ScheduleFiring[] {
     return (
       this.db
-        .prepare("SELECT id, schedule_id, fired_at, outcome, run_id, error FROM schedule_firings WHERE schedule_id = ? ORDER BY id DESC LIMIT ?")
-        .all(scheduleId, limit) as Array<{ id: number; schedule_id: string; fired_at: string; outcome: string; run_id: string | null; error: string | null }>
-    ).map((r) => ({ id: r.id, scheduleId: r.schedule_id, firedAt: r.fired_at, outcome: r.outcome as ScheduleOutcome, runId: r.run_id, error: r.error }));
+        .prepare("SELECT id, schedule_id, fired_at, outcome, run_id, error, gate_run_id, gate_cost_usd FROM schedule_firings WHERE schedule_id = ? ORDER BY id DESC LIMIT ?")
+        .all(scheduleId, limit) as Array<{ id: number; schedule_id: string; fired_at: string; outcome: string; run_id: string | null; error: string | null; gate_run_id: string | null; gate_cost_usd: number | null }>
+    ).map((r) => ({ id: r.id, scheduleId: r.schedule_id, firedAt: r.fired_at, outcome: r.outcome as ScheduleOutcome, runId: r.run_id, error: r.error, gateRunId: r.gate_run_id ?? null, gateCostUsd: r.gate_cost_usd ?? null }));
   }
 
   // ---- lease ---------------------------------------------------------------
