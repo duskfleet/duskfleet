@@ -6,6 +6,7 @@
  */
 import { ON_FAILURE_POLICIES, type AgentDefinition, type DuskFleetConfig, type OnFailurePolicy } from "../config/types.js";
 import { isResumable, type Run } from "../observability/run.js";
+import { parseNoopPattern } from "./idle.js";
 import type { ScheduleRepository } from "../storage/schedules.js";
 import { CronError, assertTimeZone, nextFire, parseCron } from "./cron.js";
 import type { Schedule, ScheduleInput, SchedulePatch } from "./types.js";
@@ -44,6 +45,7 @@ export function validateScheduleInput(config: DuskFleetConfig, input: ScheduleIn
   if (input.resumeBudgetUsd != null && !(Number.isFinite(input.resumeBudgetUsd) && input.resumeBudgetUsd > 0)) {
     throw new Error("resume_budget_usd must be a positive number");
   }
+  if (input.noopPattern != null) parseNoopPattern(input.noopPattern);
 }
 
 /** The policy a schedule applies after a failed run: its own, else its agent's, else none. */
@@ -89,6 +91,7 @@ export function updateSchedule(repo: ScheduleRepository, config: DuskFleetConfig
     enabled: patch.enabled ?? existing.enabled,
     onFailure: patch.onFailure === undefined ? existing.onFailure : patch.onFailure,
     resumeBudgetUsd: patch.resumeBudgetUsd === undefined ? existing.resumeBudgetUsd : patch.resumeBudgetUsd,
+    noopPattern: patch.noopPattern === undefined ? existing.noopPattern : patch.noopPattern,
   };
   validateScheduleInput(config, merged);
   if (merged.name !== existing.name && repo.findByName(merged.name)) throw new Error(`a schedule named "${merged.name}" already exists`);

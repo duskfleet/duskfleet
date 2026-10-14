@@ -4,7 +4,7 @@ import { CopyButton } from "@/components/CopyButton";
 import { ScheduleActions } from "@/components/ScheduleActions";
 import { StatusBadge } from "@/components/StatusBadge";
 import { listSchedules, scheduleFirings, schedulerEnabled, schedulerLease } from "@/lib/data";
-import { fmtRelative, fmtTime, runTitle } from "@/lib/format";
+import { fmtCost, fmtRelative, fmtTime, runTitle } from "@/lib/format";
 
 const HOLDER_LABEL: Record<string, string> = {
   serve: "service",
@@ -111,6 +111,7 @@ export default function SchedulesPage() {
               <th>Last tick</th>
               <th className="num">Fired</th>
               <th className="num">Skipped</th>
+              <th className="num" title="Last 7 days: runs that found nothing to do, and what they cost">Idle · 7 d</th>
             </tr>
           </thead>
           <tbody>
@@ -225,6 +226,23 @@ export default function SchedulesPage() {
                   <td className="num">{s.fires}</td>
                   <td className="num" style={s.skips > 0 ? { color: "var(--warn)" } : undefined} title={s.skips > 0 ? "Ticks skipped because the agent or project was busy. Skips are never queued." : undefined}>
                     {s.skips}
+                  </td>
+                  <td
+                    className="num"
+                    title={`Last ${s.idle7d.days} days: ${s.idle7d.ticks} ticks, ${s.idle7d.fires} fires, ${s.idle7d.runs} runs (${fmtCost(s.idle7d.costUsd)}). ${s.idle7d.noopRuns} reported no work (${fmtCost(s.idle7d.noopCostUsd)}), matched by ${s.idle7d.noopPattern}${s.noopPattern ? " (this schedule's noop_pattern)" : " (scheduler.noop_pattern)"}.`}
+                  >
+                    {s.idle7d.runs === 0 ? (
+                      <span className="faint">–</span>
+                    ) : (
+                      <div style={{ display: "grid", gap: 2 }}>
+                        <span style={s.idle7d.noopRuns > 0 && s.idle7d.noopRuns * 2 >= s.idle7d.runs ? { color: "var(--warn)" } : undefined}>
+                          {s.idle7d.noopRuns} / {s.idle7d.runs} no-op
+                        </span>
+                        <span className="muted" style={{ fontSize: "0.8rem" }}>
+                          {fmtCost(s.idle7d.noopCostUsd)} of {fmtCost(s.idle7d.costUsd)}
+                        </span>
+                      </div>
+                    )}
                   </td>
                 </tr>
               );

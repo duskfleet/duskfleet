@@ -43,5 +43,6 @@ export { parseCron, nextFire, describeCron, localParts, assertTimeZone, CronErro
 export { Scheduler, type SchedulerOptions, type SchedulerStatus } from "./scheduler/scheduler.js";
 export { createSchedule, updateSchedule, validateScheduleInput, nextRunAtFor, formatHolder, parseHolder, effectiveOnFailure, willResume, DEFAULT_TIME_ZONE, type SchedulerRole } from "./scheduler/crud.js";
 export { ScheduleRepository } from "./storage/schedules.js";
+export { DEFAULT_NOOP_PATTERN, parseNoopPattern, isNoopRun, computeIdleStats, scheduleIdleStats, type IdleStats } from "./scheduler/idle.js";
 
 export { logger, type LogLevel } from "./util/log.js";

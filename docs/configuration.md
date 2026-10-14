@@ -18,6 +18,11 @@ claude:
   allow_bypass_permissions: false
   default_timeout_minutes: 30
   default_max_budget_usd: 5
+scheduler:
+  enabled: true                 # kill switch, re-read every tick
+  tick_seconds: 30
+  default_time_zone: Europe/London
+  noop_pattern: "/nothing to do|no .* in ready/i"   # final message of a run that found no work (idle-cost stats)
 ```
 
 Config is re-read on every run and every `list_*` tool call: edits apply without restarting
