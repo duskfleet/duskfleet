@@ -44,11 +44,21 @@ export interface IdleStats {
   costUsd: number;
   /** The marker used, as written. */
   noopPattern: string;
+  /** Ticks on which the gate ran (command or agent). */
+  gateChecks: number;
+  /** Ticks the gate skipped (no work). */
+  gateSkips: number;
+  /** What the gate agent runs cost (command gates cost nothing). Not included in costUsd. */
+  gateCostUsd: number;
 }
 
 /** Idle stats of one schedule over the last `days` (default 7), read from its firings and runs. */
 export function scheduleIdleStats(
-  repo: { firingCountsSince(id: string, since: string): Record<string, number>; runOutcomesSince(id: string, since: string): Array<Pick<Run, "status" | "resultText" | "costUsd">> },
+  repo: {
+    firingCountsSince(id: string, since: string): Record<string, number>;
+    runOutcomesSince(id: string, since: string): Array<Pick<Run, "status" | "resultText" | "costUsd">>;
+    gateSpendSince(id: string, since: string): { gateChecks: number; gateCostUsd: number };
+  },
   schedule: { id: string; noopPattern: string | null },
   defaultPattern: string,
   now: Date = new Date(),
@@ -58,7 +68,13 @@ export function scheduleIdleStats(
   const counts = repo.firingCountsSince(schedule.id, since);
   const ticks = Object.values(counts).reduce((a, b) => a + b, 0);
   const fires = (counts["started"] ?? 0) + (counts["resumed"] ?? 0);
-  return computeIdleStats({ runs: repo.runOutcomesSince(schedule.id, since), ticks, fires, pattern: schedule.noopPattern ?? defaultPattern, since, days });
+  const gates = repo.gateSpendSince(schedule.id, since);
+  return {
+    ...computeIdleStats({ runs: repo.runOutcomesSince(schedule.id, since), ticks, fires, pattern: schedule.noopPattern ?? defaultPattern, since, days }),
+    gateSkips: counts["skipped_gate"] ?? 0,
+    gateChecks: gates.gateChecks,
+    gateCostUsd: Math.round(gates.gateCostUsd * 10_000) / 10_000,
+  };
 }
 
 export function computeIdleStats(input: {
@@ -68,7 +84,7 @@ export function computeIdleStats(input: {
   pattern: string;
   since: string;
   days: number;
-}): IdleStats {
+}): Omit<IdleStats, "gateChecks" | "gateSkips" | "gateCostUsd"> {
   const re = parseNoopPattern(input.pattern);
   let noopRuns = 0;
   let noopCostUsd = 0;

@@ -68,6 +68,11 @@ export function RunTable({ runs, emptyText }: { runs: RunWithProject[]; emptyTex
                       </Link>
                     </span>
                   )}
+                  {r.kind === "gate" && (
+                    <span className="flags">
+                      <span className="flag warn" title="A schedule's gate agent: it only decides whether the tick has work. Its cost counts as gate spend.">gate</span>
+                    </span>
+                  )}
                   {r.resumedFromRunId && (
                     <span className="flags">
                       <Link href={`/runs/${r.resumedFromRunId}`} className="flag warn badge-link" title={`Retry: this run resumed the session of run ${r.resumedFromRunId} (on_failure: resume_once)`}>resumes ↗</Link>

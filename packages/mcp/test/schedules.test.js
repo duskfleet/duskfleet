@@ -27,6 +27,7 @@ function makeRoot() {
   writeFileSync(path.join(configDir, "projects.yaml"), `projects:\n  demo:\n    path: ${project}\n`);
   writeFileSync(path.join(configDir, "agents", "coder.md"), `---\nproject: demo\n---\nBe brief.\n`);
   writeFileSync(path.join(configDir, "agents", "free.md"), `---\n---\nUnbound.\n`);
+  writeFileSync(path.join(configDir, "agents", "gatekeeper.md"), `---\nproject: demo\nmodel: haiku\n---\nCheck for work.\n`);
   writeFileSync(path.join(configDir, "agents", "resumer.md"), `---\nproject: demo\nmax_budget_usd: 2\nwrap_up_reserve_usd: 0\non_failure: resume_once\nresume_budget_usd: 3\n---\nRetry once.\n`);
   return { root, configDir, project: realpathSync(project) };
 }
@@ -457,6 +458,114 @@ test("idle cost: 7-day ticks, fires, no-op runs by marker and what they cost, pe
     assert.equal(t.scheduler.idleStats(t.repo.get(s.id), 0).runs, 0);
     const hung = t.runs.listRuns({ status: "running" })[0];
     if (hung) t.runs.cancelRun(hung.id);
+  } finally {
+    await t.close(root);
+  }
+});
+
+test("command gate: exit 0 runs, non-zero skips with stdout as the reason, a timeout is an error; gates cost nothing", async () => {
+  const { root, configDir } = makeRoot();
+  const t = makeScheduler(configDir);
+  try {
+    const s = t.scheduler.create({ name: "gated", agentId: "coder", prompt: "ok", cron: "* * * * *", gate: { command: "echo 'no Ready tickets'; exit 1" } });
+    t.due(s.id);
+    await t.scheduler.tick();
+    let row = t.repo.get(s.id);
+    assert.equal(row.lastOutcome, "skipped_gate");
+    assert.equal(row.lastError, "no Ready tickets", "stdout kept as the reason");
+    assert.equal(row.lastRunId, null, "no run started");
+    assert.equal(row.fires, 0);
+    assert.equal(row.skips, 1);
+    const [f] = t.repo.firings(s.id);
+    assert.equal(f.gateCostUsd, 0);
+    assert.equal(f.gateRunId, null);
+
+    // the command runs in the project directory
+    t.scheduler.update(s.id, { gate: { command: 'test "$(basename "$PWD")" = project' } });
+    const run = await t.fireAndWait(s.id);
+    assert.equal(run.status, "completed");
+    assert.equal(t.repo.get(s.id).lastOutcome, "started");
+
+    t.scheduler.update(s.id, { gate: { command: "sleep 5", timeoutSeconds: 1 } });
+    t.due(s.id);
+    await t.scheduler.tick();
+    row = t.repo.get(s.id);
+    assert.equal(row.lastOutcome, "error");
+    assert.match(row.lastError, /gate: gate command timed out after 1s/);
+
+    // skip_gate bypasses it
+    t.scheduler.update(s.id, { gate: { command: "exit 1" } });
+    const forced = await t.scheduler.fireNow(s.id, { skipGate: true });
+    assert.equal(forced.outcome, "started");
+    await t.runs.waitForRun(forced.runId, 10_000);
+
+    const idle = t.scheduler.idleStats(t.repo.get(s.id));
+    assert.equal(idle.gateChecks, 3, "three ticks asked the gate; the forced fire did not");
+    assert.equal(idle.gateSkips, 1);
+    assert.equal(idle.gateCostUsd, 0);
+
+    // validation
+    assert.throws(() => t.scheduler.update(s.id, { gate: {} }), /exactly one of command or agent/);
+    assert.throws(() => t.scheduler.update(s.id, { gate: { command: "true", agent: { agentId: "gatekeeper", prompt: "x" } } }), /exactly one/);
+    assert.throws(() => t.scheduler.update(s.id, { gate: { agent: { agentId: "ghost", prompt: "x" } } }), /gate agent "ghost" is unknown/);
+    t.scheduler.update(s.id, { gate: null });
+    assert.equal(t.repo.get(s.id).gate, null);
+  } finally {
+    await t.close(root);
+  }
+});
+
+test("agent gate: a cheap run decides; NO_WORK skips, its cost is counted apart from run cost; busy skips before the gate", async () => {
+  const { root, configDir } = makeRoot();
+  const t = makeScheduler(configDir);
+  try {
+    const gate = { agent: { agentId: "gatekeeper", prompt: "gate-nowork", budgetUsd: 0.2 } };
+    const s = t.scheduler.create({ name: "agent gated", agentId: "coder", prompt: "ok", cron: "* * * * *", gate });
+    t.due(s.id);
+    await t.scheduler.tick();
+    let row = t.repo.get(s.id);
+    assert.equal(row.lastOutcome, "skipped_gate");
+    assert.equal(row.lastError, "Checked the board. NO_WORK");
+    const [skip] = t.repo.firings(s.id);
+    assert.ok(skip.gateRunId);
+    assert.equal(skip.gateCostUsd, 0.0123);
+    const gateRun = t.runs.getRun(skip.gateRunId);
+    assert.equal(gateRun.kind, "gate");
+    assert.equal(gateRun.agentId, "gatekeeper");
+    assert.equal(gateRun.scheduleId, s.id);
+    assert.equal(gateRun.command.argv[gateRun.command.argv.indexOf("--max-budget-usd") + 1], "0.2", "gate budget, no wrap-up reserve");
+    assert.ok(gateRun.command.argv.includes("haiku"));
+
+    // a marker that is not in the answer lets the real run start
+    t.scheduler.update(s.id, { gate: { agent: { agentId: "gatekeeper", prompt: "gate-work" } } });
+    const real = await t.fireAndWait(s.id);
+    assert.equal(real.kind, "run");
+    assert.equal(real.agentId, "coder");
+    row = t.repo.get(s.id);
+    assert.equal(row.lastOutcome, "started");
+    assert.equal(row.lastRunId, real.id, "lastRunId is the real run, never the gate run");
+    assert.equal(t.repo.firings(s.id)[0].gateCostUsd, 0.0123);
+
+    const idle = t.scheduler.idleStats(row);
+    assert.equal(idle.runs, 1, "gate runs are not counted as runs");
+    assert.equal(idle.costUsd, 0.0123);
+    assert.equal(idle.gateChecks, 2);
+    assert.equal(idle.gateCostUsd, 0.0246);
+    assert.equal(t.runs.listRuns({ kind: "gate" }).length, 2);
+    assert.equal(t.runs.listRuns({ kind: "run" }).length, 1);
+
+    // busy: the real agent is still running, so the tick skips without paying for a gate
+    t.scheduler.update(s.id, { prompt: "hang" });
+    const hung = await t.scheduler.fireNow(s.id, { skipGate: true });
+    assert.equal(hung.outcome, "started");
+    t.due(s.id);
+    await t.scheduler.tick();
+    row = t.repo.get(s.id);
+    assert.equal(row.lastOutcome, "skipped_busy");
+    assert.equal(t.repo.firings(s.id)[0].gateRunId, null, "no gate run while busy");
+    assert.equal(t.runs.listRuns({ kind: "gate" }).length, 2);
+    t.runs.cancelRun(hung.runId);
+    await t.runs.waitForRun(hung.runId, 10_000);
   } finally {
     await t.close(root);
   }

@@ -12,7 +12,7 @@ import { mergeSubagent, needsRepair, subagentsFromLog } from "../execution/log-r
 import { summarizeToolInput } from "./tool-summary.js";
 import type { AgentDefinition, DuskFleetConfig, ProjectDefinition } from "../config/types.js";
 import type { ExecutionEvent, ExecutionHandle, ExecutionRequest, ExecutionResult, Executor, McpServerInfo, SubagentRecord, TokenUsage } from "../execution/types.js";
-import { isBudgetExhausted, isResumable, isTerminal, type Run, type RunAgent, type RunPhase, type RunStatus } from "../observability/run.js";
+import { isBudgetExhausted, isResumable, isTerminal, type Run, type RunAgent, type RunKind, type RunPhase, type RunStatus } from "../observability/run.js";
 import type { RunRepository, ListRunsFilter } from "../storage/runs.js";
 import { logger } from "../util/log.js";
 import { validateProjectPath } from "./project-validation.js";
@@ -30,6 +30,10 @@ export interface StartRunInput {
   scheduleId?: string;
   /** Internal: continue the session of an earlier run instead of starting a new one (see resumeRun). */
   resume?: { fromRun: Run; budgetUsd: number };
+  /** `gate` for a schedule's gate agent (no wrap-up reserve, cost counted apart). Default `run`. */
+  kind?: RunKind;
+  /** Overrides the agent's max_budget_usd (gate runs). */
+  maxBudgetUsd?: number;
 }
 
 export interface ResumeRunInput {
@@ -221,24 +225,8 @@ export class RunManager {
     const prompt = input.prompt?.trim();
     if (!prompt) throw new Error("prompt is empty");
 
-    if (this.active.size >= this.config.maxConcurrentRuns) {
-      throw new Error(`max_concurrent_runs (${this.config.maxConcurrentRuns}) reached; wait for a run to finish`);
-    }
-    const sameProject = [...this.active.entries()].filter(([, a]) => a.projectPath === projectPath);
-    if (sameProject.length >= this.config.maxConcurrentPerProject) {
-      const [id, a] = sameProject[0]!;
-      throw new Error(
-        `project busy: run ${id} (agent ${a.agentId}) is still running in ${projectPath}. ` +
-          `max_concurrent_per_project is ${this.config.maxConcurrentPerProject}; wait, cancel_run, or raise it.`,
-      );
-    }
-    const sameAgent = [...this.active.entries()].filter(([, a]) => a.agentId === agent.id);
-    if (sameAgent.length >= this.config.maxConcurrentPerAgent) {
-      const [id] = sameAgent[0]!;
-      throw new Error(
-        `agent busy: ${agent.id} is still running (run ${id}). max_concurrent_per_agent is ${this.config.maxConcurrentPerAgent}; the tick is skipped.`,
-      );
-    }
+    const busy = this.capacityError(agent.id, projectPath);
+    if (busy) throw new Error(busy);
 
     const runId = randomUUID();
     const resume = input.resume ?? null;
@@ -246,7 +234,10 @@ export class RunManager {
     const sessionId = resume?.fromRun.claudeSessionId ?? randomUUID();
     const model = input.model ?? agent.model;
     const timeoutMinutes = agent.timeoutMinutes ?? this.config.claude.defaultTimeoutMinutes;
-    const budget = budgetPlan(resume ? { ...agent, maxBudgetUsd: resume.budgetUsd } : agent, this.config);
+    const kind: RunKind = input.kind ?? "run";
+    const budgetAgent = resume ? { ...agent, maxBudgetUsd: resume.budgetUsd } : input.maxBudgetUsd !== undefined ? { ...agent, maxBudgetUsd: input.maxBudgetUsd } : agent;
+    // A gate is a quick yes/no: no reserve, no wrap-up pass.
+    const budget = budgetPlan(kind === "gate" ? { ...budgetAgent, wrapUpReserveUsd: 0 } : budgetAgent, this.config);
     const logPath = path.join(this.config.dataDir, "logs", `${runId}.jsonl`);
 
     const request: ExecutionRequest = {
@@ -317,6 +308,7 @@ export class RunManager {
       scheduleId: input.scheduleId ?? null,
       phases: [],
       resumedFromRunId: resume?.fromRun.id ?? null,
+      kind,
     };
 
     // Insert first so that events emitted by the executor always find the row.
@@ -431,7 +423,46 @@ export class RunManager {
     }
   }
 
+  /**
+   * Why a run of this agent on this project would be refused right now (the WIP guards), or
+   * null. Lets the scheduler skip a busy tick before it spends anything on a gate.
+   */
+  busyReason(input: { agentId: string; projectId?: string | null }): string | null {
+    const agent = this.resolveAgent(input.agentId);
+    const projectId = input.projectId ?? agent.project;
+    if (!projectId) return null;
+    const project = this.config.projects.get(projectId);
+    if (!project) return null;
+    let projectPath: string;
+    try {
+      projectPath = validateProjectPath(project.path, this.config);
+    } catch {
+      return null; // startRun reports it
+    }
+    return this.capacityError(agent.id, projectPath);
+  }
+
   // ---- internals -----------------------------------------------------------
+
+  private capacityError(agentId: string, projectPath: string): string | null {
+    if (this.active.size >= this.config.maxConcurrentRuns) {
+      return `max_concurrent_runs (${this.config.maxConcurrentRuns}) reached; wait for a run to finish`;
+    }
+    const sameProject = [...this.active.entries()].filter(([, a]) => a.projectPath === projectPath);
+    if (sameProject.length >= this.config.maxConcurrentPerProject) {
+      const [id, a] = sameProject[0]!;
+      return (
+        `project busy: run ${id} (agent ${a.agentId}) is still running in ${projectPath}. ` +
+        `max_concurrent_per_project is ${this.config.maxConcurrentPerProject}; wait, cancel_run, or raise it.`
+      );
+    }
+    const sameAgent = [...this.active.entries()].filter(([, a]) => a.agentId === agentId);
+    if (sameAgent.length >= this.config.maxConcurrentPerAgent) {
+      const [id] = sameAgent[0]!;
+      return `agent busy: ${agentId} is still running (run ${id}). max_concurrent_per_agent is ${this.config.maxConcurrentPerAgent}; the tick is skipped.`;
+    }
+    return null;
+  }
 
   /**
    * A process of the run ended. The main pass that ran out of budget is followed by one

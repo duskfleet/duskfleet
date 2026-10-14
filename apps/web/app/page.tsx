@@ -123,7 +123,17 @@ export default async function RunsPage({ searchParams }: { searchParams: Promise
         <div className="stat">
           <div className="label">Spent</div>
           <div className="value">{fmtCost(o.costUsd)}</div>
-          <div className="sub">{fmtCost(o.costLast24hUsd)} in the last 24 h{filtered ? " · in this filter" : ""}</div>
+          <div className="sub">
+            {fmtCost(o.costLast24hUsd)} in the last 24 h{filtered ? " · in this filter" : ""}
+            {o.costGatesUsd > 0 && (
+              <>
+                <br />
+                <span title="Schedule gate agents decide whether a tick has work; their runs are counted apart">
+                  {fmtCost(o.costUsd - o.costGatesUsd)} on runs · {fmtCost(o.costGatesUsd)} on gates
+                </span>
+              </>
+            )}
+          </div>
         </div>
       </div>
 

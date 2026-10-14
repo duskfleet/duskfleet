@@ -23,6 +23,17 @@ import { logger } from "../util/log.js";
 import { createSchedule, formatHolder, nextRunAtFor, parseHolder, updateSchedule, willResume, type SchedulerRole } from "./crud.js";
 import type { Schedule, ScheduleInput, ScheduleOutcome, SchedulePatch } from "./types.js";
 import { scheduleIdleStats, type IdleStats } from "./idle.js";
+import { evaluateGate } from "./gate.js";
+
+export interface FireResult {
+  outcome: ScheduleOutcome;
+  runId: string | null;
+  /** Error, busy message, or the gate's reason for a skip. */
+  error: string | null;
+  /** Set when an agent gate ran on this fire. */
+  gateRunId?: string | null;
+  gateCostUsd?: number | null;
+}
 
 const log = logger("scheduler");
 
@@ -114,10 +125,10 @@ export class Scheduler {
   }
 
   /** Fire a schedule right now, outside its cron (manual trigger). Returns the outcome. */
-  async fireNow(id: string): Promise<{ outcome: ScheduleOutcome; runId: string | null; error: string | null }> {
+  async fireNow(id: string, options: { skipGate?: boolean } = {}): Promise<FireResult> {
     const s = this.repo.get(id);
     if (!s) throw new Error(`schedule not found: ${id}`);
-    return this.fire(s, true);
+    return this.fire(s, true, options.skipGate ?? false);
   }
 
   // ---- loop ----------------------------------------------------------------
@@ -186,12 +197,13 @@ export class Scheduler {
 
   // ---- internals -----------------------------------------------------------
 
-  private async fire(s: Schedule, manual: boolean): Promise<{ outcome: ScheduleOutcome; runId: string | null; error: string | null }> {
+  private async fire(s: Schedule, manual: boolean, skipGate = false): Promise<FireResult> {
     const nextRunAt = s.enabled ? this.computeNext(s.cron, s.timeZone) : null;
     if (!s.enabled && !manual) {
       this.repo.recordFiring(s.id, "skipped_disabled", null, null, nextRunAt);
       return { outcome: "skipped_disabled", runId: null, error: null };
     }
+    let gateSpend: { runId: string | null; costUsd: number | null } | null = null;
     try {
       const resumable = this.resumeCandidate(s);
       if (resumable) {
@@ -202,18 +214,31 @@ export class Scheduler {
         log.info("schedule fired as a resume", { schedule: s.name, runId: run.id, resumedFrom: resumable.id, manual });
         return { outcome: "resumed", runId: run.id, error: null };
       }
+      if (s.gate && !skipGate) {
+        // Busy first: a gate costs time (and, for an agent gate, money) only when the run could start.
+        const busy = this.runs.busyReason({ agentId: s.agentId, projectId: s.projectId });
+        if (busy) throw new Error(busy);
+        const verdict = await evaluateGate(this.runs, s);
+        gateSpend = { runId: verdict.gateRunId, costUsd: verdict.costUsd };
+        if (verdict.kind === "skip") {
+          this.repo.recordFiring(s.id, "skipped_gate", null, verdict.reason, nextRunAt, gateSpend);
+          log.info("schedule skipped by its gate", { schedule: s.name, reason: verdict.reason.slice(0, 200), gateCostUsd: verdict.costUsd });
+          return { outcome: "skipped_gate", runId: null, error: verdict.reason, gateRunId: verdict.gateRunId, gateCostUsd: verdict.costUsd };
+        }
+        if (verdict.kind === "error") throw new Error(`gate: ${verdict.reason}`);
+      }
       const input: Parameters<RunManager["startRun"]>[0] = { prompt: s.prompt, agentId: s.agentId, scheduleId: s.id };
       if (s.projectId) input.projectId = s.projectId;
       if (s.model) input.model = s.model;
       const run = await this.runs.startRun(input);
-      this.repo.recordFiring(s.id, "started", run.id, null, nextRunAt);
-      log.info("schedule fired", { schedule: s.name, runId: run.id, manual });
-      return { outcome: "started", runId: run.id, error: null };
+      this.repo.recordFiring(s.id, "started", run.id, null, nextRunAt, gateSpend);
+      log.info("schedule fired", { schedule: s.name, runId: run.id, manual, gated: gateSpend !== null });
+      return { outcome: "started", runId: run.id, error: null, ...(gateSpend ? { gateRunId: gateSpend.runId, gateCostUsd: gateSpend.costUsd } : {}) };
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       const busy = /\b(project busy|agent busy|max_concurrent_runs)\b/.test(message);
       const outcome: ScheduleOutcome = busy ? "skipped_busy" : "error";
-      this.repo.recordFiring(s.id, outcome, null, message, nextRunAt);
+      this.repo.recordFiring(s.id, outcome, null, message, nextRunAt, gateSpend);
       (busy ? log.info : log.warn)("schedule not started", { schedule: s.name, outcome, message });
       return { outcome, runId: null, error: message };
     }
