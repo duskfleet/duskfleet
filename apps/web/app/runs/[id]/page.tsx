@@ -6,7 +6,7 @@ import { CopyButton } from "@/components/CopyButton";
 import { Expandable } from "@/components/Expandable";
 import { Prose } from "@/components/Prose";
 import { StatusBadge } from "@/components/StatusBadge";
-import { adjacentRuns, getRun, homeDir, listAgents, projectLabel } from "@/lib/data";
+import { adjacentRuns, agentSummary, getRun, homeDir, projectLabel } from "@/lib/data";
 import { elapsedSince, fmtCompact, fmtCost, fmtDuration, fmtInt, fmtOffset, fmtRelative, fmtTime, runTitle, shortModel, tildePath, tildeText } from "@/lib/format";
 
 export const dynamic = "force-dynamic";
@@ -42,8 +42,8 @@ export default async function RunPage({ params }: { params: Promise<{ id: string
   const { prev, next } = adjacentRuns(run);
   const project = projectLabel(run);
   // The agent as defined now; null when it was deleted or renamed since the run.
-  const agent = listAgents().find((a) => a.id === run.agentId) ?? null;
-  const agentDescription = agent ? [agent.description, agent.linked?.description].filter(Boolean).join(" · ") : "";
+  const agent = agentSummary(run.agentId);
+  const agentDescription = agent?.description ?? "";
   const started = run.startedAt ?? run.createdAt;
   const tokensIn = run.inputTokens ?? null;
   const tokensOut = run.outputTokens ?? null;

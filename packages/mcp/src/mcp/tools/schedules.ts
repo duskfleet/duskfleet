@@ -15,7 +15,7 @@ function present(s: Schedule) {
 
 const scheduleFields = {
   agent_id: z.string().min(1).describe("Agent to run (list_agents)"),
-  prompt: z.string().min(1).describe("Prompt for every run. For an own agent that drives a project command, reference the command file, e.g. 'Follow .claude/commands/pickup-app-task.md'. For a link agent, tell it to run its own loop: it already IS the project agent, and a command that invokes that agent would make it invoke itself"),
+  prompt: z.string().min(1).describe("Prompt for every run. For an own agent that drives a project command, reference the command file, e.g. 'Follow .claude/commands/pickup-task.md'. For a link agent, tell it to run its own loop: it already IS the project agent, and a command that invokes that agent would make it invoke itself"),
   cron: z.string().min(1).describe('5-field cron, e.g. "0 8-20 * * 1-5" = weekdays 08–20 on the hour, "30 8-20 * * 1-5" = at :30. Evaluated in time_zone'),
   time_zone: z.string().min(1).optional().describe("IANA zone, default from config (Europe/London)"),
   project_id: z.string().min(1).optional().describe("Required unless the agent is bound to a project"),
