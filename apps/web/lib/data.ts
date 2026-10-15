@@ -68,30 +68,52 @@ export interface LinkedAgentInfo {
   description: string | null;
 }
 
+function resolveLink(
+  cfg: DuskFleetConfig,
+  cache: Map<string, ProjectAgentInfo[]>,
+  projectId: string | undefined,
+  name: string,
+): LinkedAgentInfo {
+  const project = projectId ? cfg.projects.get(projectId) : undefined;
+  if (!project) return { name, found: false, model: null, path: null, description: null };
+  let list = cache.get(project.id);
+  if (!list) {
+    try {
+      list = listProjectAgents(project.path);
+    } catch {
+      list = [];
+    }
+    cache.set(project.id, list);
+  }
+  const hit = list.find((p) => p.name === name);
+  return hit
+    ? { name, found: true, model: hit.model, path: hit.path, description: hit.description || null }
+    : { name, found: false, model: null, path: null, description: null };
+}
+
+/**
+ * One agent as defined now, for the run page. Resolves only its own link, so a
+ * live run refreshing every 3 s does not read every linked project's agents.
+ * `description` joins the agent's and the linked agent's, without repeating one.
+ */
+export function agentSummary(
+  id: string,
+): { id: string; name: string; claudeAgent: string | null; description: string } | null {
+  const cfg = config();
+  const a = cfg.agents.get(id);
+  if (!a) return null;
+  const linked = a.claudeAgent ? resolveLink(cfg, new Map(), a.project, a.claudeAgent) : null;
+  const parts = [a.description, linked?.description].filter((d): d is string => Boolean(d));
+  return { id: a.id, name: a.name, claudeAgent: a.claudeAgent ?? null, description: [...new Set(parts)].join(" · ") };
+}
+
 export function listAgents() {
   const cfg = config();
   // .claude/agents is read once per project per request, not once per agent.
   const projectAgents = new Map<string, ProjectAgentInfo[]>();
-  const resolveLink = (projectId: string | undefined, name: string): LinkedAgentInfo => {
-    const project = projectId ? cfg.projects.get(projectId) : undefined;
-    if (!project) return { name, found: false, model: null, path: null, description: null };
-    let list = projectAgents.get(project.id);
-    if (!list) {
-      try {
-        list = listProjectAgents(project.path);
-      } catch {
-        list = [];
-      }
-      projectAgents.set(project.id, list);
-    }
-    const hit = list.find((p) => p.name === name);
-    return hit
-      ? { name, found: true, model: hit.model, path: hit.path, description: hit.description || null }
-      : { name, found: false, model: null, path: null, description: null };
-  };
 
   return [...cfg.agents.values()].map(({ systemPrompt, ...a }) => {
-    const linked = a.claudeAgent ? resolveLink(a.project, a.claudeAgent) : null;
+    const linked = a.claudeAgent ? resolveLink(cfg, projectAgents, a.project, a.claudeAgent) : null;
     // What a run actually starts with: this file's model overrides, otherwise
     // the project agent's own model, otherwise the Claude Code default.
     const effectiveModel = a.model ?? linked?.model ?? null;

@@ -19,7 +19,7 @@ const scheduleFields = {
     .string()
     .min(1)
     .describe(
-      "Prompt for every run. For an own agent that drives a project command, reference the command file, e.g. 'Follow .claude/commands/pickup-app-task.md'. For a link agent, tell it to run its own loop: it already IS the project agent, and a command that invokes that agent would make it invoke itself",
+      "Prompt for every run. For an own agent that drives a project command, reference the command file, e.g. 'Follow .claude/commands/pickup-task.md'. For a link agent, tell it to run its own loop: it already IS the project agent, and a command that invokes that agent would make it invoke itself",
     ),
   cron: z
     .string()
