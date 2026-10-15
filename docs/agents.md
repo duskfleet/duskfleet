@@ -88,8 +88,8 @@ model). Instead of copying that prompt into DuskFleet, link to it:
 
 ```markdown
 ---
-id: app-coordinator
-claude_agent: app-coordinator     # <project>/.claude/agents/app-coordinator.md
+id: my-agent
+claude_agent: my-agent     # <project>/.claude/agents/my-agent.md
 project: my-app
 permission_mode: acceptEdits
 inherit_mcp: true
@@ -98,12 +98,26 @@ allowed_tools: ["mcp__claude_ai_Atlassian_Rovo", "Bash(yarn:*)", "Bash(git:*)", 
 Optional extra instructions, appended after the project agent's own prompt.
 ```
 
-The run starts as `claude --agent app-coordinator`: the project agent decides who the
+The run starts as `claude --agent my-agent`: the project agent decides who the
 model is and what it does; the DuskFleet agent decides what it may do unattended
 (permissions, allow-list, budget, MCP). `list_project_agents` shows what a project offers;
 a link to a name the project does not define fails before anything is spawned. Note that a
 project agent's `tools:` list does not grant permissions in unattended runs: those tools
 still need to be in `allowed_tools` here.
+
+Two things to get right with a link:
+
+- **Prompt it as the agent, not as its caller.** The run *is* the project agent. If the
+  project also ships a command that invokes that agent (a gate such as
+  `/pickup-task` that checks an issue tracker and then calls `my-agent`), do not tell the
+  link to run that command: the agent would invoke itself as a subagent, paying two Opus
+  hops for one unit of work. Prompt it with "find your own work and run your loop". Keep
+  the command for an `own` agent on a cheap model if you want the gate before the hop.
+- **MCP tool names in the project agent's `tools:` must be the ones unattended runs see**
+  (`mcp__claude_ai_Atlassian_Rovo__*`, `mcp__claude_ai_Figma__*`), not the `mcp__plugin_*`
+  names interactive sessions show. The list is an allow-list: with the wrong prefix the
+  agent is denied the tools that exist. Listing both prefixes keeps the file usable from
+  both.
 
 ## MCP servers inside runs
 

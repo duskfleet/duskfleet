@@ -6,7 +6,7 @@ import { CopyButton } from "@/components/CopyButton";
 import { Expandable } from "@/components/Expandable";
 import { Prose } from "@/components/Prose";
 import { StatusBadge } from "@/components/StatusBadge";
-import { adjacentRuns, getRun, homeDir, projectLabel } from "@/lib/data";
+import { adjacentRuns, agentSummary, getRun, homeDir, projectLabel } from "@/lib/data";
 import { elapsedSince, fmtCompact, fmtCost, fmtDuration, fmtInt, fmtOffset, fmtRelative, fmtTime, runTitle, shortModel, tildePath, tildeText } from "@/lib/format";
 
 export const dynamic = "force-dynamic";
@@ -41,6 +41,9 @@ export default async function RunPage({ params }: { params: Promise<{ id: string
   ].filter(Boolean).join(" ");
   const { prev, next } = adjacentRuns(run);
   const project = projectLabel(run);
+  // The agent as defined now; null when it was deleted or renamed since the run.
+  const agent = agentSummary(run.agentId);
+  const agentDescription = agent?.description ?? "";
   const started = run.startedAt ?? run.createdAt;
   const tokensIn = run.inputTokens ?? null;
   const tokensOut = run.outputTokens ?? null;
@@ -64,7 +67,9 @@ export default async function RunPage({ params }: { params: Promise<{ id: string
         <div className="meta-row">
           <StatusBadge run={run} />
           <span className="sep">·</span>
-          <Link href={`/?agent=${encodeURIComponent(run.agentId)}`}>{run.agentId}</Link>
+          <Link href={`/agents#${encodeURIComponent(run.agentId)}`} title={agent ? `${agent.id}${agent.claudeAgent ? ` → ${agent.claudeAgent}` : ""}` : `${run.agentId} is no longer defined`}>
+            {agent?.name ?? run.agentId}
+          </Link>
           <span className="sep">·</span>
           <span title={run.projectPath}>{project}</span>
           <span className="sep">·</span>
@@ -84,6 +89,7 @@ export default async function RunPage({ params }: { params: Promise<{ id: string
             </>
           )}
         </div>
+        {agentDescription && <p className="agent-desc">{agentDescription}</p>}
       </div>
 
       <div className="facts">
