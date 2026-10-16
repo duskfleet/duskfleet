@@ -22,10 +22,13 @@ import type {
 import {
   isBudgetExhausted,
   isTerminal,
+  orphanedError,
   type Run,
   type RunAgent,
   type RunPhase,
   type RunStatus,
+  type RunSummary,
+  reviewReasons,
 } from "../observability/run.js";
 import { parseHolder, processIdentity } from "../scheduler/crud.js";
 import type { ListRunsFilter, RunRepository } from "../storage/runs.js";
@@ -170,6 +173,11 @@ export class RunManager {
     return this._config;
   }
 
+  /** How the given runs ended (status, review reasons, cost), in one query: what a schedule row shows. */
+  summaries(ids: string[]): RunSummary[] {
+    return this.runs.summaries(ids);
+  }
+
   /**
    * Mark `running` runs whose owning process is gone as failed. Called at startup and
    * by the scheduler lease holder. Several DuskFleet processes share the database
@@ -182,10 +190,15 @@ export class RunManager {
     for (const run of orphans) {
       assertTransition(run.status, "failed");
       // Compare-and-set: a starting process and the lease holder may sweep the same row.
-      const won = this.runs.updateIfStatus(run.id, "running", {
-        status: "failed",
+      const patch = {
+        status: "failed" as const,
         endedAt: new Date().toISOString(),
-        error: `orphaned: owning process ${run.owner ?? "(unrecorded)"} is gone`,
+        error: orphanedError(run.owner),
+      };
+      // Not through transition(): the write must stay a compare-and-set, so the reasons are computed here.
+      const won = this.runs.updateIfStatus(run.id, "running", {
+        ...patch,
+        reviewReasons: reviewReasons({ ...run, ...patch }),
       });
       if (!won) continue;
       this.runs.addEvent(run.id, "status_change", { from: run.status, to: "failed" });
@@ -367,6 +380,7 @@ export class RunManager {
       scheduleId: input.scheduleId ?? null,
       owner: this.owner,
       phases: [],
+      reviewReasons: [],
     };
 
     // Insert first so that events emitted by the executor always find the row.
@@ -703,7 +717,10 @@ export class RunManager {
 
   private transition(run: Run, to: RunStatus, patch: Parameters<RunRepository["update"]>[1] = {}): void {
     assertTransition(run.status, to);
-    this.runs.update(run.id, { ...patch, status: to });
+    const next = { ...patch, status: to };
+    // The one place the needs-review rule runs: on the run as it will be stored, once terminal.
+    if (isTerminal(to)) next.reviewReasons = reviewReasons({ ...run, ...defined(patch), status: to });
+    this.runs.update(run.id, next);
     this.runs.addEvent(run.id, "status_change", { from: run.status, to });
     run.status = to;
   }
@@ -784,6 +801,11 @@ function addNullable(a: number | null, b: number | null): number | null {
  * cost, turns, tool calls, tokens and denials are summed; the final text is the wrap-up's
  * (that is where the agent said where it stopped), falling back to the main pass's.
  */
+/** A patch without its `undefined` entries, so spreading it over a run never erases a stored value. */
+function defined<T extends object>(patch: T): Partial<T> {
+  return Object.fromEntries(Object.entries(patch).filter(([, v]) => v !== undefined)) as Partial<T>;
+}
+
 export function mergeResults(main: ExecutionResult, wrapUp: ExecutionResult): ExecutionResult {
   const usage: TokenUsage = {
     inputTokens: addNullable(main.usage.inputTokens, wrapUp.usage.inputTokens),

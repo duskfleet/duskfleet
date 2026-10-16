@@ -1,19 +1,17 @@
-import { describeCron, type LastRunSummary, lastRunSummary, parseCron, type Schedule } from "@duskfleet/core";
+import { describeCron, parseCron, type ScheduleWithLastRun } from "@duskfleet/core";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { errorResult, jsonResult, type ToolContext } from "../server.js";
 
-function present(ctx: ToolContext, s: Schedule & { lastRun?: LastRunSummary | null }) {
+/** `lastRun` (how the run the schedule last started *ended*) comes from core's `attachLastRun`, via the Scheduler. */
+function present(s: ScheduleWithLastRun) {
   let human = s.cron;
   try {
     human = describeCron(parseCron(s.cron));
   } catch {
     // keep the raw expression
   }
-  // The outcome of the last tick says whether a run *started*; lastRun says how that run *ended*.
-  const lastRun =
-    s.lastRun !== undefined ? s.lastRun : lastRunSummary(s.lastRunId ? ctx.runs.getRun(s.lastRunId) : null);
-  return { ...s, cronHuman: human, lastRun };
+  return { ...s, cronHuman: human };
 }
 
 const scheduleFields = {
@@ -47,10 +45,7 @@ export function registerScheduleTools(server: McpServer, ctx: ToolContext): void
       inputSchema: {},
     },
     async () =>
-      jsonResult({
-        scheduler: ctx.scheduler.status(),
-        schedules: ctx.scheduler.listWithLastRun().map((s) => present(ctx, s)),
-      }),
+      jsonResult({ scheduler: ctx.scheduler.status(), schedules: ctx.scheduler.listWithLastRun().map(present) }),
   );
 
   server.registerTool(
@@ -78,7 +73,7 @@ export function registerScheduleTools(server: McpServer, ctx: ToolContext): void
         if (args.project_id !== undefined) input.projectId = args.project_id;
         if (args.model !== undefined) input.model = args.model;
         if (args.enabled !== undefined) input.enabled = args.enabled;
-        return jsonResult({ created: true, schedule: present(ctx, ctx.scheduler.create(input)) });
+        return jsonResult({ created: true, schedule: present(ctx.scheduler.withLastRun(ctx.scheduler.create(input))) });
       } catch (err) {
         return errorResult(err);
       }
@@ -116,7 +111,10 @@ export function registerScheduleTools(server: McpServer, ctx: ToolContext): void
         if (args.model !== undefined) patch.model = args.model;
         if (args.clear_model) patch.model = null;
         if (args.enabled !== undefined) patch.enabled = args.enabled;
-        return jsonResult({ updated: true, schedule: present(ctx, ctx.scheduler.update(args.id, patch)) });
+        return jsonResult({
+          updated: true,
+          schedule: present(ctx.scheduler.withLastRun(ctx.scheduler.update(args.id, patch))),
+        });
       } catch (err) {
         return errorResult(err);
       }
@@ -154,7 +152,7 @@ export function registerScheduleTools(server: McpServer, ctx: ToolContext): void
     async (args) => {
       try {
         const result = await ctx.scheduler.fireNow(args.id);
-        return jsonResult({ ...result, schedule: present(ctx, ctx.scheduler.get(args.id)!) });
+        return jsonResult({ ...result, schedule: present(ctx.scheduler.withLastRun(ctx.scheduler.get(args.id)!)) });
       } catch (err) {
         return errorResult(err);
       }

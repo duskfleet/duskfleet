@@ -689,6 +689,10 @@ test("cancelling during the wrap-up pass records the run as cancelled", async ()
         ["wrap_up", "cancelled"],
       ],
     );
+    // The main pass left budget_exhausted and an exit code behind; a person cancelled, so nothing to review.
+    assert.equal(run.terminationReason, "budget_exhausted");
+    assert.deepEqual(run.reviewReasons, []);
+    assert.equal(summarizeRun(run).needsReview, false);
   } finally {
     delete process.env.FAKE_CLAUDE_RESUME;
     await app.cleanup();
@@ -844,6 +848,20 @@ test("needs review is true for budget, timeout, crash and orphan runs, and false
     );
     assert.equal(summarizeRun(budget).needsReview, true);
     assert.deepEqual(summarizeRun(budget).reviewReasons, ["budget_exhausted", "nonzero_exit"]);
+    assert.deepEqual(
+      budget.reviewReasons,
+      ["budget_exhausted", "nonzero_exit"],
+      "stored on the row at the terminal transition",
+    );
+    assert.equal(
+      app.db.prepare("SELECT review_reasons_json FROM runs WHERE id = ?").get(budget.id).review_reasons_json,
+      '["budget_exhausted","nonzero_exit"]',
+    );
+    assert.equal(
+      app.db.prepare("SELECT COUNT(*) AS n FROM runs WHERE (COALESCE(review_reasons_json, '[]') <> '[]')").get().n,
+      1,
+      "the aggregate expression reads the same stored value",
+    );
 
     const crash = await app.runs.waitForRun(
       (await app.runs.startRun({ prompt: "crash", projectPath: app.project })).id,

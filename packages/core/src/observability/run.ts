@@ -88,6 +88,13 @@ export interface Run {
   owner: string | null;
   /** The processes behind this run, in order (see RunPhase). Empty for runs recorded before migration 8. */
   phases: RunPhase[];
+  /**
+   * Why this run needs a human, as `RunManager` computed it with `reviewReasons()` when the
+   * run reached its terminal status (`review_reasons_json`, migration 8; backfilled for
+   * older rows). Empty while the run is pending or running. Readers use this field, never
+   * the rule: lists, badges and aggregates (`NEEDS_REVIEW_SQL`) all read the same stored value.
+   */
+  reviewReasons: ReviewReason[];
 }
 
 /** The wrap-up phase of a run, when there was one. */
@@ -120,6 +127,10 @@ export interface RunAgent extends SubagentRecord {
  * chose to stop, or that silently narrowed what it could do, counts: a run that failed
  * but looked green in a list is how a budget stop on 2026-10-14 went unnoticed for 11 hours.
  * `cancelled` is not a reason (a person did it); running runs have none yet.
+ *
+ * `reviewReasons()` is the rule; `RunManager` applies it once, at the terminal transition,
+ * and stores the result in `Run.reviewReasons`. Everything that displays or counts runs
+ * reads the stored value, so the rule has exactly one writer and cannot drift from the SQL.
  */
 export type ReviewReason =
   | "budget_exhausted"
@@ -147,16 +158,34 @@ export function isBudgetExhausted(terminationReason: string | null | undefined):
   return typeof terminationReason === "string" && /budget/i.test(terminationReason);
 }
 
+/**
+ * The `error` RunManager writes on a `running` run whose owning process is gone. Readers
+ * detect an orphan through `isOrphaned()`, never by matching this text themselves.
+ */
+export const ORPHANED_ERROR_PREFIX = "orphaned:";
+
+export function orphanedError(owner: string | null): string {
+  return `${ORPHANED_ERROR_PREFIX} owning process ${owner ?? "(unrecorded)"} is gone`;
+}
+
+export function isOrphaned(run: Pick<Run, "error">): boolean {
+  return typeof run.error === "string" && run.error.startsWith(ORPHANED_ERROR_PREFIX);
+}
+
 type ReviewInput = Pick<
   Run,
   "status" | "terminationReason" | "error" | "exitCode" | "humanIntervention" | "permissionDenials" | "contextExhausted"
 > & { mcp?: Pick<RunMcpInfo, "allowListedMissing"> | null };
 
+/** The rule. Call it on a terminal run; the stored `Run.reviewReasons` is what readers use. */
 export function reviewReasons(run: ReviewInput): ReviewReason[] {
+  // A person cancelled it, or it is still going: nothing to review, whatever the main
+  // pass left behind (a cancel during the wrap-up keeps `budget_exhausted` and the exit code).
+  if (run.status === "cancelled" || run.status === "running" || run.status === "pending") return [];
   const reasons: ReviewReason[] = [];
   if (isBudgetExhausted(run.terminationReason)) reasons.push("budget_exhausted");
   if (run.status === "timed_out") reasons.push("timed_out");
-  if (run.error?.startsWith("orphaned")) reasons.push("orphaned");
+  if (isOrphaned(run)) reasons.push("orphaned");
   if (run.exitCode !== null && run.exitCode !== 0) reasons.push("nonzero_exit");
   if (run.status === "failed" && reasons.length === 0) reasons.push("failed");
   if (run.humanIntervention || (run.permissionDenials ?? 0) > 0) reasons.push("permission_denied");
@@ -169,6 +198,9 @@ export function needsReview(run: ReviewInput): boolean {
   return reviewReasons(run).length > 0;
 }
 
+/** The columns a list or a schedule row needs to say how a run ended, without its result blobs. */
+export type RunSummary = Pick<Run, "id" | "status" | "reviewReasons" | "terminationReason" | "costUsd" | "endedAt">;
+
 /** What a schedule row says about the run it last started: enough to see a failure without opening it. */
 export interface LastRunSummary {
   id: string;
@@ -180,13 +212,13 @@ export interface LastRunSummary {
   endedAt: string | null;
 }
 
-export function lastRunSummary(run: Run | null): LastRunSummary | null {
+export function lastRunSummary(run: RunSummary | null): LastRunSummary | null {
   if (!run) return null;
   return {
     id: run.id,
     status: run.status,
-    needsReview: needsReview(run),
-    reviewReasons: reviewReasons(run),
+    needsReview: run.reviewReasons.length > 0,
+    reviewReasons: run.reviewReasons,
     terminationReason: run.terminationReason,
     costUsd: run.costUsd,
     endedAt: run.endedAt,
@@ -212,8 +244,8 @@ export function summarizeRun(run: Run) {
     toolCalls: run.toolCalls,
     deniedTools: run.deniedTools,
     mcpAllowListedMissing: run.mcp.allowListedMissing,
-    needsReview: needsReview(run),
-    reviewReasons: reviewReasons(run),
+    needsReview: run.reviewReasons.length > 0,
+    reviewReasons: run.reviewReasons,
     humanIntervention: run.humanIntervention,
     contextExhausted: run.contextExhausted,
     terminationReason: run.terminationReason,

@@ -18,7 +18,6 @@
  *    minute, so a crashed process's runs close without waiting for the next start.
  */
 
-import { type LastRunSummary, lastRunSummary } from "../observability/run.js";
 import type { RunManager } from "../orchestration/run-manager.js";
 import type { ScheduleRepository } from "../storage/schedules.js";
 import { logger } from "../util/log.js";
@@ -30,6 +29,7 @@ import {
   type SchedulerRole,
   updateSchedule,
 } from "./crud.js";
+import { attachLastRun, type ScheduleWithLastRun } from "./last-run.js";
 import type { Schedule, ScheduleInput, ScheduleOutcome, SchedulePatch } from "./types.js";
 
 const log = logger("scheduler");
@@ -107,10 +107,13 @@ export class Scheduler {
   }
 
   /** Schedules with the state of the run each last started (null before the first firing). */
-  listWithLastRun(): Array<Schedule & { lastRun: LastRunSummary | null }> {
-    return this.repo
-      .list()
-      .map((s) => ({ ...s, lastRun: lastRunSummary(s.lastRunId ? this.runs.getRun(s.lastRunId) : null) }));
+  listWithLastRun(): ScheduleWithLastRun[] {
+    return attachLastRun(this.repo.list(), this.runs);
+  }
+
+  /** One schedule with its last run, for the responses of create / update / run now. */
+  withLastRun(s: Schedule): ScheduleWithLastRun {
+    return attachLastRun([s], this.runs)[0]!;
   }
 
   get(id: string): Schedule | null {

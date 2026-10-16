@@ -1,4 +1,4 @@
-import { isBudgetExhausted, wrapUpPhase } from "@duskfleet/core";
+import { wrapUpPhase } from "@duskfleet/core";
 import Link from "next/link";
 import type { RunWithProject } from "@/lib/data";
 import { elapsedSince, fmtCost, fmtDuration, fmtRelative, fmtTime, runTitle, shortModel } from "@/lib/format";
@@ -31,6 +31,11 @@ export function RunTable({ runs, emptyText }: { runs: RunWithProject[]; emptyTex
           const started = r.startedAt ?? r.createdAt;
           const href = `/runs/${r.id}`;
           const issues = `${href}#issues`;
+          // The flags are the stored review reasons; the rule itself lives in core.
+          const reasons = r.reviewReasons;
+          const budget = reasons.includes("budget_exhausted");
+          const orphaned = reasons.includes("orphaned");
+          const wrapUp = budget ? wrapUpPhase(r) : null;
           return (
             <RunRow key={r.id} href={href}>
               <td className="status">
@@ -77,38 +82,35 @@ export function RunTable({ runs, emptyText }: { runs: RunWithProject[]; emptyTex
                       </Link>
                     </span>
                   )}
-                  {isBudgetExhausted(r.terminationReason) && (
+                  {budget && (
                     <span className="flags">
                       <Link
                         href={issues}
                         className="flag bad badge-link"
                         title={
-                          wrapUpPhase(r)
+                          wrapUp
                             ? "The main pass ran out of budget; a wrap-up pass recorded where it stopped"
                             : "The run ran out of budget mid-action and left no wrap-up trace"
                         }
                       >
-                        budget exhausted{wrapUpPhase(r) ? " · wrapped up" : ""}
+                        budget exhausted{wrapUp ? " · wrapped up" : ""}
                       </Link>
                     </span>
                   )}
-                  {r.error?.startsWith("orphaned") && (
+                  {orphaned && (
                     <span className="flags">
-                      <Link href={issues} className="flag bad badge-link" title={r.error}>
+                      <Link href={issues} className="flag bad badge-link" title={r.error ?? undefined}>
                         orphaned
                       </Link>
                     </span>
                   )}
-                  {r.error &&
-                    r.status !== "completed" &&
-                    !isBudgetExhausted(r.terminationReason) &&
-                    !r.error.startsWith("orphaned") && (
-                      <span className="flags">
-                        <Link href={issues} className="flag bad badge-link" title={r.error}>
-                          error
-                        </Link>
-                      </span>
-                    )}
+                  {r.error && r.status !== "completed" && !budget && !orphaned && (
+                    <span className="flags">
+                      <Link href={issues} className="flag bad badge-link" title={r.error}>
+                        error
+                      </Link>
+                    </span>
+                  )}
                 </div>
               </td>
               <td className="col-model">

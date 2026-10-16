@@ -2,15 +2,17 @@ import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, renameSync } from "node:fs";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
+import { reviewReasons, TERMINAL_STATUSES } from "../observability/run.js";
 import { logger } from "../util/log.js";
 
 const log = logger("storage");
 
 /**
  * Ordered, idempotent migrations. Add a new entry to change the schema;
- * never edit an applied one.
+ * never edit an applied one. `backfill` runs after the SQL, in the same transaction,
+ * for data an SQL statement cannot compute.
  */
-const MIGRATIONS: ReadonlyArray<{ version: number; sql: string }> = [
+const MIGRATIONS: ReadonlyArray<{ version: number; sql: string; backfill?: (db: DatabaseSync) => void }> = [
   {
     version: 1,
     sql: `
@@ -175,6 +177,14 @@ const MIGRATIONS: ReadonlyArray<{ version: number; sql: string }> = [
     version: 8,
     sql: `ALTER TABLE runs ADD COLUMN phases_json TEXT NOT NULL DEFAULT '[]';`,
   },
+  {
+    // Why a run needs review, computed once by RunManager at the terminal transition
+    // (reviewReasons()); NULL while pending / running. Backfilled with the rule as it was
+    // on this date so lists, badges and aggregates share one stored value.
+    version: 9,
+    sql: `ALTER TABLE runs ADD COLUMN review_reasons_json TEXT;`,
+    backfill: backfillReviewReasons,
+  },
 ];
 
 /**
@@ -188,6 +198,49 @@ export function migrationDigests(): ReadonlyArray<{ version: number; sha256: str
     version: m.version,
     sha256: createHash("sha256").update(m.sql.replace(/\s+/g, " ").trim()).digest("hex"),
   }));
+}
+
+function backfillReviewReasons(db: DatabaseSync): void {
+  const rows = db
+    .prepare(
+      "SELECT id, status, termination_reason, error, exit_code, human_intervention, permission_denials, context_exhausted, mcp_json FROM runs WHERE review_reasons_json IS NULL",
+    )
+    .all() as Array<{
+    id: string;
+    status: string;
+    termination_reason: string | null;
+    error: string | null;
+    exit_code: number | null;
+    human_intervention: number;
+    permission_denials: number | null;
+    context_exhausted: number;
+    mcp_json: string | null;
+  }>;
+  const update = db.prepare("UPDATE runs SET review_reasons_json = ? WHERE id = ?");
+  let n = 0;
+  for (const r of rows) {
+    if (!TERMINAL_STATUSES.has(r.status as never)) continue;
+    let allowListedMissing: string[] = [];
+    try {
+      const mcp = r.mcp_json ? (JSON.parse(r.mcp_json) as { allowListedMissing?: unknown }) : null;
+      if (Array.isArray(mcp?.allowListedMissing)) allowListedMissing = mcp.allowListedMissing as string[];
+    } catch {
+      // a malformed mcp_json never blocked the dashboard before; it does not block the migration either
+    }
+    const reasons = reviewReasons({
+      status: r.status as never,
+      terminationReason: r.termination_reason,
+      error: r.error,
+      exitCode: r.exit_code,
+      humanIntervention: r.human_intervention === 1,
+      permissionDenials: r.permission_denials,
+      contextExhausted: r.context_exhausted === 1,
+      mcp: { allowListedMissing },
+    });
+    update.run(JSON.stringify(reasons), r.id);
+    n++;
+  }
+  if (n) log.info(`review reasons computed for ${n} finished run(s)`);
 }
 
 export function openDatabase(dataDir: string): DatabaseSync {
@@ -207,6 +260,7 @@ export function openDatabase(dataDir: string): DatabaseSync {
     db.exec("BEGIN");
     try {
       db.exec(m.sql);
+      m.backfill?.(db);
       db.prepare("INSERT INTO schema_migrations (version, applied_at) VALUES (?, ?)").run(
         m.version,
         new Date().toISOString(),

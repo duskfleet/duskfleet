@@ -11,11 +11,11 @@ import { homedir } from "node:os";
 import path from "node:path";
 import type { DatabaseSync } from "node:sqlite";
 import {
+  attachLastRun,
   budgetPlan,
   type DuskFleetConfig,
   describeCron,
   findRepoRoot,
-  lastRunSummary,
   listProjectAgents,
   loadConfig,
   NEEDS_REVIEW_SQL,
@@ -329,9 +329,11 @@ export interface Overview {
   running: number;
   finished: number;
   completed: number;
-  /** Completed without any denial or context exhaustion: the number that deserves to be green. */
+  /** Completed without a review reason: the number that deserves to be green. */
   clean: number;
+  /** failed, timed out or cancelled. */
   failed: number;
+  /** Every run with a review reason, completed or not (a failed run is counted here too). */
   needsReview: number;
   costUsd: number;
   costLast24hUsd: number;
@@ -391,7 +393,8 @@ export function overview(filter: Pick<RunsFilter, "agentId" | "projectPath"> = {
 export function listSchedules() {
   const { schedules, runs } = services();
   const now = new Date();
-  return schedules.list().map((s) => {
+  // `lastRun` (how the run it last started ended) is core's attachLastRun, shared with MCP and the CLI.
+  return attachLastRun(schedules.list(), runs).map((s) => {
     let cronHuman = s.cron;
     let theoreticalNextAt: string | null = null;
     try {
@@ -401,9 +404,7 @@ export function listSchedules() {
     } catch {
       // keep raw
     }
-    // How the run it last started ended: the tick outcome alone ("started") hides a failed run.
-    const lastRun = lastRunSummary(s.lastRunId ? runs.get(s.lastRunId) : null);
-    return { ...s, cronHuman, theoreticalNextAt, lastRun };
+    return { ...s, cronHuman, theoreticalNextAt };
   });
 }
 

@@ -82,6 +82,7 @@ export {
   updateSchedule,
   validateScheduleInput,
 } from "./scheduler/crud.js";
+export { attachLastRun, type RunSummarySource, type ScheduleWithLastRun } from "./scheduler/last-run.js";
 export { Scheduler, type SchedulerOptions, type SchedulerStatus } from "./scheduler/scheduler.js";
 export * from "./scheduler/types.js";
 export { migrationDigests, openDatabase } from "./storage/db.js";
