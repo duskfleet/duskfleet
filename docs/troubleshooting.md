@@ -19,8 +19,10 @@
   Use `dontAsk` with `disallowed_tools: [Edit, Write, NotebookEdit]` for read-only agents.
 - **`bypassPermissions` rejected**: enable `claude.allow_bypass_permissions` deliberately; it maps
   to `--dangerously-skip-permissions`.
-- **Runs failed with "orphaned"**: DuskFleet was restarted while they were running. Resume the
-  Claude session with the `resumeCommand` from `get_run` if you want to continue the work.
+- **Runs failed with "orphaned: owning process ... is gone"**: the DuskFleet process that
+  started them (named in the error) exited or crashed while they were running. Runs of a live
+  process (another MCP server, `serve`) are never touched. Resume the Claude session with the
+  `resumeCommand` from `get_run` if you want to continue the work.
 - **Two DuskFleet processes, schedules fire once**: that is the SQLite lease at work. The
   dashboard's Schedules page and `doctor` show the holder and its kind (`serve`, `mcp`).
 - **"Ticking from an unknown process", Run now never fires, the service is running**: a

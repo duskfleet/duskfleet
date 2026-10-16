@@ -31,7 +31,7 @@ export * from "./execution/types.js";
 export { ClaudeCodeExecutor, resolveClaudeBinary, type ClaudeCodeExecutorOptions } from "./execution/claude-code.js";
 export { ingestLine, createStreamState, looksLikeContextExhaustion, type ParsedResult, type StreamState } from "./execution/stream-json.js";
 
-export { RunManager, mcpToolPrefix, type StartRunInput } from "./orchestration/run-manager.js";
+export { RunManager, mcpToolPrefix, type RunManagerOptions, type StartRunInput } from "./orchestration/run-manager.js";
 export { summarizeToolInput } from "./orchestration/tool-summary.js";
 export { validateProjectPath, ProjectValidationError } from "./orchestration/project-validation.js";
 export { assertTransition, IllegalTransitionError } from "./orchestration/run-state.js";
@@ -40,7 +40,7 @@ export * from "./evals/types.js";
 export * from "./scheduler/types.js";
 export { parseCron, nextFire, describeCron, localParts, assertTimeZone, CronError, type CronSpec } from "./scheduler/cron.js";
 export { Scheduler, type SchedulerOptions, type SchedulerStatus } from "./scheduler/scheduler.js";
-export { createSchedule, updateSchedule, validateScheduleInput, nextRunAtFor, formatHolder, parseHolder, DEFAULT_TIME_ZONE, type SchedulerRole } from "./scheduler/crud.js";
+export { createSchedule, updateSchedule, validateScheduleInput, nextRunAtFor, formatHolder, parseHolder, processIdentity, DEFAULT_TIME_ZONE, type SchedulerRole } from "./scheduler/crud.js";
 export { ScheduleRepository } from "./storage/schedules.js";
 
 export { logger, type LogLevel } from "./util/log.js";

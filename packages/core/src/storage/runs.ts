@@ -39,6 +39,7 @@ interface RunRow {
   log_path: string | null;
   raw_result_json: string | null;
   schedule_id: string | null;
+  owner: string | null;
 }
 
 function rowToRun(r: RunRow): Run {
@@ -78,6 +79,7 @@ function rowToRun(r: RunRow): Run {
     logPath: r.log_path,
     rawResultJson: r.raw_result_json,
     scheduleId: r.schedule_id ?? null,
+    owner: r.owner ?? null,
   };
 }
 
@@ -160,8 +162,8 @@ export class RunRepository {
            created_at, started_at, ended_at, duration_ms, claude_session_id, permission_mode, command_json,
            exit_code, termination_reason, error, result_text, num_turns, tool_calls, input_tokens, output_tokens,
            cache_read_tokens, cache_creation_tokens, cost_usd, permission_denials, denied_tools_json, mcp_json, human_intervention,
-           context_exhausted, retries, log_path, raw_result_json, schedule_id)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+           context_exhausted, retries, log_path, raw_result_json, schedule_id, owner)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         run.id,
@@ -199,6 +201,7 @@ export class RunRepository {
         run.logPath,
         run.rawResultJson,
         run.scheduleId,
+        run.owner,
       );
   }
 

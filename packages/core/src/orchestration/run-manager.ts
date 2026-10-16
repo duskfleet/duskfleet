@@ -16,6 +16,7 @@ import type { RunRepository, ListRunsFilter } from "../storage/runs.js";
 import { logger } from "../util/log.js";
 import { validateProjectPath } from "./project-validation.js";
 import { assertTransition } from "./run-state.js";
+import { parseHolder, processIdentity } from "../scheduler/crud.js";
 
 const log = logger("orchestration");
 
@@ -27,6 +28,11 @@ export interface StartRunInput {
   model?: string;
   /** Set by the scheduler. */
   scheduleId?: string;
+}
+
+export interface RunManagerOptions {
+  /** Owner recorded on every run, `role@host:pid` (processIdentity); defaults to role `unknown`. */
+  owner?: string;
 }
 
 interface ActiveRun {
@@ -67,12 +73,17 @@ export class RunManager {
 
   private _config: DuskFleetConfig;
 
+  /** This process as `role@host:pid`, recorded as the owner of every run it starts. */
+  readonly owner: string;
+
   constructor(
     config: DuskFleetConfig,
     private readonly runs: RunRepository,
     private readonly executor: Executor,
+    options: RunManagerOptions = {},
   ) {
     this._config = config;
+    this.owner = options.owner ?? processIdentity();
   }
 
   /** Current configuration. Call reloadConfig() first when freshness matters. */
@@ -95,17 +106,42 @@ export class RunManager {
     return this._config;
   }
 
-  /** Mark runs left in `running` by a previous process as failed. Call once at startup. */
+  /**
+   * Mark `running` runs whose owning process is gone as failed. Called at startup and
+   * by the scheduler lease holder. Several DuskFleet processes share the database
+   * (serve, one MCP server per host session, CLI), so a run owned by a live process,
+   * or by another host, is left alone.
+   */
   recoverOrphans(): number {
-    const orphans = this.runs.listByStatus("running");
+    const orphans = this.runs.listByStatus("running").filter((run) => this.ownerIsGone(run));
     for (const run of orphans) {
       this.transition(run, "failed", {
         endedAt: new Date().toISOString(),
-        error: "orphaned: DuskFleet restarted while this run was in progress",
+        error: `orphaned: owning process ${run.owner ?? "(unrecorded)"} is gone`,
       });
     }
     if (orphans.length) log.warn(`marked ${orphans.length} orphaned run(s) as failed`);
     return orphans.length;
+  }
+
+  /**
+   * Gone = no owner recorded (legacy row), or an owner on this host whose pid is not
+   * alive, or this very process without the run in memory (only after pid reuse).
+   */
+  private ownerIsGone(run: Run): boolean {
+    if (run.owner === null) return true;
+    const owner = parseHolder(run.owner);
+    const self = parseHolder(this.owner);
+    if (owner.host !== self.host) return false;
+    if (owner.pid === null) return true;
+    if (owner.pid === self.pid) return !this.active.has(run.id);
+    try {
+      process.kill(owner.pid, 0);
+      return false;
+    } catch (err) {
+      // EPERM: alive, owned by another user. Only ESRCH proves it is gone.
+      return (err as NodeJS.ErrnoException).code === "ESRCH";
+    }
   }
 
   activeCount(): number {
@@ -240,6 +276,7 @@ export class RunManager {
       logPath,
       rawResultJson: null,
       scheduleId: input.scheduleId ?? null,
+      owner: this.owner,
     };
 
     // Insert first so that events emitted by the executor always find the row.
@@ -331,7 +368,7 @@ export class RunManager {
       const current = this.runs.get(runId);
       if (!current) return;
       if (isTerminal(current.status)) {
-        // Already closed out (e.g. marked orphaned/failed by a restart). Keep the first verdict.
+        // Already closed out (e.g. marked orphaned after a pid reuse). Keep the first verdict.
         this.runs.addEvent(runId, "note", { message: `process exited after run was already ${current.status}`, outcome: result.outcome });
         return;
       }

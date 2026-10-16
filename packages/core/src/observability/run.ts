@@ -64,6 +64,8 @@ export interface Run {
   rawResultJson: string | null;
   /** Set when the run was started by a schedule. */
   scheduleId: string | null;
+  /** Process supervising the run, `role@host:pid`; null for runs recorded before ownership existed. */
+  owner: string | null;
 }
 
 export interface RunEvent {
