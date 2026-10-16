@@ -129,7 +129,7 @@ iteration can add a small local HTTP API to the MCP server for the dashboard to 
 | A5 | `permission_denials` in the result approximates "needed a human". | Heuristic. Good enough for MVP; refine with hook events later. |
 | A6 | Context exhaustion is visible via `terminal_reason` / `subtype` / result text. | Heuristic: recorded raw plus a derived boolean. Exact values to be confirmed on real long runs. |
 | A7 | `total_cost_usd` is reported for subscription (OAuth) users as well as API-key users. | Verified: a real run reported cost, tokens and `terminal_reason: "completed"`. |
-| A8 | Killing the MCP server does not necessarily kill children on macOS. | Handled: the server tracks child PIDs and kills them on shutdown; orphaned `running` rows are marked `failed` on next start. |
+| A8 | Killing the MCP server does not necessarily kill children on macOS. | Handled: the server tracks child PIDs and kills them on shutdown; orphaned `running` rows are marked `failed` on next start. Each run records its owner (`role@host:pid`, migration 7); startup recovery and the lease holder's once-a-minute sweep fail only rows whose owner is gone (dead pid on this host, or no owner recorded), never runs of a live process or another host. |
 | A9 | User-level hooks run inside child sessions. A `Stop` hook that needs a desktop/terminal (notifications via `terminal-notifier`/`osascript`) can block a headless run indefinitely. | Verified during development. Mitigation: `claude.setting_sources: [project, local]` skips `~/.claude/settings.json` for runs. |
 
 ---

@@ -162,6 +162,12 @@ const MIGRATIONS: ReadonlyArray<{ version: number; sql: string }> = [
     version: 6,
     sql: `ALTER TABLE schedules ADD COLUMN run_requested_at TEXT;`,
   },
+  {
+    // The process supervising a run (`role@host:pid`, see formatHolder). Orphan recovery only
+    // fails `running` rows whose owner is gone; NULL = written before this column (always recovered).
+    version: 7,
+    sql: `ALTER TABLE runs ADD COLUMN owner TEXT;`,
+  },
 ];
 
 export function openDatabase(dataDir: string): DatabaseSync {

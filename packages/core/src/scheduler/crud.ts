@@ -4,6 +4,7 @@
  * here so a schedule edited from the dashboard obeys exactly the same rules
  * as one edited over MCP.
  */
+import { hostname } from "node:os";
 import type { DuskFleetConfig } from "../config/types.js";
 import type { ScheduleRepository } from "../storage/schedules.js";
 import { CronError, assertTimeZone, nextFire, parseCron } from "./cron.js";
@@ -77,6 +78,11 @@ export type SchedulerRole = "serve" | "mcp" | "cli" | "unknown";
 
 export function formatHolder(role: SchedulerRole, host: string, pid: number): string {
   return `${role}@${host}:${pid}`;
+}
+
+/** This process as `<role>@<host>:<pid>`: the lease holder and the owner of the runs it starts. */
+export function processIdentity(role: SchedulerRole = "unknown"): string {
+  return formatHolder(role, hostname(), process.pid);
 }
 
 export function parseHolder(holder: string): { role: SchedulerRole; host: string; pid: number | null } {
