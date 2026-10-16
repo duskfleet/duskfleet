@@ -9,7 +9,8 @@
  *   duskfleet runs [--status <s>] [--limit <n>]
  *   duskfleet run-info <run_id> [--events]
  *   duskfleet schedules
- *   duskfleet tools            # MCP tool catalogue (names, descriptions, input schemas)
+ *   duskfleet schedules run-now <id or name>   # stamp run_requested_at; the lease holder fires it next tick
+ *   duskfleet tools           # MCP tool catalogue (names, descriptions, input schemas)
  *   duskfleet serve            # long-running scheduler process (what the service runs)
  *   duskfleet install-service [--print]   # register `serve` with launchd / systemd --user / Task Scheduler
  *   duskfleet uninstall-service
@@ -38,6 +39,7 @@ function usage(): never {
       "  duskfleet runs [--status <status>] [--limit <n>]",
       "  duskfleet run-info <run_id> [--events]",
       "  duskfleet schedules",
+      "  duskfleet schedules run-now <schedule id or name>",
       "  duskfleet tools",
       "  duskfleet serve",
       "  duskfleet install-service [--print]",
@@ -189,6 +191,29 @@ async function main(): Promise<void> {
       return done();
     }
     case "schedules": {
+      const [sub, target] = rest;
+      if (sub === "run-now") {
+        if (!target) usage();
+        // Only stamps run_requested_at: the lease holder (normally the service) fires the
+        // schedule on its next tick. Nothing is spawned here, so this is the command to call
+        // from a git hook or any script that must return at once (`run --no-wait` would exit
+        // before the run's stream is read).
+        const schedule = app.scheduler.requestRun(target);
+        if (!schedule) {
+          process.stderr.write(`schedule not found: ${target}\n`);
+          return done(1);
+        }
+        const lease = app.scheduler.status().lease;
+        const leaseLive = lease ? new Date(lease.expiresAt).getTime() > Date.now() : false;
+        process.stderr.write(
+          leaseLive
+            ? `schedule "${schedule.name}" requested; ${lease!.holder} fires it within ${app.config.scheduler.tickSeconds}s\n`
+            : `schedule "${schedule.name}" requested, but nothing is ticking: it fires when a scheduler starts (duskfleet serve / install-service)\n`,
+        );
+        print(schedule);
+        return done();
+      }
+      if (sub) usage();
       print({ scheduler: app.scheduler.status(), schedules: app.scheduler.list() });
       return done();
     }

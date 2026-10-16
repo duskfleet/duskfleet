@@ -9,6 +9,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
+import { RunRepository, ScheduleRepository, loadConfig, openDatabase } from "@duskfleet/core";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const fakeBinary = path.join(here, "fake-claude.js");
@@ -58,6 +59,39 @@ test("cli run --project accepts a registered id or a path; unknown ids, relative
     const both = cli(configDir, ["run", "--project", "demo", "--project-id", "demo", "--", "hello"]);
     assert.notEqual(both.status, 0);
     assert.match(both.stderr, /mutually exclusive/);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("cli schedules run-now stamps run_requested_at by id or name and spawns nothing; unknown targets fail", () => {
+  const { root, configDir } = makeRoot();
+  try {
+    const config = loadConfig(configDir);
+    const db = openDatabase(config.dataDir);
+    const repo = new ScheduleRepository(db);
+    const s = repo.insert({ name: "pr review", agentId: "coder", projectId: "demo", prompt: "ok", cron: "0 9 * * *", timeZone: "UTC", enabled: false, nextRunAt: null });
+    db.close();
+
+    const byName = cli(configDir, ["schedules", "run-now", "pr review"]);
+    assert.equal(byName.status, 0, byName.stderr);
+    assert.ok(JSON.parse(byName.stdout).runRequestedAt, "the request is stamped, even on a paused schedule");
+    assert.match(byName.stderr, /nothing is ticking/, "a CLI process never ticks, so it tells the caller who will fire it");
+
+    const byId = cli(configDir, ["schedules", "run-now", s.id]);
+    assert.equal(byId.status, 0, byId.stderr);
+    assert.equal(JSON.parse(byId.stdout).runRequestedAt, JSON.parse(byName.stdout).runRequestedAt, "idempotent: the first timestamp is kept");
+
+    const db2 = openDatabase(config.dataDir);
+    assert.equal(new RunRepository(db2).list({}).length, 0, "run-now does not start a run itself");
+    db2.close();
+
+    const unknown = cli(configDir, ["schedules", "run-now", "nope"]);
+    assert.notEqual(unknown.status, 0);
+    assert.match(unknown.stderr, /schedule not found: nope/);
+
+    const noTarget = cli(configDir, ["schedules", "run-now"]);
+    assert.equal(noTarget.status, 2, "usage error");
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
