@@ -81,7 +81,8 @@ npm workspaces, one `config/` and one SQLite database shared by three deliverabl
   (cents) and say so. An agent without an explicit model uses the CLI default,
   which can be 100x more expensive.
 - Dashboard: no component library, design tokens live in `apps/web/app/globals.css`
-  (dark and light). A completed run that hit a permission denial is "needs review"
+  (dark only, brand palette: night ground, sunset accent; fonts via `next/font` in
+  `app/layout.tsx`). A completed run that hit a permission denial is "needs review"
   (amber), never plain green.
 
 ## Things that bite
