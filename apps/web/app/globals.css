@@ -1,50 +1,43 @@
+/* DuskFleet brand: night ground, sunset accent. Dark only. */
 :root {
-  --bg: #0e1014;
-  --panel: #161920;
-  --panel-2: #1c2029;
-  --border: #262b36;
-  --border-strong: #343b49;
-  --text: #e7e9ef;
-  --muted: #8a92a6;
-  --faint: #5f6678;
-  --accent: #7aa2f7;
-  --accent-bg: rgba(122, 162, 247, 0.12);
-  --ok: #7fcf7a;
-  --ok-bg: rgba(127, 207, 122, 0.12);
-  --warn: #e3b25f;
-  --warn-bg: rgba(227, 178, 95, 0.14);
-  --bad: #f2748c;
-  --bad-bg: rgba(242, 116, 140, 0.14);
-  --run: #6fd0ff;
-  --run-bg: rgba(111, 208, 255, 0.12);
+  /* brand */
+  --amber: #f6b24a;
+  --sunset: #f0783a;
+  --coral: #e24b5a;
+  --dusk: #5a3f7a;
+  --brand-gradient: linear-gradient(90deg, var(--amber), var(--sunset), var(--coral));
+
+  /* surfaces and text */
+  --bg: #0b0d1a;
+  --panel: #141729;
+  --panel-2: #1b1f36;
+  --border: #2a2f4a;
+  --border-strong: #3b4166;
+  --text: #f3ede2;
+  --muted: #a39db3;
+  --faint: #6e6a85;
+
+  /* semantic: accent = sunset; status = running sky, clean green, review amber, failed coral */
+  --accent: var(--sunset);
+  --accent-bg: rgba(240, 120, 58, 0.14);
+  --ok: #86c98a;
+  --ok-bg: rgba(134, 201, 138, 0.14);
+  --warn: var(--amber);
+  --warn-bg: rgba(246, 178, 74, 0.14);
+  --bad: var(--coral);
+  --bad-bg: rgba(226, 75, 90, 0.16);
+  --run: #6fc4e8;
+  --run-bg: rgba(111, 196, 232, 0.14);
   --shadow: 0 1px 0 rgba(0, 0, 0, 0.3);
+
+  /* type: next/font sets --font-outfit / --font-plex-sans / --font-plex-mono on <html> (app/layout.tsx) */
+  --font-display: var(--font-outfit), ui-sans-serif, system-ui, sans-serif;
+  --font-sans: var(--font-plex-sans), ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-mono: var(--font-plex-mono), ui-monospace, SFMono-Regular, Menlo, monospace;
+
   color-scheme: dark;
-  font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  font-family: var(--font-sans);
   font-size: 15px;
-}
-@media (prefers-color-scheme: light) {
-  :root {
-    --bg: #f5f6f9;
-    --panel: #ffffff;
-    --panel-2: #f1f3f8;
-    --border: #e1e5ee;
-    --border-strong: #c9cfdc;
-    --text: #1a1e29;
-    --muted: #5d6477;
-    --faint: #8b92a5;
-    --accent: #2f62d6;
-    --accent-bg: rgba(47, 98, 214, 0.1);
-    --ok: #2b8a3e;
-    --ok-bg: rgba(43, 138, 62, 0.1);
-    --warn: #b7791f;
-    --warn-bg: rgba(183, 121, 31, 0.12);
-    --bad: #c92a5b;
-    --bad-bg: rgba(201, 42, 91, 0.1);
-    --run: #1971c2;
-    --run-bg: rgba(25, 113, 194, 0.1);
-    --shadow: 0 1px 2px rgba(20, 30, 60, 0.06);
-    color-scheme: light;
-  }
 }
 
 * { box-sizing: border-box; }
@@ -52,7 +45,7 @@ html { -webkit-text-size-adjust: 100%; }
 body { margin: 0; background: var(--bg); color: var(--text); line-height: 1.45; }
 a { color: var(--accent); text-decoration: none; }
 a:hover { text-decoration: underline; }
-code, .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.86em; }
+code, .mono { font-family: var(--font-mono); font-size: 0.86em; }
 .num { font-variant-numeric: tabular-nums; }
 .muted { color: var(--muted); }
 .faint { color: var(--faint); }
@@ -61,8 +54,8 @@ code, .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-
 /* ---- shell ---------------------------------------------------------------- */
 .shell { max-width: 1320px; margin: 0 auto; padding: 0 20px 64px; }
 .nav { display: flex; gap: 6px; align-items: center; padding: 14px 0; border-bottom: 1px solid var(--border); margin-bottom: 24px; flex-wrap: wrap; }
-.nav .brand { font-weight: 700; letter-spacing: 0.01em; color: var(--text); margin-right: 18px; display: inline-flex; align-items: center; gap: 8px; }
-.nav .brand .dot { width: 10px; height: 10px; border-radius: 3px; background: linear-gradient(135deg, var(--accent), var(--run)); display: inline-block; }
+.nav .brand { font-family: var(--font-display); font-weight: 700; letter-spacing: 0.01em; color: var(--text); margin-right: 18px; display: inline-flex; align-items: center; gap: 8px; }
+.nav .brand .dot { width: 10px; height: 10px; border-radius: 3px; background: var(--brand-gradient); display: inline-block; }
 .nav a.tab { color: var(--muted); padding: 6px 10px; border-radius: 8px; font-weight: 500; }
 .nav a.tab:hover { color: var(--text); background: var(--panel-2); text-decoration: none; }
 .nav a.tab.active { color: var(--text); background: var(--panel-2); box-shadow: inset 0 -2px 0 var(--accent); }
@@ -73,8 +66,8 @@ code, .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-
 .live-btn.paused .pulse { background: var(--muted); animation: none; }
 
 .page-head { display: flex; align-items: baseline; justify-content: space-between; gap: 16px; margin-bottom: 18px; flex-wrap: wrap; }
-h1 { font-size: 1.35rem; margin: 0; letter-spacing: -0.01em; }
-h2 { font-size: 0.8rem; margin: 30px 0 10px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.08em; font-weight: 600; display: flex; align-items: center; gap: 10px; }
+h1 { font-family: var(--font-display); font-weight: 600; font-size: 1.35rem; margin: 0; letter-spacing: -0.01em; }
+h2 { font-family: var(--font-display); font-size: 0.8rem; margin: 30px 0 10px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.08em; font-weight: 600; display: flex; align-items: center; gap: 10px; }
 h2 .count { color: var(--faint); font-weight: 500; letter-spacing: 0; text-transform: none; }
 
 /* ---- cards & stats ------------------------------------------------------- */
@@ -195,7 +188,7 @@ pre.block.bad { border-color: color-mix(in srgb, var(--bad) 50%, transparent); }
 .timeline .ic.status { color: var(--ok); background: var(--ok-bg); }
 .timeline .ic.err { color: var(--bad); background: var(--bad-bg); }
 .timeline .name { font-weight: 600; white-space: nowrap; }
-.timeline .detail { color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.8rem; }
+.timeline .detail { color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: var(--font-mono); font-size: 0.8rem; }
 .timeline .detail.plain { font-family: inherit; font-size: inherit; }
 .timeline li.status-row { background: color-mix(in srgb, var(--panel-2) 50%, transparent); }
 
@@ -344,7 +337,7 @@ details.caps .chips { margin-top: 6px; }
 .toc { position: sticky; top: 16px; max-height: calc(100vh - 32px); overflow: auto; font-size: 0.86rem; display: grid; gap: 2px; align-content: start; }
 .toc .group { color: var(--muted); font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.06em; font-weight: 600; margin: 10px 0 4px; }
 .toc .group:first-child { margin-top: 0; }
-.toc a { color: var(--text); padding: 3px 8px; border-radius: 6px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.8rem; display: block; }
+.toc a { color: var(--text); padding: 3px 8px; border-radius: 6px; font-family: var(--font-mono); font-size: 0.8rem; display: block; }
 .toc a:hover { background: var(--panel-2); text-decoration: none; }
 .card:target { border-color: var(--accent); }
 details.desc > summary { cursor: pointer; color: var(--accent); font-size: 0.86rem; list-style: none; display: inline; }
