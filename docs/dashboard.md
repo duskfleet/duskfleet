@@ -41,8 +41,36 @@ in the nav); the other pages are static.
   real server) with a sticky index, plus the registration snippets for Claude Desktop and
   Claude Code with your absolute paths.
 
-A completed run that hit a permission denial or an allow-listed MCP server that never mounted
-is **needs review** (amber), never plain green.
+## Needs review
+
+One rule decides what needs a human: `reviewReasons()` in core. `RunManager` applies it once,
+when a run reaches its terminal status, and stores the result on the row
+(`review_reasons_json`, migration 8; older rows are backfilled when the database is opened).
+`list_runs` (`needsReview`, `reviewReasons`), the status badges, the KPI cards, the agent stats
+(`NEEDS_REVIEW_SQL`, a test on that column) and the schedule rows all read that stored value, so
+there is no second copy of the rule to keep in step. A run needs review when it ended before
+the agent chose to stop, or when something silently narrowed what it could do:
+
+| Reason | When |
+|---|---|
+| `budget_exhausted` | `terminationReason` says the budget ran out (with or without a wrap-up pass) |
+| `timed_out` | the agent's `timeout_minutes` elapsed |
+| `orphaned` | DuskFleet restarted while the run was in progress |
+| `nonzero_exit` | the process exited with a code other than 0 |
+| `failed` | any other failure (spawn error, no result line) |
+| `permission_denied` | a tool call was refused: the allow-list is incomplete |
+| `context_exhausted` | structured signal that the context window ran out |
+| `mcp_missing` | an allow-listed MCP server never mounted |
+
+A completed run with a reason is **needs review** (amber), never plain green; a failed or
+timed-out run is red and its badge title names the reasons. `cancelled` is not a reason: a
+person did it, whatever the main pass had left behind (a cancel during the wrap-up pass keeps
+`budget_exhausted` on the row but yields no reason). Running runs have none yet. The Clean
+runs card splits finished runs three ways: clean, completed but to review, failed. The run detail opens with a "Needs review" callout listing the reasons and
+what they imply (a timeout or a budget stop without wrap-up may have left half-done,
+unrecorded work). The Schedules page shows, next to the outcome of the last tick, how the
+run it started **ended**: `started` alone looked fine on 2026-10-14 while the run behind it
+had died out of budget, and nobody noticed for 11 hours.
 
 The dashboard never mutates runs or builtins: the Claude Code child processes belong to the
 MCP server process, so cancelling goes through `cancel_run` (Cowork) or the CLI. Its writes are

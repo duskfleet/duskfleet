@@ -16,7 +16,7 @@ import { ClaudeCodeExecutor } from "@duskfleet/core";
 import { RunManager } from "@duskfleet/core";
 import { openDatabase } from "@duskfleet/core";
 import { RunRepository } from "@duskfleet/core";
-import { budgetPlan, looksLikeContextExhaustion, summarizeRun, WRAP_UP_PROMPT } from "@duskfleet/core";
+import { budgetPlan, looksLikeContextExhaustion, needsReview, reviewReasons, summarizeRun, WRAP_UP_PROMPT } from "@duskfleet/core";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const fakeBinary = path.join(here, "fake-claude.js");
@@ -488,8 +488,69 @@ test("cancelling during the wrap-up pass records the run as cancelled", async ()
     const run = await app.runs.waitForRun(started.id, 15_000);
     assert.equal(run.status, "cancelled");
     assert.deepEqual(run.phases.map((p) => [p.phase, p.outcome]), [["main", "failed"], ["wrap_up", "cancelled"]]);
+    // The main pass left budget_exhausted and an exit code behind; a person cancelled, so nothing to review.
+    assert.equal(run.terminationReason, "budget_exhausted");
+    assert.deepEqual(run.reviewReasons, []);
+    assert.equal(summarizeRun(run).needsReview, false);
   } finally {
     delete process.env.FAKE_CLAUDE_RESUME;
+    await app.cleanup();
+  }
+});
+
+test("needs review: every run that ended before the agent chose to stop, from one shared rule", () => {
+  const base = { status: "completed", terminationReason: "completed", error: null, exitCode: 0, humanIntervention: false, permissionDenials: 0, contextExhausted: false, mcp: { allowListedMissing: [] } };
+  assert.deepEqual(reviewReasons(base), []);
+  assert.equal(needsReview(base), false);
+  assert.deepEqual(reviewReasons({ ...base, status: "failed", exitCode: 1, terminationReason: "budget_exhausted" }), ["budget_exhausted", "nonzero_exit"]);
+  assert.deepEqual(reviewReasons({ ...base, status: "failed", exitCode: null, terminationReason: "error_max_budget_usd" }), ["budget_exhausted"], "the subtype alone is enough");
+  assert.deepEqual(reviewReasons({ ...base, status: "timed_out", terminationReason: null, exitCode: null }), ["timed_out"]);
+  assert.deepEqual(reviewReasons({ ...base, status: "failed", terminationReason: null, exitCode: null, error: "orphaned: DuskFleet restarted while this run was in progress" }), ["orphaned"]);
+  assert.deepEqual(reviewReasons({ ...base, status: "failed", terminationReason: null, exitCode: 3, error: "no result message received (exit 3)" }), ["nonzero_exit"]);
+  assert.deepEqual(reviewReasons({ ...base, status: "failed", terminationReason: null, exitCode: null, error: "spawn failed: ENOENT" }), ["failed"], "a failure with no finer reason is still a reason");
+  assert.deepEqual(reviewReasons({ ...base, status: "completed", exitCode: 2 }), ["nonzero_exit"], "a completed run with a non-zero exit code is suspicious");
+  assert.deepEqual(reviewReasons({ ...base, permissionDenials: 2, humanIntervention: true }), ["permission_denied"]);
+  assert.deepEqual(reviewReasons({ ...base, contextExhausted: true }), ["context_exhausted"]);
+  assert.deepEqual(reviewReasons({ ...base, mcp: { allowListedMissing: ["mcp__x"] } }), ["mcp_missing"]);
+  assert.deepEqual(reviewReasons({ ...base, status: "cancelled", terminationReason: null, exitCode: null }), [], "a person cancelled it: nothing to review");
+  assert.deepEqual(reviewReasons({ ...base, status: "running", terminationReason: null, exitCode: null }), []);
+  assert.deepEqual(reviewReasons({ ...base, status: "failed", exitCode: 1, terminationReason: "api_error", error: "API Error" }), ["nonzero_exit"]);
+});
+
+test("needs review is true for budget, timeout, crash and orphan runs, and false for a cancelled one", async () => {
+  const app = makeApp();
+  try {
+    const budget = await app.runs.waitForRun((await app.runs.startRun({ prompt: "budget", projectPath: app.project, agentId: "no-reserve" })).id, 15_000);
+    assert.equal(summarizeRun(budget).needsReview, true);
+    assert.deepEqual(summarizeRun(budget).reviewReasons, ["budget_exhausted", "nonzero_exit"]);
+    assert.deepEqual(budget.reviewReasons, ["budget_exhausted", "nonzero_exit"], "stored on the row at the terminal transition");
+    assert.equal(app.db.prepare("SELECT review_reasons_json FROM runs WHERE id = ?").get(budget.id).review_reasons_json, '["budget_exhausted","nonzero_exit"]');
+    assert.equal(app.db.prepare("SELECT COUNT(*) AS n FROM runs WHERE (COALESCE(review_reasons_json, '[]') <> '[]')").get().n, 1, "the aggregate expression reads the same stored value");
+
+    const crash = await app.runs.waitForRun((await app.runs.startRun({ prompt: "crash", projectPath: app.project })).id, 15_000);
+    assert.equal(summarizeRun(crash).needsReview, true);
+    assert.deepEqual(summarizeRun(crash).reviewReasons, ["nonzero_exit"]);
+
+    const hung = await app.runs.startRun({ prompt: "hang", projectPath: app.project });
+    const timedOut = await app.runs.waitForRun(hung.id, 15_000);
+    assert.equal(timedOut.status, "timed_out");
+    assert.deepEqual(summarizeRun(timedOut).reviewReasons, ["timed_out"]);
+
+    const cancelledRun = await app.runs.startRun({ prompt: "hang", projectPath: app.project });
+    await new Promise((r) => setTimeout(r, 200));
+    app.runs.cancelRun(cancelledRun.id);
+    const cancelled = await app.runs.waitForRun(cancelledRun.id, 15_000);
+    assert.equal(cancelled.status, "cancelled");
+    assert.equal(summarizeRun(cancelled).needsReview, false);
+
+    const orphanRun = await app.runs.startRun({ prompt: "hang", projectPath: app.project });
+    const fresh = new RunManager(app.config, new RunRepository(app.db), new ClaudeCodeExecutor({ binary: fakeBinary, strictMcpConfig: true, allowBypassPermissions: false }));
+    fresh.recoverOrphans();
+    const orphan = fresh.getRun(orphanRun.id);
+    assert.deepEqual(summarizeRun(orphan).reviewReasons, ["orphaned"]);
+    app.runs.cancelRun(orphanRun.id);
+    await app.runs.waitForRun(orphanRun.id, 15_000);
+  } finally {
     await app.cleanup();
   }
 });

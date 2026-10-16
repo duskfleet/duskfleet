@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { wrapUpPhase, type RunEvent } from "@duskfleet/core";
+import { REVIEW_REASON_LABELS, wrapUpPhase, type RunEvent } from "@duskfleet/core";
 import { AutoRefresh } from "@/components/AutoRefresh";
 import { CopyButton } from "@/components/CopyButton";
 import { Expandable } from "@/components/Expandable";
@@ -29,8 +29,9 @@ export default async function RunPage({ params }: { params: Promise<{ id: string
   const mcpMissing = run.mcp?.allowListedMissing ?? [];
   const wrapUp = wrapUpPhase(run);
   const mainPhase = run.phases.find((p) => p.phase === "main") ?? null;
-  const hasIssues = denials > 0 || mcpMissing.length > 0 || run.contextExhausted || Boolean(run.error) || wrapUp !== null;
-  const needsAttention = run.status === "failed" || run.status === "timed_out" || (run.status === "completed" && (run.humanIntervention || run.contextExhausted));
+  const reasons = run.reviewReasons; // stored by RunManager when the run ended
+  const needsAttention = reasons.length > 0;
+  const hasIssues = needsAttention || Boolean(run.error) || wrapUp !== null;
   const resume = run.claudeSessionId ? `cd ${shellQuote(run.projectPath)} && claude --resume ${run.claudeSessionId}` : null;
   const t0 = new Date(run.startedAt ?? run.createdAt).getTime();
   const fullCommand = `${run.command.binary} ${run.command.argv.map((a) => shellQuote(a, 160)).join(" ")}`;
@@ -102,6 +103,17 @@ export default async function RunPage({ params }: { params: Promise<{ id: string
       </div>
 
       <div id="issues">
+        {needsAttention && (
+          <div className="callout warn" style={{ marginBottom: 8 }}>
+            <span className="icon">!</span>
+            <div>
+              <strong>Needs review:</strong> {reasons.map((r) => REVIEW_REASON_LABELS[r]).join(" · ")}.
+              {run.status === "timed_out" && <> The agent&apos;s <code>timeout_minutes</code> elapsed and the process was killed mid-action; nothing may have been recorded.</>}
+              {reasons.includes("orphaned") && <> DuskFleet restarted while the run was in progress; its process was lost.</>}
+              {reasons.includes("budget_exhausted") && !wrapUp && <> The run hit <code>max_budget_usd</code> mid-action and no wrap-up pass ran (see <code>wrap_up_reserve_usd</code>): whatever it was doing may be half-done and unrecorded.</>}
+            </div>
+          </div>
+        )}
         {denials > 0 && (
           <div className="callout warn">
             <span className="icon">!</span>

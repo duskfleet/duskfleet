@@ -11,8 +11,7 @@ import { listProjectAgents, projectAgentDefinitionHash } from "../config/agent-f
 import { summarizeToolInput } from "./tool-summary.js";
 import type { AgentDefinition, DuskFleetConfig, ProjectDefinition } from "../config/types.js";
 import type { ExecutionEvent, ExecutionHandle, ExecutionRequest, ExecutionResult, Executor, McpServerInfo, SubagentRecord, TokenUsage } from "../execution/types.js";
-import { isBudgetExhausted } from "../execution/stream-json.js";
-import { isTerminal, type Run, type RunAgent, type RunPhase, type RunStatus } from "../observability/run.js";
+import { isBudgetExhausted, isTerminal, ORPHANED_ERROR, reviewReasons, type Run, type RunAgent, type RunPhase, type RunStatus, type RunSummary } from "../observability/run.js";
 import type { RunRepository, ListRunsFilter } from "../storage/runs.js";
 import { logger } from "../util/log.js";
 import { validateProjectPath } from "./project-validation.js";
@@ -125,14 +124,16 @@ export class RunManager {
     return this._config;
   }
 
+  /** How the given runs ended (status, review reasons, cost), in one query: what a schedule row shows. */
+  summaries(ids: string[]): RunSummary[] {
+    return this.runs.summaries(ids);
+  }
+
   /** Mark runs left in `running` by a previous process as failed. Call once at startup. */
   recoverOrphans(): number {
     const orphans = this.runs.listByStatus("running");
     for (const run of orphans) {
-      this.transition(run, "failed", {
-        endedAt: new Date().toISOString(),
-        error: "orphaned: DuskFleet restarted while this run was in progress",
-      });
+      this.transition(run, "failed", { endedAt: new Date().toISOString(), error: ORPHANED_ERROR });
     }
     if (orphans.length) log.warn(`marked ${orphans.length} orphaned run(s) as failed`);
     return orphans.length;
@@ -271,6 +272,7 @@ export class RunManager {
       rawResultJson: null,
       scheduleId: input.scheduleId ?? null,
       phases: [],
+      reviewReasons: [],
     };
 
     // Insert first so that events emitted by the executor always find the row.
@@ -515,7 +517,10 @@ export class RunManager {
 
   private transition(run: Run, to: RunStatus, patch: Parameters<RunRepository["update"]>[1] = {}): void {
     assertTransition(run.status, to);
-    this.runs.update(run.id, { ...patch, status: to });
+    const next = { ...patch, status: to };
+    // The one place the needs-review rule runs: on the run as it will be stored, once terminal.
+    if (isTerminal(to)) next.reviewReasons = reviewReasons({ ...run, ...defined(patch), status: to });
+    this.runs.update(run.id, next);
     this.runs.addEvent(run.id, "status_change", { from: run.status, to });
     run.status = to;
   }
@@ -588,6 +593,11 @@ function addNullable(a: number | null, b: number | null): number | null {
  * cost, turns, tool calls, tokens and denials are summed; the final text is the wrap-up's
  * (that is where the agent said where it stopped), falling back to the main pass's.
  */
+/** A patch without its `undefined` entries, so spreading it over a run never erases a stored value. */
+function defined<T extends object>(patch: T): Partial<T> {
+  return Object.fromEntries(Object.entries(patch).filter(([, v]) => v !== undefined)) as Partial<T>;
+}
+
 export function mergeResults(main: ExecutionResult, wrapUp: ExecutionResult): ExecutionResult {
   const usage: TokenUsage = {
     inputTokens: addNullable(main.usage.inputTokens, wrapUp.usage.inputTokens),

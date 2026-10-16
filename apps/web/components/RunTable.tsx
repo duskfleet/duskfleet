@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { wrapUpPhase } from "@duskfleet/core";
 import type { RunWithProject } from "@/lib/data";
 import { RunRow } from "./RunRow";
 import { StatusBadge } from "./StatusBadge";
@@ -30,6 +31,11 @@ export function RunTable({ runs, emptyText }: { runs: RunWithProject[]; emptyTex
           const started = r.startedAt ?? r.createdAt;
           const href = `/runs/${r.id}`;
           const issues = `${href}#issues`;
+          // The flags are the stored review reasons; the rule itself lives in core.
+          const reasons = r.reviewReasons;
+          const budget = reasons.includes("budget_exhausted");
+          const orphaned = reasons.includes("orphaned");
+          const wrapUp = budget ? wrapUpPhase(r) : null;
           return (
             <RunRow key={r.id} href={href}>
               <td className="status">
@@ -60,7 +66,19 @@ export function RunTable({ runs, emptyText }: { runs: RunWithProject[]; emptyTex
                       <Link href={issues} className="flag bad badge-link">context exhausted</Link>
                     </span>
                   )}
-                  {r.error && r.status !== "completed" && (
+                  {budget && (
+                    <span className="flags">
+                      <Link href={issues} className="flag bad badge-link" title={wrapUp ? "The main pass ran out of budget; a wrap-up pass recorded where it stopped" : "The run ran out of budget mid-action and left no wrap-up trace"}>
+                        budget exhausted{wrapUp ? " · wrapped up" : ""}
+                      </Link>
+                    </span>
+                  )}
+                  {orphaned && (
+                    <span className="flags">
+                      <Link href={issues} className="flag bad badge-link" title={r.error ?? undefined}>orphaned</Link>
+                    </span>
+                  )}
+                  {r.error && r.status !== "completed" && !budget && !orphaned && (
                     <span className="flags">
                       <Link href={issues} className="flag bad badge-link" title={r.error}>error</Link>
                     </span>

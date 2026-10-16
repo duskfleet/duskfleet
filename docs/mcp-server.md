@@ -57,14 +57,14 @@ recurse into itself.
 | `update_agent` | Merge fields into a user agent; `clear: [...]` removes optional fields. Pass `kind` to convert: `link` (with `claude_agent`) or `own` (with a `system_prompt`); `clear: ["claude_agent"]` unlinks and therefore needs a prompt. Builtins are read-only (override them instead). |
 | `delete_agent` | Remove a user agent file; the builtin with the same id, if any, takes over again |
 | `list_projects` | Named projects, allowed roots, executor info |
-| `list_schedules` | Schedules with next/last firing, outcome (`started` \| `skipped_busy` \| `error`) and scheduler status (kill switch, lease holder) |
+| `list_schedules` | Schedules with next/last firing, outcome of the last tick (`started` \| `skipped_busy` \| `error`), `lastRun` (how the run it last started ended: `status`, `needsReview`, `reviewReasons`, `terminationReason`, `costUsd`) and scheduler status (kill switch, lease holder) |
 | `create_schedule` | `name`, `agent_id`, `prompt`, `cron`, optional `time_zone`, `project_id`, `model`, `enabled` |
 | `update_schedule` | Merge fields; `enabled: false` pauses, `true` resumes from now |
 | `delete_schedule` | Remove a schedule |
 | `run_schedule_now` | Fire a schedule immediately, same busy rules as a tick |
 | `run_agent` | Start a run. `prompt` + (`project_path` \| `project_id`), optional `agent_id`, `model`, `wait_seconds` (≤300). Returns the run immediately unless waiting. |
 | `get_run` | Full run record incl. `claudeSessionId`, `resumeCommand`, tokens, cost, status, `phases` (the main pass and, after a budget exhaustion, the wrap-up pass: outcome, budget, cost, turns; see [budget reserve](agents.md#budget-reserve-and-wrap-up-pass)) and `subagents` (one per Agent call: type, brief, report, tools, model, tokens; see [agents](agents.md#subagents-inside-runs)). `include_output: true` adds the final message, untruncated briefs and reports, and the event timeline. |
-| `list_runs` | Recent runs with filters (`status`, `agent_id`, `project_path`, `limit`); `needsReview`, `terminationReason` and `wrapUp` (outcome and cost of the wrap-up pass, or null) per run |
+| `list_runs` | Recent runs with filters (`status`, `agent_id`, `project_path`, `limit`); per run `needsReview` with `reviewReasons` (budget exhausted, timed out, orphaned, non-zero exit, failed, permission denied, context exhausted, MCP missing; see [dashboard](dashboard.md#needs-review)), `terminationReason` and `wrapUp` (outcome and cost of the wrap-up pass, or null) |
 | `cancel_run` | SIGTERM (then SIGKILL) the run's process; recorded as `cancelled` |
 
 `create_agent` and `update_agent` validate the spec before writing and roll the file back if

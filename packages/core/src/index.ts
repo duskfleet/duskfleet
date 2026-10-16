@@ -25,11 +25,11 @@ export {
 export * from "./observability/run.js";
 
 export { openDatabase } from "./storage/db.js";
-export { RunRepository, type ListRunsFilter, type RunPatch } from "./storage/runs.js";
+export { RunRepository, NEEDS_REVIEW_SQL, type ListRunsFilter, type RunPatch } from "./storage/runs.js";
 
 export * from "./execution/types.js";
 export { ClaudeCodeExecutor, resolveClaudeBinary, type ClaudeCodeExecutorOptions } from "./execution/claude-code.js";
-export { ingestLine, createStreamState, looksLikeContextExhaustion, isBudgetExhausted, type ParsedResult, type StreamState } from "./execution/stream-json.js";
+export { ingestLine, createStreamState, looksLikeContextExhaustion, type ParsedResult, type StreamState } from "./execution/stream-json.js";
 
 export { RunManager, mcpToolPrefix, budgetPlan, mergeResults, WRAP_UP_PROMPT, type StartRunInput } from "./orchestration/run-manager.js";
 export { summarizeToolInput } from "./orchestration/tool-summary.js";
@@ -40,6 +40,7 @@ export * from "./evals/types.js";
 export * from "./scheduler/types.js";
 export { parseCron, nextFire, describeCron, localParts, assertTimeZone, CronError, type CronSpec } from "./scheduler/cron.js";
 export { Scheduler, type SchedulerOptions, type SchedulerStatus } from "./scheduler/scheduler.js";
+export { attachLastRun, type ScheduleWithLastRun, type RunSummarySource } from "./scheduler/last-run.js";
 export { createSchedule, updateSchedule, validateScheduleInput, nextRunAtFor, formatHolder, parseHolder, DEFAULT_TIME_ZONE, type SchedulerRole } from "./scheduler/crud.js";
 export { ScheduleRepository } from "./storage/schedules.js";
 
