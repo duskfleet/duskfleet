@@ -15,6 +15,8 @@ npm run build        # core + mcp (tsc). Run after every change under packages/:
 npm run typecheck    # core + mcp;  web: npm run typecheck -w @duskfleet/web
 npm test             # packages/mcp/test/*.test.js, node --test, ~25 s, no network, no cost
 npm run cli -- doctor | agents | projects | run | runs | run-info | schedules
+npm run cli -- schedules run-now <id or name>   # stamps run_requested_at; the lease holder fires it next tick.
+                     # The command for git hooks / scripts: `run --no-wait` leaves the run unread once the CLI exits
 npm run cli -- serve  # long-running scheduler process; the MCP server also ticks
 npm run cli -- install-service [--print] | uninstall-service   # register `serve` with launchd / systemd --user / Task Scheduler
 npm run cli -- run --project <project id or abs path> --agent <agent id> --model haiku -- "task"

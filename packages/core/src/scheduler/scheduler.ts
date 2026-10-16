@@ -95,6 +95,16 @@ export class Scheduler {
     return this.repo.firings(id, limit);
   }
 
+  /**
+   * Ask whichever process holds the lease to fire this schedule on its next tick (see
+   * `ScheduleRepository.requestRun`). Accepts the id or the unique name. Unlike `fireNow`
+   * it spawns nothing here, so a short-lived caller (CLI, git hook) can return at once.
+   */
+  requestRun(idOrName: string): Schedule | null {
+    const s = this.repo.get(idOrName) ?? this.repo.findByName(idOrName);
+    return s ? this.repo.requestRun(s.id) : null;
+  }
+
   /** Fire a schedule right now, outside its cron (manual trigger). Returns the outcome. */
   async fireNow(id: string): Promise<{ outcome: ScheduleOutcome; runId: string | null; error: string | null }> {
     const s = this.repo.get(id);
