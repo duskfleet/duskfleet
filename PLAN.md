@@ -139,7 +139,7 @@ iteration can add a small local HTTP API to the MCP server for the dashboard to 
 - `--strict-mcp-config` → 0 MCP servers; without it a headless run gets the user's claude.ai connectors (Atlassian Rovo, Figma, Gmail, Drive, Docs) already authenticated, 140 MCP tools. Exposed as `inherit_mcp` per agent/project; no `--mcp-config` file needed for connectors.
 - `--permission-prompts none` ignores user/project/local settings files, confines file tools to cwd (+ `--add-dir`), and refuses `bypassPermissions`.
 - `plan` mode denies Bash, MCP and writes even when allow-listed. `dontAsk` + `--allowedTools` + `--disallowedTools Edit Write NotebookEdit` is the working read-only recipe.
-- Denials are recorded per call (`denied_tools_json`, migration 2) and surfaced as `deniedTools` / `needsReview` in `list_runs`.
+- Denials are recorded per call (`denied_tools_json`, migration 2) and surfaced as `deniedTools` in `list_runs`. Since 2026-10-16 `needsReview` / `reviewReasons` in `list_runs` come from one rule (`reviewReasons()`: budget exhausted, timed out, orphaned, non-zero exit, failed, permission denied, context exhausted, MCP missing; nothing for cancelled or running) that `RunManager` applies at the terminal transition and stores in `review_reasons_json` (migration 8); `list_schedules` adds `lastRun` (status, `needsReview`, `reviewReasons`, termination reason, cost of the run the schedule last started), so a schedule whose run died is red on its row, not green behind a `started` tick.
 
 ## 4. Minimal SQLite schema
 
@@ -176,7 +176,8 @@ CREATE TABLE runs (
   context_exhausted     INTEGER NOT NULL DEFAULT 0, -- boolean
   retries               INTEGER NOT NULL DEFAULT 0,
   log_path              TEXT,
-  raw_result_json       TEXT                        -- full result line for later analysis
+  raw_result_json       TEXT,                       -- full result line for later analysis
+  review_reasons_json   TEXT                        -- why it needs review, stored at the terminal transition; NULL while running (migration 8)
 );
 
 CREATE TABLE run_events (

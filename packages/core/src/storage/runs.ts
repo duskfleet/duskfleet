@@ -1,6 +1,6 @@
 import type { DatabaseSync } from "node:sqlite";
 import type { DeniedTool, RunMcpInfo, SubagentRecord, SubagentStatus } from "../execution/types.js";
-import type { Run, RunAgent, RunEvent, RunPhase, RunStatus } from "../observability/run.js";
+import type { ReviewReason, Run, RunAgent, RunEvent, RunPhase, RunStatus, RunSummary } from "../observability/run.js";
 
 /** Row shape as SQLite returns it. */
 interface RunRow {
@@ -40,6 +40,7 @@ interface RunRow {
   raw_result_json: string | null;
   schedule_id: string | null;
   phases_json: string | null;
+  review_reasons_json: string | null;
 }
 
 function rowToRun(r: RunRow): Run {
@@ -80,7 +81,19 @@ function rowToRun(r: RunRow): Run {
     rawResultJson: r.raw_result_json,
     scheduleId: r.schedule_id ?? null,
     phases: parsePhases(r.phases_json),
+    reviewReasons: parseReasons(r.review_reasons_json),
   };
+}
+
+/** NULL until the run is terminal (and for rows written before migration 8 that the backfill did not reach). */
+function parseReasons(json: string | null | undefined): ReviewReason[] {
+  if (!json) return [];
+  try {
+    const v = JSON.parse(json);
+    return Array.isArray(v) ? v.filter((x): x is ReviewReason => typeof x === "string") : [];
+  } catch {
+    return [];
+  }
 }
 
 function parsePhases(json: string | null | undefined): RunPhase[] {
@@ -131,6 +144,7 @@ export type RunPatch = Partial<
     | "rawResultJson"
     | "command"
     | "phases"
+    | "reviewReasons"
   >
 >;
 
@@ -162,19 +176,22 @@ const PATCH_COLUMNS: Record<keyof RunPatch, string> = {
   rawResultJson: "raw_result_json",
   command: "command_json",
   phases: "phases_json",
+  reviewReasons: "review_reasons_json",
 };
 
 /**
- * SQL twin of `reviewReasons()` (observability/run.ts) for aggregate queries; keep the
- * two in step. Usable as a boolean expression over the `runs` table.
+ * "This run needs review" as a boolean expression over the `runs` table, for the aggregate
+ * queries (overview KPIs, agent stats). It reads the reasons `RunManager` stored at the
+ * terminal transition, the same value `Run.reviewReasons` exposes: no second copy of the rule.
  */
-export const NEEDS_REVIEW_SQL = `(
-  human_intervention = 1 OR context_exhausted = 1
-  OR status IN ('failed', 'timed_out')
-  OR (exit_code IS NOT NULL AND exit_code <> 0)
-  OR LOWER(COALESCE(termination_reason, '')) LIKE '%budget%'
-  OR json_array_length(json_extract(COALESCE(mcp_json, '{}'), '$.allowListedMissing')) > 0
-)`;
+export const NEEDS_REVIEW_SQL = `(COALESCE(review_reasons_json, '[]') <> '[]')`;
+
+const SUMMARY_COLUMNS = "id, status, review_reasons_json, termination_reason, cost_usd, ended_at";
+type SummaryRow = Pick<RunRow, "id" | "status" | "review_reasons_json" | "termination_reason" | "cost_usd" | "ended_at">;
+
+function rowToSummary(r: SummaryRow): RunSummary {
+  return { id: r.id, status: r.status as RunStatus, reviewReasons: parseReasons(r.review_reasons_json), terminationReason: r.termination_reason, costUsd: r.cost_usd, endedAt: r.ended_at };
+}
 
 export class RunRepository {
   constructor(private readonly db: DatabaseSync) {}
@@ -186,8 +203,8 @@ export class RunRepository {
            created_at, started_at, ended_at, duration_ms, claude_session_id, permission_mode, command_json,
            exit_code, termination_reason, error, result_text, num_turns, tool_calls, input_tokens, output_tokens,
            cache_read_tokens, cache_creation_tokens, cost_usd, permission_denials, denied_tools_json, mcp_json, human_intervention,
-           context_exhausted, retries, log_path, raw_result_json, schedule_id, phases_json)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+           context_exhausted, retries, log_path, raw_result_json, schedule_id, phases_json, review_reasons_json)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         run.id,
@@ -226,6 +243,7 @@ export class RunRepository {
         run.rawResultJson,
         run.scheduleId,
         JSON.stringify(run.phases ?? []),
+        run.reviewReasons?.length ? JSON.stringify(run.reviewReasons) : null,
       );
   }
 
@@ -272,6 +290,14 @@ export class RunRepository {
 
   listByStatus(status: RunStatus): Run[] {
     return (this.db.prepare("SELECT * FROM runs WHERE status = ?").all(status) as unknown as RunRow[]).map(rowToRun);
+  }
+
+  /** How the given runs ended, in one query and without their result blobs. Unknown ids are left out. */
+  summaries(ids: string[]): RunSummary[] {
+    const unique = [...new Set(ids)];
+    if (unique.length === 0) return [];
+    const marks = unique.map(() => "?").join(", ");
+    return (this.db.prepare(`SELECT ${SUMMARY_COLUMNS} FROM runs WHERE id IN (${marks})`).all(...unique) as unknown as SummaryRow[]).map(rowToSummary);
   }
 
   addEvent(runId: string, type: RunEvent["type"], payload: unknown, agentId: string | null = null): void {

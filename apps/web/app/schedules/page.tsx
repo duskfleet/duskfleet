@@ -185,7 +185,7 @@ export default function SchedulesPage() {
                             <Link href={`/runs/${s.lastRun.id}`}>last run →</Link>
                             <StatusBadge status={s.lastRun.status} reasons={s.lastRun.reviewReasons} />
                             {s.lastRun.needsReview && (
-                              <Link href={`/runs/${s.lastRun.id}#issues`} className="flag bad badge-link" title={`The run this schedule last started needs review: ${s.lastRun.reviewReasons.map((r) => REVIEW_REASON_LABELS[r]).join(", ")}`}>
+                              <Link href={`/runs/${s.lastRun.id}#issues`} className="muted" title={`The run this schedule last started needs review: ${s.lastRun.reviewReasons.map((r) => REVIEW_REASON_LABELS[r]).join(", ")}`}>
                                 {s.lastRun.reviewReasons.map((r) => REVIEW_REASON_LABELS[r]).slice(0, 2).join(" · ")}
                               </Link>
                             )}

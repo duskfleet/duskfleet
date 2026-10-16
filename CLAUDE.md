@@ -82,10 +82,13 @@ npm workspaces, one `config/` and one SQLite database shared by three deliverabl
   which can be 100x more expensive.
 - Dashboard: no component library, design tokens live in `apps/web/app/globals.css`
   (dark and light). A completed run that hit a permission denial is "needs review"
-  (amber), never plain green. One rule decides needs-review everywhere (`reviewReasons`
-  in `core/src/observability/run.ts`, `NEEDS_REVIEW_SQL` for aggregates): budget
-  exhausted, timed out, orphaned, non-zero exit, failed, denial, context, MCP mismatch.
-  Schedule rows show how the last run *ended*, not only that the tick started it.
+  (amber), never plain green. One rule decides needs-review (`reviewReasons` in
+  `core/src/observability/run.ts`: budget exhausted, timed out, orphaned, non-zero exit,
+  failed, denial, context, MCP mismatch; never for cancelled or running). `RunManager.transition`
+  is its only caller: it stores the result in `review_reasons_json` (migration 8) and every
+  reader (`summarizeRun`, badges, `NEEDS_REVIEW_SQL`, `attachLastRun` for schedule rows) uses
+  the stored `run.reviewReasons`, never the rule. Orphans are detected with `isOrphaned`, not by
+  matching the error text. Schedule rows show how the last run *ended*, not only that the tick started it.
 
 ## Things that bite
 

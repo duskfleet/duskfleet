@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { REVIEW_REASON_LABELS, reviewReasons, wrapUpPhase, type RunEvent } from "@duskfleet/core";
+import { REVIEW_REASON_LABELS, wrapUpPhase, type RunEvent } from "@duskfleet/core";
 import { AutoRefresh } from "@/components/AutoRefresh";
 import { CopyButton } from "@/components/CopyButton";
 import { Expandable } from "@/components/Expandable";
@@ -29,7 +29,7 @@ export default async function RunPage({ params }: { params: Promise<{ id: string
   const mcpMissing = run.mcp?.allowListedMissing ?? [];
   const wrapUp = wrapUpPhase(run);
   const mainPhase = run.phases.find((p) => p.phase === "main") ?? null;
-  const reasons = reviewReasons(run);
+  const reasons = run.reviewReasons; // stored by RunManager when the run ended
   const needsAttention = reasons.length > 0;
   const hasIssues = needsAttention || Boolean(run.error) || wrapUp !== null;
   const resume = run.claudeSessionId ? `cd ${shellQuote(run.projectPath)} && claude --resume ${run.claudeSessionId}` : null;

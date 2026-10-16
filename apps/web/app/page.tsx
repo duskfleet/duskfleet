@@ -108,11 +108,11 @@ export default async function RunsPage({ searchParams }: { searchParams: Promise
           <div className={`value ${o.running ? "run" : ""}`}>{o.running}</div>
           <div className="sub">{o.running ? "agents working" : "idle"}{filtered ? " · in this filter" : ""}</div>
         </div>
-        <div className="stat" title="Completed with nothing to review (no denial, context or budget exhaustion, MCP mismatch), over all finished runs">
+        <div className="stat" title="Completed with nothing to review (no denial, context exhaustion or MCP mismatch), over all finished runs. clean + completed to review + failed = finished">
           <div className="label">Clean runs</div>
           <div className="value">{fmtPct(o.clean, o.finished)}</div>
           <div className="sub">
-            {fmtInt(o.clean)} clean · {fmtInt(o.needsReview)} to review · {fmtInt(o.failed)} failed
+            {fmtInt(o.clean)} clean · {fmtInt(o.completed - o.clean)} completed to review · {fmtInt(o.failed)} failed
           </div>
         </div>
         <div className="stat">
