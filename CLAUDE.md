@@ -93,6 +93,9 @@ npm workspaces, one `config/` and one SQLite database shared by three deliverabl
 - **`--permission-prompts none` ignores the target project's `.claude/settings` allow-lists**
   and confines file tools (and Bash paths) to the project directory. Everything an agent
   needs must be in its own `allowed_tools`; use `add_dirs` to reach other directories.
+- **`CLAUDE_BIN` beats `claude.binary`**, so an inherited one would make the tests launch the
+  real claude instead of fake-claude.js. Test files import `test/helpers.js` (drops it) before
+  `@duskfleet/core` and spawn processes with `testEnv()`; `childEnv()` never passes it to runs.
 - **Agents can be bound to a project** (`project: <id>`): grouped, default target, refused
   elsewhere. `create_agent`/`update_agent` validate the spec *before* writing, and roll the
   file back if the config no longer loads: one bad agent file would otherwise break every
