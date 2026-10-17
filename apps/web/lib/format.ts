@@ -3,7 +3,7 @@ export function fmtDuration(ms: number | null | undefined): string {
   const s = Math.round(ms / 1000);
   if (s < 60) return `${s}s`;
   const m = Math.floor(s / 60);
-  if (m < 60) return `${m}m ${s % 60}s`;
+  if (m < 60) return `${m}m ${String(s % 60).padStart(2, "0")}s`;
   return `${Math.floor(m / 60)}h ${m % 60}m`;
 }
 
@@ -47,6 +47,30 @@ export function fmtRelative(iso: string | null | undefined, now = Date.now()): s
   const d = Math.round(h / 24);
   if (d < 7) return `${d} days ago`;
   return t.toLocaleDateString(undefined, { day: "numeric", month: "short" });
+}
+
+function clock(t: Date): string {
+  return t.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" });
+}
+
+/** Wall-clock moment: "02:06" today, "yesterday 18:40", "Fri 09:15" this week, else "12 Oct". */
+export function fmtClock(iso: string | null | undefined, now = Date.now()): string {
+  if (!iso) return "–";
+  const t = new Date(iso);
+  const today = new Date(now);
+  // Local midnight N days back (not N * 24 h: DST days are 23 or 25 h long).
+  const since = (days: number) => new Date(today.getFullYear(), today.getMonth(), today.getDate() - days).getTime();
+  if (t.getTime() >= since(0)) return clock(t);
+  if (t.getTime() >= since(1)) return `yesterday ${clock(t)}`;
+  if (t.getTime() >= since(6)) return `${t.toLocaleDateString(undefined, { weekday: "short" })} ${clock(t)}`;
+  return t.toLocaleDateString(undefined, { day: "numeric", month: "short" });
+}
+
+/** Page header date: "Sunday 12 Oct · 21:08". */
+export function fmtToday(now = new Date()): string {
+  const weekday = now.toLocaleDateString(undefined, { weekday: "long" });
+  const date = now.toLocaleDateString(undefined, { day: "numeric", month: "short" });
+  return `${weekday} ${date} · ${clock(now)}`;
 }
 
 export function fmtInt(n: number | null | undefined): string {
