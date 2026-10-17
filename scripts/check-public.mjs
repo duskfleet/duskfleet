@@ -24,11 +24,20 @@ const patterns = [
 ];
 
 // Values of this machine: never versioned, never hard-coded here (the script itself is public).
+// Only meaningful on the committing machine: CI runners have generic names (`runner`) that
+// would match ordinary prose, so the check is skipped there and for common account names.
+const GENERIC = new Set(["root", "runner", "user", "admin", "ubuntu", "node", "build", "test", "guest", "docker"]);
 const local = [];
-const user = userInfo().username;
-if (user && user.length >= 4) local.push({ re: new RegExp(escapeRegExp(user), "i"), why: "current user name" });
-const host = hostname().replace(/\.local$/, "");
-if (host && host.length >= 4) local.push({ re: new RegExp(escapeRegExp(host), "i"), why: "this machine's host name" });
+if (!process.env.CI) {
+  const user = userInfo().username;
+  if (user.length >= 4 && !GENERIC.has(user.toLowerCase())) {
+    local.push({ re: new RegExp(`\\b${escapeRegExp(user)}\\b`, "i"), why: "current user name" });
+  }
+  const host = hostname().replace(/\.local$/, "");
+  if (host.length >= 4 && !GENERIC.has(host.toLowerCase())) {
+    local.push({ re: new RegExp(`\\b${escapeRegExp(host)}\\b`, "i"), why: "this machine's host name" });
+  }
+}
 
 // Placeholders docs are allowed to use.
 const allowed = [
