@@ -1,4 +1,5 @@
 import { CopyButton } from "@/components/CopyButton";
+import { TocSpy } from "@/components/TocSpy";
 import { mcpRegistration, toolCatalog, type JsonSchema, type ToolCatalogEntry } from "@/lib/data";
 import { fmtRelative, fmtTime } from "@/lib/format";
 
@@ -28,10 +29,12 @@ export default function McpPage() {
   return (
     <>
       <div className="page-head">
-        <h1>MCP tools</h1>
+        <h1>
+          MCP {catalog && <span className="count">{catalog.tools.length} tools</span>}
+        </h1>
         {catalog && (
-          <span className="muted" style={{ fontSize: "0.86rem" }}>
-            {catalog.tools.length} tools · server <code>{catalog.server.name}</code> v{catalog.server.version} ·{" "}
+          <span className="note">
+            server <code>{catalog.server.name}</code> v{catalog.server.version} ·{" "}
             <span title={`Written by npm run build to packages/mcp/dist/tools.json on ${fmtTime(catalog.generatedAt)}. Hosts load the server once: after a rebuild, restart Claude Desktop / Claude Code to get the new tools.`}>
               catalogue built {fmtRelative(catalog.generatedAt)} (restart the host after a rebuild)
             </span>
@@ -59,24 +62,25 @@ export default function McpPage() {
               </div>
             ))}
             <div className="group">Setup</div>
-            <a href="#connect" style={{ fontFamily: "inherit" }}>Connect a client</a>
+            <a href="#connect" className="plain">Connect a client</a>
           </nav>
+          <TocSpy selector=".toc" />
 
-          <div style={{ minWidth: 0 }}>
-            <div className="card" style={{ marginBottom: 20 }}>
-              <div className="muted" style={{ fontSize: "0.8rem", textTransform: "uppercase", letterSpacing: "0.07em", fontWeight: 600, marginBottom: 6 }}>
-                What the server tells clients
+          <div className="docs-main">
+            <section className="docs-section">
+              <h2>What the server tells clients</h2>
+              <div className="card server-says">
+                <Sentences text={catalog.server.instructions} />
               </div>
-              <Sentences text={catalog.server.instructions} />
-            </div>
+            </section>
 
             {groups.map((g) => (
-              <section key={g.key} style={{ marginBottom: 28 }} id={`group-${g.key}`}>
-                <h2 style={{ marginTop: 0 }}>
+              <section key={g.key} className="docs-section" id={`group-${g.key}`}>
+                <h2>
                   {g.title} <span className="count">{catalog.tools.filter((t) => t.group === g.key).length}</span>
-                  {g.blurb && <span className="count" style={{ fontWeight: 400 }}>· {g.blurb}</span>}
+                  {g.blurb && <span className="count">· {g.blurb}</span>}
                 </h2>
-                <div style={{ display: "grid", gap: 12 }}>
+                <div className="tool-list">
                   {catalog.tools
                     .filter((t) => t.group === g.key)
                     .map((t) => (
@@ -99,28 +103,29 @@ function ConnectClient({ desktopJson, claudeCodeCmd }: { desktopJson: string; cl
   // Shown verbatim, not tilde-shortened: Claude Desktop spawns the server without a shell and
   // never expands "~", so a snippet read off the screen must already hold absolute paths.
   return (
-    <section id="connect">
+    <section id="connect" className="docs-section connect">
       <h2>Connect a client</h2>
-      <div className="two-col">
-        <div>
-          <div className="muted" style={{ fontSize: "0.86rem", marginBottom: 6 }}>
-            Claude Desktop / Cowork: add to <code>~/Library/Application Support/Claude/claude_desktop_config.json</code>, then restart the app.
-            Keep the paths absolute: the app does not expand <code>~</code>.
-          </div>
+      <div className="connect-grid">
+        <div className="connect-box">
+          <h3>Claude Desktop / Cowork</h3>
           <div className="cmd">
-            <pre className="block" style={{ whiteSpace: "pre", overflowX: "auto" }}>{desktopJson}</pre>
+            <pre className="block">{desktopJson}</pre>
             <CopyButton text={desktopJson} />
           </div>
+          <div className="side-note">
+            Add to <code>~/Library/Application Support/Claude/claude_desktop_config.json</code>, then restart the app.
+            Keep the paths absolute: the app does not expand <code>~</code>.
+          </div>
         </div>
-        <div>
-          <div className="muted" style={{ fontSize: "0.86rem", marginBottom: 6 }}>Claude Code (any project, one command):</div>
+        <div className="connect-box">
+          <h3>Claude Code</h3>
           <div className="cmd">
-            <pre className="block" style={{ whiteSpace: "pre", overflowX: "auto" }}>{claudeCodeCmd}</pre>
+            <pre className="block">{claudeCodeCmd}</pre>
             <CopyButton text={claudeCodeCmd} />
           </div>
-          <div className="muted" style={{ fontSize: "0.8rem", marginTop: 10 }}>
-            Hosts keep the server process alive and load it once: after <code>npm run build</code>, restart the host. Config under <code>config/</code>
-            needs no restart.
+          <div className="side-note">
+            Any project, one command. Hosts keep the server process alive and load it once: after <code>npm run build</code>, restart
+            the host. Config under <code>config/</code> needs no restart.
           </div>
         </div>
       </div>
@@ -142,9 +147,9 @@ function sentences(text: string): string[] {
 /** The long server instructions as a list, one sentence per line. */
 function Sentences({ text }: { text: string }) {
   const parts = sentences(text);
-  if (parts.length <= 2) return <div style={{ fontSize: "0.95rem" }}>{text}</div>;
+  if (parts.length <= 2) return <div>{text}</div>;
   return (
-    <ul style={{ margin: 0, paddingLeft: 20, fontSize: "0.92rem", display: "grid", gap: 4 }}>
+    <ul>
       {parts.map((s, i) => <li key={i}>{s}</li>)}
     </ul>
   );
@@ -157,12 +162,12 @@ function ToolCard({ tool }: { tool: ToolCatalogEntry }) {
   const [first, rest] = splitFirstSentence(tool.description);
   const restParts = rest ? sentences(rest) : [];
   return (
-    <div className="card" id={tool.name}>
-      <div style={{ display: "flex", gap: 10, alignItems: "baseline", flexWrap: "wrap" }}>
-        <a href={`#${tool.name}`} style={{ color: "inherit" }}><code style={{ fontSize: "1rem", fontWeight: 650 }}>{tool.name}</code></a>
-        {tool.title && <span className="muted">{tool.title}</span>}
+    <div className="card tool" id={tool.name}>
+      <div className="tool-head">
+        <a href={`#${tool.name}`} className="tool-name">{tool.name}</a>
+        {tool.title && <span className="tool-title">{tool.title}</span>}
       </div>
-      <div style={{ margin: "8px 0 10px", fontSize: "0.92rem" }}>
+      <div className="tool-desc">
         {first}
         {restParts.length > 0 && (
           <>
@@ -177,13 +182,13 @@ function ToolCard({ tool }: { tool: ToolCatalogEntry }) {
         )}
       </div>
       {names.length === 0 ? (
-        <div className="muted" style={{ fontSize: "0.86rem" }}>No parameters.</div>
+        <div className="no-params">No parameters.</div>
       ) : (
-        <table className="table">
+        <table className="params">
           <thead>
             <tr>
-              <th style={{ width: "22%" }}>Parameter</th>
-              <th style={{ width: "18%" }}>Type</th>
+              <th className="col-name">Parameter</th>
+              <th className="col-type">Type</th>
               <th>Description</th>
             </tr>
           </thead>
@@ -194,15 +199,13 @@ function ToolCard({ tool }: { tool: ToolCatalogEntry }) {
                 <tr key={n}>
                   <td>
                     <code>{n}</code>
-                    {required.has(n) && <span className="tag" style={{ marginLeft: 6 }}>required</span>}
+                    {required.has(n) && <span className="req">required</span>}
                   </td>
-                  <td className="mono muted">{typeOf(s)}</td>
-                  <td style={{ fontSize: "0.88rem" }}>
+                  <td className="type">{typeOf(s)}</td>
+                  <td>
                     {s.description ?? null}
-                    {s.enum && (
-                      <div className="mono muted" style={{ fontSize: "0.8rem", marginTop: 3 }}>one of: {s.enum.map(String).join(" | ")}</div>
-                    )}
-                    {s.default !== undefined && <div className="muted" style={{ fontSize: "0.8rem" }}>default: {JSON.stringify(s.default)}</div>}
+                    {s.enum && <div className="sub mono">one of: {s.enum.map(String).join(" | ")}</div>}
+                    {s.default !== undefined && <div className="sub">default: {JSON.stringify(s.default)}</div>}
                   </td>
                 </tr>
               );

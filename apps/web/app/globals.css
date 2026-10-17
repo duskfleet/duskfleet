@@ -350,20 +350,64 @@ details.caps .chips { margin-top: 6px; }
 .howto .cmd pre { font-size: 0.8rem; }
 
 /* ---- MCP docs ------------------------------------------------------------ */
-.docs { display: grid; grid-template-columns: 220px minmax(0, 1fr); gap: 24px; align-items: start; }
-.toc { position: sticky; top: 16px; max-height: calc(100vh - 32px); overflow: auto; font-size: 0.86rem; display: grid; gap: 2px; align-content: start; }
-.toc .group { color: var(--muted); font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.06em; font-weight: 600; margin: 10px 0 4px; }
+/* header: "MCP N tools" + muted note, as on the other pages */
+.page-head h1 .count { color: var(--muted); font-weight: 500; }
+.page-head .note { color: var(--faint); font-size: 0.86rem; line-height: 19px; }
+
+/* sticky left list in muted text; the section in view is sunset (aria-current, set by TocSpy) */
+.docs { display: grid; grid-template-columns: 220px minmax(0, 1fr); gap: 28px; align-items: start; }
+.toc { position: sticky; top: 16px; max-height: calc(100vh - 32px); overflow: auto; display: grid; gap: 1px; align-content: start; }
+.toc .group { color: var(--faint); font-size: 12px; line-height: 17.5px; text-transform: uppercase; letter-spacing: 0.07em; font-weight: 600; margin: 14px 0 4px; }
 .toc .group:first-child { margin-top: 0; }
-.toc a { color: var(--text); padding: 3px 8px; border-radius: 6px; font-family: var(--font-mono); font-size: 0.8rem; display: block; }
-.toc a:hover { background: var(--panel-2); text-decoration: none; }
+.toc a { color: var(--muted); padding: 3px 10px; border-left: 2px solid transparent; font-family: var(--font-mono); font-size: 13px; line-height: 19px; display: block; }
+.toc a.plain { font-family: inherit; font-size: 13.5px; }
+.toc a:hover { color: var(--text); text-decoration: none; }
+.toc a[aria-current="location"] { color: var(--accent); border-left-color: var(--accent); }
+
+/* sections: uppercase label + cards, spaced like the run detail columns */
+.docs-main { min-width: 0; display: grid; gap: 30px; }
+.docs-section h2 { margin-top: 0; }
+.docs-section h2 .count + .count { font-weight: 400; }
+.server-says { font-size: 14.5px; line-height: 22.5px; }
+.server-says ul { margin: 0; padding-left: 20px; display: grid; gap: 4px; }
+.tool-list { display: grid; gap: 12px; }
+
+/* tool card: mono cream name, Plex Sans description, parameters as the run tables */
+.card.tool { scroll-margin-top: 16px; }
 .card:target { border-color: var(--accent); }
-details.desc > summary { cursor: pointer; color: var(--accent); font-size: 0.86rem; list-style: none; display: inline; }
+.tool-head { display: flex; gap: 10px; align-items: baseline; flex-wrap: wrap; }
+.tool-name { color: var(--text); font-family: var(--font-mono); font-size: 15px; line-height: 22px; font-weight: 600; }
+.tool-name:hover { color: var(--accent); text-decoration: none; }
+.tool-title { color: var(--muted); font-size: 13.5px; line-height: 19.5px; }
+.tool-desc { margin: 6px 0 12px; font-size: 14px; line-height: 21px; color: var(--text); }
+.no-params { color: var(--faint); font-size: 13px; line-height: 19px; }
+details.desc > summary { cursor: pointer; color: var(--accent); font-size: 13px; list-style: none; display: inline; }
 details.desc > summary::-webkit-details-marker { display: none; }
 details.desc[open] > summary { display: none; }
-details.desc ul { margin: 6px 0 0; padding-left: 20px; }
+details.desc ul { margin: 6px 0 0; padding-left: 20px; color: var(--muted); display: grid; gap: 2px; }
+.params { width: 100%; border-collapse: separate; border-spacing: 0; border: 1px solid var(--border); border-radius: 10px; overflow: hidden; font-size: 13.5px; line-height: 19.5px; }
+.params th, .params td { text-align: left; padding: 9px 12px; border-bottom: 1px solid var(--border); vertical-align: top; }
+.params th { color: var(--muted); font-weight: 600; font-size: 12px; line-height: 17.5px; text-transform: uppercase; letter-spacing: 0.06em; background: var(--panel-2); }
+.params tr:last-child td { border-bottom: none; }
+.params .col-name { width: 24%; }
+.params .col-type { width: 18%; }
+.params td code { color: var(--text); font-size: 13px; }
+.params td.type { color: var(--muted); font-family: var(--font-mono); font-size: 12.5px; }
+.params .req { margin-left: 6px; padding: 0 6px; border-radius: 5px; font-size: 11.5px; line-height: 17px; font-weight: 600; color: var(--warn); background: var(--warn-bg); white-space: nowrap; }
+.params .sub { color: var(--muted); font-size: 12.5px; line-height: 18px; margin-top: 3px; }
+.params .sub.mono { font-size: 12px; }
+
+/* connect a client: the code box + Copy pattern of the run detail */
+.connect-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 20px; align-items: start; }
+.connect-box { display: grid; gap: 8px; min-width: 0; }
+.connect-box h3 { margin: 0; color: var(--text); font-size: 14px; line-height: 20.5px; font-weight: 500; }
+.connect pre.block { white-space: pre; overflow-x: auto; font-size: 12.5px; line-height: 19px; padding: 11px 12px; min-width: 0; }
+.connect .cmd .copy-btn { color: var(--text); font-size: 13px; line-height: 19px; padding: 6px 12px; }
+.connect .side-note { color: var(--faint); font-size: 12.5px; line-height: 18px; }
+@media (max-width: 960px) { .connect-grid { grid-template-columns: 1fr; } }
 
 /* ---- responsive ---------------------------------------------------------- */
-@media (max-width: 1100px) { .docs { grid-template-columns: 1fr; } .toc { position: static; max-height: none; display: flex; flex-wrap: wrap; gap: 4px 6px; } .toc .group { width: 100%; margin: 6px 0 2px; } }
+@media (max-width: 1100px) { .docs { grid-template-columns: 1fr; } .toc { position: static; max-height: none; display: flex; flex-wrap: wrap; gap: 4px 6px; } .toc .group { width: 100%; margin: 6px 0 2px; } .toc a { border: 1px solid var(--border); border-radius: 999px; padding: 2px 10px; } .toc a[aria-current="location"] { border-color: var(--accent); } }
 @media (max-width: 900px) {
   .shell { padding: 0 16px 48px; }
   .stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
