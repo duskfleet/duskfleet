@@ -45,7 +45,8 @@ export function AgentActions({ id, source, linked, overridesBuiltin = false }: {
           )}
           <button
             type="button"
-            className="copy-btn"
+            // Deleting an override only reactivates the builtin: not destructive, so not red.
+            className={`copy-btn ${overridesBuiltin ? "" : "danger"}`}
             onClick={() => setConfirm("delete")}
             title={overridesBuiltin ? "Remove the user file from data/agents: the builtin becomes active again" : "Remove the agent file from data/agents"}
           >

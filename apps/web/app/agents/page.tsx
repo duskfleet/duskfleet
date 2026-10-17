@@ -2,7 +2,7 @@ import Link from "next/link";
 import path from "node:path";
 import type { ReactNode } from "react";
 import { AgentActions } from "@/components/AgentActions";
-import { agentStats, deniedBashSuggestions, homeDir, listAgents, listProjects, listSchedules, projectAgentsFor, type AgentStats } from "@/lib/data";
+import { agentStats, bashAllowed, deniedBashSuggestions, homeDir, listAgents, listProjects, listSchedules, projectAgentsFor, type AgentStats } from "@/lib/data";
 import { fmtAgo, fmtCost, fmtPct, shortModel, tildePath } from "@/lib/format";
 
 export const dynamic = "force-dynamic";
@@ -69,8 +69,9 @@ export default function AgentsPage() {
                 key={a.id}
                 agent={a}
                 stats={stats.get(a.id)}
-                suggestions={(suggestions.get(a.id) ?? []).filter((t) => !(a.allowedTools ?? []).includes(t))}
+                suggestions={(suggestions.get(a.id) ?? []).filter((t) => !bashAllowed(a.allowedTools ?? [], t))}
                 scheduleIds={schedulesByAgent.get(a.id) ?? []}
+                home={home}
               />
             ))}
           </div>
@@ -100,9 +101,10 @@ export default function AgentsPage() {
   );
 }
 
-function AgentCard({ agent: a, stats: s, suggestions, scheduleIds }: { agent: Agent; stats: AgentStats | undefined; suggestions: string[]; scheduleIds: string[] }) {
+function AgentCard({ agent: a, stats: s, suggestions, scheduleIds, home }: { agent: Agent; stats: AgentStats | undefined; suggestions: string[]; scheduleIds: string[]; home: string }) {
   const allowed = a.allowedTools ?? [];
   const denied = a.disallowedTools ?? [];
+  const addDirs = a.addDirs ?? [];
   const readOnly = a.permissionMode === "plan" || (denied.includes("Edit") && denied.includes("Write"));
   const runsHref = `/?agent=${encodeURIComponent(a.id)}${a.project ? `&project=${encodeURIComponent(a.project)}` : ""}`;
   const avgCost = s && s.total > 0 ? s.costUsd / s.total : null;
@@ -144,7 +146,7 @@ function AgentCard({ agent: a, stats: s, suggestions, scheduleIds }: { agent: Ag
         <span className="ac-state-slot">{state}</span>
       </header>
 
-      <p className="ac-desc">
+      <p className="ac-desc" title={!a.claudeAgent && a.systemPromptPreview ? `System prompt (${a.systemPromptLength} chars):\n${a.systemPromptPreview}` : undefined}>
         {a.description ||
           (a.claudeAgent ? (
             <>
@@ -176,8 +178,14 @@ function AgentCard({ agent: a, stats: s, suggestions, scheduleIds }: { agent: Ag
           ))}
         {shownTools.map((t) => <code key={t} className="ac-tag">{t}</code>)}
         {hiddenTools.length > 0 && <code className="ac-tag" title={hiddenTools.join("\n")}>+{hiddenTools.length} more</code>}
-        {denied.length > 0 && <code className="ac-tag" title="disallowed_tools">{denied.map((t) => `−${t}`).join(" ")}</code>}
+        {denied.length > 0 && <code className="ac-tag" title="disallowed_tools">{denied.map((t) => `-${t}`).join(" ")}</code>}
         {a.ownBudgetUsd !== null && <code className="ac-tag" title="max_budget_usd per run">budget {fmtBudget(a.ownBudgetUsd)}</code>}
+        {a.ownTimeoutMinutes !== null && <code className="ac-tag" title="timeout_minutes per run">timeout {a.ownTimeoutMinutes} min</code>}
+        {addDirs.length > 0 && (
+          <code className="ac-tag" title={`add_dirs:\n${addDirs.map((d) => tildePath(d, home)).join("\n")}`}>
+            +{addDirs.length} {addDirs.length === 1 ? "dir" : "dirs"}
+          </code>
+        )}
         {suggestions.map((t) => (
           <code key={t} className="ac-tag suggest" title={`Denied in this agent's recent runs. Add ${t} to allowed_tools to let unattended runs use it.`}>
             + {t}?

@@ -95,6 +95,8 @@ export function listAgents() {
       maxBudgetUsd: a.maxBudgetUsd ?? cfg.claude.defaultMaxBudgetUsd,
       /** Budget set by the agent file itself (null = the global default applies). */
       ownBudgetUsd: a.maxBudgetUsd ?? null,
+      /** Timeout set by the agent file itself (null = the global default applies). */
+      ownTimeoutMinutes: a.timeoutMinutes ?? null,
       overridesBuiltin: a.source === "user" && builtinIds.has(a.id),
       /** Repo-relative (or ~) path of the agent file, for display. */
       fileLabel: fileLabel(a.sourcePath),
@@ -280,6 +282,23 @@ export function deniedBashSuggestions(perAgent = 10): Map<string, string[]> {
     }
   }
   return out;
+}
+
+/**
+ * Whether `allowedTools` already lets `Bash(<cmd>:*)` through: bare `Bash`, the
+ * same entry, or a shorter prefix (`Bash(git:*)` covers `Bash(git push:*)`).
+ * The suggestion window is the last N runs, so a denial fixed since then is
+ * suppressed here rather than by age.
+ */
+export function bashAllowed(allowedTools: readonly string[], suggestion: string): boolean {
+  const cmd = /^Bash\((.+):\*\)$/.exec(suggestion)?.[1];
+  if (!cmd) return allowedTools.includes(suggestion);
+  return allowedTools.some((t) => {
+    if (t === "Bash") return true;
+    // Only wildcard entries are prefixes; an exact Bash(ls) covers nothing broader.
+    const p = /^Bash\((.+?)(?::\*|\s\*)\)$/.exec(t)?.[1]?.trim();
+    return !!p && (cmd === p || cmd.startsWith(p + " "));
+  });
 }
 
 // Tools whose first argument is a subcommand: "git push", "npm run", "gh pr".
