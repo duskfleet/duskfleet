@@ -1,4 +1,4 @@
-# DuskFleet — Implementation Plan
+Audit is report-only for now (`continue-on-error`): Next 15.5 pins `postcss` 8.4.31, which carries a high advisory (GHSA-qx2v-qp2m-jg93 and three sourceMappingURL ones), the fix is Next 16, and an npm `overrides` on postcss made npm drop the package instead of upgrading it (2026-10-17). Make the step blocking again with the Next 16 upgrade. |# DuskFleet — Implementation Plan
 
 DuskFleet is a local platform for orchestrating, scheduling, observing and evaluating
 autonomous coding agents that run on top of Claude Code.

@@ -72,7 +72,7 @@ login and spends nothing: the tests use the fake binary. In order:
 | Typecheck | `npm run typecheck`, `npm run typecheck -w @duskfleet/web` | Type errors anywhere |
 | Tests + coverage | `npm run test:coverage` | A failing test, or line coverage of the in-process code under 80 % |
 | Dashboard build | `npm run build:web` | `next build` errors (Server Component rules `tsc` does not see) |
-| Audit | `npm audit --audit-level=high` | A high or critical advisory in the lockfile |
+| Audit | `npm audit --audit-level=high` | Report-only until the Next 16 upgrade clears the `postcss` advisory Next 15 pins (PLAN.md §8); then blocking on high / critical. |
 
 Two tests are gates in themselves: `test/migrations.test.js` pins the SHA-256 of every shipped
 migration (edit one and it fails; add one and it tells you the digest to append), and the layering of
