@@ -6,7 +6,7 @@
  * schedule rows (app/schedules/actions.ts), both on the core API.
  */
 import "server-only";
-import { describeCron, findRepoRoot, listProjectAgents, loadConfig, nextFire, openDatabase, parseCron, resolveClaudeBinary, resolveConfigDir, RunRepository, ScheduleRepository, type DuskFleetConfig, type ProjectAgentInfo, type Run, type RunStatus } from "@duskfleet/core";
+import { describeCron, findRepoRoot, listProjectAgents, loadAgents, loadConfig, nextFire, openDatabase, parseCron, resolveClaudeBinary, resolveConfigDir, RunRepository, ScheduleRepository, type DuskFleetConfig, type ProjectAgentInfo, type Run, type RunStatus } from "@duskfleet/core";
 import { homedir } from "node:os";
 import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
@@ -69,6 +69,18 @@ export function listAgents() {
     return hit ? { name, found: true, model: hit.model, path: hit.path } : { name, found: false, model: null, path: null };
   };
 
+  // A user file with a builtin's id overrides it: the card says so.
+  let builtinIds = new Set<string>();
+  try {
+    builtinIds = new Set(loadAgents(path.join(cfg.configDir, "agents"), "builtin").keys());
+  } catch {
+    // a broken builtin would have failed loadConfig already
+  }
+  const root = findRepoRoot(process.cwd());
+  const home = homedir();
+  const fileLabel = (p: string) =>
+    root && p.startsWith(root + path.sep) ? path.relative(root, p) : home && p.startsWith(home + path.sep) ? "~" + p.slice(home.length) : p;
+
   return [...cfg.agents.values()].map(({ systemPrompt, ...a }) => {
     const linked = a.claudeAgent ? resolveLink(a.project, a.claudeAgent) : null;
     // What a run actually starts with: this file's model overrides, otherwise
@@ -81,6 +93,11 @@ export function listAgents() {
       systemPromptLength: systemPrompt.length,
       timeoutMinutes: a.timeoutMinutes ?? cfg.claude.defaultTimeoutMinutes,
       maxBudgetUsd: a.maxBudgetUsd ?? cfg.claude.defaultMaxBudgetUsd,
+      /** Budget set by the agent file itself (null = the global default applies). */
+      ownBudgetUsd: a.maxBudgetUsd ?? null,
+      overridesBuiltin: a.source === "user" && builtinIds.has(a.id),
+      /** Repo-relative (or ~) path of the agent file, for display. */
+      fileLabel: fileLabel(a.sourcePath),
       isDefault: a.id === cfg.defaultAgent,
       linked,
       effectiveModel,
@@ -172,6 +189,12 @@ export interface AgentStats {
   completed: number;
   failed: number;
   needsReview: number;
+  /** Runs that reached a terminal status. */
+  finished: number;
+  /** Completed without any denial or context exhaustion (same rule as the runs overview). */
+  clean: number;
+  /** The most recent finished run completed but needs review (denial or context exhausted). */
+  lastNeedsReview: boolean;
   costUsd: number;
   avgDurationMs: number | null;
   lastRunAt: string | null;
@@ -189,16 +212,22 @@ export function agentStats(): AgentStats[] {
               SUM(status = 'completed')                         AS completed,
               SUM(status IN ('failed','timed_out','cancelled')) AS failed,
               SUM(human_intervention = 1)                       AS needs_review,
+              SUM(status IN ('completed','failed','timed_out','cancelled')) AS finished,
+              SUM(status = 'completed' AND human_intervention = 0 AND context_exhausted = 0) AS clean,
               COALESCE(SUM(cost_usd), 0)                        AS cost_usd,
               AVG(duration_ms)                                  AS avg_duration_ms,
               MAX(created_at)                                   AS last_run_at,
               (SELECT model_used FROM runs r2 WHERE r2.agent_id = runs.agent_id AND r2.model_used IS NOT NULL
-                 ORDER BY r2.created_at DESC LIMIT 1)          AS last_model_used
+                 ORDER BY r2.created_at DESC LIMIT 1)          AS last_model_used,
+              (SELECT human_intervention = 1 OR (status = 'completed' AND context_exhausted = 1) FROM runs r3
+                 WHERE r3.agent_id = runs.agent_id AND r3.status IN ('completed','failed','timed_out','cancelled')
+                 ORDER BY r3.created_at DESC LIMIT 1)          AS last_needs_review
        FROM runs GROUP BY agent_id ORDER BY total DESC`,
     )
     .all() as Array<{
     agent_id: string; total: number; running: number; completed: number; failed: number;
-    needs_review: number; cost_usd: number; avg_duration_ms: number | null; last_run_at: string | null; last_model_used: string | null;
+    needs_review: number; finished: number; clean: number; cost_usd: number; avg_duration_ms: number | null;
+    last_run_at: string | null; last_model_used: string | null; last_needs_review: number | null;
   }>;
   return rows.map((r) => ({
     agentId: r.agent_id,
@@ -207,11 +236,66 @@ export function agentStats(): AgentStats[] {
     completed: r.completed,
     failed: r.failed,
     needsReview: r.needs_review,
+    finished: r.finished,
+    clean: r.clean,
+    lastNeedsReview: r.last_needs_review === 1,
     costUsd: r.cost_usd,
     avgDurationMs: r.avg_duration_ms,
     lastRunAt: r.last_run_at,
     lastModelUsed: r.last_model_used,
   }));
+}
+
+/**
+ * Bash allow-list entries worth suggesting per agent: the commands its last
+ * `perAgent` runs were denied (stored denied_tools_json), reduced to a
+ * `Bash(<cmd>:*)` prefix. One window query, no events scan.
+ */
+export function deniedBashSuggestions(perAgent = 10): Map<string, string[]> {
+  const { db } = services();
+  const rows = db
+    .prepare(
+      `SELECT agent_id, denied_tools_json FROM (
+         SELECT agent_id, denied_tools_json, ROW_NUMBER() OVER (PARTITION BY agent_id ORDER BY created_at DESC) AS rn FROM runs
+       ) WHERE rn <= ? AND denied_tools_json IS NOT NULL AND denied_tools_json != '[]'`,
+    )
+    .all(perAgent) as Array<{ agent_id: string; denied_tools_json: string }>;
+  const out = new Map<string, string[]>();
+  for (const r of rows) {
+    let denied: Array<{ tool?: unknown; summary?: unknown }>;
+    try {
+      denied = JSON.parse(r.denied_tools_json) as typeof denied;
+    } catch {
+      continue;
+    }
+    if (!Array.isArray(denied)) continue;
+    for (const d of denied) {
+      if (d.tool !== "Bash" || typeof d.summary !== "string") continue;
+      const prefix = bashPrefix(d.summary);
+      if (!prefix) continue;
+      const list = out.get(r.agent_id) ?? [];
+      const entry = `Bash(${prefix}:*)`;
+      if (!list.includes(entry)) list.push(entry);
+      out.set(r.agent_id, list);
+    }
+  }
+  return out;
+}
+
+// Tools whose first argument is a subcommand: "git push", "npm run", "gh pr".
+const SUBCOMMAND_TOOLS = new Set(["git", "npm", "npx", "pnpm", "yarn", "gh", "docker", "cargo", "go", "kubectl", "brew", "uv", "pip", "poetry"]);
+
+/** "cd x && git push origin main" → "git push"; "ls -la" → "ls". */
+function bashPrefix(command: string): string | null {
+  for (const segment of command.split(/&&|\|\||;|\|/)) {
+    const words = segment.trim().split(/\s+/).filter((w) => w && !/^[A-Z_][A-Z0-9_]*=/.test(w));
+    const [first, second] = words;
+    if (!first || first === "cd") continue;
+    const cmd = first.replace(/^.*\//, "");
+    if (!/^[\w.-]+$/.test(cmd)) return null;
+    return SUBCOMMAND_TOOLS.has(cmd) && second && /^[\w.:-]+$/.test(second) && !second.startsWith("-") ? `${cmd} ${second}` : cmd;
+  }
+  return null;
 }
 
 export interface ModelStats {

@@ -49,6 +49,20 @@ export function fmtRelative(iso: string | null | undefined, now = Date.now()): s
   return t.toLocaleDateString(undefined, { day: "numeric", month: "short" });
 }
 
+/** Compact age for stat cells: "now", "2 min", "19 h", "3 d", else a short date. */
+export function fmtAgo(iso: string | null | undefined, now = Date.now()): string {
+  if (!iso) return "–";
+  const t = new Date(iso);
+  const min = Math.floor(Math.max(0, now - t.getTime()) / 60_000);
+  if (min < 1) return "now";
+  if (min < 60) return `${min} min`;
+  const h = Math.floor(min / 60);
+  if (h < 24) return `${h} h`;
+  const d = Math.floor(h / 24);
+  if (d < 30) return `${d} d`;
+  return t.toLocaleDateString(undefined, { day: "numeric", month: "short" });
+}
+
 export function fmtInt(n: number | null | undefined): string {
   return n === null || n === undefined ? "–" : n.toLocaleString();
 }
