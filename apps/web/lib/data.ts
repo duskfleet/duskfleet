@@ -315,12 +315,35 @@ export function scheduleFirings(id: string, limit = 10) {
   return services().schedules.firings(id, limit);
 }
 
+/** A firing plus the run it started (null for skips, errors, or a run that was pruned). */
+export function scheduleFiringsWithRuns(id: string, limit = 10) {
+  const { runs } = services();
+  return scheduleFirings(id, limit).map((f) => ({ ...f, run: f.runId ? runs.get(f.runId) : null }));
+}
+
+/** Firing counts over the last `days` days, across every schedule. */
+export function firingTotals(days = 7): { started: number; skippedBusy: number } {
+  const since = new Date(Date.now() - days * 24 * 3600_000).toISOString();
+  const r = services()
+    .db.prepare(
+      `SELECT SUM(outcome = 'started') AS started, SUM(outcome = 'skipped_busy') AS skipped_busy
+       FROM schedule_firings WHERE fired_at >= ?`,
+    )
+    .get(since) as { started: number | null; skipped_busy: number | null };
+  return { started: r.started ?? 0, skippedBusy: r.skipped_busy ?? 0 };
+}
+
 export function schedulerLease() {
   return services().schedules.leaseInfo();
 }
 
 export function schedulerEnabled(): boolean {
   return config().scheduler.enabled;
+}
+
+/** The holder renews the lease every tick with a TTL of three ticks (core scheduler). */
+export function schedulerTickSeconds(): number {
+  return config().scheduler.tickSeconds;
 }
 
 export interface ToolCatalogEntry {

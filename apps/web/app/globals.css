@@ -335,7 +335,60 @@ details.caps .chips { margin-top: 6px; }
 .chip-link:hover { color: var(--text); border-color: var(--border-strong); text-decoration: none; }
 
 /* ---- schedules ----------------------------------------------------------- */
-.runs td.cron-cell .mono { font-size: 0.8rem; }
+.page-head h1 .count { font-size: 16px; font-weight: 500; color: var(--faint); margin-left: 2px; }
+.page-head .head-note { font-size: 13px; line-height: 19px; }
+/* status strip: scheduler / lease holder / next firing / last 7 days */
+.sched-strip { display: grid; grid-template-columns: 1fr 1.25fr 1.33fr 1.33fr; background: var(--panel); border: 1px solid var(--border); border-radius: 12px; box-shadow: var(--shadow); overflow: hidden; margin-bottom: 24px; }
+.sched-strip .cell { padding: 12px 18px; border-right: 1px solid var(--border); min-width: 0; }
+.sched-strip .cell:last-child { border-right: none; }
+.sched-strip .label { font-size: 12px; line-height: 17.5px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.07em; font-weight: 600; }
+.sched-strip .value { font-family: var(--font-display); font-size: 20px; line-height: 29px; font-weight: 600; margin-top: 2px; color: var(--text); display: flex; align-items: baseline; gap: 8px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.sched-strip .value.ok { color: var(--ok); }
+.sched-strip .value.neutral { color: var(--muted); }
+.sched-strip .value.mono { font-family: var(--font-mono); font-size: 15px; line-height: 22px; font-weight: 500; margin-top: 5px; }
+.sched-strip .value .dot { flex: none; width: 8px; height: 8px; border-radius: 50%; background: currentColor; align-self: center; }
+.sched-strip .value .aside { font-size: 15px; line-height: 22px; font-weight: 500; color: var(--muted); margin-left: -4px; }
+.sched-strip .sub { font-size: 12px; line-height: 17.5px; color: var(--faint); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* one card per schedule: what it runs on the left, last firings on the right, actions below */
+.sched-list { display: grid; gap: 12px; }
+.sched-card { display: grid; grid-template-columns: minmax(0, 1fr) 420px; column-gap: 24px; background: var(--panel); border: 1px solid var(--border); border-radius: 12px; box-shadow: var(--shadow); padding: 16px 18px 12px; }
+.sched-card.paused { opacity: 0.75; }
+.sched-card:target { border-color: var(--accent); }
+.sched-card .main { min-width: 0; }
+.sched-card .title-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.sched-card h3 { font-family: var(--font-display); font-size: 18px; line-height: 26px; font-weight: 600; margin: 0; color: var(--text); }
+.sched-card .meta { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: 8px; font-size: 13.5px; line-height: 19.5px; color: var(--muted); }
+.sched-card .meta .sep { color: var(--faint); }
+.sched-card .meta a.agent { color: var(--amber); }
+.sched-card .meta .model { font-family: var(--font-mono); font-size: 12.5px; line-height: 18px; }
+.cron-chip { font-family: var(--font-mono); font-size: 13.5px; line-height: 19.5px; padding: 1px 8px; border-radius: 6px; background: var(--panel-2); border: 1px solid var(--border); color: var(--text); white-space: pre; }
+.sched-card blockquote { margin: 10px 0 0; padding: 4px 0 4px 12px; border-left: 3px solid var(--dusk); font-size: 14px; line-height: 20.5px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.sched-card .firings { min-width: 0; }
+.sched-card .firings .label { font-size: 11px; line-height: 16px; color: var(--faint); text-transform: uppercase; letter-spacing: 0.07em; font-weight: 600; }
+.sched-card .squares { display: flex; gap: 4px; margin-top: 8px; }
+.sched-card .squares .sq { flex: 1 1 0; height: 28px; border-radius: 5px; }
+.sched-card .squares a.sq:hover { filter: brightness(1.15); }
+.sched-card .last { display: flex; justify-content: space-between; gap: 12px; margin-top: 8px; font-size: 12.5px; line-height: 18px; color: var(--muted); }
+.sched-card .last a { color: var(--amber); white-space: nowrap; }
+.sched-card .last .v.clean { color: var(--ok); }
+.sched-card .last .v.review { color: var(--warn); }
+.sched-card .last .v.failed { color: var(--bad-ink); }
+.sched-card .last .v.running { color: var(--run); }
+.sched-card .foot { grid-column: 1 / -1; display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-top: 12px; padding-top: 10px; border-top: 1px solid var(--border); font-size: 12.5px; line-height: 18px; }
+.sched-card .foot .sched-actions { margin-top: 0; }
+.sched-card .foot .sched-edit { margin-top: 0; }
+/* firing squares, shared by the cards and the legend */
+.sq { display: inline-block; border: 1px solid transparent; }
+.sq.clean { background: var(--ok); }
+.sq.review { background: var(--warn); }
+.sq.failed { background: var(--coral); }
+.sq.running { background: var(--run); }
+.sq.busy, .sq.skipped { border-color: var(--faint); }
+.sq.skipped { border-style: dashed; }
+.sq.none { background: var(--panel-2); border-color: var(--border); }
+.sched-legend { display: flex; gap: 16px; flex-wrap: wrap; margin-top: 16px; font-size: 12.5px; line-height: 18px; color: var(--muted); }
+.sched-legend > span { display: inline-flex; align-items: center; gap: 6px; }
+.sched-legend .sq { width: 10px; height: 10px; border-radius: 3px; }
 .sched-actions { display: inline-flex; gap: 6px; align-items: center; flex-wrap: wrap; font-size: 0.8rem; margin-top: 8px; }
 .sched-actions .err, .sched-edit .err { color: var(--bad); }
 .sched-edit { display: grid; gap: 6px; margin-top: 8px; font-size: 0.8rem; max-width: 360px; }
@@ -346,8 +399,6 @@ details.caps .chips { margin-top: 6px; }
 .sched-edit .row { display: flex; gap: 6px; }
 .sched-edit .hint { color: var(--faint); font-size: 0.74rem; }
 .runs tr:target td { background: var(--accent-bg); }
-.howto { display: grid; gap: 10px; }
-.howto .cmd pre { font-size: 0.8rem; }
 
 /* ---- MCP docs ------------------------------------------------------------ */
 .docs { display: grid; grid-template-columns: 220px minmax(0, 1fr); gap: 24px; align-items: start; }
@@ -376,6 +427,11 @@ details.desc ul { margin: 6px 0 0; padding-left: 20px; }
   .facts { flex-wrap: wrap; }
   .fact { border-bottom: 1px solid var(--border); }
   .two-col { grid-template-columns: 1fr; }
+  .sched-strip { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .sched-strip .cell:nth-child(2) { border-right: none; }
+  .sched-strip .cell:nth-child(-n + 2) { border-bottom: 1px solid var(--border); }
+  .sched-card { grid-template-columns: 1fr; row-gap: 14px; }
+  .sched-card blockquote { white-space: normal; }
 }
 @media (max-width: 600px) {
   .nav .brand { margin-right: 6px; }
