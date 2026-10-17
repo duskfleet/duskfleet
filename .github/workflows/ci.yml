@@ -1,0 +1,55 @@
+# Quality gates for every pull request (PLAN.md §8). Everything here runs without a Claude
+# login and without network beyond npm: the tests replay recorded stream-json through
+# packages/mcp/test/fake-claude.js, so a CI run never spawns Claude and never costs money.
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  checks:
+    name: checks
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Install
+        run: npm ci
+
+      - name: Public repo hygiene (no home paths, usernames or machine-specific values)
+        run: npm run check:public
+
+      - name: Lint and format (Biome)
+        run: npm run lint
+
+      - name: Build core + mcp
+        run: npm run build
+
+      - name: Typecheck (core, mcp, web)
+        run: |
+          npm run typecheck
+          npm run typecheck -w @duskfleet/web
+
+      - name: Tests with coverage floor
+        run: npm run test:coverage
+
+      - name: Build dashboard
+        run: npm run build:web
+
+      - name: Dependency audit (high and critical only)
+        run: npm audit --audit-level=high

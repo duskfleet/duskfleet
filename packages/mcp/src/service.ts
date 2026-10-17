@@ -101,11 +101,15 @@ export function renderService(t: ServiceTarget): ServiceUnit {
   const home = t.home ?? homedir();
   const unitPath = serviceUnitPath(t.platform, home);
   if (!isSupportedPlatform(t.platform) || !unitPath) {
-    throw new Error(`install-service supports macOS (launchd), Linux (systemd --user) and Windows (Task Scheduler); this is ${t.platform}. Run "duskfleet serve" under your own supervisor instead.`);
+    throw new Error(
+      `install-service supports macOS (launchd), Linux (systemd --user) and Windows (Task Scheduler); this is ${t.platform}. Run "duskfleet serve" under your own supervisor instead.`,
+    );
   }
 
   if (t.platform === "darwin") {
-    const env: Array<[string, string]> = [["PATH", searchPath(t, ["/opt/homebrew/bin", "/usr/local/bin", "/usr/bin", "/bin"])]];
+    const env: Array<[string, string]> = [
+      ["PATH", searchPath(t, ["/opt/homebrew/bin", "/usr/local/bin", "/usr/bin", "/bin"])],
+    ];
     if (t.claudeBin) env.push(["CLAUDE_BIN", t.claudeBin]);
     const content = [
       '<?xml version="1.0" encoding="UTF-8"?>',
@@ -140,7 +144,11 @@ export function renderService(t: ServiceTarget): ServiceUnit {
       label: LAUNCHD_LABEL,
       unitPath,
       content,
-      installCommands: [`launchctl bootout ${domain}/${LAUNCHD_LABEL} 2>/dev/null`, `launchctl bootstrap ${domain} "${unitPath}"`, `launchctl kickstart -k ${domain}/${LAUNCHD_LABEL}`],
+      installCommands: [
+        `launchctl bootout ${domain}/${LAUNCHD_LABEL} 2>/dev/null`,
+        `launchctl bootstrap ${domain} "${unitPath}"`,
+        `launchctl kickstart -k ${domain}/${LAUNCHD_LABEL}`,
+      ],
       uninstallCommands: [`launchctl bootout ${domain}/${LAUNCHD_LABEL}`, `rm "${unitPath}"`],
       notes: [
         "A LaunchAgent runs in your login session, so the service sees the same `claude` login as your terminal.",
@@ -178,8 +186,16 @@ export function renderService(t: ServiceTarget): ServiceUnit {
       label: SYSTEMD_UNIT,
       unitPath,
       content,
-      installCommands: ["systemctl --user daemon-reload", `systemctl --user enable ${SYSTEMD_UNIT}`, `systemctl --user restart ${SYSTEMD_UNIT}`],
-      uninstallCommands: [`systemctl --user disable --now ${SYSTEMD_UNIT}`, `rm "${unitPath}"`, "systemctl --user daemon-reload"],
+      installCommands: [
+        "systemctl --user daemon-reload",
+        `systemctl --user enable ${SYSTEMD_UNIT}`,
+        `systemctl --user restart ${SYSTEMD_UNIT}`,
+      ],
+      uninstallCommands: [
+        `systemctl --user disable --now ${SYSTEMD_UNIT}`,
+        `rm "${unitPath}"`,
+        "systemctl --user daemon-reload",
+      ],
       notes: [
         "A systemd user unit runs in your login session, so the service sees the same `claude` login as your terminal.",
         "To keep it running when you are logged out: `loginctl enable-linger $USER`.",
@@ -243,7 +259,10 @@ export function renderService(t: ServiceTarget): ServiceUnit {
     label: WINDOWS_TASK,
     unitPath,
     content,
-    installCommands: [`schtasks /Create /F /TN "${WINDOWS_TASK}" /XML "${unitPath}"`, `schtasks /Run /TN "${WINDOWS_TASK}"`],
+    installCommands: [
+      `schtasks /Create /F /TN "${WINDOWS_TASK}" /XML "${unitPath}"`,
+      `schtasks /Run /TN "${WINDOWS_TASK}"`,
+    ],
     uninstallCommands: [`schtasks /End /TN "${WINDOWS_TASK}"`, `schtasks /Delete /F /TN "${WINDOWS_TASK}"`],
     notes: [
       "A logon task in Task Scheduler runs as you, so the service sees the same `claude` login as your terminal.",
@@ -271,9 +290,7 @@ function safeUserName(): string | null {
 
 // ---- running the service manager ----------------------------------------------
 
-export interface Exec {
-  (cmd: string, args: string[]): { status: number | null; stdout: string; stderr: string };
-}
+export type Exec = (cmd: string, args: string[]) => { status: number | null; stdout: string; stderr: string };
 
 export const realExec: Exec = (cmd, args) => {
   const r = spawnSync(cmd, args, { encoding: "utf8", windowsHide: true });
@@ -283,7 +300,10 @@ export const realExec: Exec = (cmd, args) => {
 
 function must(exec: Exec, cmd: string, args: string[], what: string): string {
   const r = exec(cmd, args);
-  if (r.status !== 0) throw new Error(`${what} failed (${cmd} ${args.join(" ")}): ${(r.stderr || r.stdout).trim() || `exit ${r.status}`}`);
+  if (r.status !== 0)
+    throw new Error(
+      `${what} failed (${cmd} ${args.join(" ")}): ${(r.stderr || r.stdout).trim() || `exit ${r.status}`}`,
+    );
   return r.stdout;
 }
 
@@ -318,17 +338,29 @@ export function installService(t: ServiceTarget, exec: Exec = realExec): { unit:
     must(exec, "systemctl", ["--user", "daemon-reload"], "systemctl daemon-reload");
     must(exec, "systemctl", ["--user", "enable", unit.label], "systemctl enable");
     must(exec, "systemctl", ["--user", "restart", unit.label], "systemctl restart");
-    ran.push("systemctl --user daemon-reload", `systemctl --user enable ${unit.label}`, `systemctl --user restart ${unit.label}`);
+    ran.push(
+      "systemctl --user daemon-reload",
+      `systemctl --user enable ${unit.label}`,
+      `systemctl --user restart ${unit.label}`,
+    );
   } else {
     exec("schtasks", ["/End", "/TN", unit.label]); // stop a running instance so /Run restarts with the new code
     must(exec, "schtasks", ["/Create", "/F", "/TN", unit.label, "/XML", unit.unitPath], "schtasks /Create");
     must(exec, "schtasks", ["/Run", "/TN", unit.label], "schtasks /Run");
-    ran.push(`schtasks /End /TN "${unit.label}"`, `schtasks /Create /F /TN "${unit.label}" /XML "${unit.unitPath}"`, `schtasks /Run /TN "${unit.label}"`);
+    ran.push(
+      `schtasks /End /TN "${unit.label}"`,
+      `schtasks /Create /F /TN "${unit.label}" /XML "${unit.unitPath}"`,
+      `schtasks /Run /TN "${unit.label}"`,
+    );
   }
   return { unit, ran };
 }
 
-export function uninstallService(platform: NodeJS.Platform, exec: Exec = realExec, home = homedir()): { removed: boolean; ran: string[] } {
+export function uninstallService(
+  platform: NodeJS.Platform,
+  exec: Exec = realExec,
+  home = homedir(),
+): { removed: boolean; ran: string[] } {
   const label = serviceLabel(platform);
   const unitPath = serviceUnitPath(platform, home);
   if (!label || !unitPath) throw new Error(`no service support on ${platform}`);
@@ -359,25 +391,59 @@ export function serviceStatus(platform: NodeJS.Platform, exec: Exec = realExec, 
   const label = serviceLabel(platform);
   const unitPath = serviceUnitPath(platform, home);
   if (!label || !unitPath) {
-    return { platform, supported: false, label: null, unitPath: null, installed: false, running: null, pid: null, detail: `no service support on ${platform}; run "duskfleet serve" under your own supervisor` };
+    return {
+      platform,
+      supported: false,
+      label: null,
+      unitPath: null,
+      installed: false,
+      running: null,
+      pid: null,
+      detail: `no service support on ${platform}; run "duskfleet serve" under your own supervisor`,
+    };
   }
   const base = { platform, supported: true, label, unitPath };
   if (platform === "darwin") {
     const r = exec("launchctl", ["print", `${launchdDomain()}/${label}`]);
     if (r.status !== 0) {
-      return { ...base, installed: existsSync(unitPath), running: false, pid: null, detail: existsSync(unitPath) ? "plist present but not loaded: run install-service" : "not installed" };
+      return {
+        ...base,
+        installed: existsSync(unitPath),
+        running: false,
+        pid: null,
+        detail: existsSync(unitPath) ? "plist present but not loaded: run install-service" : "not installed",
+      };
     }
     const pid = /^\s*pid = (\d+)/m.exec(r.stdout)?.[1];
     const state = /^\s*state = (\w+)/m.exec(r.stdout)?.[1] ?? "unknown";
-    return { ...base, installed: true, running: state === "running" || !!pid, pid: pid ? Number(pid) : null, detail: `launchd: ${state}${pid ? ` pid ${pid}` : ""}` };
+    return {
+      ...base,
+      installed: true,
+      running: state === "running" || !!pid,
+      pid: pid ? Number(pid) : null,
+      detail: `launchd: ${state}${pid ? ` pid ${pid}` : ""}`,
+    };
   }
   if (platform === "linux") {
     const r = exec("systemctl", ["--user", "show", label, "--property=ActiveState,SubState,MainPID,LoadState"]);
-    if (r.status !== 0) return { ...base, installed: existsSync(unitPath), running: null, pid: null, detail: `systemctl unavailable: ${(r.stderr || r.stdout).trim()}` };
+    if (r.status !== 0)
+      return {
+        ...base,
+        installed: existsSync(unitPath),
+        running: null,
+        pid: null,
+        detail: `systemctl unavailable: ${(r.stderr || r.stdout).trim()}`,
+      };
     const prop = (k: string) => new RegExp(`^${k}=(.*)$`, "m").exec(r.stdout)?.[1]?.trim() ?? "";
     const loaded = prop("LoadState") === "loaded";
     const pid = Number(prop("MainPID"));
-    return { ...base, installed: loaded || existsSync(unitPath), running: prop("ActiveState") === "active", pid: pid > 0 ? pid : null, detail: loaded ? `systemd: ${prop("ActiveState")} (${prop("SubState")})` : "not installed" };
+    return {
+      ...base,
+      installed: loaded || existsSync(unitPath),
+      running: prop("ActiveState") === "active",
+      pid: pid > 0 ? pid : null,
+      detail: loaded ? `systemd: ${prop("ActiveState")} (${prop("SubState")})` : "not installed",
+    };
   }
   const r = exec("schtasks", ["/Query", "/TN", label, "/FO", "LIST", "/V"]);
   if (r.status !== 0) return { ...base, installed: false, running: false, pid: null, detail: "not installed" };

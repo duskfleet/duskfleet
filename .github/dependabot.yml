@@ -1,0 +1,26 @@
+# Weekly dependency updates, grouped so a week yields one or two PRs rather than ten.
+# Runtime dependencies are deliberately few (PLAN.md §2); a bump that adds a transitive
+# native addon or a new framework should be declined, not merged.
+version: 2
+updates:
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 5
+    groups:
+      runtime:
+        dependency-type: production
+      dev-tooling:
+        dependency-type: development
+    ignore:
+      # Next.js majors change the App Router contract; take them on purpose, not from a bot.
+      - dependency-name: next
+        update-types: ["version-update:semver-major"]
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday

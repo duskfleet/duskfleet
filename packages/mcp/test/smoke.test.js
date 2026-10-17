@@ -5,18 +5,20 @@
  *   npm run build && npm test
  */
 import assert from "node:assert/strict";
-import { mkdtempSync, writeFileSync, mkdirSync, rmSync, realpathSync } from "node:fs";
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
-
-import { loadConfig } from "@duskfleet/core";
-import { ClaudeCodeExecutor } from "@duskfleet/core";
-import { RunManager } from "@duskfleet/core";
-import { openDatabase } from "@duskfleet/core";
-import { RunRepository } from "@duskfleet/core";
-import { looksLikeContextExhaustion, summarizeRun } from "@duskfleet/core";
+import {
+  ClaudeCodeExecutor,
+  loadConfig,
+  looksLikeContextExhaustion,
+  openDatabase,
+  RunManager,
+  RunRepository,
+  summarizeRun,
+} from "@duskfleet/core";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const fakeBinary = path.join(here, "fake-claude.js");
@@ -39,7 +41,11 @@ function makeApp() {
   );
   const config = loadConfig(configDir);
   const db = openDatabase(config.dataDir);
-  const executor = new ClaudeCodeExecutor({ binary: config.claude.binary, strictMcpConfig: true, allowBypassPermissions: false });
+  const executor = new ClaudeCodeExecutor({
+    binary: config.claude.binary,
+    strictMcpConfig: true,
+    allowBypassPermissions: false,
+  });
   const runs = new RunManager(config, new RunRepository(db), executor);
   const cleanup = async () => {
     runs.shutdown();
@@ -153,7 +159,10 @@ test("subagent invocations are recorded as run_agents rows with the persona hash
   const app = makeApp();
   try {
     mkdirSync(path.join(app.project, ".claude", "agents"), { recursive: true });
-    writeFileSync(path.join(app.project, ".claude", "agents", "reviewer.md"), `---\ndescription: Reviews diffs\ntools: Bash, Read\n---\nReview.\n`);
+    writeFileSync(
+      path.join(app.project, ".claude", "agents", "reviewer.md"),
+      `---\ndescription: Reviews diffs\ntools: Bash, Read\n---\nReview.\n`,
+    );
     const started = await app.runs.startRun({ prompt: "subagent", projectPath: app.project, model: "opus" });
     const run = await app.runs.waitForRun(started.id, 10_000);
     assert.equal(run.status, "completed");
@@ -207,7 +216,14 @@ test("a subagent still open when the run is cancelled is recorded as interrupted
   const app = makeApp();
   try {
     const started = await app.runs.startRun({ prompt: "subagent-hang", projectPath: app.project });
-    await new Promise((r) => setTimeout(r, 500));
+    // Wait for the subagent row (written on subagent_start), then a short settle for the two
+    // nested tool calls the fake binary emits right after it before hanging. The run timeout
+    // is 3 s, so the wait is bounded well below it; a fixed 500 ms was flaky on slow runners.
+    const deadline = Date.now() + 2_000;
+    while (app.runs.agents(started.id).length === 0 && Date.now() < deadline) {
+      await new Promise((r) => setTimeout(r, 25));
+    }
+    await new Promise((r) => setTimeout(r, 200));
     app.runs.cancelRun(started.id);
     const run = await app.runs.waitForRun(started.id, 10_000);
     assert.equal(run.status, "cancelled");
@@ -226,7 +242,10 @@ test("a subagent still open when the run is cancelled is recorded as interrupted
 test("project validation rejects paths outside allowed roots", async () => {
   const app = makeApp();
   try {
-    await assert.rejects(() => app.runs.startRun({ prompt: "ok", projectPath: tmpdir() }), /outside allowed_project_roots/);
+    await assert.rejects(
+      () => app.runs.startRun({ prompt: "ok", projectPath: tmpdir() }),
+      /outside allowed_project_roots/,
+    );
     await assert.rejects(() => app.runs.startRun({ prompt: "ok", projectPath: "relative/path" }), /must be absolute/);
     await assert.rejects(() => app.runs.startRun({ prompt: "ok" }), /project_path or project_id/);
   } finally {
@@ -240,7 +259,11 @@ test("orphaned runs are failed on restart", async () => {
     const started = await app.runs.startRun({ prompt: "hang", projectPath: app.project });
     // Simulate a restart: new RunManager over the same database.
     const repo = new RunRepository(app.db);
-    const fresh = new RunManager(app.config, repo, new ClaudeCodeExecutor({ binary: fakeBinary, strictMcpConfig: true, allowBypassPermissions: false }));
+    const fresh = new RunManager(
+      app.config,
+      repo,
+      new ClaudeCodeExecutor({ binary: fakeBinary, strictMcpConfig: true, allowBypassPermissions: false }),
+    );
     assert.equal(fresh.recoverOrphans(), 1);
     assert.equal(fresh.getRun(started.id).status, "failed");
   } finally {
@@ -252,8 +275,14 @@ test("private data/projects.yaml merges over config/projects.yaml", () => {
   const app = makeApp();
   try {
     const dataDir = app.config.dataDir;
-    writeFileSync(path.join(app.root, "config", "projects.yaml"), `projects:\n  shared:\n    path: ${app.project}\n  mine:\n    path: ${app.project}\n    description: versioned\n`);
-    writeFileSync(path.join(dataDir, "projects.yaml"), `projects:\n  mine:\n    path: ${app.project}\n    description: private\n    inherit_mcp: true\n`);
+    writeFileSync(
+      path.join(app.root, "config", "projects.yaml"),
+      `projects:\n  shared:\n    path: ${app.project}\n  mine:\n    path: ${app.project}\n    description: versioned\n`,
+    );
+    writeFileSync(
+      path.join(dataDir, "projects.yaml"),
+      `projects:\n  mine:\n    path: ${app.project}\n    description: private\n    inherit_mcp: true\n`,
+    );
     const fresh = app.runs.reloadConfig();
     assert.deepEqual([...fresh.projects.keys()].sort(), ["mine", "shared"]);
     assert.equal(fresh.projects.get("mine").description, "private", "private entry wins");
@@ -307,8 +336,14 @@ test("a second run on a busy project or a busy agent is refused, not queued", as
     const other = path.join(app.root, "project2");
     mkdirSync(other);
     const first = await app.runs.startRun({ prompt: "hang", projectPath: app.project });
-    await assert.rejects(() => app.runs.startRun({ prompt: "ok", projectPath: app.project, agentId: "connected" }), /project busy: run .* \(agent coder\)/);
-    await assert.rejects(() => app.runs.startRun({ prompt: "ok", projectPath: realpathSync(other) }), /agent busy: coder/);
+    await assert.rejects(
+      () => app.runs.startRun({ prompt: "ok", projectPath: app.project, agentId: "connected" }),
+      /project busy: run .* \(agent coder\)/,
+    );
+    await assert.rejects(
+      () => app.runs.startRun({ prompt: "ok", projectPath: realpathSync(other) }),
+      /agent busy: coder/,
+    );
     const okRun = await app.runs.startRun({ prompt: "ok", projectPath: realpathSync(other), agentId: "connected" });
     assert.equal(okRun.status, "running", "different project and different agent is fine");
     app.runs.cancelRun(first.id);
@@ -326,8 +361,15 @@ test("MCP servers mounted and allow-list mismatches are recorded on the run", as
     const run = await app.runs.waitForRun(started.id, 10_000);
     assert.deepEqual(run.mcp.mounted, [{ name: "claude.ai Figma", status: "connected" }]);
     assert.deepEqual(run.mcp.used, []);
-    assert.deepEqual(run.mcp.allowListedMissing, ["mcp__plugin_productivity_atlassian"], "tool-level entries resolve to their server prefix");
-    const notes = app.runs.events(run.id).filter((e) => e.type === "note").map((e) => e.payload.message);
+    assert.deepEqual(
+      run.mcp.allowListedMissing,
+      ["mcp__plugin_productivity_atlassian"],
+      "tool-level entries resolve to their server prefix",
+    );
+    const notes = app.runs
+      .events(run.id)
+      .filter((e) => e.type === "note")
+      .map((e) => e.payload.message);
     assert.equal(notes.length, 1);
     assert.match(notes[0], /never mounted.*mcp__plugin_productivity_atlassian.*mounted: mcp__claude_ai_Figma/);
     const summary = summarizeRun(app.runs.listRuns({ limit: 1 })[0]);
@@ -340,9 +382,41 @@ test("MCP servers mounted and allow-list mismatches are recorded on the run", as
 });
 
 test("context exhaustion is detected from structured signals, not from prose", () => {
-  const base = { isError: false, subtype: "success", terminalReason: "completed", stopReason: "end_turn", sessionId: null, resultText: null, numTurns: 1, durationMs: 1, costUsd: 0, usage: {}, permissionDenials: 0, deniedTools: [], modelUsed: null, raw: null };
-  assert.equal(looksLikeContextExhaustion({ ...base, resultText: "The page listing may be an open-page limitation CLAUDE.md describes; context is fine." }), false);
+  const base = {
+    isError: false,
+    subtype: "success",
+    terminalReason: "completed",
+    stopReason: "end_turn",
+    sessionId: null,
+    resultText: null,
+    numTurns: 1,
+    durationMs: 1,
+    costUsd: 0,
+    usage: {},
+    permissionDenials: 0,
+    deniedTools: [],
+    modelUsed: null,
+    raw: null,
+  };
+  assert.equal(
+    looksLikeContextExhaustion({
+      ...base,
+      resultText: "The page listing may be an open-page limitation CLAUDE.md describes; context is fine.",
+    }),
+    false,
+  );
   assert.equal(looksLikeContextExhaustion({ ...base, terminalReason: "context_window_exceeded" }), true);
-  assert.equal(looksLikeContextExhaustion({ ...base, isError: true, subtype: "error_during_execution", resultText: "API Error: prompt is too long" }), true);
-  assert.equal(looksLikeContextExhaustion({ ...base, isError: false, resultText: "prompt is too long, said the user, jokingly" }), false);
+  assert.equal(
+    looksLikeContextExhaustion({
+      ...base,
+      isError: true,
+      subtype: "error_during_execution",
+      resultText: "API Error: prompt is too long",
+    }),
+    true,
+  );
+  assert.equal(
+    looksLikeContextExhaustion({ ...base, isError: false, resultText: "prompt is too long, said the user, jokingly" }),
+    false,
+  );
 });

@@ -5,14 +5,24 @@ import type { Run, RunStatus } from "@duskfleet/core";
  * denial, exhausted context) is shown in amber, not green. The raw status
  * is still visible in the title.
  */
-export function StatusBadge({ run, status }: { run?: Pick<Run, "status" | "humanIntervention" | "contextExhausted" | "permissionDenials"> & { mcp?: Run["mcp"] }; status?: RunStatus }) {
+export function StatusBadge({
+  run,
+  status,
+}: {
+  run?: Pick<Run, "status" | "humanIntervention" | "contextExhausted" | "permissionDenials"> & { mcp?: Run["mcp"] };
+  status?: RunStatus;
+}) {
   const s = run?.status ?? status ?? "pending";
   const mcpMissing = (run?.mcp?.allowListedMissing ?? []).length > 0;
   const attention = s === "completed" && run && (run.humanIntervention || run.contextExhausted || mcpMissing);
   const label = attention ? "needs review" : s.replace("_", " ");
   const cls = attention ? "attention" : s;
   const title = attention
-    ? [run.permissionDenials ? `${run.permissionDenials} permission denial(s)` : null, run.contextExhausted ? "context exhausted" : null, mcpMissing ? "allow-listed MCP server not mounted" : null]
+    ? [
+        run.permissionDenials ? `${run.permissionDenials} permission denial(s)` : null,
+        run.contextExhausted ? "context exhausted" : null,
+        mcpMissing ? "allow-listed MCP server not mounted" : null,
+      ]
         .filter(Boolean)
         .join(" · ")
     : s;

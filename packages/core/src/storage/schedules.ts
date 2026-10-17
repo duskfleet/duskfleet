@@ -3,8 +3,9 @@
  * that makes sure only one process ticks at a time (the MCP server inside
  * Claude Desktop and a `duskfleet serve` under launchd may both be alive).
  */
-import type { DatabaseSync } from "node:sqlite";
+
 import { randomUUID } from "node:crypto";
+import type { DatabaseSync } from "node:sqlite";
 import type { Schedule, ScheduleFiring, ScheduleInput, ScheduleOutcome, SchedulePatch } from "../scheduler/types.js";
 
 interface ScheduleRow {
@@ -57,7 +58,11 @@ export class ScheduleRepository {
   constructor(private readonly db: DatabaseSync) {}
 
   list(): Schedule[] {
-    return (this.db.prepare("SELECT * FROM schedules ORDER BY enabled DESC, next_run_at IS NULL, next_run_at, name").all() as unknown as ScheduleRow[]).map(rowToSchedule);
+    return (
+      this.db
+        .prepare("SELECT * FROM schedules ORDER BY enabled DESC, next_run_at IS NULL, next_run_at, name")
+        .all() as unknown as ScheduleRow[]
+    ).map(rowToSchedule);
   }
 
   get(id: string): Schedule | null {
@@ -66,7 +71,9 @@ export class ScheduleRepository {
   }
 
   findByName(name: string): Schedule | null {
-    const row = this.db.prepare("SELECT * FROM schedules WHERE name = ?").get(name) as unknown as ScheduleRow | undefined;
+    const row = this.db.prepare("SELECT * FROM schedules WHERE name = ?").get(name) as unknown as
+      | ScheduleRow
+      | undefined;
     return row ? rowToSchedule(row) : null;
   }
 
@@ -74,7 +81,9 @@ export class ScheduleRepository {
   due(nowIso: string): Schedule[] {
     return (
       this.db
-        .prepare("SELECT * FROM schedules WHERE enabled = 1 AND next_run_at IS NOT NULL AND next_run_at <= ? ORDER BY next_run_at")
+        .prepare(
+          "SELECT * FROM schedules WHERE enabled = 1 AND next_run_at IS NOT NULL AND next_run_at <= ? ORDER BY next_run_at",
+        )
         .all(nowIso) as unknown as ScheduleRow[]
     ).map(rowToSchedule);
   }
@@ -142,8 +151,13 @@ export class ScheduleRepository {
 
   /** Schedules with a pending run request, cleared in the same call so a crash cannot loop on them. */
   takeRunRequests(): Schedule[] {
-    const rows = (this.db.prepare("SELECT * FROM schedules WHERE run_requested_at IS NOT NULL ORDER BY run_requested_at").all() as unknown as ScheduleRow[]).map(rowToSchedule);
-    if (rows.length > 0) this.db.prepare("UPDATE schedules SET run_requested_at = NULL WHERE run_requested_at IS NOT NULL").run();
+    const rows = (
+      this.db
+        .prepare("SELECT * FROM schedules WHERE run_requested_at IS NOT NULL ORDER BY run_requested_at")
+        .all() as unknown as ScheduleRow[]
+    ).map(rowToSchedule);
+    if (rows.length > 0)
+      this.db.prepare("UPDATE schedules SET run_requested_at = NULL WHERE run_requested_at IS NOT NULL").run();
     return rows;
   }
 
@@ -153,23 +167,57 @@ export class ScheduleRepository {
   }
 
   /** Record a firing attempt and advance the schedule. */
-  recordFiring(id: string, outcome: ScheduleOutcome, runId: string | null, error: string | null, nextRunAt: string | null): void {
+  recordFiring(
+    id: string,
+    outcome: ScheduleOutcome,
+    runId: string | null,
+    error: string | null,
+    nextRunAt: string | null,
+  ): void {
     const now = new Date().toISOString();
-    this.db.prepare("INSERT INTO schedule_firings (schedule_id, fired_at, outcome, run_id, error) VALUES (?, ?, ?, ?, ?)").run(id, now, outcome, runId, error);
+    this.db
+      .prepare("INSERT INTO schedule_firings (schedule_id, fired_at, outcome, run_id, error) VALUES (?, ?, ?, ?, ?)")
+      .run(id, now, outcome, runId, error);
     this.db
       .prepare(
         `UPDATE schedules SET last_fired_at = ?, last_outcome = ?, last_error = ?, last_run_id = COALESCE(?, last_run_id),
            fires = fires + ?, skips = skips + ?, next_run_at = ?, updated_at = ? WHERE id = ?`,
       )
-      .run(now, outcome, error, runId, outcome === "started" ? 1 : 0, outcome === "started" ? 0 : 1, nextRunAt, now, id);
+      .run(
+        now,
+        outcome,
+        error,
+        runId,
+        outcome === "started" ? 1 : 0,
+        outcome === "started" ? 0 : 1,
+        nextRunAt,
+        now,
+        id,
+      );
   }
 
   firings(scheduleId: string, limit = 20): ScheduleFiring[] {
     return (
       this.db
-        .prepare("SELECT id, schedule_id, fired_at, outcome, run_id, error FROM schedule_firings WHERE schedule_id = ? ORDER BY id DESC LIMIT ?")
-        .all(scheduleId, limit) as Array<{ id: number; schedule_id: string; fired_at: string; outcome: string; run_id: string | null; error: string | null }>
-    ).map((r) => ({ id: r.id, scheduleId: r.schedule_id, firedAt: r.fired_at, outcome: r.outcome as ScheduleOutcome, runId: r.run_id, error: r.error }));
+        .prepare(
+          "SELECT id, schedule_id, fired_at, outcome, run_id, error FROM schedule_firings WHERE schedule_id = ? ORDER BY id DESC LIMIT ?",
+        )
+        .all(scheduleId, limit) as Array<{
+        id: number;
+        schedule_id: string;
+        fired_at: string;
+        outcome: string;
+        run_id: string | null;
+        error: string | null;
+      }>
+    ).map((r) => ({
+      id: r.id,
+      scheduleId: r.schedule_id,
+      firedAt: r.fired_at,
+      outcome: r.outcome as ScheduleOutcome,
+      runId: r.run_id,
+      error: r.error,
+    }));
   }
 
   // ---- lease ---------------------------------------------------------------
@@ -186,7 +234,9 @@ export class ScheduleRepository {
     const now = Date.now();
     const expires = new Date(now + ttlMs).toISOString();
     const nowIso = new Date(now).toISOString();
-    this.db.prepare("INSERT OR IGNORE INTO scheduler_lease (id, holder, expires_at) VALUES (1, ?, ?)").run(holder, expires);
+    this.db
+      .prepare("INSERT OR IGNORE INTO scheduler_lease (id, holder, expires_at) VALUES (1, ?, ?)")
+      .run(holder, expires);
     const r = this.db
       .prepare(
         "UPDATE scheduler_lease SET holder = ?, expires_at = ? WHERE id = 1 AND (holder = ? OR expires_at < ? OR (? AND holder NOT LIKE 'serve@%'))",
@@ -196,11 +246,15 @@ export class ScheduleRepository {
   }
 
   releaseLease(holder: string): void {
-    this.db.prepare("UPDATE scheduler_lease SET expires_at = ? WHERE id = 1 AND holder = ?").run(new Date(0).toISOString(), holder);
+    this.db
+      .prepare("UPDATE scheduler_lease SET expires_at = ? WHERE id = 1 AND holder = ?")
+      .run(new Date(0).toISOString(), holder);
   }
 
   leaseInfo(): { holder: string; expiresAt: string } | null {
-    const r = this.db.prepare("SELECT holder, expires_at FROM scheduler_lease WHERE id = 1").get() as { holder: string; expires_at: string } | undefined;
+    const r = this.db.prepare("SELECT holder, expires_at FROM scheduler_lease WHERE id = 1").get() as
+      | { holder: string; expires_at: string }
+      | undefined;
     return r ? { holder: r.holder, expiresAt: r.expires_at } : null;
   }
 }

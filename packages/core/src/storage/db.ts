@@ -1,6 +1,7 @@
-import { DatabaseSync } from "node:sqlite";
+import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, renameSync } from "node:fs";
 import path from "node:path";
+import { DatabaseSync } from "node:sqlite";
 import { logger } from "../util/log.js";
 
 const log = logger("storage");
@@ -164,6 +165,19 @@ const MIGRATIONS: ReadonlyArray<{ version: number; sql: string }> = [
   },
 ];
 
+/**
+ * SHA-256 of every migration's SQL (whitespace-normalised), in order. A test pins the
+ * digests of the applied migrations so that an edit to an existing entry, instead of a
+ * new one, fails the build: an edited migration never reaches databases that already
+ * recorded that version.
+ */
+export function migrationDigests(): ReadonlyArray<{ version: number; sha256: string }> {
+  return MIGRATIONS.map((m) => ({
+    version: m.version,
+    sha256: createHash("sha256").update(m.sql.replace(/\s+/g, " ").trim()).digest("hex"),
+  }));
+}
+
 export function openDatabase(dataDir: string): DatabaseSync {
   mkdirSync(dataDir, { recursive: true });
   const file = path.join(dataDir, "duskfleet.db");
@@ -181,7 +195,10 @@ export function openDatabase(dataDir: string): DatabaseSync {
     db.exec("BEGIN");
     try {
       db.exec(m.sql);
-      db.prepare("INSERT INTO schema_migrations (version, applied_at) VALUES (?, ?)").run(m.version, new Date().toISOString());
+      db.prepare("INSERT INTO schema_migrations (version, applied_at) VALUES (?, ?)").run(
+        m.version,
+        new Date().toISOString(),
+      );
       db.exec("COMMIT");
       log.info(`applied migration ${m.version}`);
     } catch (err) {
