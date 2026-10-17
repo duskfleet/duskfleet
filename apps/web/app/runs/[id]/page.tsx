@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import type { RunEvent } from "@duskfleet/core";
+import type { Run, RunEvent } from "@duskfleet/core";
 import { AutoRefresh } from "@/components/AutoRefresh";
 import { CopyButton } from "@/components/CopyButton";
 import { Expandable } from "@/components/Expandable";
@@ -17,8 +17,12 @@ export async function generateMetadata({ params }: { params: Promise<{ id: strin
   return { title: data ? `${runTitle(data.run.prompt, 60)} · DuskFleet` : "Run not found · DuskFleet" };
 }
 
-export default async function RunPage({ params }: { params: Promise<{ id: string }> }) {
+/** Timeline entries shown before "show all N events". */
+const TIMELINE_LIMIT = 60;
+
+export default async function RunPage({ params, searchParams }: { params: Promise<{ id: string }>; searchParams: Promise<{ events?: string }> }) {
   const { id } = await params;
+  const showAll = (await searchParams).events === "all";
   const data = getRun(id);
   if (!data) notFound();
   const { run, events } = data;
@@ -56,8 +60,8 @@ export default async function RunPage({ params }: { params: Promise<{ id: string
           <span className="sep">/</span>
           <span title={run.projectPath}>{project}</span>
           <span className="nav-runs">
-            {prev ? <Link href={`/runs/${prev.id}`} className="chip-link" title={`Previous run of ${run.agentId}: ${runTitle(prev.prompt, 60)}`}>← older</Link> : <span className="faint">← older</span>}
-            {next ? <Link href={`/runs/${next.id}`} className="chip-link" title={`Next run of ${run.agentId}: ${runTitle(next.prompt, 60)}`}>newer →</Link> : <span className="faint">newer →</span>}
+            {prev ? <Link href={`/runs/${prev.id}`} className="chip-link" title={`Previous run of ${run.agentId}: ${runTitle(prev.prompt, 60)}`}>← older</Link> : <span className="chip-link off">← older</span>}
+            {next ? <Link href={`/runs/${next.id}`} className="chip-link" title={`Next run of ${run.agentId}: ${runTitle(next.prompt, 60)}`}>newer →</Link> : <span className="chip-link off">newer →</span>}
           </span>
         </div>
         <h1 title={run.prompt}>{runTitle(run.prompt, 110)}</h1>
@@ -80,7 +84,7 @@ export default async function RunPage({ params }: { params: Promise<{ id: string
           {hasIssues && (
             <>
               <span className="sep">·</span>
-              <a href="#issues" className="muted">see issues ↓</a>
+              <a href="#issues" className="to-issues">see issues ↓</a>
             </>
           )}
         </div>
@@ -96,7 +100,7 @@ export default async function RunPage({ params }: { params: Promise<{ id: string
           value={tokensIn === null && tokensOut === null ? "–" : `${tokensIn === null ? "–" : fmtCompact(tokensIn)} / ${tokensOut === null ? "–" : fmtCompact(tokensOut)}`}
           title={`input ${fmtInt(tokensIn)} · output ${fmtInt(tokensOut)} · cache read ${fmtInt(run.cacheReadTokens)} · cache write ${fmtInt(run.cacheCreationTokens)}`}
         />
-        <Fact label="Denials" value={live && run.permissionDenials === null ? "–" : String(denials)} tone={denials > 0 ? "warn" : "neutral"} />
+        <Fact label="Denials" value={live && run.permissionDenials === null ? "–" : String(denials)} tone={denials > 0 ? "warn" : undefined} />
       </div>
 
       <div id="issues">
@@ -108,11 +112,10 @@ export default async function RunPage({ params }: { params: Promise<{ id: string
               anything outside the agent's <code>allowed_tools</code> is refused. Add the tool if it should have been permitted.
               {" "}The denied calls are <span className="flag warn">highlighted</span> in the timeline below.
               {(run.deniedTools ?? []).length > 0 && (
-                <ul style={{ margin: "6px 0 0", paddingLeft: 18 }}>
+                <ul className="denied-calls">
                   {(run.deniedTools ?? []).map((d, i) => (
                     <li key={i}>
-                      <code>{d.tool}</code>
-                      {d.summary && <span className="muted"> {tildeText(d.summary, home)}</span>}
+                      <code>{d.summary ? `${d.tool}(${tildeText(d.summary, home)})` : d.tool}</code>
                     </li>
                   ))}
                 </ul>
@@ -160,13 +163,13 @@ export default async function RunPage({ params }: { params: Promise<{ id: string
             <div className="prose quiet">{live ? "Working… the result appears here when the run finishes." : "The run produced no final text."}</div>
           )}
 
-          <h2>
-            Timeline <span className="count">{events.length} events</span>
+          <h2 id="timeline">
+            Timeline <span className="count">{fmtInt(events.length)} events</span>
           </h2>
-          <Timeline events={events} t0={t0} cwd={run.projectPath} home={home} denied={run.deniedTools ?? []} />
+          <Timeline run={run} events={events} t0={t0} home={home} limit={showAll ? null : TIMELINE_LIMIT} />
         </div>
 
-        <div style={{ display: "grid", gap: 20 }}>
+        <div className="run-side">
           {resume && (
             <div>
               <h2 style={{ marginTop: 0 }}>Resume this session</h2>
@@ -191,10 +194,7 @@ export default async function RunPage({ params }: { params: Promise<{ id: string
 
           <div>
             <h2 style={{ marginTop: 0 }}>Prompt <span className="count">{fmtInt(run.prompt.length)} chars</span></h2>
-            <div className="cmd">
-              <blockquote className="quote" style={{ flex: 1 }}>{run.prompt}</blockquote>
-              <CopyButton text={run.prompt} />
-            </div>
+            <blockquote className="quote">{run.prompt}</blockquote>
           </div>
 
           <details className="tech" open={needsAttention}>
@@ -206,22 +206,18 @@ export default async function RunPage({ params }: { params: Promise<{ id: string
                 <dt>project</dt><dd className="mono" title={run.projectPath}>{tildePath(run.projectPath, home)}</dd>
                 <dt>permissions</dt><dd className="mono">{run.permissionMode}</dd>
                 <dt>model used</dt><dd className="mono">{run.modelUsed ?? "–"}</dd>
-                <dt>model requested</dt><dd className="mono">{run.modelRequested ?? "agent / CLI default"}</dd>
-                <dt>created</dt><dd>{fmtTime(run.createdAt)}</dd>
-                <dt>started</dt><dd>{fmtTime(run.startedAt)}</dd>
-                <dt>ended</dt><dd>{fmtTime(run.endedAt)}</dd>
-                <dt>exit code</dt><dd>{run.exitCode ?? "–"}</dd>
                 <dt>termination</dt><dd className="mono">{run.terminationReason ?? "–"}</dd>
-                <dt>input tokens</dt><dd>{fmtInt(run.inputTokens)}</dd>
-                <dt>output tokens</dt><dd>{fmtInt(run.outputTokens)}</dd>
-                <dt>cache read</dt><dd>{fmtInt(run.cacheReadTokens)}</dd>
-                <dt>cache write</dt><dd>{fmtInt(run.cacheCreationTokens)}</dd>
+                <dt>cache read / write</dt><dd className="num">{fmtInt(run.cacheReadTokens)} / {fmtInt(run.cacheCreationTokens)}</dd>
                 <dt>mcp mounted</dt><dd className="mono">{run.mcp?.mounted?.length ? run.mcp.mounted.map((m) => `${m.name} (${m.status})`).join(", ") : "none reported"}</dd>
                 <dt>mcp used</dt><dd className="mono">{run.mcp?.used?.length ? run.mcp.used.join(", ") : "–"}</dd>
+                <dt>model requested</dt><dd className="mono">{run.modelRequested ?? "agent / CLI default"}</dd>
+                <dt>exit code</dt><dd className="mono">{run.exitCode ?? "–"}</dd>
+                <dt>started</dt><dd>{fmtTime(started)}</dd>
+                <dt>ended</dt><dd>{fmtTime(run.endedAt)}</dd>
                 <dt>log</dt><dd className="mono" title={run.logPath ?? undefined}>{tildePath(run.logPath, home)}</dd>
               </dl>
               <div>
-                <div className="muted" style={{ fontSize: "0.8rem", marginBottom: 6 }}>Exact command</div>
+                <div className="muted" style={{ fontSize: 13, marginBottom: 6 }}>Exact command</div>
                 <div className="cmd">
                   <pre className="block">{tildeText(fullCommand, home)}</pre>
                   <CopyButton text={fullCommand} />
@@ -246,45 +242,34 @@ function Fact({ label, value, title, tone }: { label: string; value: string; tit
 
 // ---- timeline ---------------------------------------------------------------
 
+/** Type colours: tool calls sky, result green, errors coral, the rest (system, status, notes) muted. */
+type Kind = "tool" | "muted" | "ok" | "bad";
+
 interface Row {
   key: string;
   offsetMs: number;
-  icon: string;
-  iconCls: string;
+  /** Type column: "system", "Read", "Bash", "Figma", "result"… */
   name: string;
+  kind: Kind;
   detail: string;
   mono: boolean;
-  isStatus: boolean;
   denied: boolean;
   toolName: string | null;
 }
 
 type Entry = { kind: "row"; row: Row } | { kind: "group"; rows: Row[] };
 
-const LEGEND: Array<{ cls: string; icon: string; label: string }> = [
-  { cls: "read", icon: "read", label: "Read / Grep / Glob" },
-  { cls: "edit", icon: "edit", label: "Edit / Write" },
-  { cls: "sh", icon: "sh", label: "Bash" },
-  { cls: "mcp", icon: "mcp", label: "MCP tool" },
-  { cls: "status", icon: "◆", label: "status change" },
-  { cls: "denied", icon: "✗", label: "denied call" },
-];
-
-function Timeline({ events, t0, cwd, home, denied }: { events: RunEvent[]; t0: number; cwd: string; home: string; denied: Array<{ tool: string; summary: string | null }> }) {
-  const rows = markDenied(events.map(toRow(t0, cwd, home)), denied);
+function Timeline({ run, events, t0, home, limit }: { run: Run; events: RunEvent[]; t0: number; home: string; limit: number | null }) {
+  const rows = markDenied(events.map(toRow(run, t0, home)), run.deniedTools ?? []);
+  const result = resultRow(run, t0);
+  if (result) rows.push(result);
   if (rows.length === 0) return <div className="empty">No events recorded.</div>;
   const entries = groupRuns(rows);
-  const used = new Set(rows.map((r) => (r.denied ? "denied" : r.iconCls)));
+  const shown = limit === null ? entries : entries.slice(0, limit);
   return (
     <>
-      <div className="legend" aria-label="Legend">
-        {LEGEND.filter((l) => used.has(l.cls)).map((l) => (
-          <span key={l.cls}><span className={`ic ${l.cls}`}>{l.icon}</span>{l.label}</span>
-        ))}
-        <span className="faint">· click a line to see it in full</span>
-      </div>
       <ul className="timeline">
-        {entries.map((e, i) =>
+        {shown.map((e, i) =>
           e.kind === "row" ? (
             <TimelineRow key={e.row.key} r={e.row} />
           ) : (
@@ -292,8 +277,7 @@ function Timeline({ events, t0, cwd, home, denied }: { events: RunEvent[]; t0: n
               <details>
                 <summary>
                   <span className="off">{fmtOffset(e.rows[0]!.offsetMs)}</span>
-                  <span className={`ic ${e.rows[0]!.iconCls}`}>{e.rows[0]!.icon}</span>
-                  <span className="name">{e.rows[0]!.name} <span className="count-tag">×{e.rows.length}</span></span>
+                  <span className={`name ${e.rows[0]!.kind}`}>{e.rows[0]!.name} <span className="count-tag">×{e.rows.length}</span></span>
                   <span className="detail plain">
                     {fmtOffset(e.rows[0]!.offsetMs)} → {fmtOffset(e.rows[e.rows.length - 1]!.offsetMs)} · {e.rows.map((r) => r.detail).filter(Boolean).slice(0, 3).join(", ")}{e.rows.length > 3 ? ", …" : ""}
                   </span>
@@ -306,19 +290,38 @@ function Timeline({ events, t0, cwd, home, denied }: { events: RunEvent[]; t0: n
           ),
         )}
       </ul>
+      <div className="timeline-foot">
+        {shown.length < entries.length && (
+          <>
+            <Link href={`/runs/${run.id}?events=all#timeline`}>show all {fmtInt(events.length)} events</Link>
+            {run.logPath && <span className="sep">·</span>}
+          </>
+        )}
+        {run.logPath && <a href={`/runs/${run.id}/log`} target="_blank" rel="noreferrer">open the JSONL log</a>}
+      </div>
     </>
   );
 }
 
 function TimelineRow({ r }: { r: Row }) {
   return (
-    <li id={`ev-${r.key}`} className={`${r.isStatus ? "status-row" : ""} ${r.denied ? "denied" : ""}`} title={r.denied ? "This call was denied: the tool is not in the agent's allowed_tools" : undefined}>
+    <li id={`ev-${r.key}`} className={r.denied ? "denied" : undefined} title={r.denied ? "This call was denied: the tool is not in the agent's allowed_tools" : undefined}>
       <span className="off">{fmtOffset(r.offsetMs)}</span>
-      <span className={`ic ${r.denied ? "denied" : r.iconCls}`}>{r.denied ? "✗" : r.icon}</span>
-      <span className="name">{r.name}{r.denied && <span className="count-tag"> denied</span>}</span>
-      <span className={`detail ${r.mono ? "" : "plain"}`} tabIndex={r.detail.length > 60 ? 0 : undefined} title={r.detail}>{r.detail}</span>
+      <span className={`name ${r.denied ? "denied" : r.kind}`} title={r.toolName ?? undefined}>{r.name}</span>
+      <span className="what">
+        <span className={`detail ${r.mono ? "" : "plain"}`} tabIndex={r.detail.length > 60 ? 0 : undefined} title={r.detail}>{r.detail}</span>
+        {r.denied && <span className="flag warn">denied</span>}
+      </span>
     </li>
   );
+}
+
+/** The run's outcome as a closing row, once it has ended. */
+function resultRow(run: Run, t0: number): Row | null {
+  if (!run.endedAt) return null;
+  const kind: Kind = run.status === "completed" ? "ok" : run.status === "cancelled" ? "muted" : "bad";
+  const detail = [run.terminationReason ?? run.status, run.exitCode !== null && run.exitCode !== undefined ? `exit ${run.exitCode}` : null, run.costUsd !== null && run.costUsd !== undefined ? fmtCost(run.costUsd) : null].filter(Boolean).join(" · ");
+  return { key: "result", offsetMs: new Date(run.endedAt).getTime() - t0, name: "result", kind, detail, mono: false, denied: false, toolName: null };
 }
 
 /** Consecutive calls of the same tool (3 or more, none denied) collapse into one expandable row. */
@@ -361,54 +364,46 @@ function markDenied(rows: Row[], denied: Array<{ tool: string; summary: string |
   return out;
 }
 
-function toRow(t0: number, cwd: string, home: string) {
+function toRow(run: Run, t0: number, home: string) {
+  const cwd = run.projectPath;
   return (e: RunEvent): Row => {
     const p = (e.payload ?? {}) as Record<string, unknown>;
     const offsetMs = new Date(e.ts).getTime() - t0;
-    const base = { key: String(e.id), offsetMs, mono: true, isStatus: false, denied: false, toolName: null as string | null };
+    const base = { key: String(e.id), offsetMs, kind: "muted" as Kind, mono: true, denied: false, toolName: null as string | null };
     switch (e.type) {
       case "status_change":
-        return { ...base, icon: "◆", iconCls: "status", name: String(p["to"] ?? "status"), detail: p["from"] ? `from ${String(p["from"])}` : "run created", mono: false, isStatus: true };
-      case "init":
-        return { ...base, icon: "▶", iconCls: "status", name: "session", detail: [p["model"] ? shortModel(String(p["model"])) : null, p["cliVersion"] ? `Claude Code ${String(p["cliVersion"])}` : null, p["tools"] !== undefined ? `${String(p["tools"])} tools` : null].filter(Boolean).join(" · "), mono: false };
+        return { ...base, name: "status", detail: p["from"] ? `${String(p["from"])} → ${String(p["to"] ?? "?")}` : `${String(p["to"] ?? "?")} · run created`, mono: false };
+      case "init": {
+        const servers = Array.isArray(p["mcpServers"]) ? (p["mcpServers"] as unknown[]).map(String) : null;
+        const mounted = servers?.filter((s) => s.endsWith("(connected)")).length ?? 0;
+        const detail = [
+          "session started",
+          p["model"] ? shortModel(String(p["model"])) : null,
+          run.permissionMode,
+          servers && servers.length > 0 ? `${mounted} MCP server${mounted === 1 ? "" : "s"} mounted` : null,
+          p["cliVersion"] ? `Claude Code ${String(p["cliVersion"])}` : null,
+        ].filter(Boolean).join(" · ");
+        return { ...base, name: "system", detail, mono: false };
+      }
       case "tool_use": {
         const name = String(p["name"] ?? "tool");
         const raw = typeof p["summary"] === "string" ? p["summary"] : "";
         // Paths inside the project read better relative to it; others relative to home.
         const summary = tildeText(raw.split(cwd.endsWith("/") ? cwd : cwd + "/").join(""), home);
-        return { ...base, icon: toolIcon(name), iconCls: toolClass(name), name: shortToolName(name), detail: summary, toolName: name };
+        // MCP tools: the server is the type, the tool name leads the detail.
+        const m = /^mcp__(?:claude_ai_|plugin_)?(.+?)__(.+)$/.exec(name);
+        return m
+          ? { ...base, kind: "tool", name: m[1]!.replace(/_/g, " "), detail: summary ? `${m[2]} ${summary}` : m[2]!, toolName: name }
+          : { ...base, kind: "tool", name, detail: summary, toolName: name };
       }
       case "error":
-        return { ...base, icon: "×", iconCls: "err", name: "error", detail: tildeText(String(p["parseError"] ?? p["message"] ?? JSON.stringify(p)), home) };
+        return { ...base, kind: "bad", name: "error", detail: tildeText(String(p["parseError"] ?? p["message"] ?? JSON.stringify(p)), home) };
       case "note":
-        return { ...base, icon: "·", iconCls: "", name: "note", detail: tildeText(String(p["message"] ?? JSON.stringify(p)), home), mono: false };
+        return { ...base, name: "note", detail: tildeText(String(p["message"] ?? JSON.stringify(p)), home), mono: false };
       default:
-        return { ...base, icon: "·", iconCls: "", name: String(e.type), detail: JSON.stringify(p) };
+        return { ...base, name: String(e.type), detail: JSON.stringify(p) };
     }
   };
-}
-
-/** "mcp__claude_ai_Figma__get_screenshot" → "Figma · get_screenshot" */
-function shortToolName(name: string): string {
-  const m = /^mcp__(?:claude_ai_|plugin_)?(.+?)__(.+)$/.exec(name);
-  return m ? `${m[1]!.replace(/_/g, " ")} · ${m[2]}` : name;
-}
-
-function toolClass(name: string): string {
-  if (name === "Bash") return "sh";
-  if (name === "Edit" || name === "Write" || name === "MultiEdit" || name === "NotebookEdit") return "edit";
-  if (name === "Read" || name === "Grep" || name === "Glob") return "read";
-  if (name.startsWith("mcp__")) return "mcp";
-  return "";
-}
-
-/** Readable type labels instead of 10px glyphs. */
-function toolIcon(name: string): string {
-  if (name === "Bash") return "sh";
-  if (name === "Edit" || name === "Write" || name === "MultiEdit" || name === "NotebookEdit") return "edit";
-  if (name === "Read" || name === "Grep" || name === "Glob") return "read";
-  if (name.startsWith("mcp__")) return "mcp";
-  return "tool";
 }
 
 function shellQuote(arg: string, max?: number): string {
