@@ -1,4 +1,4 @@
-# DuskFleet — Implementation Plan
+Audit is report-only for now (`continue-on-error`): Next 15.5 pins `postcss` 8.4.31, which carries a high advisory (GHSA-qx2v-qp2m-jg93 and three sourceMappingURL ones), the fix is Next 16, and an npm `overrides` on postcss made npm drop the package instead of upgrading it (2026-10-17). Make the step blocking again with the Next 16 upgrade. |# DuskFleet — Implementation Plan
 
 DuskFleet is a local platform for orchestrating, scheduling, observing and evaluating
 autonomous coding agents that run on top of Claude Code.
@@ -315,3 +315,38 @@ Future: `scheduled` (before `pending`) once the scheduler exists.
     `fake-claude.js`) before writing the executor.
   - Sequencing: after deterministic evals. Two runtimes pay off when evals can compare them on the
     same task; before that it is a second binary to maintain.
+
+## 8. Quality gates (added 2026-10-17)
+
+Until this point nothing checked a pull request: `main` accepted any merge. The project is meant to
+grow, and most of its code is written by agents, so the gates have to be mechanical and cheap, never
+a human reading every diff. They run without a Claude login and without spending money: the tests
+replay recorded `stream-json` through `packages/mcp/test/fake-claude.js`.
+
+### Implemented (this iteration)
+
+| # | Gate | Where | What fails the PR |
+|---|------|-------|-------------------|
+| 1 | **CI workflow** `checks` (GitHub Actions, Node 24, `ubuntu-latest`, ~3 min, one job in sequence, `cancel-in-progress`) | `.github/workflows/ci.yml` | `npm ci`, hygiene, Biome, `npm run build`, `npm run typecheck` (core, mcp) + web typecheck, tests with coverage floor, `next build`, `npm audit --audit-level=high`. Any step red. |
+| 2 | **Ruleset on `main`** | GitHub repository settings (not versioned) | Pushes to `main` outside a PR, merges with the `checks` job red, force pushes, branch deletion. Admins are not exempt. |
+| 3 | **Public-repo hygiene** | `scripts/check-public.mjs`, `npm run check:public` | A versioned file (`git ls-files`) containing a home path (`/Users/…`, `/home/…`, `C:\Users\…`, `/Volumes/…`), the committing machine's user or host name (whole word, skipped under `CI` and for generic names such as `runner`), or a symbolic link in the index. Placeholders `<you>`, `you` and `me` are allowed. The rule in CLAUDE.md was enforced only by attention before; a symlink `apps/web/node_modules` pointing into a home directory had already been committed (PR #5) and is what the symlink check is for. |
+| 4 | **Migration pin** | `packages/mcp/test/migrations.test.js`, `migrationDigests()` in `core/storage/db.ts` | Editing a shipped migration (SHA-256 of its whitespace-normalised SQL is pinned per version), removing one, or a gap in the version sequence. Adding version N+1 means appending its digest to the test once the SQL is final: the failure message prints it. |
+| 5 | **Lint + format: Biome** (one dev dependency, no plugins) | `biome.json`, `npm run lint` (= `biome ci .`), `npm run lint:fix` | Lint errors and unformatted files. Width 120, double quotes, trailing commas. `recommended` rules; `noUnusedImports` is an error; `noNonNullAssertion`, `noExplicitAny`, `noArrayIndexKey`, `noAssignInExpressions`, `noAutofocus` stay warnings (visible, not blocking); `useLiteralKeys` and `useTemplate` are off. An override on `packages/core/src/**` turns the layering rule into a lint error: core may not import `@modelcontextprotocol/sdk`, `@duskfleet/mcp`, `react`, `react-dom` or `next`. Import sorting is on. The first run reformatted most of the dashboard (one-off). |
+| 6 | **Dependency updates** | `.github/dependabot.yml`, `npm audit --audit-level=high` in CI | Weekly, Monday, grouped into `runtime` and `dev-tooling` plus GitHub Actions; Next.js majors are excluded from the bot and taken on purpose. Audit fails the PR on high / critical advisories only. |
+| 7 | **Coverage floor** | `npm run test:coverage` (`node --test --experimental-test-coverage --test-coverage-lines=80`, test files excluded) | Line coverage of the in-process code (core `dist/` and what the tests import directly) below 80 %. Measured at 90 % on 2026-10-17; the floor is there to stop regressions, not to be chased. Code exercised only through child processes (the CLI and MCP server binaries spawned by the tests) is not counted. |
+
+Rejected: Husky / pre-commit hooks (duplicate CI and slow down both the owner and the agents that
+write most commits), commitlint, CODEOWNERS (one maintainer), ESLint + typescript-eslint (dozens of
+packages where Biome is one).
+
+### Later, not in a PR
+
+- **`claude` flag drift**: a periodic job that diffs `claude --help` against the flags listed in §1 and
+  opens an issue when one disappears. Needs the CLI, so it runs locally (a DuskFleet schedule or
+  `serve`) rather than on Actions.
+- **Real smoke run** with `--model haiku` on manual dispatch only; never per PR (costs money).
+- **Docs sync**: a script that checks every tool registered in `packages/mcp/src/mcp/server.ts`
+  appears in `docs/mcp-server.md`, and that `README.md` links every page under `docs/`.
+- **Flaky-test policy**: a test that fails intermittently is fixed or quarantined the same day; CI never
+  gets a retry button. The first one, the cancelled-subagent case in `smoke.test.js`, waited a fixed
+  500 ms and was made to wait for the subagent row instead (2026-10-17).

@@ -120,7 +120,9 @@ export function ingestLine(state: StreamState, line: string): ExecutionEvent[] {
         case "init": {
           state.sessionId = str(msg["session_id"]) ?? state.sessionId;
           state.model = str(msg["model"]) ?? state.model;
-          const tools = Array.isArray(msg["tools"]) ? msg["tools"].filter((t): t is string => typeof t === "string") : [];
+          const tools = Array.isArray(msg["tools"])
+            ? msg["tools"].filter((t): t is string => typeof t === "string")
+            : [];
           // Connectors may still be connecting at init time (list seen empty while MCP tools were later used).
           const mcpServers = (Array.isArray(msg["mcp_servers"]) ? msg["mcp_servers"] : [])
             .filter(isObject)
@@ -138,7 +140,14 @@ export function ingestLine(state: StreamState, line: string): ExecutionEvent[] {
         case "task_started": {
           const agentId = str(msg["task_id"]);
           if (!agentId) break;
-          const record = subagentFor(state, agentId, msg["tool_use_id"], msg["subagent_type"], msg["description"], events);
+          const record = subagentFor(
+            state,
+            agentId,
+            msg["tool_use_id"],
+            msg["subagent_type"],
+            msg["description"],
+            events,
+          );
           if (record.prompt === null) record.prompt = str(msg["prompt"]);
           break;
         }
@@ -220,13 +229,16 @@ export function ingestLine(state: StreamState, line: string): ExecutionEvent[] {
         } else if (block["type"] === "tool_result") {
           // The hand-back: a tool_result for the Agent call that spawned a subagent closes it.
           const toolUseId = str(block["tool_use_id"]);
-          const record = toolUseId ? [...state.subagents.values()].find((s) => s.parentToolUseId === toolUseId) : undefined;
+          const record = toolUseId
+            ? [...state.subagents.values()].find((s) => s.parentToolUseId === toolUseId)
+            : undefined;
           if (!record || record.endedAt !== null) continue;
           const text = toolResultText(block["content"]);
           if (text) record.resultText = text;
           if (record.status === "running") record.status = "completed";
           record.endedAt = str(msg["timestamp"]) ?? new Date().toISOString();
-          if (record.durationMs === null) record.durationMs = Math.max(0, Date.parse(record.endedAt) - Date.parse(record.startedAt));
+          if (record.durationMs === null)
+            record.durationMs = Math.max(0, Date.parse(record.endedAt) - Date.parse(record.startedAt));
           events.push({ type: "subagent_end", subagent: record });
         }
       }
@@ -250,7 +262,14 @@ export function ingestLine(state: StreamState, line: string): ExecutionEvent[] {
 function nestedAgent(state: StreamState, msg: Json, events: ExecutionEvent[]): string | null {
   const agentId = str(msg["agent_id"]);
   if (!agentId) return null;
-  const record = subagentFor(state, agentId, msg["parent_tool_use_id"], msg["subagent_type"], msg["task_description"], events);
+  const record = subagentFor(
+    state,
+    agentId,
+    msg["parent_tool_use_id"],
+    msg["subagent_type"],
+    msg["task_description"],
+    events,
+  );
   // task_started lines carry no timestamp; the first nested message does. Prefer stream time over wall-clock time.
   const ts = str(msg["timestamp"]);
   if (ts && !state.stamped.has(agentId)) {
@@ -298,7 +317,10 @@ function subagentFor(
 function toolResultText(content: unknown): string | null {
   if (typeof content === "string") return content;
   if (!Array.isArray(content)) return null;
-  const parts = content.filter(isObject).map((b) => (b["type"] === "text" ? str(b["text"]) : null)).filter((t): t is string => !!t);
+  const parts = content
+    .filter(isObject)
+    .map((b) => (b["type"] === "text" ? str(b["text"]) : null))
+    .filter((t): t is string => !!t);
   return parts.length ? parts.join("\n") : null;
 }
 

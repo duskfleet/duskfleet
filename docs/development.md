@@ -50,12 +50,34 @@ apps/web/lib/data.ts             server-only read access to config + SQLite
 npm run build          # core + mcp (tsc). The CLI, the MCP server and the dashboard import from dist/
 npm run typecheck      # core + mcp; dashboard: npm run typecheck -w @duskfleet/web
 npm test               # packages/mcp/test/*.test.js, node --test, ~25 s, no network, no cost
+npm run check          # everything CI runs, in the same order (hygiene, lint, build, typecheck, tests)
 ```
 
 The tests use `packages/mcp/test/fake-claude.js`, a stand-in for the Claude binary that replays
 the real `stream-json` event shapes, so they never launch a real Claude. They cover the
 executor, state machine, SQLite storage, validation, scheduler, legacy database adoption and the
 MCP server driven over stdio. Add a case to the fake binary when the parser learns a new event.
+
+## Quality gates
+
+Every pull request runs the `checks` job in `.github/workflows/ci.yml`; a ruleset on `main` refuses
+the merge while it is red, and refuses pushes that bypass a pull request. The job needs no Claude
+login and spends nothing: the tests use the fake binary. In order:
+
+| Step | Command | Fails when |
+|------|---------|------------|
+| Public-repo hygiene | `npm run check:public` | A versioned file contains a home path, the committing machine's user or host name, or the index holds a symlink. Placeholders `<you>`, `you`, `me` are fine. |
+| Lint + format | `npm run lint` (`biome ci .`; `npm run lint:fix` repairs) | A Biome lint error or an unformatted file. Warnings (`noNonNullAssertion`, `noExplicitAny`, …) do not block. In `packages/core` an import of the MCP SDK, React or Next.js is an error. |
+| Build | `npm run build` | `tsc` errors in core or mcp |
+| Typecheck | `npm run typecheck`, `npm run typecheck -w @duskfleet/web` | Type errors anywhere |
+| Tests + coverage | `npm run test:coverage` | A failing test, or line coverage of the in-process code under 80 % |
+| Dashboard build | `npm run build:web` | `next build` errors (Server Component rules `tsc` does not see) |
+| Audit | `npm audit --audit-level=high` | Report-only until the Next 16 upgrade clears the `postcss` advisory Next 15 pins (PLAN.md §8); then blocking on high / critical. |
+
+Two tests are gates in themselves: `test/migrations.test.js` pins the SHA-256 of every shipped
+migration (edit one and it fails; add one and it tells you the digest to append), and the layering of
+the three packages is a Biome rule, not just this page. Dependabot opens grouped weekly PRs for npm
+and GitHub Actions. Design and the list of gates not yet built: [PLAN.md §8](../PLAN.md#8-quality-gates-added-2026-10-17).
 
 ## Security model
 
@@ -71,7 +93,7 @@ MCP server driven over stdio. Add a case to the fake binary when the parser lear
 
 - **New MCP tool**: add a file in `packages/mcp/src/mcp/tools/`, register it in `packages/mcp/src/mcp/server.ts`.
 - **New builtin agent**: drop a Markdown file in `config/agents/`.
-- **Schema change**: append a migration in `packages/core/src/storage/db.ts`; never edit an existing one.
+- **Schema change**: append a migration in `packages/core/src/storage/db.ts`; never edit an existing one. Then pin its digest in `packages/mcp/test/migrations.test.js` (the failing test prints it).
 - **Run status changes**: only `RunManager`, through `assertTransition`.
 - **New dashboard view**: add a route under `apps/web/app/` and a query in `apps/web/lib/data.ts`.
 - **Evals**: implement the interfaces in `packages/core/src/evals/types.ts`; the run pipeline does not need to change.

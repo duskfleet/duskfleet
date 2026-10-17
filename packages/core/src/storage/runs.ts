@@ -255,8 +255,17 @@ export class RunRepository {
 
   events(runId: string, limit = 200): RunEvent[] {
     const rows = this.db
-      .prepare("SELECT id, run_id, ts, type, payload, agent_id FROM run_events WHERE run_id = ? ORDER BY id ASC LIMIT ?")
-      .all(runId, limit) as Array<{ id: number; run_id: string; ts: string; type: RunEvent["type"]; payload: string | null; agent_id: string | null }>;
+      .prepare(
+        "SELECT id, run_id, ts, type, payload, agent_id FROM run_events WHERE run_id = ? ORDER BY id ASC LIMIT ?",
+      )
+      .all(runId, limit) as Array<{
+      id: number;
+      run_id: string;
+      ts: string;
+      type: RunEvent["type"];
+      payload: string | null;
+      agent_id: string | null;
+    }>;
     return rows.map((r) => ({
       id: r.id,
       runId: r.run_id,
@@ -313,7 +322,11 @@ export class RunRepository {
 
   /** Subagent invocations of a run, in start order. */
   agents(runId: string): RunAgent[] {
-    return (this.db.prepare("SELECT * FROM run_agents WHERE run_id = ? ORDER BY id ASC").all(runId) as unknown as RunAgentRow[]).map(rowToRunAgent);
+    return (
+      this.db
+        .prepare("SELECT * FROM run_agents WHERE run_id = ? ORDER BY id ASC")
+        .all(runId) as unknown as RunAgentRow[]
+    ).map(rowToRunAgent);
   }
 }
 
