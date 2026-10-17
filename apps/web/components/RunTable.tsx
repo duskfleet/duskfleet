@@ -43,10 +43,15 @@ export function RunTable({ runs, emptyText }: { runs: RunWithProject[]; emptyTex
                   <Link href={`/?agent=${encodeURIComponent(r.agentId)}`}>{r.agentId}</Link>
                   <span className="sep">·</span>
                   <span title={r.projectPath}>{r.projectLabel}</span>
+                  {r.scheduleId && (
+                    <span className="flags">
+                      <Link href={`/schedules#${r.scheduleId}`} className="flag quiet badge-link" title={r.scheduleId}>scheduled</Link>
+                    </span>
+                  )}
                   {(r.permissionDenials ?? 0) > 0 && (
                     <span className="flags">
                       <Link href={issues} className="flag warn badge-link" title={(r.deniedTools ?? []).map((d) => `${d.tool}${d.summary ? `: ${d.summary}` : ""}`).join("\n") || "A tool call was denied"}>
-                        {r.permissionDenials} denied
+                        {r.permissionDenials} {r.permissionDenials === 1 ? "denial" : "denials"}
                       </Link>
                     </span>
                   )}

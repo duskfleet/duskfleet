@@ -77,14 +77,14 @@ export default async function RunsPage({ searchParams }: { searchParams: Promise
 
       <div className="toolbar">
         <div className="filters">
-          <span>Project</span>
+          <span className="filter-label">Project</span>
           <Link href={qs({ project: undefined })} className={`chip ${project ? "" : "on"}`}>all</Link>
           {projects.map((p) => (
             <Link key={p.id} href={qs({ project: p.id })} className={`chip ${project === p.id ? "on" : ""}`} title={p.path}>{p.id}</Link>
           ))}
         </div>
         <div className="filters">
-          <span>Agent</span>
+          <span className="filter-label">Agent</span>
           <Link href={qs({ agent: undefined })} className={`chip ${agent ? "" : "on"}`}>all</Link>
           {agents
             .filter((a) => !project || !a.project || a.project === project)
@@ -97,7 +97,7 @@ export default async function RunsPage({ searchParams }: { searchParams: Promise
           {project && <input type="hidden" name="project" value={project} />}
           {schedule && <input type="hidden" name="schedule" value={schedule} />}
           <input type="search" name="q" defaultValue={q ?? ""} placeholder="Search prompts or paste a run id…" aria-label="Search runs" />
-          <button type="submit" className="copy-btn">Search</button>
+          <button type="submit" className="search-btn">Search</button>
           {q && <Link href={qs({ q: undefined })} className="clear">× clear search</Link>}
         </form>
       </div>
