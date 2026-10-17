@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 .5 15 15" fill="none">
+  <defs>
+    <linearGradient id="sunset" x1="2.5" y1="1.75" x2="14.93" y2="12.94" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#F6B24A"/>
+      <stop offset=".55" stop-color="#F0783A"/>
+      <stop offset="1" stop-color="#E24B5A"/>
+    </linearGradient>
+  </defs>
+  <rect y=".5" width="15" height="15" rx="3.75" fill="#1B1F36"/>
+  <path fill="url(#sunset)" fill-rule="evenodd" d="M2.5 1.75H7.5A6.25 6.25 0 0 1 7.5 14.25H2.5ZM5.25 4.75V11.75H10.75Z"/>
+</svg>
