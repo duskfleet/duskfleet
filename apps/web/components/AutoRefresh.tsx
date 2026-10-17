@@ -42,8 +42,8 @@ export function AutoRefresh({ intervalMs }: { intervalMs: number }) {
           : `This page reloads its data every ${seconds}s. Click to pause while reading.`
       }
     >
-      <span className="pulse" />
-      {paused ? "refresh paused" : `auto-refresh ${seconds}s`}
+      <span className="pulse" aria-hidden="true" />
+      {paused ? "paused" : `live · ${seconds} s`}
     </button>
   );
   return slot ? createPortal(button, slot) : null;
