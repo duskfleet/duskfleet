@@ -26,6 +26,7 @@
   --warn-bg: rgba(246, 178, 74, 0.14);
   --bad: var(--coral);
   --bad-bg: rgba(226, 75, 90, 0.16);
+  --bad-ink: #f0808a; /* coral lifted for small text on --bad-bg (AA on panel) */
   --run: #6fc4e8;
   --run-bg: rgba(111, 196, 232, 0.14);
   --shadow: 0 1px 0 rgba(0, 0, 0, 0.3);
@@ -67,7 +68,8 @@ code, .mono { font-family: var(--font-mono); font-size: 0.86em; }
 
 .page-head { display: flex; align-items: baseline; justify-content: space-between; gap: 16px; margin-bottom: 18px; flex-wrap: wrap; }
 h1 { font-family: var(--font-display); font-weight: 600; font-size: 1.35rem; margin: 0; letter-spacing: -0.01em; }
-h2 { font-family: var(--font-display); font-size: 0.8rem; margin: 30px 0 10px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.08em; font-weight: 600; display: flex; align-items: center; gap: 10px; }
+/* section label: "RUNNING 2", "RECENT 50" */
+h2 { font-family: var(--font-sans); font-size: 12.5px; line-height: 18px; margin: 30px 0 10px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.08em; font-weight: 600; display: flex; align-items: center; gap: 10px; }
 h2 .count { color: var(--faint); font-weight: 500; letter-spacing: 0; text-transform: none; }
 
 /* ---- cards & stats ------------------------------------------------------- */
@@ -75,31 +77,35 @@ h2 .count { color: var(--faint); font-weight: 500; letter-spacing: 0; text-trans
 .card { background: var(--panel); border: 1px solid var(--border); border-radius: 12px; padding: 16px 18px; box-shadow: var(--shadow); }
 .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 12px; margin-bottom: 8px; }
 .stat { background: var(--panel); border: 1px solid var(--border); border-radius: 12px; padding: 14px 16px; box-shadow: var(--shadow); min-width: 0; }
-.stat .label { font-size: 0.8rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.07em; font-weight: 600; }
-.stat .value { font-size: 1.7rem; font-weight: 700; letter-spacing: -0.02em; margin-top: 4px; line-height: 1.1; }
+.stat .label { font-size: 12px; line-height: 17.5px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.07em; font-weight: 600; }
+.stat .value { font-family: var(--font-display); font-size: 30px; font-weight: 600; letter-spacing: -0.02em; margin-top: 4px; line-height: 33px; color: var(--text); font-variant-numeric: tabular-nums; }
 .stat .value.warn { color: var(--warn); }
 .stat .value.run { color: var(--run); }
-.stat .sub { font-size: 0.8rem; color: var(--muted); margin-top: 4px; }
+.stat .sub { font-size: 12.5px; line-height: 18px; color: var(--muted); margin-top: 4px; }
 
 /* ---- badges & pills ------------------------------------------------------ */
-.badge { display: inline-flex; align-items: center; gap: 6px; padding: 2px 9px; border-radius: 999px; font-size: 0.8rem; font-weight: 600; letter-spacing: 0.01em; white-space: nowrap; border: 1px solid transparent; }
-.badge::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
+/* status badge: dot + label on a tint of the status colour */
+.badge { display: inline-flex; align-items: center; gap: 6px; padding: 2px 9px; border-radius: 999px; font-size: 12px; line-height: 17.5px; font-weight: 600; white-space: nowrap; border: 0; }
+.badge::before { content: ""; flex: none; width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
 .badge.running { color: var(--run); background: var(--run-bg); }
 .badge.running::before { animation: pulse 1.4s ease-in-out infinite; }
 .badge.pending { color: var(--muted); background: var(--panel-2); }
 .badge.completed { color: var(--ok); background: var(--ok-bg); }
 .badge.attention { color: var(--warn); background: var(--warn-bg); }
-.badge.failed, .badge.timed_out { color: var(--bad); background: var(--bad-bg); }
+.badge.failed, .badge.timed_out { color: var(--bad-ink); background: var(--bad-bg); }
 .badge.cancelled { color: var(--muted); background: var(--panel-2); }
 .pill { display: inline-block; padding: 1px 8px; border-radius: 6px; font-size: 0.8rem; background: var(--panel-2); border: 1px solid var(--border); color: var(--muted); white-space: nowrap; }
-.pill.model { color: var(--text); }
+/* model tag: sonnet / haiku / opus */
+.pill.model { font-family: var(--font-mono); font-size: 12.5px; line-height: 18px; padding: 0 8px; color: var(--text); }
 .tag { display: inline-block; padding: 0 6px; border-radius: 5px; font-size: 0.8rem; font-weight: 600; background: var(--accent-bg); color: var(--accent); }
 @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.35; } }
 
 /* ---- run table ----------------------------------------------------------- */
-.runs { width: 100%; border-collapse: collapse; background: var(--panel); border: 1px solid var(--border); border-radius: 12px; overflow: hidden; box-shadow: var(--shadow); }
-.runs th, .runs td { text-align: left; padding: 11px 14px; border-bottom: 1px solid var(--border); vertical-align: top; }
-.runs th { color: var(--muted); font-weight: 600; font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.06em; background: var(--panel-2); }
+/* separate borders so the rounded outline clips the header and rows */
+.runs { width: 100%; border-collapse: separate; border-spacing: 0; background: var(--panel); border: 1px solid var(--border); border-radius: 10px; overflow: hidden; box-shadow: var(--shadow); }
+.runs th, .runs td { text-align: left; padding: 12px 14px; border-bottom: 1px solid var(--border); vertical-align: top; }
+.runs td { line-height: 22px; }
+.runs th { color: var(--muted); font-weight: 600; font-size: 12px; line-height: 17.5px; padding-top: 11px; padding-bottom: 10px; text-transform: uppercase; letter-spacing: 0.06em; background: var(--panel-2); }
 .runs tr:last-child td { border-bottom: none; }
 .runs tbody tr.clickable { cursor: pointer; }
 .runs tbody tr:hover td { background: color-mix(in srgb, var(--panel-2) 60%, transparent); }
@@ -108,28 +114,42 @@ h2 .count { color: var(--faint); font-weight: 500; letter-spacing: 0; text-trans
 .runs td.num, .runs th.num { text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }
 .runs td.status { width: 1%; white-space: nowrap; }
 .runs .what { min-width: 320px; }
-.runs .what .prompt { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; color: var(--text); font-weight: 500; line-height: 1.35; }
+.runs .what .prompt { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; color: var(--text); font-weight: 500; line-height: 22px; }
 .runs .what .prompt a { color: inherit; }
-.runs .what .where { margin-top: 4px; font-size: 0.8rem; color: var(--muted); display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
+/* muted sub-line under the run title: agent · project · issue tags */
+.runs .what .where { margin-top: 3px; font-size: 12.5px; line-height: 18px; color: var(--muted); display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
+.runs .what .where a { color: inherit; }
+.runs .what .where a:hover { color: var(--text); }
 .runs .what .where .sep { color: var(--faint); }
-.runs td.when { color: var(--muted); font-size: 0.85rem; white-space: nowrap; }
-.runs .flags { display: inline-flex; gap: 4px; margin-left: 6px; }
-.flag { display: inline-flex; align-items: center; font-size: 0.8rem; font-weight: 600; padding: 0 6px; border-radius: 5px; }
-.flag.warn { color: var(--warn); background: var(--warn-bg); }
-.flag.bad { color: var(--bad); background: var(--bad-bg); }
+.runs td.when { color: var(--muted); font-size: 13.5px; line-height: 19.5px; padding-top: 13px; white-space: nowrap; }
+.runs .flags { display: inline-flex; gap: 4px; }
+/* issue tags: 1 denial (amber), context exhausted (coral), scheduled (muted) */
+.flag { display: inline-flex; align-items: center; font-size: 12px; line-height: 17.5px; font-weight: 600; padding: 0 6px; border-radius: 5px; }
+.flag.warn, .runs .what .where a.flag.warn { color: var(--warn); background: var(--warn-bg); }
+.flag.bad, .runs .what .where a.flag.bad { color: var(--bad-ink); background: var(--bad-bg); }
+.flag.quiet, .runs .what .where a.flag.quiet { color: var(--muted); background: var(--panel-2); font-weight: 500; }
 
 .empty { color: var(--muted); padding: 22px; text-align: center; background: var(--panel); border: 1px dashed var(--border); border-radius: 12px; }
 
-.filters { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; font-size: 0.85rem; color: var(--muted); }
-.filters a.chip { padding: 3px 10px; border-radius: 999px; border: 1px solid var(--border); color: var(--muted); }
+/* filter chips: row label on the left, rounded outline, active = amber tint */
+.filters { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; font-size: 13px; line-height: 19px; color: var(--muted); }
+.filters > .filter-label { min-width: 56px; }
+.filters a.chip { padding: 3px 11px; border-radius: 999px; border: 1px solid var(--border); background: none; color: var(--muted); font-size: 13px; line-height: 19px; }
 .filters a.chip:hover { text-decoration: none; color: var(--text); border-color: var(--border-strong); }
-.filters a.chip.on { background: var(--accent-bg); color: var(--accent); border-color: transparent; }
+.filters a.chip.on { background: var(--warn-bg); color: var(--warn); border-color: transparent; font-weight: 500; }
+
+/* search box + button */
+.search input[type="search"] { flex: 1 1 220px; min-width: 0; height: 33px; background: var(--panel); border: 1px solid var(--border); color: var(--text); border-radius: 8px; padding: 0 10px; font: inherit; font-size: 13px; }
+.search input[type="search"]::placeholder { color: var(--faint); }
+.search input[type="search"]:focus-visible { border-color: var(--border-strong); outline-offset: 1px; }
+.search-btn { height: 33px; background: var(--panel-2); border: 1px solid var(--border); color: var(--text); border-radius: 8px; padding: 0 13px; font: inherit; font-size: 13px; cursor: pointer; white-space: nowrap; }
+.search-btn:hover { border-color: var(--border-strong); }
 
 /* ---- breakdown table ----------------------------------------------------- */
 .table { width: 100%; border-collapse: collapse; font-size: 0.9rem; }
 .table th, .table td { padding: 7px 10px; border-bottom: 1px solid var(--border); text-align: left; }
-.table th { color: var(--muted); font-weight: 600; font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.06em; }
-.table td.num, .table th.num { text-align: right; white-space: nowrap; }
+.table th { color: var(--muted); font-weight: 600; font-size: 12px; line-height: 17.5px; text-transform: uppercase; letter-spacing: 0.06em; }
+.table td.num, .table th.num { text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }
 .table tr:last-child td { border-bottom: none; }
 
 /* ---- run detail ---------------------------------------------------------- */
@@ -263,10 +283,7 @@ details.prompt pre { margin-top: 8px; }
 
 /* ---- runs toolbar -------------------------------------------------------- */
 .toolbar { display: grid; gap: 8px; margin: -6px 0 18px; padding: 10px 14px; background: var(--panel); border: 1px solid var(--border); border-radius: 12px; box-shadow: var(--shadow); }
-.toolbar .filters > span:first-child { min-width: 52px; font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.06em; font-weight: 600; }
-.toolbar .search { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
-.toolbar .search input { flex: 1 1 220px; min-width: 0; background: var(--panel-2); border: 1px solid var(--border); color: var(--text); border-radius: 8px; padding: 5px 10px; font: inherit; font-size: 0.9rem; }
-.toolbar .search input::placeholder { color: var(--faint); }
+.toolbar .search { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
 .toolbar .active-filter { display: inline-flex; gap: 6px; align-items: center; color: var(--muted); font-size: 0.85rem; }
 .toolbar .clear { color: var(--text); background: var(--panel-2); border: 1px solid var(--border); border-radius: 999px; padding: 2px 10px; font-size: 0.8rem; }
 .toolbar .clear:hover { text-decoration: none; border-color: var(--border-strong); }
