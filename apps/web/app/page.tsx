@@ -81,7 +81,7 @@ export default async function RunsPage({ searchParams }: { searchParams: Promise
 
       <div className="toolbar">
         <div className="filters">
-          <span>Project</span>
+          <span className="filter-label">Project</span>
           <Link href={qs({ project: undefined })} className={`chip ${project ? "" : "on"}`}>
             all
           </Link>
@@ -97,7 +97,7 @@ export default async function RunsPage({ searchParams }: { searchParams: Promise
           ))}
         </div>
         <div className="filters">
-          <span>Agent</span>
+          <span className="filter-label">Agent</span>
           <Link href={qs({ agent: undefined })} className={`chip ${agent ? "" : "on"}`}>
             all
           </Link>
@@ -126,7 +126,7 @@ export default async function RunsPage({ searchParams }: { searchParams: Promise
             placeholder="Search prompts or paste a run id…"
             aria-label="Search runs"
           />
-          <button type="submit" className="copy-btn">
+          <button type="submit" className="search-btn">
             Search
           </button>
           {q && (
