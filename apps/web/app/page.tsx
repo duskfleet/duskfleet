@@ -2,7 +2,7 @@ import Link from "next/link";
 import { AutoRefresh } from "@/components/AutoRefresh";
 import { RunTable } from "@/components/RunTable";
 import { listAgents, listProjects, listRuns, listSchedules, modelStats, overview } from "@/lib/data";
-import { fmtCost, fmtDuration, fmtInt, fmtPct, shortModel } from "@/lib/format";
+import { fmtCost, fmtDayClock, fmtDuration, fmtInt, fmtPct, shortModel } from "@/lib/format";
 
 export const dynamic = "force-dynamic";
 
@@ -62,16 +62,18 @@ export default async function RunsPage({ searchParams }: { searchParams: Promise
         <h1>
           Runs
           {filtered && (
-            <span className="muted" style={{ fontWeight: 500 }}> · {activeLabel}</span>
+            <span className="count"> · {activeLabel}</span>
           )}
         </h1>
-        {filtered && (
+        {filtered ? (
           <span className="active-filter">
             <span className="muted">
               showing {fmtInt(recent.length + running.length)} of {fmtInt(total)}
             </span>
             <Link href="/" className="clear">× clear filters</Link>
           </span>
+        ) : (
+          <span className="note">{fmtDayClock(new Date())}</span>
         )}
       </div>
 

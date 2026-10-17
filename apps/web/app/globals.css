@@ -54,19 +54,28 @@ code, .mono { font-family: var(--font-mono); font-size: 0.86em; }
 /* ---- shell ---------------------------------------------------------------- */
 .shell { max-width: 1320px; margin: 0 auto; padding: 0 20px 64px; }
 .nav { display: flex; gap: 6px; align-items: center; padding: 14px 0; border-bottom: 1px solid var(--border); margin-bottom: 24px; flex-wrap: wrap; }
-.nav .brand { font-family: var(--font-display); font-weight: 700; letter-spacing: 0.01em; color: var(--text); margin-right: 18px; display: inline-flex; align-items: center; gap: 8px; }
-.nav .brand .dot { width: 10px; height: 10px; border-radius: 3px; background: var(--brand-gradient); display: inline-block; }
-.nav a.tab { color: var(--muted); padding: 6px 10px; border-radius: 8px; font-weight: 500; }
+.nav .brand { font-family: var(--font-display); font-weight: 700; font-size: 1.2rem; line-height: 26px; letter-spacing: -0.02em; color: var(--text); margin-right: 18px; display: inline-flex; align-items: center; gap: 9px; border-radius: 6px; }
+.nav .brand:hover { text-decoration: none; }
+.nav .brand img { display: block; flex: none; }
+.nav .brand .fleet { color: var(--accent); }
+.nav a.tab { color: var(--muted); padding: 6px 12px; border-radius: 8px; font-size: 1rem; line-height: 22px; font-weight: 500; }
 .nav a.tab:hover { color: var(--text); background: var(--panel-2); text-decoration: none; }
 .nav a.tab.active { color: var(--text); background: var(--panel-2); box-shadow: inset 0 -2px 0 var(--accent); }
+.nav a.tab:focus-visible { border-radius: 8px; }
 .nav .meta { margin-left: auto; color: var(--muted); font-size: 0.86rem; display: flex; gap: 10px; align-items: center; }
-.live-btn { background: none; border: 1px solid var(--border); color: var(--muted); border-radius: 999px; padding: 3px 10px; cursor: pointer; font: inherit; font-size: 0.86rem; display: inline-flex; align-items: center; gap: 6px; }
+.nav .meta .scheduler { color: var(--muted); font-family: var(--font-mono); line-height: 19px; }
+.nav .meta .scheduler:hover { color: var(--text); text-decoration: none; }
+.nav #nav-meta { display: contents; }
+.live-btn { background: none; border: 1px solid var(--border); color: var(--muted); border-radius: 999px; padding: 4px 11px; cursor: pointer; font: inherit; font-size: 0.86rem; line-height: 19px; display: inline-flex; align-items: center; gap: 6px; }
 .live-btn:hover { border-color: var(--border-strong); color: var(--text); }
 .live-btn .pulse { width: 7px; height: 7px; border-radius: 50%; background: var(--ok); animation: pulse 1.8s ease-in-out infinite; }
 .live-btn.paused .pulse { background: var(--muted); animation: none; }
 
+/* page header: h1 + optional muted count on the left, a muted note or timestamp on the right */
 .page-head { display: flex; align-items: baseline; justify-content: space-between; gap: 16px; margin-bottom: 18px; flex-wrap: wrap; }
-h1 { font-family: var(--font-display); font-weight: 600; font-size: 1.35rem; margin: 0; letter-spacing: -0.01em; }
+h1 { font-family: var(--font-display); font-weight: 600; font-size: 1.6rem; line-height: 35px; margin: 0; letter-spacing: -0.01em; }
+.page-head h1 .count { color: var(--muted); font-weight: 500; }
+.page-head .note { color: var(--faint); font-size: 0.86rem; line-height: 19px; }
 h2 { font-family: var(--font-display); font-size: 0.8rem; margin: 30px 0 10px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.08em; font-weight: 600; display: flex; align-items: center; gap: 10px; }
 h2 .count { color: var(--faint); font-weight: 500; letter-spacing: 0; text-transform: none; }
 
