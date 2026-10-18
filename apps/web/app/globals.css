@@ -352,12 +352,12 @@ details.caps .chips { margin-top: 6px; }
 /* ---- MCP docs ------------------------------------------------------------ */
 /* header: "MCP N tools" + muted note, as on the other pages */
 .page-head h1 .count { color: var(--muted); font-weight: 500; }
-.page-head .note { color: var(--faint); font-size: 0.86rem; line-height: 19px; }
+.page-head .note { color: var(--muted); font-size: 0.86rem; line-height: 19px; }
 
 /* sticky left list in muted text; the section in view is sunset (aria-current, set by TocSpy) */
 .docs { display: grid; grid-template-columns: 220px minmax(0, 1fr); gap: 28px; align-items: start; }
 .toc { position: sticky; top: 16px; max-height: calc(100vh - 32px); overflow: auto; display: grid; gap: 1px; align-content: start; }
-.toc .group { color: var(--faint); font-size: 12px; line-height: 17.5px; text-transform: uppercase; letter-spacing: 0.07em; font-weight: 600; margin: 14px 0 4px; }
+.toc .group { color: var(--muted); font-size: 12px; line-height: 17.5px; text-transform: uppercase; letter-spacing: 0.07em; font-weight: 600; margin: 14px 0 4px; }
 .toc .group:first-child { margin-top: 0; }
 .toc a { color: var(--muted); padding: 3px 10px; border-left: 2px solid transparent; font-family: var(--font-mono); font-size: 13px; line-height: 19px; display: block; }
 .toc a.plain { font-family: inherit; font-size: 13.5px; }
@@ -380,20 +380,23 @@ details.caps .chips { margin-top: 6px; }
 .tool-name:hover { color: var(--accent); text-decoration: none; }
 .tool-title { color: var(--muted); font-size: 13.5px; line-height: 19.5px; }
 .tool-desc { margin: 6px 0 12px; font-size: 14px; line-height: 21px; color: var(--text); }
-.no-params { color: var(--faint); font-size: 13px; line-height: 19px; }
+.no-params { color: var(--muted); font-size: 13px; line-height: 19px; }
 details.desc > summary { cursor: pointer; color: var(--accent); font-size: 13px; list-style: none; display: inline; }
 details.desc > summary::-webkit-details-marker { display: none; }
 details.desc[open] > summary { display: none; }
 details.desc ul { margin: 6px 0 0; padding-left: 20px; color: var(--muted); display: grid; gap: 2px; }
 .params { width: 100%; border-collapse: separate; border-spacing: 0; border: 1px solid var(--border); border-radius: 10px; overflow: hidden; font-size: 13.5px; line-height: 19.5px; }
 .params th, .params td { text-align: left; padding: 9px 12px; border-bottom: 1px solid var(--border); vertical-align: top; }
+/* Long names and unbreakable path tokens must wrap, or the min-content width pushes the
+   Description column past the card edge, where overflow: hidden (kept for the radius) clips it. */
+.params td { overflow-wrap: anywhere; }
 .params th { color: var(--muted); font-weight: 600; font-size: 12px; line-height: 17.5px; text-transform: uppercase; letter-spacing: 0.06em; background: var(--panel-2); }
 .params tr:last-child td { border-bottom: none; }
 .params .col-name { width: 24%; }
 .params .col-type { width: 18%; }
 .params td code { color: var(--text); font-size: 13px; }
 .params td.type { color: var(--muted); font-family: var(--font-mono); font-size: 12.5px; }
-.params .req { margin-left: 6px; padding: 0 6px; border-radius: 5px; font-size: 11.5px; line-height: 17px; font-weight: 600; color: var(--warn); background: var(--warn-bg); white-space: nowrap; }
+.params .req { margin-left: 6px; padding: 0 6px; border-radius: 5px; font-size: 11.5px; line-height: 17px; font-weight: 600; color: var(--text); background: var(--panel-2); border: 1px solid var(--border-strong); white-space: nowrap; }
 .params .sub { color: var(--muted); font-size: 12.5px; line-height: 18px; margin-top: 3px; }
 .params .sub.mono { font-size: 12px; }
 
@@ -403,7 +406,7 @@ details.desc ul { margin: 6px 0 0; padding-left: 20px; color: var(--muted); disp
 .connect-box h3 { margin: 0; color: var(--text); font-size: 14px; line-height: 20.5px; font-weight: 500; }
 .connect pre.block { white-space: pre; overflow-x: auto; font-size: 12.5px; line-height: 19px; padding: 11px 12px; min-width: 0; }
 .connect .cmd .copy-btn { color: var(--text); font-size: 13px; line-height: 19px; padding: 6px 12px; }
-.connect .side-note { color: var(--faint); font-size: 12.5px; line-height: 18px; }
+.connect .side-note { color: var(--muted); font-size: 12.5px; line-height: 18px; margin-top: 0; }
 @media (max-width: 960px) { .connect-grid { grid-template-columns: 1fr; } }
 
 /* ---- responsive ---------------------------------------------------------- */

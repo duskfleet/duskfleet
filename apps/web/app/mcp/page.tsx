@@ -30,7 +30,7 @@ export default function McpPage() {
     <>
       <div className="page-head">
         <h1>
-          MCP {catalog && <span className="count">{catalog.tools.length} tools</span>}
+          MCP {catalog ? <span className="count">{catalog.tools.length} tools</span> : "tools"}
         </h1>
         {catalog && (
           <span className="note">

@@ -17,13 +17,17 @@ export function TocSpy({ selector }: { selector: string }) {
     let frame = 0;
     const update = () => {
       frame = 0;
-      let current = pairs[0]!;
+      // Nothing is current until a target has actually crossed the threshold.
+      let current: (typeof pairs)[number] | null = null;
       for (const p of pairs) {
         if (p.el.getBoundingClientRect().top <= 96) current = p;
         else break;
       }
       // At the bottom of the page the last entries can never reach the top: take the last one.
-      if (window.innerHeight + window.scrollY >= document.documentElement.scrollHeight - 2) current = pairs[pairs.length - 1]!;
+      // Only once the reader has scrolled: a page shorter than the viewport is "at the bottom" at load.
+      const atBottom =
+        window.scrollY > 0 && window.innerHeight + window.scrollY >= document.documentElement.scrollHeight - 2;
+      if (atBottom) current = pairs[pairs.length - 1]!;
       for (const p of pairs) {
         if (p === current) p.a.setAttribute("aria-current", "location");
         else p.a.removeAttribute("aria-current");
