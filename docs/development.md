@@ -59,25 +59,24 @@ MCP server driven over stdio. Add a case to the fake binary when the parser lear
 
 ## Pull request review by agents
 
-Two project skills in `.claude/skills/` turn a pair of DuskFleet agents into a review loop for
-this repository's own PRs. A run loads the project's skills (verified with Claude Code 2.1.302:
+The owner runs a review loop over this repository's own PRs with two local Claude Code agents
+and two local skills (`.claude/` is git-ignored: agents, skills and settings stay on the
+machine). A DuskFleet run loads the project's skills (verified with Claude Code 2.1.302:
 `--permission-prompts none` with `--setting-sources project,local` still mounts `.claude/skills`
 and the built-in skills), so an agent only needs `Skill` in its `allowed_tools`.
 
-- `duskfleet-pr-review`: the reviewer picks the oldest open PR without a `VERDICT:` comment newer
-  than its last commit, runs the built-in `code-review` skill with `--comment` (inline
-  correctness findings), then checks the rules of this repo (CLAUDE.md) and posts one summary
-  comment ending with `VERDICT: approve` or `VERDICT: changes`. Read-only agent.
-- `duskfleet-pr-fix`: the developer picks the oldest PR with unresolved review threads, works in
-  a worktree on the PR branch (`scripts/pr-worktree.sh <name> <branch> <base>`), pushes one fix
-  commit, replies to every thread with the `[df-pr-developer]` prefix and resolves the ones it
-  fixed. Declined threads stay open for a human. The new commit makes the reviewer look again.
+- The reviewer picks the oldest open PR without a `VERDICT:` comment newer than its last commit,
+  runs the built-in `code-review` skill with `--comment` (inline correctness findings), then
+  checks the rules of CLAUDE.md and posts one summary comment ending with `VERDICT: approve` or
+  `VERDICT: changes`. Read-only agent.
+- The developer picks the oldest PR with unresolved review threads, works in a worktree on the
+  PR branch (`scripts/pr-worktree.sh <name> <branch> <base>`), pushes one fix commit, replies to
+  every thread with a fixed prefix and resolves the ones it fixed. Declined threads stay open
+  for a human. The new commit makes the reviewer look again.
 
-The agents are ordinary Claude Code agents of this repo, `.claude/agents/df-pr-reviewer.md` and
-`.claude/agents/df-pr-developer.md` (persona, model, tools), so they also work interactively
-(`claude --agent df-pr-reviewer`). The builtin DuskFleet agents of the same ids in
-`config/agents/` are links to them (`claude_agent`) that only add the unattended envelope:
-permission mode, `gh` / `git` / `npm` allow-list, budget and timeout. See `docs/agents.md`.
+The DuskFleet side is a pair of user agents in `data/agents/` that link the local Claude Code
+agents (`claude_agent`) and add only the unattended envelope: permission mode, `gh` / `git` /
+`npm` allow-list, budget and timeout. See `docs/agents.md`.
 
 ## Security model
 
