@@ -28,6 +28,7 @@ import {
   resolveClaudeBinary,
   resolveConfigDir,
   ScheduleRepository,
+  scheduleIdleStats,
   scheduleRunState,
 } from "@duskfleet/core";
 
@@ -416,7 +417,17 @@ export function listSchedules() {
       cfg.agents.get(s.agentId),
       runs,
     );
-    return { ...s, cronHuman, theoreticalNextAt, lastRun, effectiveOnFailure, onFailureSource, willResumeRunId };
+    const idle7d = scheduleIdleStats(schedules, s, cfg.scheduler.noopPattern, now);
+    return {
+      ...s,
+      cronHuman,
+      theoreticalNextAt,
+      lastRun,
+      effectiveOnFailure,
+      onFailureSource,
+      willResumeRunId,
+      idle7d,
+    };
   });
 }
 

@@ -6,7 +6,14 @@
 
 import { randomUUID } from "node:crypto";
 import type { DatabaseSync } from "node:sqlite";
-import type { Schedule, ScheduleFiring, ScheduleInput, ScheduleOutcome, SchedulePatch } from "../scheduler/types.js";
+import type {
+  RunOutcomes,
+  Schedule,
+  ScheduleFiring,
+  ScheduleInput,
+  ScheduleOutcome,
+  SchedulePatch,
+} from "../scheduler/types.js";
 
 interface ScheduleRow {
   id: string;
@@ -30,6 +37,7 @@ interface ScheduleRow {
   run_requested_at: string | null;
   on_failure: string | null;
   resume_budget_usd: number | null;
+  noop_pattern: string | null;
 }
 
 function rowToSchedule(r: ScheduleRow): Schedule {
@@ -55,6 +63,7 @@ function rowToSchedule(r: ScheduleRow): Schedule {
     runRequestedAt: r.run_requested_at ?? null,
     onFailure: (r.on_failure as Schedule["onFailure"]) ?? null,
     resumeBudgetUsd: r.resume_budget_usd ?? null,
+    noopPattern: r.noop_pattern ?? null,
   };
 }
 
@@ -98,8 +107,8 @@ export class ScheduleRepository {
     this.db
       .prepare(
         `INSERT INTO schedules (id, name, agent_id, project_id, prompt, model, cron, time_zone, enabled, created_at, updated_at, next_run_at,
-           last_fired_at, last_outcome, last_error, last_run_id, fires, skips, on_failure, resume_budget_usd)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, NULL, NULL, 0, 0, ?, ?)`,
+           last_fired_at, last_outcome, last_error, last_run_id, fires, skips, on_failure, resume_budget_usd, noop_pattern)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, NULL, NULL, 0, 0, ?, ?, ?)`,
       )
       .run(
         id,
@@ -116,6 +125,7 @@ export class ScheduleRepository {
         input.nextRunAt,
         input.onFailure ?? null,
         input.resumeBudgetUsd ?? null,
+        input.noopPattern ?? null,
       );
     return this.get(id)!;
   }
@@ -135,6 +145,7 @@ export class ScheduleRepository {
       nextRunAt: "next_run_at",
       onFailure: "on_failure",
       resumeBudgetUsd: "resume_budget_usd",
+      noopPattern: "noop_pattern",
     };
     for (const [k, v] of Object.entries(patch)) {
       if (v === undefined || !(k in map)) continue;
@@ -202,6 +213,37 @@ export class ScheduleRepository {
         now,
         id,
       );
+  }
+
+  /** Ticks considered since `sinceIso`, by outcome. */
+  firingCountsSince(scheduleId: string, sinceIso: string): Record<string, number> {
+    const rows = this.db
+      .prepare(
+        "SELECT outcome, COUNT(*) AS n FROM schedule_firings WHERE schedule_id = ? AND fired_at >= ? GROUP BY outcome",
+      )
+      .all(scheduleId, sinceIso) as Array<{ outcome: string; n: number }>;
+    return Object.fromEntries(rows.map((r) => [r.outcome, r.n]));
+  }
+
+  /**
+   * What the idle stats read about the runs a schedule started since `sinceIso`: count and cost
+   * of all of them from SQL, and the head (`textLimit` chars) of the final message of the
+   * completed ones only, since only those can be no-ops.
+   */
+  runOutcomesSince(scheduleId: string, sinceIso: string, textLimit: number): RunOutcomes {
+    const totals = this.db
+      .prepare(
+        "SELECT COUNT(*) AS n, COALESCE(SUM(cost_usd), 0) AS cost FROM runs WHERE schedule_id = ? AND created_at >= ?",
+      )
+      .get(scheduleId, sinceIso) as { n: number; cost: number };
+    const completed = (
+      this.db
+        .prepare(
+          "SELECT substr(result_text, 1, ?) AS text, cost_usd FROM runs WHERE schedule_id = ? AND created_at >= ? AND status = 'completed' AND result_text IS NOT NULL",
+        )
+        .all(textLimit, scheduleId, sinceIso) as Array<{ text: string; cost_usd: number | null }>
+    ).map((r) => ({ resultText: r.text, costUsd: r.cost_usd }));
+    return { runs: totals.n, costUsd: totals.cost, completed };
   }
 
   firings(scheduleId: string, limit = 20): ScheduleFiring[] {

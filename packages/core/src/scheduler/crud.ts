@@ -14,6 +14,7 @@ import {
 import { isResumable, type LastRunSummary, lastRunSummary, type Run } from "../observability/run.js";
 import type { ScheduleRepository } from "../storage/schedules.js";
 import { assertTimeZone, CronError, nextFire, parseCron } from "./cron.js";
+import { parseNoopPattern } from "./idle.js";
 import type { Schedule, ScheduleInput, SchedulePatch } from "./types.js";
 
 export const DEFAULT_TIME_ZONE = "Europe/London";
@@ -52,6 +53,7 @@ export function validateScheduleInput(config: DuskFleetConfig, input: ScheduleIn
   if (input.resumeBudgetUsd != null && !(Number.isFinite(input.resumeBudgetUsd) && input.resumeBudgetUsd > 0)) {
     throw new Error("resume_budget_usd must be a positive number");
   }
+  if (input.noopPattern != null) parseNoopPattern(input.noopPattern);
 }
 
 /** The policy a schedule applies after a failed run: its own, else its agent's, else none. */
@@ -161,6 +163,7 @@ export function updateSchedule(
     enabled: patch.enabled ?? existing.enabled,
     onFailure: patch.onFailure === undefined ? existing.onFailure : patch.onFailure,
     resumeBudgetUsd: patch.resumeBudgetUsd === undefined ? existing.resumeBudgetUsd : patch.resumeBudgetUsd,
+    noopPattern: patch.noopPattern === undefined ? existing.noopPattern : patch.noopPattern,
   };
   validateScheduleInput(config, merged);
   if (merged.name !== existing.name && repo.findByName(merged.name))

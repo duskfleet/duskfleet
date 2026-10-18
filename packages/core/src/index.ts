@@ -90,6 +90,15 @@ export {
   validateScheduleInput,
   willResume,
 } from "./scheduler/crud.js";
+export {
+  computeIdleStats,
+  DEFAULT_NOOP_PATTERN,
+  type IdleStats,
+  isNoopRun,
+  NOOP_TEXT_LIMIT,
+  parseNoopPattern,
+  scheduleIdleStats,
+} from "./scheduler/idle.js";
 export { attachLastRun, type RunSummarySource, type ScheduleWithLastRun } from "./scheduler/last-run.js";
 export { Scheduler, type SchedulerOptions, type SchedulerStatus } from "./scheduler/scheduler.js";
 export * from "./scheduler/types.js";

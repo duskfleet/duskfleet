@@ -110,6 +110,8 @@ export interface SchedulerConfig {
   tickSeconds: number;
   /** Default IANA zone for new schedules. */
   defaultTimeZone: string;
+  /** Default no-op marker for idle-cost stats: `/regex/flags` or a plain case-insensitive regex. */
+  noopPattern: string;
 }
 
 export interface DuskFleetConfig {

@@ -1,14 +1,21 @@
-import { describeCron, ON_FAILURE_POLICIES, parseCron, type Schedule, type ScheduleRunState } from "@duskfleet/core";
+import {
+  describeCron,
+  type IdleStats,
+  ON_FAILURE_POLICIES,
+  parseCron,
+  type Schedule,
+  type ScheduleRunState,
+} from "@duskfleet/core";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { errorResult, jsonResult, type ToolContext } from "../server.js";
 
 /**
  * A schedule as the tools return it. The run state (lastRun: how the run it last started *ended*,
- * effectiveOnFailure, willResumeRunId) comes from Scheduler.withLastRun / listWithLastRun; this
+ * effectiveOnFailure, willResumeRunId, idle7d) comes from Scheduler.withLastRun / listWithLastRun; this
  * only adds the cron in words.
  */
-function present(s: Schedule & ScheduleRunState) {
+function present(s: Schedule & ScheduleRunState & { idle7d: IdleStats }) {
   let human = s.cron;
   try {
     human = describeCron(parseCron(s.cron));
@@ -47,6 +54,13 @@ const scheduleFields = {
     .positive()
     .optional()
     .describe("Budget of the resumed run; defaults to the agent's resume_budget_usd, else its max_budget_usd"),
+  noop_pattern: z
+    .string()
+    .min(1)
+    .optional()
+    .describe(
+      'What this schedule\'s agent says when it finds no work, for the idle-cost stats (idle7d): a regex literal "/.../flags" or a plain case-insensitive regex. Tested against the start of the final message (first 2000 chars). Default scheduler.noop_pattern ("/^\\s*(nothing to do|no .* in ready)/i")',
+    ),
 };
 
 export function registerScheduleTools(server: McpServer, ctx: ToolContext): void {
@@ -91,6 +105,7 @@ export function registerScheduleTools(server: McpServer, ctx: ToolContext): void
         if (args.enabled !== undefined) input.enabled = args.enabled;
         if (args.on_failure !== undefined) input.onFailure = args.on_failure;
         if (args.resume_budget_usd !== undefined) input.resumeBudgetUsd = args.resume_budget_usd;
+        if (args.noop_pattern !== undefined) input.noopPattern = args.noop_pattern;
         return jsonResult({ created: true, schedule: present(ctx.scheduler.withLastRun(ctx.scheduler.create(input))) });
       } catch (err) {
         return errorResult(err);
@@ -116,6 +131,11 @@ export function registerScheduleTools(server: McpServer, ctx: ToolContext): void
         enabled: scheduleFields.enabled,
         on_failure: scheduleFields.on_failure,
         resume_budget_usd: scheduleFields.resume_budget_usd,
+        noop_pattern: scheduleFields.noop_pattern,
+        clear_noop_pattern: z
+          .boolean()
+          .optional()
+          .describe("Remove the schedule's noop_pattern: scheduler.noop_pattern applies again"),
         clear_model: z.boolean().optional().describe("Remove the model override"),
         clear_on_failure: z
           .boolean()
@@ -128,6 +148,8 @@ export function registerScheduleTools(server: McpServer, ctx: ToolContext): void
         const patch: Parameters<typeof ctx.scheduler.update>[1] = {};
         if (args.on_failure !== undefined) patch.onFailure = args.on_failure;
         if (args.resume_budget_usd !== undefined) patch.resumeBudgetUsd = args.resume_budget_usd;
+        if (args.noop_pattern !== undefined) patch.noopPattern = args.noop_pattern;
+        if (args.clear_noop_pattern) patch.noopPattern = null;
         if (args.clear_on_failure) {
           patch.onFailure = null;
           patch.resumeBudgetUsd = null;

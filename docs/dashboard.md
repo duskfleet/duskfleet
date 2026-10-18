@@ -33,7 +33,9 @@ in the nav); the other pages are static.
   unlinked from here, with an inline confirmation; builtins are read-only.
 - **Schedules**: state, cron (human and raw), next tick (theoretical one for paused schedules),
   last outcome and firing history, the state of the run it last started, the on-failure policy
-  in force and a "next: resume" badge when the next fire will resume that run. Each row can be run now, paused / resumed, have its cron and
+  in force and a "next: resume" badge when the next fire will resume that run, and the
+  **Idle · 7 d** column: no-op runs out of all runs and the dollars they cost (amber when at
+  least half the runs were no-ops; see [idle cost](schedules.md#idle-cost)). Each row can be run now, paused / resumed, have its cron and
   time zone edited, or be deleted (inline confirmation); the changes go through the same
   validation as `update_schedule`. **Run now** does not start Claude from the dashboard: it marks
   the row and the process that holds the scheduler lease fires it on its next tick (within

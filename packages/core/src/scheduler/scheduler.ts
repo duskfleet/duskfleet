@@ -32,6 +32,7 @@ import {
   scheduleRunState,
   updateSchedule,
 } from "./crud.js";
+import { type IdleStats, scheduleIdleStats } from "./idle.js";
 import type { Schedule, ScheduleInput, ScheduleOutcome, SchedulePatch } from "./types.js";
 
 const log = logger("scheduler");
@@ -112,15 +113,22 @@ export class Scheduler {
     return this.repo.list();
   }
 
-  /** Schedules with the state of the run each last started and what their next fire does (see scheduleRunState). */
-  listWithLastRun(): Array<Schedule & ScheduleRunState> {
-    return this.repo.list().map((s) => this.withLastRun(s));
+  /** Schedules with the state of the run each last started, what their next fire does (see scheduleRunState) and their 7-day idle cost. */
+  listWithLastRun(): Array<Schedule & ScheduleRunState & { idle7d: IdleStats }> {
+    const now = this.now();
+    return this.repo.list().map((s) => this.withLastRun(s, now));
   }
 
-  /** One schedule with its run state: lastRun, effectiveOnFailure, onFailureSource, willResumeRunId. */
-  withLastRun(s: Schedule): Schedule & ScheduleRunState {
+  /** One schedule with its run state (lastRun, effectiveOnFailure, onFailureSource, willResumeRunId) and idle7d. */
+  withLastRun(s: Schedule, now: Date = this.now()): Schedule & ScheduleRunState & { idle7d: IdleStats } {
     const { lastRun, effectiveOnFailure, onFailureSource, willResumeRunId } = this.runState(s);
-    return { ...s, lastRun, effectiveOnFailure, onFailureSource, willResumeRunId };
+    const idle7d = scheduleIdleStats(this.repo, s, this.runs.config.scheduler.noopPattern, now);
+    return { ...s, lastRun, effectiveOnFailure, onFailureSource, willResumeRunId, idle7d };
+  }
+
+  /** Idle stats of one schedule over the last `days`. */
+  idleStats(s: Schedule, days = 7): IdleStats {
+    return scheduleIdleStats(this.repo, s, this.runs.config.scheduler.noopPattern, this.now(), days);
   }
 
   get(id: string): Schedule | null {

@@ -372,7 +372,9 @@ if (resumeIdx >= 0) {
     ? "API Error: something went wrong"
     : prompt === "env"
       ? `CLAUDE_BIN ${process.env.CLAUDE_BIN === undefined ? "unset" : "set"}`
-      : "Done: created hello.txt";
+      : prompt === "noop"
+        ? "Nothing to do: no tickets in Ready."
+        : "Done: created hello.txt";
   out({
     type: "result",
     subtype: isError ? "error_during_execution" : "success",

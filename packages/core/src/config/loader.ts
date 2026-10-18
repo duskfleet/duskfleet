@@ -4,6 +4,8 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { parse as parseYaml } from "yaml";
 import { z } from "zod";
+import { DEFAULT_NOOP_PATTERN, parseNoopPattern } from "../scheduler/idle.js";
+import { logger } from "../util/log.js";
 import { AGENT_ID_PATTERN, maxConcurrentSchema } from "./agent-files.js";
 import {
   type AgentDefinition,
@@ -14,6 +16,8 @@ import {
   PERMISSION_MODES,
   type ProjectDefinition,
 } from "./types.js";
+
+const log = logger("config");
 
 /**
  * Locates the config directory.
@@ -78,6 +82,23 @@ const globalSchema = z.object({
       enabled: z.boolean().default(true),
       tick_seconds: z.number().int().min(5).max(300).default(30),
       default_time_zone: z.string().default("Europe/London"),
+      // A bad marker only feeds the idle-cost stats: warn and use the default rather than
+      // failing every config reload (every run, list_* call and scheduler tick).
+      noop_pattern: z
+        .string()
+        .default(DEFAULT_NOOP_PATTERN)
+        .transform((p) => {
+          try {
+            parseNoopPattern(p);
+            return p;
+          } catch (err) {
+            log.warn("scheduler.noop_pattern ignored, using the default", {
+              err: err instanceof Error ? err.message : String(err),
+              default: DEFAULT_NOOP_PATTERN,
+            });
+            return DEFAULT_NOOP_PATTERN;
+          }
+        }),
     })
     .prefault({}),
 });
@@ -180,6 +201,7 @@ export function loadConfig(configDir: string): DuskFleetConfig {
       enabled: g.scheduler.enabled,
       tickSeconds: g.scheduler.tick_seconds,
       defaultTimeZone: g.scheduler.default_time_zone,
+      noopPattern: g.scheduler.noop_pattern,
     },
     agents,
     projects,
