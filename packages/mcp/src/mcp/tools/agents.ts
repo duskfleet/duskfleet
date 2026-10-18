@@ -14,6 +14,7 @@ import {
   EFFORT_LEVELS,
   listProjectAgents,
   loadAgents,
+  ON_FAILURE_POLICIES,
   PERMISSION_MODES,
   projectIdFromPath,
   upsertUserProject,
@@ -119,6 +120,8 @@ function presentAgent(a: AgentDefinition, config: DuskFleetConfig) {
     maxBudgetUsd: a.maxBudgetUsd ?? config.claude.defaultMaxBudgetUsd,
     /** Dollars of maxBudgetUsd kept for the wrap-up pass after a budget exhaustion (0 = no wrap-up). */
     wrapUpReserveUsd: budgetPlan(a, config).reserve,
+    onFailure: a.onFailure ?? "none",
+    resumeBudgetUsd: a.resumeBudgetUsd ?? null,
     inheritMcp: a.inheritMcp ?? false,
     addDirs: a.addDirs ?? [],
     claudeAgent: a.claudeAgent ?? null,
@@ -170,6 +173,17 @@ const agentFields = {
     .describe(
       "Part of max_budget_usd held back for a wrap-up pass: when the main pass runs out of budget the session is resumed with this amount and told to record where it stopped. Default 10% of the budget, at least $0.50, at most half of it; 0 disables",
     ),
+  on_failure: z
+    .enum(ON_FAILURE_POLICIES)
+    .optional()
+    .describe(
+      "resume_once: a schedule's next tick resumes a run of this agent that ended budget_exhausted or timed_out, once (a second failure is final). Default none. A schedule can override it",
+    ),
+  resume_budget_usd: z
+    .number()
+    .positive()
+    .optional()
+    .describe("Budget of the resumed run (on_failure: resume_once); defaults to max_budget_usd"),
   inherit_mcp: z
     .boolean()
     .optional()
@@ -330,12 +344,12 @@ export function registerAgentTools(server: McpServer, ctx: ToolContext): void {
               "timeout_minutes",
               "max_budget_usd",
               "wrap_up_reserve_usd",
+              "on_failure",
+              "resume_budget_usd",
               "inherit_mcp",
               "add_dirs",
               "claude_agent",
               "project",
-              "max_concurrent",
-              "isolated",
             ]),
           )
           .optional()

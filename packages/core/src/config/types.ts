@@ -10,6 +10,10 @@ export type PermissionMode = (typeof PERMISSION_MODES)[number];
 export const EFFORT_LEVELS = ["low", "medium", "high", "xhigh", "max"] as const;
 export type EffortLevel = (typeof EFFORT_LEVELS)[number];
 
+/** `none`: a failed run is final. `resume_once`: the next tick of the schedule resumes the session, once. */
+export const ON_FAILURE_POLICIES = ["none", "resume_once"] as const;
+export type OnFailurePolicy = (typeof ON_FAILURE_POLICIES)[number];
+
 /** Where an agent definition was loaded from. Only "user" agents are writable by tools. */
 export type AgentSource = "builtin" | "user";
 
@@ -33,6 +37,14 @@ export interface AgentDefinition {
    * stopped. Default 10% of the budget, at least $0.50, never more than half of it. 0 disables.
    */
   wrapUpReserveUsd?: number;
+  /**
+   * What a schedule does on the tick after a run of this agent ended `budget_exhausted` or
+   * `timed_out`: `resume_once` resumes that session (one retry, a second failure is final)
+   * instead of starting fresh. A schedule can override it. Default none.
+   */
+  onFailure?: OnFailurePolicy;
+  /** Budget of the resumed run (`on_failure: resume_once`). Defaults to `maxBudgetUsd`. */
+  resumeBudgetUsd?: number;
   /**
    * Let runs see the MCP servers of the user running DuskFleet (claude.ai
    * connectors such as Atlassian or Figma, user/project .mcp.json). Default

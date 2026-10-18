@@ -18,6 +18,7 @@
  *    minute, so a crashed process's runs close without waiting for the next start.
  */
 
+import type { Run } from "../observability/run.js";
 import type { RunManager } from "../orchestration/run-manager.js";
 import type { ScheduleRepository } from "../storage/schedules.js";
 import { logger } from "../util/log.js";
@@ -26,15 +27,20 @@ import {
   nextRunAtFor,
   parseHolder,
   processIdentity,
+  type ScheduleRunState,
   type SchedulerRole,
+  scheduleRunState,
   updateSchedule,
 } from "./crud.js";
-import { attachLastRun, type ScheduleWithLastRun } from "./last-run.js";
 import type { Schedule, ScheduleInput, ScheduleOutcome, SchedulePatch } from "./types.js";
 
 const log = logger("scheduler");
 
 const ORPHAN_SWEEP_MS = 60_000;
+/** RunManager's refusals that make a tick skip (keep "agent busy" / "project busy" in its error text). */
+function isBusy(message: string): boolean {
+  return /\b(project busy|agent busy|max_concurrent_runs)\b/.test(message);
+}
 
 export interface SchedulerOptions {
   tickMs?: number;
@@ -106,14 +112,15 @@ export class Scheduler {
     return this.repo.list();
   }
 
-  /** Schedules with the state of the run each last started (null before the first firing). */
-  listWithLastRun(): ScheduleWithLastRun[] {
-    return attachLastRun(this.repo.list(), this.runs);
+  /** Schedules with the state of the run each last started and what their next fire does (see scheduleRunState). */
+  listWithLastRun(): Array<Schedule & ScheduleRunState> {
+    return this.repo.list().map((s) => this.withLastRun(s));
   }
 
-  /** One schedule with its last run, for the responses of create / update / run now. */
-  withLastRun(s: Schedule): ScheduleWithLastRun {
-    return attachLastRun([s], this.runs)[0]!;
+  /** One schedule with its run state: lastRun, effectiveOnFailure, onFailureSource, willResumeRunId. */
+  withLastRun(s: Schedule): Schedule & ScheduleRunState {
+    const { lastRun, effectiveOnFailure, onFailureSource, willResumeRunId } = this.runState(s);
+    return { ...s, lastRun, effectiveOnFailure, onFailureSource, willResumeRunId };
   }
 
   get(id: string): Schedule | null {
@@ -219,21 +226,66 @@ export class Scheduler {
       return { outcome: "skipped_disabled", runId: null, error: null };
     }
     try {
+      const resumable = this.resumeCandidate(s);
+      let resumeError: string | null = null;
+      if (resumable) {
+        const input: Parameters<RunManager["resumeRun"]>[0] = { runId: resumable.id, scheduleId: s.id };
+        if (s.resumeBudgetUsd !== null) input.budgetUsd = s.resumeBudgetUsd;
+        try {
+          const run = await this.runs.resumeRun(input);
+          this.repo.recordFiring(s.id, "resumed", run.id, null, nextRunAt);
+          log.info("schedule fired as a resume", {
+            schedule: s.name,
+            runId: run.id,
+            resumedFrom: resumable.id,
+            manual,
+          });
+          return { outcome: "resumed", runId: run.id, error: null };
+        } catch (err) {
+          // Busy is a skip: the resume is tried again on the next tick. Anything else (agent
+          // deleted, project gone, already resumed by another process) would come back on every
+          // tick, so this fire starts fresh instead and last_run_id moves past the failed run.
+          const message = err instanceof Error ? err.message : String(err);
+          if (isBusy(message)) throw err;
+          resumeError = message;
+          log.warn("resume refused; starting fresh", { schedule: s.name, resumedFrom: resumable.id, message });
+        }
+      }
       const input: Parameters<RunManager["startRun"]>[0] = { prompt: s.prompt, agentId: s.agentId, scheduleId: s.id };
       if (s.projectId) input.projectId = s.projectId;
       if (s.model) input.model = s.model;
       const run = await this.runs.startRun(input);
+      if (resumable && resumeError)
+        this.runs.note(run.id, `started fresh: the resume of run ${resumable.id} was refused (${resumeError})`);
       this.repo.recordFiring(s.id, "started", run.id, null, nextRunAt);
       log.info("schedule fired", { schedule: s.name, runId: run.id, manual });
       return { outcome: "started", runId: run.id, error: null };
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
-      const busy = /\b(project busy|agent busy|max_concurrent_runs)\b/.test(message);
+      const busy = isBusy(message);
       const outcome: ScheduleOutcome = busy ? "skipped_busy" : "error";
       this.repo.recordFiring(s.id, outcome, null, message, nextRunAt);
       (busy ? log.info : log.warn)("schedule not started", { schedule: s.name, outcome, message });
       return { outcome, runId: null, error: message };
     }
+  }
+
+  /**
+   * The run to resume instead of starting fresh, when the schedule's policy (its own
+   * `on_failure`, else the agent's) is `resume_once`, the run it last started ended
+   * `budget_exhausted` or `timed_out`, and that run was not itself a resume: one retry,
+   * a second failure is final and the next tick starts fresh.
+   */
+  resumeCandidate(s: Schedule): Run | null {
+    const { last, willResumeRunId } = this.runState(s);
+    return willResumeRunId ? last : null;
+  }
+
+  private runState(s: Schedule) {
+    return scheduleRunState(s, this.runs.config.agents.get(s.agentId), {
+      get: (id) => this.runs.getRun(id),
+      resumedBy: (id) => this.runs.resumedBy(id),
+    });
   }
 
   private computeNext(cron: string, timeZone: string): string | null {

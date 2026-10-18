@@ -106,8 +106,12 @@ export function registerRunTools(server: McpServer, ctx: ToolContext): void {
       if (!run) return errorResult(`run not found: ${run_id}`);
       const view = presentRun(run, Boolean(include_output));
       const subagents = ctx.runs.agents(run_id).map((s) => presentSubagent(s, Boolean(include_output)));
+      /** The run that continued this one's session after a budget / timeout failure (on_failure: resume_once), or null. */
+      const resumedByRunId = ctx.runs.resumedBy(run_id)?.id ?? null;
       return jsonResult(
-        include_output ? { ...view, subagents, events: ctx.runs.events(run_id) } : { ...view, subagents },
+        include_output
+          ? { ...view, resumedByRunId, subagents, events: ctx.runs.events(run_id) }
+          : { ...view, resumedByRunId, subagents },
       );
     },
   );
@@ -130,7 +134,13 @@ export function registerRunTools(server: McpServer, ctx: ToolContext): void {
       if (args.agent_id !== undefined) filter.agentId = args.agent_id;
       if (args.project_path !== undefined) filter.projectPath = args.project_path;
       if (args.limit !== undefined) filter.limit = args.limit;
-      return jsonResult({ active: ctx.runs.activeCount(), runs: ctx.runs.listRuns(filter).map(summarizeRun) });
+      const runs = ctx.runs.listRuns(filter);
+      // Linked retries both ways: a run that was resumed points at its retry, the retry at its origin.
+      const resumedBy = ctx.runs.resumedByMany(runs.map((r) => r.id));
+      return jsonResult({
+        active: ctx.runs.activeCount(),
+        runs: runs.map((r) => ({ ...summarizeRun(r), resumedByRunId: resumedBy.get(r.id) ?? null })),
+      });
     },
   );
 

@@ -55,8 +55,10 @@ export {
   budgetPlan,
   mcpToolPrefix,
   mergeResults,
+  type ResumeRunInput,
   RunManager,
   type RunManagerOptions,
+  resumePrompt,
   type StartRunInput,
   WRAP_UP_PROMPT,
 } from "./orchestration/run-manager.js";
@@ -74,13 +76,17 @@ export {
 export {
   createSchedule,
   DEFAULT_TIME_ZONE,
+  effectiveOnFailure,
   formatHolder,
   nextRunAtFor,
   parseHolder,
   processIdentity,
+  type ScheduleRunState,
   type SchedulerRole,
+  scheduleRunState,
   updateSchedule,
   validateScheduleInput,
+  willResume,
 } from "./scheduler/crud.js";
 export { attachLastRun, type RunSummarySource, type ScheduleWithLastRun } from "./scheduler/last-run.js";
 export { Scheduler, type SchedulerOptions, type SchedulerStatus } from "./scheduler/scheduler.js";

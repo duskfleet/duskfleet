@@ -34,7 +34,7 @@ export default async function RunPage({ params }: { params: Promise<{ id: string
   const { id } = await params;
   const data = getRun(id);
   if (!data) notFound();
-  const { run, events } = data;
+  const { run, events, resumedFrom, resumedBy } = data;
   const home = homeDir();
   const live = run.status === "running" || run.status === "pending";
   const duration = live ? elapsedSince(run.startedAt) : run.durationMs;
@@ -167,6 +167,29 @@ export default async function RunPage({ params }: { params: Promise<{ id: string
       </div>
 
       <div id="issues">
+        {resumedFrom && (
+          <div className="callout warn">
+            <span className="icon">↺</span>
+            <div>
+              <strong>Retry.</strong> This run resumed the session of{" "}
+              <Link href={`/runs/${resumedFrom.id}`}>{runTitle(resumedFrom.prompt, 60)}</Link> (
+              {resumedFrom.status.replace("_", " ")}
+              {resumedFrom.terminationReason ? `, ${resumedFrom.terminationReason}` : ""}), once: a second failure is
+              final (<code>on_failure: resume_once</code>).
+            </div>
+          </div>
+        )}
+        {resumedBy && (
+          <div className="callout warn">
+            <span className="icon">↺</span>
+            <div>
+              <strong>Retried.</strong> The next tick resumed this session as{" "}
+              <Link href={`/runs/${resumedBy.id}`}>run {resumedBy.id.slice(0, 8)}</Link> (
+              <StatusBadge run={resumedBy} />
+              ). Check that run for the outcome.
+            </div>
+          </div>
+        )}
         {needsAttention && (
           <div className="callout warn" style={{ marginBottom: 8 }}>
             <span className="icon">!</span>

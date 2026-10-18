@@ -185,6 +185,19 @@ const MIGRATIONS: ReadonlyArray<{ version: number; sql: string; backfill?: (db: 
     sql: `ALTER TABLE runs ADD COLUMN review_reasons_json TEXT;`,
     backfill: backfillReviewReasons,
   },
+  {
+    // Resume-once on failure: a schedule (or its agent) may resume the session of a run that
+    // ended budget_exhausted / timed_out on the next tick, once. The retry run points at the
+    // run it resumed; the original is found through the index. The index is unique: the insert
+    // of the retry row is the once-only claim, atomic across processes sharing the database.
+    version: 10,
+    sql: `
+      ALTER TABLE schedules ADD COLUMN on_failure TEXT;
+      ALTER TABLE schedules ADD COLUMN resume_budget_usd REAL;
+      ALTER TABLE runs ADD COLUMN resumed_from_run_id TEXT;
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_runs_resumed_from ON runs(resumed_from_run_id);
+    `,
+  },
 ];
 
 /**

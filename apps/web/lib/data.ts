@@ -11,7 +11,6 @@ import { homedir } from "node:os";
 import path from "node:path";
 import type { DatabaseSync } from "node:sqlite";
 import {
-  attachLastRun,
   budgetPlan,
   type DuskFleetConfig,
   describeCron,
@@ -29,6 +28,7 @@ import {
   resolveClaudeBinary,
   resolveConfigDir,
   ScheduleRepository,
+  scheduleRunState,
 } from "@duskfleet/core";
 
 interface Services {
@@ -149,8 +149,8 @@ export interface RunsFilter {
   limit?: number;
 }
 
-/** A run plus the label the UI shows for its project: registry id when known, else the folder name. */
-export type RunWithProject = Run & { projectLabel: string };
+/** A run plus the label the UI shows for its project (registry id when known, else the folder name) and its linked retry, if any. */
+export type RunWithProject = Run & { projectLabel: string; resumedByRunId: string | null };
 
 /**
  * Older runs were recorded without `projectId` even when the path is a registered
@@ -184,7 +184,8 @@ export function listRuns(filter: RunsFilter = {}): RunWithProject[] {
   }
   if (inMemory) list = list.slice(0, limit);
   const label = projectLabeller();
-  return list.map((r) => ({ ...r, projectLabel: label(r) }));
+  const resumedBy = runs.resumedByMany(list.map((r) => r.id));
+  return list.map((r) => ({ ...r, projectLabel: label(r), resumedByRunId: resumedBy.get(r.id) ?? null }));
 }
 
 /** Label for a single run (detail page). */
@@ -226,7 +227,11 @@ export function listProjects() {
 export function getRun(id: string) {
   const { runs } = services();
   const run = runs.get(id);
-  return run ? { run, events: runs.events(id) } : null;
+  if (!run) return null;
+  // Linked retry (on_failure: resume_once): the run this one resumed, and the one that resumed it.
+  const resumedFrom = run.resumedFromRunId ? runs.get(run.resumedFromRunId) : null;
+  const resumedBy = runs.resumedBy(id);
+  return { run, events: runs.events(id), resumedFrom, resumedBy };
 }
 
 export interface AgentStats {
@@ -392,9 +397,9 @@ export function overview(filter: Pick<RunsFilter, "agentId" | "projectPath"> = {
 
 export function listSchedules() {
   const { schedules, runs } = services();
+  const cfg = config();
   const now = new Date();
-  // `lastRun` (how the run it last started ended) is core's attachLastRun, shared with MCP and the CLI.
-  return attachLastRun(schedules.list(), runs).map((s) => {
+  return schedules.list().map((s) => {
     let cronHuman = s.cron;
     let theoreticalNextAt: string | null = null;
     try {
@@ -404,7 +409,14 @@ export function listSchedules() {
     } catch {
       // keep raw
     }
-    return { ...s, cronHuman, theoreticalNextAt };
+    // How the run it last started ended (the tick outcome alone hides a failed run) and what the
+    // next fire does: the same core composition as list_schedules and the CLI.
+    const { lastRun, effectiveOnFailure, onFailureSource, willResumeRunId } = scheduleRunState(
+      s,
+      cfg.agents.get(s.agentId),
+      runs,
+    );
+    return { ...s, cronHuman, theoreticalNextAt, lastRun, effectiveOnFailure, onFailureSource, willResumeRunId };
   });
 }
 

@@ -46,6 +46,8 @@ permission_mode: acceptEdits      # acceptEdits | dontAsk | auto | manual  (plan
 timeout_minutes: 30
 max_budget_usd: 5
 # wrap_up_reserve_usd: 0.5     # part of max_budget_usd kept for the wrap-up pass; default 10%, min $0.50, 0 = off
+# on_failure: resume_once      # a schedule's next tick resumes a budget-exhausted / timed-out run, once (default none)
+# resume_budget_usd: 3         # budget of that resumed run (default max_budget_usd)
 ---
 You are running unattended. Finish the task end to end and summarise what you changed.
 ```
@@ -110,6 +112,20 @@ Two frontmatter fields lift the limits per agent:
 for `max_concurrent` is a config error naming the file. `list_agents` reports both fields
 (`maxConcurrent` is the effective limit) and the dashboard shows them in the limits row when
 they differ from the defaults.
+## Resume once on failure
+
+The wrap-up pass leaves a trace; it does not finish the job. `on_failure: resume_once` lets a
+**schedule** retry: on its next tick after a run of this agent ended `budget_exhausted` or
+`timed_out`, it resumes that session (`claude --resume <session>`) instead of starting fresh,
+with `resume_budget_usd` (default `max_budget_usd`; the wrap-up reserve applies to it too)
+and a prompt that says the previous session ended early, to check what was already done
+before redoing anything, and to finish and record the outcome. The retry is its own run,
+linked both ways (`resumedFromRunId` on the retry, `resumedByRunId` in `get_run`, `list_runs`
+and on the dashboard; `retries` counts the hop). It happens **once**: a retry that fails is
+final and the tick after starts fresh; a retry that completes is followed by a fresh run as
+usual. The default is `none`. A schedule can override the agent (`on_failure` on the
+schedule, `none` to switch it off for that schedule); see [schedules](schedules.md#resume-once-on-failure).
+`run_agent` is never retried: the policy belongs to the scheduler.
 
 ## Permissions in unattended runs
 

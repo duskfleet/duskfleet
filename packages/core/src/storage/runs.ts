@@ -42,6 +42,7 @@ interface RunRow {
   owner: string | null;
   phases_json: string | null;
   review_reasons_json: string | null;
+  resumed_from_run_id: string | null;
 }
 
 function rowToRun(r: RunRow): Run {
@@ -84,6 +85,7 @@ function rowToRun(r: RunRow): Run {
     owner: r.owner ?? null,
     phases: parsePhases(r.phases_json),
     reviewReasons: parseReasons(r.review_reasons_json),
+    resumedFromRunId: r.resumed_from_run_id ?? null,
   };
 }
 
@@ -215,8 +217,8 @@ export class RunRepository {
            created_at, started_at, ended_at, duration_ms, claude_session_id, permission_mode, command_json,
            exit_code, termination_reason, error, result_text, num_turns, tool_calls, input_tokens, output_tokens,
            cache_read_tokens, cache_creation_tokens, cost_usd, permission_denials, denied_tools_json, mcp_json, human_intervention,
-           context_exhausted, retries, log_path, raw_result_json, schedule_id, owner, phases_json, review_reasons_json)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+           context_exhausted, retries, log_path, raw_result_json, schedule_id, owner, phases_json, review_reasons_json, resumed_from_run_id)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         run.id,
@@ -257,7 +259,34 @@ export class RunRepository {
         run.owner,
         JSON.stringify(run.phases ?? []),
         run.reviewReasons?.length ? JSON.stringify(run.reviewReasons) : null,
+        run.resumedFromRunId ?? null,
       );
+  }
+
+  /** The run that resumed `runId` (on_failure: resume_once), or null. At most one exists: a resume is tried once. */
+  resumedBy(runId: string): Run | null {
+    const row = this.db
+      .prepare("SELECT * FROM runs WHERE resumed_from_run_id = ? ORDER BY created_at DESC LIMIT 1")
+      .get(runId) as unknown as RunRow | undefined;
+    return row ? rowToRun(row) : null;
+  }
+
+  /** A resume that never started (spawn failure) drops its link, so the original can be resumed again. */
+  releaseResumeClaim(runId: string): void {
+    this.db.prepare("UPDATE runs SET resumed_from_run_id = NULL WHERE id = ?").run(runId);
+  }
+
+  /** For a list page: id → id of the run that resumed it, for every id that has one. */
+  resumedByMany(ids: string[]): Map<string, string> {
+    const out = new Map<string, string>();
+    if (ids.length === 0) return out;
+    const rows = this.db
+      .prepare(
+        `SELECT id, resumed_from_run_id FROM runs WHERE resumed_from_run_id IN (${ids.map(() => "?").join(",")}) ORDER BY created_at ASC`,
+      )
+      .all(...ids) as Array<{ id: string; resumed_from_run_id: string }>;
+    for (const r of rows) out.set(r.resumed_from_run_id, r.id);
+    return out;
   }
 
   update(id: string, patch: RunPatch): void {

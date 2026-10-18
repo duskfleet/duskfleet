@@ -95,6 +95,12 @@ export interface Run {
    * the rule: lists, badges and aggregates (`NEEDS_REVIEW_SQL`) all read the same stored value.
    */
   reviewReasons: ReviewReason[];
+  /**
+   * Set when this run resumed the session of an earlier run that ended `budget_exhausted` or
+   * `timed_out` (a schedule's `on_failure: resume_once`). The original run is found through
+   * `RunRepository.resumedBy`.
+   */
+  resumedFromRunId: string | null;
 }
 
 /** The wrap-up phase of a run, when there was one. */
@@ -251,8 +257,17 @@ export function summarizeRun(run: Run) {
     terminationReason: run.terminationReason,
     /** Outcome and cost of the wrap-up pass after a budget exhaustion; null when there was none. */
     wrapUp: summarizeWrapUp(run),
+    /** The run whose session this one resumed (on_failure: resume_once); null for a fresh run. */
+    resumedFromRunId: run.resumedFromRunId,
+    retries: run.retries,
     error: run.error,
   };
+}
+
+/** A run ended in a way `on_failure: resume_once` retries: out of budget or out of time, with a session to resume. */
+export function isResumable(run: Pick<Run, "status" | "terminationReason" | "claudeSessionId">): boolean {
+  if (!run.claudeSessionId) return false;
+  return run.status === "timed_out" || (run.status === "failed" && isBudgetExhausted(run.terminationReason));
 }
 
 export function summarizeWrapUp(
