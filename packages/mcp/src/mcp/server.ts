@@ -3,9 +3,9 @@
  * `register(server, ctx)` function. Add a file there and one line here to
  * expose a new tool.
  */
+
+import type { DuskFleetConfig, RunManager, Scheduler } from "@duskfleet/core";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import type { DuskFleetConfig } from "@duskfleet/core";
-import type { RunManager, Scheduler } from "@duskfleet/core";
 import { registerAgentTools } from "./tools/agents.js";
 import { registerRunTools } from "./tools/runs.js";
 import { registerScheduleTools } from "./tools/schedules.js";

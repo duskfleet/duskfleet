@@ -1,5 +1,6 @@
 "use server";
 
+import { updateSchedule } from "@duskfleet/core";
 /**
  * Schedule writes from the dashboard: pause / resume, change when it fires
  * (cron + time zone), delete, and "run now". They go through the same validation
@@ -10,7 +11,6 @@
  * and the ticking process fires the schedule (see Scheduler.tick).
  */
 import { revalidatePath } from "next/cache";
-import { updateSchedule } from "@duskfleet/core";
 import { config, services } from "@/lib/data";
 
 export interface ActionResult {
@@ -26,7 +26,12 @@ export async function setScheduleEnabledAction(id: string, enabled: boolean): Pr
   try {
     const s = updateSchedule(services().schedules, config(), id, { enabled });
     revalidatePath("/schedules");
-    return { ok: true, message: enabled ? `Resumed "${s.name}"${s.nextRunAt ? `, next ${new Date(s.nextRunAt).toLocaleString()}` : ""}.` : `Paused "${s.name}".` };
+    return {
+      ok: true,
+      message: enabled
+        ? `Resumed "${s.name}"${s.nextRunAt ? `, next ${new Date(s.nextRunAt).toLocaleString()}` : ""}.`
+        : `Paused "${s.name}".`,
+    };
   } catch (err) {
     return fail(err);
   }
@@ -36,7 +41,10 @@ export async function updateScheduleWhenAction(id: string, cron: string, timeZon
   try {
     const s = updateSchedule(services().schedules, config(), id, { cron: cron.trim(), timeZone: timeZone.trim() });
     revalidatePath("/schedules");
-    return { ok: true, message: `"${s.name}" now runs on "${s.cron}" (${s.timeZone})${s.enabled && s.nextRunAt ? `, next ${new Date(s.nextRunAt).toLocaleString()}` : ""}.` };
+    return {
+      ok: true,
+      message: `"${s.name}" now runs on "${s.cron}" (${s.timeZone})${s.enabled && s.nextRunAt ? `, next ${new Date(s.nextRunAt).toLocaleString()}` : ""}.`,
+    };
   } catch (err) {
     return fail(err);
   }
@@ -52,12 +60,21 @@ export async function requestScheduleRunAction(id: string): Promise<ActionResult
     const lease = repo.leaseInfo();
     const live = lease ? new Date(lease.expiresAt).getTime() > Date.now() : false;
     if (!cfg.scheduler.enabled) {
-      return { ok: true, message: `Run of "${s.name}" requested, but scheduler.enabled is false: nothing fires until the kill switch is off.` };
+      return {
+        ok: true,
+        message: `Run of "${s.name}" requested, but scheduler.enabled is false: nothing fires until the kill switch is off.`,
+      };
     }
     if (!live) {
-      return { ok: true, message: `Run of "${s.name}" requested; it starts as soon as a DuskFleet process ticks (duskfleet serve or the MCP server).` };
+      return {
+        ok: true,
+        message: `Run of "${s.name}" requested; it starts as soon as a DuskFleet process ticks (duskfleet serve or the MCP server).`,
+      };
     }
-    return { ok: true, message: `Run of "${s.name}" requested; the ticking process starts it within ${cfg.scheduler.tickSeconds} s (busy agent or project = skipped).` };
+    return {
+      ok: true,
+      message: `Run of "${s.name}" requested; the ticking process starts it within ${cfg.scheduler.tickSeconds} s (busy agent or project = skipped).`,
+    };
   } catch (err) {
     return fail(err);
   }

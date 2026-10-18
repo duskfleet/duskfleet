@@ -50,12 +50,57 @@ apps/web/lib/data.ts             server-only read access to config + SQLite
 npm run build          # core + mcp (tsc). The CLI, the MCP server and the dashboard import from dist/
 npm run typecheck      # core + mcp; dashboard: npm run typecheck -w @duskfleet/web
 npm test               # packages/mcp/test/*.test.js, node --test, ~25 s, no network, no cost
+npm run check          # everything CI runs, in the same order (hygiene, lint, build, typecheck, tests)
 ```
 
 The tests use `packages/mcp/test/fake-claude.js`, a stand-in for the Claude binary that replays
 the real `stream-json` event shapes, so they never launch a real Claude. They cover the
 executor, state machine, SQLite storage, validation, scheduler, legacy database adoption and the
 MCP server driven over stdio. Add a case to the fake binary when the parser learns a new event.
+
+## Quality gates
+
+Every pull request runs the `checks` job in `.github/workflows/ci.yml`; a ruleset on `main` refuses
+the merge while it is red, and refuses pushes that bypass a pull request. The job needs no Claude
+login and spends nothing: the tests use the fake binary. In order:
+
+| Step | Command | Fails when |
+|------|---------|------------|
+| Public-repo hygiene | `npm run check:public` | A versioned file contains a home path, the committing machine's user or host name, or the index holds a symlink. Placeholders `<you>`, `you`, `me` are fine. |
+| Lint + format | `npm run lint` (`biome ci .`; `npm run lint:fix` repairs) | A Biome lint error or an unformatted file. Warnings (`noNonNullAssertion`, `noExplicitAny`, …) do not block. In `packages/core` an import of the MCP SDK, React or Next.js is an error. |
+| Build | `npm run build` | `tsc` errors in core or mcp |
+| Typecheck | `npm run typecheck`, `npm run typecheck -w @duskfleet/web` | Type errors anywhere |
+| Tests + coverage | `npm run test:coverage` | A failing test, or line coverage of the in-process code under 80 % |
+| Dashboard build | `npm run build:web` | `next build` errors (Server Component rules `tsc` does not see) |
+| Audit | `npm audit --audit-level=high` | Report-only until the Next 16 upgrade clears the `postcss` advisory Next 15 pins; then blocking on high / critical. |
+
+Two tests are gates in themselves: `test/migrations.test.js` pins the SHA-256 of every shipped
+migration (edit one and it fails; add one and it tells you the digest to append), and the layering of
+the three packages is a Biome rule, not just this page. Dependabot opens grouped weekly PRs for npm
+and GitHub Actions. Not built yet: a periodic `claude --help` flag-drift check (needs the CLI, so a
+local schedule rather than Actions), a manual-dispatch smoke run with `--model haiku`, and a docs
+sync check (every MCP tool in `docs/mcp-server.md`, every `docs/` page linked from `README.md`).
+
+## Pull request review by agents
+
+The owner runs a review loop over this repository's own PRs with two local Claude Code agents
+and two local skills (`.claude/` is git-ignored: agents, skills and settings stay on the
+machine). A DuskFleet run loads the project's skills (verified with Claude Code 2.1.302:
+`--permission-prompts none` with `--setting-sources project,local` still mounts `.claude/skills`
+and the built-in skills), so an agent only needs `Skill` in its `allowed_tools`.
+
+- The reviewer picks the oldest open PR without a `VERDICT:` comment newer than its last commit,
+  runs the built-in `code-review` skill with `--comment` (inline correctness findings), then
+  checks the rules of CLAUDE.md and posts one summary comment ending with `VERDICT: approve` or
+  `VERDICT: changes`. Read-only agent.
+- The developer picks the oldest PR with unresolved review threads, works in a worktree on the
+  PR branch (`scripts/pr-worktree.sh <name> <branch> <base>`), pushes one fix commit, replies to
+  every thread with a fixed prefix and resolves the ones it fixed. Declined threads stay open
+  for a human. The new commit makes the reviewer look again.
+
+The DuskFleet side is a pair of user agents in `data/agents/` that link the local Claude Code
+agents (`claude_agent`) and add only the unattended envelope: permission mode, `gh` / `git` /
+`npm` allow-list, budget and timeout. See `docs/agents.md`.
 
 ## Security model
 
@@ -71,10 +116,29 @@ MCP server driven over stdio. Add a case to the fake binary when the parser lear
 
 - **New MCP tool**: add a file in `packages/mcp/src/mcp/tools/`, register it in `packages/mcp/src/mcp/server.ts`.
 - **New builtin agent**: drop a Markdown file in `config/agents/`.
-- **Schema change**: append a migration in `packages/core/src/storage/db.ts`; never edit an existing one.
+- **Schema change**: append a migration in `packages/core/src/storage/db.ts`; never edit an existing one. Then pin its digest in `packages/mcp/test/migrations.test.js` (the failing test prints it).
 - **Run status changes**: only `RunManager`, through `assertTransition`.
 - **New dashboard view**: add a route under `apps/web/app/` and a query in `apps/web/lib/data.ts`.
 - **Evals**: implement the interfaces in `packages/core/src/evals/types.ts`; the run pipeline does not need to change.
-- **Claude CLI flags**: verify every flag against `claude --help` before using it; `PLAN.md` §1 lists the ones verified so far.
+- **Claude CLI flags**: verify every flag against `claude --help` before using it. The ones the
+  executor uses, checked against `claude --help` of Claude Code 2.1.285:
 
-The design document is [PLAN.md](../PLAN.md); keep it and these pages in sync when behaviour changes.
+  | Flag | Purpose in DuskFleet |
+  |---|---|
+  | `-p, --print` | Non-interactive execution |
+  | `--output-format stream-json` + `--verbose` | Line-delimited JSON events (`stream-json` refuses to run without `--verbose`) |
+  | `--session-id <uuid>` | The run knows its session id before the process starts |
+  | `--model <model>` | Only passed when explicitly selected |
+  | `--permission-mode <mode>` | `acceptEdits`, `auto`, `manual`, `dontAsk`, `plan` (`bypassPermissions` is refused unattended) |
+  | `--permission-prompts none` | Unattended: anything that would prompt is denied instead of blocking |
+  | `--allowedTools` / `--disallowedTools` | Per-agent tool policy |
+  | `--append-system-prompt <text>` | Agent definition body becomes the appended system prompt |
+  | `--agent <name>` | Link agents: run as the project's `.claude/agents/<name>.md` |
+  | `--max-budget-usd <amount>` | Hard cost cap per run |
+  | `--effort <level>` | Optional per-agent effort |
+  | `--strict-mcp-config` | Isolate the child from user-level MCP servers (default on, configurable) |
+  | `--add-dir <dir>` | `add_dirs`: extra directories the run may touch |
+  | `--setting-sources <list>` | Restrict which settings files the child loads (`claude.setting_sources`) |
+  | `-r, --resume <id>` | Not used by the executor; surfaced as the "resume this run" command |
+
+Keep these pages in sync when behaviour changes.

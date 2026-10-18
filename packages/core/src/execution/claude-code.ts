@@ -4,17 +4,17 @@
  * Everything CLI-specific lives here: flag names, output parsing, process
  * lifecycle. The rest of DuskFleet only sees `Executor` / `ExecutionResult`.
  *
- * Flags used were verified against `claude --help` for 2.1.285 (see PLAN.md §1).
+ * Flags used were verified against `claude --help` for 2.1.285.
  */
-import { spawn, execFile, type ChildProcess } from "node:child_process";
+import { type ChildProcess, execFile, spawn } from "node:child_process";
 import { createWriteStream, existsSync, mkdirSync, type WriteStream } from "node:fs";
 import { homedir } from "node:os";
 import path from "node:path";
 import { createInterface } from "node:readline";
+import type { RecordedCommand } from "../observability/run.js";
 import { logger } from "../util/log.js";
 import { createStreamState, ingestLine, looksLikeContextExhaustion } from "./stream-json.js";
 import type { ExecutionEvent, ExecutionHandle, ExecutionRequest, ExecutionResult, Executor } from "./types.js";
-import type { RecordedCommand } from "../observability/run.js";
 
 const log = logger("execution");
 

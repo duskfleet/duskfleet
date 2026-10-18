@@ -1,5 +1,5 @@
 import { CopyButton } from "@/components/CopyButton";
-import { mcpRegistration, toolCatalog, type JsonSchema, type ToolCatalogEntry } from "@/lib/data";
+import { type JsonSchema, mcpRegistration, type ToolCatalogEntry, toolCatalog } from "@/lib/data";
 import { fmtRelative, fmtTime } from "@/lib/format";
 
 export const dynamic = "force-dynamic";
@@ -32,7 +32,9 @@ export default function McpPage() {
         {catalog && (
           <span className="muted" style={{ fontSize: "0.86rem" }}>
             {catalog.tools.length} tools · server <code>{catalog.server.name}</code> v{catalog.server.version} ·{" "}
-            <span title={`Written by npm run build to packages/mcp/dist/tools.json on ${fmtTime(catalog.generatedAt)}. Hosts load the server once: after a rebuild, restart Claude Desktop / Claude Code to get the new tools.`}>
+            <span
+              title={`Written by npm run build to packages/mcp/dist/tools.json on ${fmtTime(catalog.generatedAt)}. Hosts load the server once: after a rebuild, restart Claude Desktop / Claude Code to get the new tools.`}
+            >
               catalogue built {fmtRelative(catalog.generatedAt)} (restart the host after a rebuild)
             </span>
           </span>
@@ -43,7 +45,8 @@ export default function McpPage() {
         <div className="callout warn">
           <span className="icon">!</span>
           <div>
-            <strong>No catalogue found.</strong> It is written by <code>npm run build</code> of <code>@duskfleet/mcp</code> to
+            <strong>No catalogue found.</strong> It is written by <code>npm run build</code> of{" "}
+            <code>@duskfleet/mcp</code> to
             <code> packages/mcp/dist/tools.json</code>. Run the build and reload.
           </div>
         </div>
@@ -53,18 +56,33 @@ export default function McpPage() {
             {groups.map((g) => (
               <div key={g.key} style={{ display: "contents" }}>
                 <div className="group">{g.title}</div>
-                {catalog.tools.filter((t) => t.group === g.key).map((t) => (
-                  <a key={t.name} href={`#${t.name}`}>{t.name}</a>
-                ))}
+                {catalog.tools
+                  .filter((t) => t.group === g.key)
+                  .map((t) => (
+                    <a key={t.name} href={`#${t.name}`}>
+                      {t.name}
+                    </a>
+                  ))}
               </div>
             ))}
             <div className="group">Setup</div>
-            <a href="#connect" style={{ fontFamily: "inherit" }}>Connect a client</a>
+            <a href="#connect" style={{ fontFamily: "inherit" }}>
+              Connect a client
+            </a>
           </nav>
 
           <div style={{ minWidth: 0 }}>
             <div className="card" style={{ marginBottom: 20 }}>
-              <div className="muted" style={{ fontSize: "0.8rem", textTransform: "uppercase", letterSpacing: "0.07em", fontWeight: 600, marginBottom: 6 }}>
+              <div
+                className="muted"
+                style={{
+                  fontSize: "0.8rem",
+                  textTransform: "uppercase",
+                  letterSpacing: "0.07em",
+                  fontWeight: 600,
+                  marginBottom: 6,
+                }}
+              >
                 What the server tells clients
               </div>
               <Sentences text={catalog.server.instructions} />
@@ -74,7 +92,11 @@ export default function McpPage() {
               <section key={g.key} style={{ marginBottom: 28 }} id={`group-${g.key}`}>
                 <h2 style={{ marginTop: 0 }}>
                   {g.title} <span className="count">{catalog.tools.filter((t) => t.group === g.key).length}</span>
-                  {g.blurb && <span className="count" style={{ fontWeight: 400 }}>· {g.blurb}</span>}
+                  {g.blurb && (
+                    <span className="count" style={{ fontWeight: 400 }}>
+                      · {g.blurb}
+                    </span>
+                  )}
                 </h2>
                 <div style={{ display: "grid", gap: 12 }}>
                   {catalog.tools
@@ -104,22 +126,29 @@ function ConnectClient({ desktopJson, claudeCodeCmd }: { desktopJson: string; cl
       <div className="two-col">
         <div>
           <div className="muted" style={{ fontSize: "0.86rem", marginBottom: 6 }}>
-            Claude Desktop / Cowork: add to <code>~/Library/Application Support/Claude/claude_desktop_config.json</code>, then restart the app.
-            Keep the paths absolute: the app does not expand <code>~</code>.
+            Claude Desktop / Cowork: add to <code>~/Library/Application Support/Claude/claude_desktop_config.json</code>
+            , then restart the app. Keep the paths absolute: the app does not expand <code>~</code>.
           </div>
           <div className="cmd">
-            <pre className="block" style={{ whiteSpace: "pre", overflowX: "auto" }}>{desktopJson}</pre>
+            <pre className="block" style={{ whiteSpace: "pre", overflowX: "auto" }}>
+              {desktopJson}
+            </pre>
             <CopyButton text={desktopJson} />
           </div>
         </div>
         <div>
-          <div className="muted" style={{ fontSize: "0.86rem", marginBottom: 6 }}>Claude Code (any project, one command):</div>
+          <div className="muted" style={{ fontSize: "0.86rem", marginBottom: 6 }}>
+            Claude Code (any project, one command):
+          </div>
           <div className="cmd">
-            <pre className="block" style={{ whiteSpace: "pre", overflowX: "auto" }}>{claudeCodeCmd}</pre>
+            <pre className="block" style={{ whiteSpace: "pre", overflowX: "auto" }}>
+              {claudeCodeCmd}
+            </pre>
             <CopyButton text={claudeCodeCmd} />
           </div>
           <div className="muted" style={{ fontSize: "0.8rem", marginTop: 10 }}>
-            Hosts keep the server process alive and load it once: after <code>npm run build</code>, restart the host. Config under <code>config/</code>
+            Hosts keep the server process alive and load it once: after <code>npm run build</code>, restart the host.
+            Config under <code>config/</code>
             needs no restart.
           </div>
         </div>
@@ -136,7 +165,10 @@ function splitFirstSentence(text: string): [string, string] {
 }
 
 function sentences(text: string): string[] {
-  return text.split(/(?<=[.!?])\s+(?=[A-Z"'`(])/).map((s) => s.trim()).filter(Boolean);
+  return text
+    .split(/(?<=[.!?])\s+(?=[A-Z"'`(])/)
+    .map((s) => s.trim())
+    .filter(Boolean);
 }
 
 /** The long server instructions as a list, one sentence per line. */
@@ -145,7 +177,9 @@ function Sentences({ text }: { text: string }) {
   if (parts.length <= 2) return <div style={{ fontSize: "0.95rem" }}>{text}</div>;
   return (
     <ul style={{ margin: 0, paddingLeft: 20, fontSize: "0.92rem", display: "grid", gap: 4 }}>
-      {parts.map((s, i) => <li key={i}>{s}</li>)}
+      {parts.map((s, i) => (
+        <li key={i}>{s}</li>
+      ))}
     </ul>
   );
 }
@@ -159,7 +193,9 @@ function ToolCard({ tool }: { tool: ToolCatalogEntry }) {
   return (
     <div className="card" id={tool.name}>
       <div style={{ display: "flex", gap: 10, alignItems: "baseline", flexWrap: "wrap" }}>
-        <a href={`#${tool.name}`} style={{ color: "inherit" }}><code style={{ fontSize: "1rem", fontWeight: 650 }}>{tool.name}</code></a>
+        <a href={`#${tool.name}`} style={{ color: "inherit" }}>
+          <code style={{ fontSize: "1rem", fontWeight: 650 }}>{tool.name}</code>
+        </a>
         {tool.title && <span className="muted">{tool.title}</span>}
       </div>
       <div style={{ margin: "8px 0 10px", fontSize: "0.92rem" }}>
@@ -170,14 +206,18 @@ function ToolCard({ tool }: { tool: ToolCatalogEntry }) {
             <details className="desc" style={{ display: "inline" }}>
               <summary>more…</summary>
               <ul>
-                {restParts.map((s, i) => <li key={i}>{s}</li>)}
+                {restParts.map((s, i) => (
+                  <li key={i}>{s}</li>
+                ))}
               </ul>
             </details>
           </>
         )}
       </div>
       {names.length === 0 ? (
-        <div className="muted" style={{ fontSize: "0.86rem" }}>No parameters.</div>
+        <div className="muted" style={{ fontSize: "0.86rem" }}>
+          No parameters.
+        </div>
       ) : (
         <table className="table">
           <thead>
@@ -194,15 +234,25 @@ function ToolCard({ tool }: { tool: ToolCatalogEntry }) {
                 <tr key={n}>
                   <td>
                     <code>{n}</code>
-                    {required.has(n) && <span className="tag" style={{ marginLeft: 6 }}>required</span>}
+                    {required.has(n) && (
+                      <span className="tag" style={{ marginLeft: 6 }}>
+                        required
+                      </span>
+                    )}
                   </td>
                   <td className="mono muted">{typeOf(s)}</td>
                   <td style={{ fontSize: "0.88rem" }}>
                     {s.description ?? null}
                     {s.enum && (
-                      <div className="mono muted" style={{ fontSize: "0.8rem", marginTop: 3 }}>one of: {s.enum.map(String).join(" | ")}</div>
+                      <div className="mono muted" style={{ fontSize: "0.8rem", marginTop: 3 }}>
+                        one of: {s.enum.map(String).join(" | ")}
+                      </div>
                     )}
-                    {s.default !== undefined && <div className="muted" style={{ fontSize: "0.8rem" }}>default: {JSON.stringify(s.default)}</div>}
+                    {s.default !== undefined && (
+                      <div className="muted" style={{ fontSize: "0.8rem" }}>
+                        default: {JSON.stringify(s.default)}
+                      </div>
+                    )}
                   </td>
                 </tr>
               );
