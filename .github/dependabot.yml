@@ -1,5 +1,5 @@
 # Weekly dependency updates, grouped so a week yields one or two PRs rather than ten.
-# Runtime dependencies are deliberately few (PLAN.md §2); a bump that adds a transitive
+# Runtime dependencies are deliberately few (CLAUDE.md "Keep it small"); a bump that adds a transitive
 # native addon or a new framework should be declined, not merged.
 version: 2
 updates:

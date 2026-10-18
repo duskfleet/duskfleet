@@ -2,9 +2,9 @@
 
 Local platform that orchestrates, observes and (later) schedules and evaluates autonomous
 Claude Code agents. An MCP server (stdio) spawns `claude -p --output-format stream-json`
-with a target project as cwd and records every run in SQLite. Design: `PLAN.md`. User
-docs: `README.md` (short entry page) and `docs/*.md` (one page per topic). Keep them in
-sync with `PLAN.md` when behaviour changes.
+with a target project as cwd and records every run in SQLite. The design notes are private
+(not in the repo). User docs: `README.md` (short entry page) and `docs/*.md` (one page per
+topic). Keep them in sync when behaviour changes.
 
 ## Commands
 
@@ -24,7 +24,7 @@ npm run lint:fix     # Biome: format + safe fixes
 ```
 
 Every PR must pass the `checks` job (`.github/workflows/ci.yml`); a ruleset on `main` blocks the
-merge otherwise. Gates and rationale: PLAN.md §8, docs/development.md "Quality gates".
+merge otherwise. Gates and rationale: docs/development.md "Quality gates".
 
 Node 24+ is required (built-in `node:sqlite`). The MCP server entry is
 `packages/mcp/dist/index.js`; it is registered for this repo in `.mcp.json` and in
@@ -71,10 +71,10 @@ npm workspaces, one `config/` and one SQLite database shared by three deliverabl
   Create/update validation is `scheduler/crud.ts`, shared by MCP, CLI and dashboard.
   `install-service` (`packages/mcp/src/service.ts`) renders a per-user unit (launchd,
   systemd --user, Task Scheduler XML) from machine paths: never version a unit, re-run it
-  after every build (it restarts the service). Not the OS crontab: see PLAN.md §7.
+  after every build (it restarts the service). Not the OS crontab.
 
 - **Verify every `claude` CLI flag against `claude --help` before using it.** Flags change
-  between versions; `PLAN.md` §1 lists the ones verified so far.
+  between versions; `docs/development.md` lists the ones verified so far.
 - Keep it small: three runtime deps (`@modelcontextprotocol/sdk`, `zod`, `yaml`), no
   native addons, no new frameworks. The owner evolves this code by hand. Biome is the only
   lint/format tool (`biome.json`); core importing the MCP SDK, React or Next.js is a lint error.
@@ -143,9 +143,9 @@ npm workspaces, one `config/` and one SQLite database shared by three deliverabl
 - Git: public repo `github.com/duskfleet/duskfleet`, branch `main`, first commit 2026-10-11.
   Git commands that write `.git` fail inside the sandbox; run them outside it.
 
-## Roadmap (see PLAN.md §7)
+## Roadmap
 
 Next: scheduler (`packages/core/src/scheduler/types.ts` is the contract, no implementation),
 then deterministic evals (`tests_passed`, `build_passed`, `files_exist`) as post-run hooks,
 then LLM evals as a second read-only run, then metrics tools and Git integration. A Codex CLI
-executor as a second runtime is assessed in PLAN.md §7 (after evals).
+executor as a second runtime is assessed in the design notes (after evals).
