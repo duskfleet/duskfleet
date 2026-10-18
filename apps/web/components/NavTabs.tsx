@@ -18,7 +18,12 @@ export function NavTabs() {
       {TABS.map((t) => {
         const active = t.match(pathname);
         return (
-          <Link key={t.href} href={t.href} className={`tab ${active ? "active" : ""}`} aria-current={active ? "page" : undefined}>
+          <Link
+            key={t.href}
+            href={t.href}
+            className={`tab ${active ? "active" : ""}`}
+            aria-current={active ? "page" : undefined}
+          >
             {t.label}
           </Link>
         );

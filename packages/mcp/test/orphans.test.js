@@ -5,12 +5,21 @@
  */
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, writeFileSync, mkdirSync, rmSync, realpathSync } from "node:fs";
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { hostname, tmpdir } from "node:os";
 import path from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
-import { ClaudeCodeExecutor, RunManager, RunRepository, ScheduleRepository, Scheduler, formatHolder, loadConfig, openDatabase } from "@duskfleet/core";
+import {
+  ClaudeCodeExecutor,
+  formatHolder,
+  loadConfig,
+  openDatabase,
+  RunManager,
+  RunRepository,
+  ScheduleRepository,
+  Scheduler,
+} from "@duskfleet/core";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const fakeBinary = path.join(here, "fake-claude.js");
@@ -30,7 +39,12 @@ function makeApp() {
   const db = openDatabase(config.dataDir);
   const repo = new RunRepository(db);
   const manager = (owner) =>
-    new RunManager(config, repo, new ClaudeCodeExecutor({ binary: fakeBinary, strictMcpConfig: true, allowBypassPermissions: false }), owner ? { owner } : {});
+    new RunManager(
+      config,
+      repo,
+      new ClaudeCodeExecutor({ binary: fakeBinary, strictMcpConfig: true, allowBypassPermissions: false }),
+      owner ? { owner } : {},
+    );
   const a = manager(); // this test process, alive
   const cleanup = async () => {
     a.shutdown();
@@ -51,7 +65,9 @@ function deadPid() {
 async function runningRow(app, owner) {
   const started = await app.a.startRun({ prompt: "ok", projectPath: app.project });
   await app.a.waitForRun(started.id, 10_000);
-  app.db.prepare("UPDATE runs SET status = 'running', ended_at = NULL, error = NULL, owner = ? WHERE id = ?").run(owner, started.id);
+  app.db
+    .prepare("UPDATE runs SET status = 'running', ended_at = NULL, error = NULL, owner = ? WHERE id = ?")
+    .run(owner, started.id);
   return started.id;
 }
 
@@ -100,7 +116,11 @@ test("the scheduler lease holder sweeps orphans on its tick, at most once a minu
   const app = makeApp();
   try {
     let now = new Date("2026-10-16T10:00:00Z");
-    const scheduler = new Scheduler(new ScheduleRepository(app.db), app.a, { tickMs: 1000, holder: app.a.owner, now: () => now });
+    const scheduler = new Scheduler(new ScheduleRepository(app.db), app.a, {
+      tickMs: 1000,
+      holder: app.a.owner,
+      now: () => now,
+    });
 
     const first = await runningRow(app, formatHolder("serve", hostname(), deadPid()));
     await scheduler.tick();

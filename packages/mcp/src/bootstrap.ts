@@ -2,14 +2,20 @@
  * Shared start-up for the MCP server and the CLI: load config, open the
  * database, build the executor and the RunManager.
  */
-import { loadConfig, resolveConfigDir } from "@duskfleet/core";
-import { ClaudeCodeExecutor } from "@duskfleet/core";
-import { RunManager } from "@duskfleet/core";
-import { openDatabase } from "@duskfleet/core";
-import { RunRepository } from "@duskfleet/core";
-import { logger } from "@duskfleet/core";
-import { ScheduleRepository, Scheduler, processIdentity } from "@duskfleet/core";
+
 import type { DuskFleetConfig, SchedulerRole } from "@duskfleet/core";
+import {
+  ClaudeCodeExecutor,
+  loadConfig,
+  logger,
+  openDatabase,
+  processIdentity,
+  RunManager,
+  RunRepository,
+  resolveConfigDir,
+  ScheduleRepository,
+  Scheduler,
+} from "@duskfleet/core";
 
 const log = logger("bootstrap");
 
@@ -44,7 +50,10 @@ export async function bootstrap(entryFileUrl: string, options: BootstrapOptions 
   // One identity for the runs this process owns and for the scheduler lease it may hold.
   const runs = new RunManager(config, repo, executor, { owner: processIdentity(options.role ?? "unknown") });
   runs.recoverOrphans();
-  const scheduler = new Scheduler(new ScheduleRepository(db), runs, { tickMs: config.scheduler.tickSeconds * 1000, holder: runs.owner });
+  const scheduler = new Scheduler(new ScheduleRepository(db), runs, {
+    tickMs: config.scheduler.tickSeconds * 1000,
+    holder: runs.owner,
+  });
 
   return {
     config,

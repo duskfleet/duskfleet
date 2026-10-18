@@ -6,17 +6,25 @@
  */
 import { randomUUID } from "node:crypto";
 import path from "node:path";
-import { loadConfig } from "../config/loader.js";
 import { listProjectAgents, projectAgentDefinitionHash } from "../config/agent-files.js";
-import { summarizeToolInput } from "./tool-summary.js";
+import { loadConfig } from "../config/loader.js";
 import type { AgentDefinition, DuskFleetConfig, ProjectDefinition } from "../config/types.js";
-import type { ExecutionEvent, ExecutionHandle, ExecutionRequest, ExecutionResult, Executor, McpServerInfo, SubagentRecord } from "../execution/types.js";
+import type {
+  ExecutionEvent,
+  ExecutionHandle,
+  ExecutionRequest,
+  ExecutionResult,
+  Executor,
+  McpServerInfo,
+  SubagentRecord,
+} from "../execution/types.js";
 import { isTerminal, type Run, type RunAgent, type RunStatus } from "../observability/run.js";
-import type { RunRepository, ListRunsFilter } from "../storage/runs.js";
+import { parseHolder, processIdentity } from "../scheduler/crud.js";
+import type { ListRunsFilter, RunRepository } from "../storage/runs.js";
 import { logger } from "../util/log.js";
 import { validateProjectPath } from "./project-validation.js";
 import { assertTransition } from "./run-state.js";
-import { parseHolder, processIdentity } from "../scheduler/crud.js";
+import { summarizeToolInput } from "./tool-summary.js";
 
 const log = logger("orchestration");
 
@@ -101,7 +109,9 @@ export class RunManager {
     try {
       this._config = loadConfig(this._config.configDir);
     } catch (err) {
-      log.warn("config reload failed; keeping previous config", { err: err instanceof Error ? err.message : String(err) });
+      log.warn("config reload failed; keeping previous config", {
+        err: err instanceof Error ? err.message : String(err),
+      });
     }
     return this._config;
   }
@@ -369,7 +379,10 @@ export class RunManager {
       if (!current) return;
       if (isTerminal(current.status)) {
         // Already closed out (e.g. marked orphaned after a pid reuse). Keep the first verdict.
-        this.runs.addEvent(runId, "note", { message: `process exited after run was already ${current.status}`, outcome: result.outcome });
+        this.runs.addEvent(runId, "note", {
+          message: `process exited after run was already ${current.status}`,
+          outcome: result.outcome,
+        });
         return;
       }
       this.transition(current, result.outcome, {
@@ -395,7 +408,12 @@ export class RunManager {
         contextExhausted: result.contextExhausted,
         rawResultJson: result.rawResult === null ? null : JSON.stringify(result.rawResult),
       });
-      log.info("run finished", { runId, status: result.outcome, durationMs: result.durationMs, costUsd: result.costUsd });
+      log.info("run finished", {
+        runId,
+        status: result.outcome,
+        durationMs: result.durationMs,
+        costUsd: result.costUsd,
+      });
     } catch (err) {
       log.error("failed to record run completion", { runId, err: err instanceof Error ? err.message : String(err) });
     }
@@ -429,7 +447,9 @@ export class RunManager {
   private resolveAgent(agentId: string | undefined): AgentDefinition {
     const id = agentId ?? this.config.defaultAgent;
     if (!id) {
-      throw new Error(`no agent given and no default_agent in duskfleet.yaml. Known agents: ${[...this.config.agents.keys()].join(", ")}`);
+      throw new Error(
+        `no agent given and no default_agent in duskfleet.yaml. Known agents: ${[...this.config.agents.keys()].join(", ")}`,
+      );
     }
     const agent = this.config.agents.get(id);
     if (!agent) {
@@ -438,7 +458,11 @@ export class RunManager {
     return agent;
   }
 
-  private resolveProject(input: StartRunInput): { projectPath: string; projectId: string | null; project: ProjectDefinition | null } {
+  private resolveProject(input: StartRunInput): {
+    projectPath: string;
+    projectId: string | null;
+    project: ProjectDefinition | null;
+  } {
     if (input.projectId && input.projectPath) {
       throw new Error("project_path and project_id are mutually exclusive");
     }
@@ -452,7 +476,9 @@ export class RunManager {
     if (projectIdOrNull) {
       const project = this.config.projects.get(projectIdOrNull);
       if (!project) {
-        throw new Error(`unknown project "${projectIdOrNull}". Known projects: ${[...this.config.projects.keys()].join(", ")}`);
+        throw new Error(
+          `unknown project "${projectIdOrNull}". Known projects: ${[...this.config.projects.keys()].join(", ")}`,
+        );
       }
       return { projectPath: validateProjectPath(project.path, this.config), projectId: project.id, project };
     }
@@ -475,7 +501,10 @@ export class RunManager {
   private onEvent(runId: string, event: ExecutionEvent): void {
     switch (event.type) {
       case "init": {
-        this.runs.update(runId, event.sessionId ? { claudeSessionId: event.sessionId, modelUsed: event.model } : { modelUsed: event.model });
+        this.runs.update(
+          runId,
+          event.sessionId ? { claudeSessionId: event.sessionId, modelUsed: event.model } : { modelUsed: event.model },
+        );
         const a = this.active.get(runId);
         if (a) a.mounted = event.mcpServers;
         this.runs.addEvent(runId, "init", {
@@ -489,7 +518,12 @@ export class RunManager {
       case "tool_use": {
         const m = /^(mcp__[^_].*?)__/.exec(event.name);
         if (m) this.active.get(runId)?.usedServers.add(m[1]!);
-        this.runs.addEvent(runId, "tool_use", { name: event.name, summary: summarizeToolInput(event.name, event.input) }, event.agentId);
+        this.runs.addEvent(
+          runId,
+          "tool_use",
+          { name: event.name, summary: summarizeToolInput(event.name, event.input) },
+          event.agentId,
+        );
         break;
       }
       case "subagent_start": {

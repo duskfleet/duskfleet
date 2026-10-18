@@ -7,7 +7,7 @@
 import { hostname } from "node:os";
 import type { DuskFleetConfig } from "../config/types.js";
 import type { ScheduleRepository } from "../storage/schedules.js";
-import { CronError, assertTimeZone, nextFire, parseCron } from "./cron.js";
+import { assertTimeZone, CronError, nextFire, parseCron } from "./cron.js";
 import type { Schedule, ScheduleInput, SchedulePatch } from "./types.js";
 
 export const DEFAULT_TIME_ZONE = "Europe/London";
@@ -36,11 +36,18 @@ export function validateScheduleInput(config: DuskFleetConfig, input: ScheduleIn
     throw new Error(`agent "${input.agentId}" is not bound to a project; pass project_id`);
   }
   if (input.projectId && agent.project && agent.project !== input.projectId) {
-    throw new Error(`agent "${input.agentId}" belongs to project "${agent.project}", cannot schedule it on "${input.projectId}"`);
+    throw new Error(
+      `agent "${input.agentId}" belongs to project "${agent.project}", cannot schedule it on "${input.projectId}"`,
+    );
   }
 }
 
-export function createSchedule(repo: ScheduleRepository, config: DuskFleetConfig, input: ScheduleInput, now: Date = new Date()): Schedule {
+export function createSchedule(
+  repo: ScheduleRepository,
+  config: DuskFleetConfig,
+  input: ScheduleInput,
+  now: Date = new Date(),
+): Schedule {
   validateScheduleInput(config, input);
   if (repo.findByName(input.name)) throw new Error(`a schedule named "${input.name}" already exists`);
   const timeZone = input.timeZone ?? DEFAULT_TIME_ZONE;
@@ -49,7 +56,13 @@ export function createSchedule(repo: ScheduleRepository, config: DuskFleetConfig
 }
 
 /** Merge a patch into an existing schedule. Resuming (`enabled: true`) recomputes next_run_at from `now`. */
-export function updateSchedule(repo: ScheduleRepository, config: DuskFleetConfig, id: string, patch: SchedulePatch, now: Date = new Date()): Schedule {
+export function updateSchedule(
+  repo: ScheduleRepository,
+  config: DuskFleetConfig,
+  id: string,
+  patch: SchedulePatch,
+  now: Date = new Date(),
+): Schedule {
   const existing = repo.get(id);
   if (!existing) throw new Error(`schedule not found: ${id}`);
   const merged: ScheduleInput = {
@@ -63,7 +76,8 @@ export function updateSchedule(repo: ScheduleRepository, config: DuskFleetConfig
     enabled: patch.enabled ?? existing.enabled,
   };
   validateScheduleInput(config, merged);
-  if (merged.name !== existing.name && repo.findByName(merged.name)) throw new Error(`a schedule named "${merged.name}" already exists`);
+  if (merged.name !== existing.name && repo.findByName(merged.name))
+    throw new Error(`a schedule named "${merged.name}" already exists`);
   const nextRunAt = merged.enabled ? nextRunAtFor(merged.cron, merged.timeZone!, now) : null;
   return repo.update(id, { ...merged, nextRunAt });
 }
@@ -93,5 +107,9 @@ export function parseHolder(holder: string): { role: SchedulerRole; host: string
   const host = colon > 0 ? rest.slice(0, colon) : rest;
   const pid = colon > 0 ? Number(rest.slice(colon + 1)) : NaN;
   const known: SchedulerRole[] = ["serve", "mcp", "cli"];
-  return { role: (known as string[]).includes(role) ? (role as SchedulerRole) : "unknown", host, pid: Number.isFinite(pid) ? pid : null };
+  return {
+    role: (known as string[]).includes(role) ? (role as SchedulerRole) : "unknown",
+    host,
+    pid: Number.isFinite(pid) ? pid : null,
+  };
 }

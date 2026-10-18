@@ -2,9 +2,9 @@
 
 Local platform that orchestrates, observes and (later) schedules and evaluates autonomous
 Claude Code agents. An MCP server (stdio) spawns `claude -p --output-format stream-json`
-with a target project as cwd and records every run in SQLite. Design: `PLAN.md`. User
-docs: `README.md` (short entry page) and `docs/*.md` (one page per topic). Keep them in
-sync with `PLAN.md` when behaviour changes.
+with a target project as cwd and records every run in SQLite. The design notes are private
+(not in the repo). User docs: `README.md` (short entry page) and `docs/*.md` (one page per
+topic). Keep them in sync when behaviour changes.
 
 ## Commands
 
@@ -19,7 +19,12 @@ npm run cli -- serve  # long-running scheduler process; the MCP server also tick
 npm run cli -- install-service [--print] | uninstall-service   # register `serve` with launchd / systemd --user / Task Scheduler
 npm run cli -- run --project <project id or abs path> --agent <agent id> --model haiku -- "task"
 npm run web          # Next.js dashboard, http://localhost:4777
+npm run check        # what CI runs, same order: check:public, lint (biome ci), build, typecheck, test
+npm run lint:fix     # Biome: format + safe fixes
 ```
+
+Every PR must pass the `checks` job (`.github/workflows/ci.yml`); a ruleset on `main` blocks the
+merge otherwise. Gates and rationale: docs/development.md "Quality gates".
 
 Node 24+ is required (built-in `node:sqlite`). The MCP server entry is
 `packages/mcp/dist/index.js`; it is registered for this repo in `.mcp.json` and in
@@ -45,7 +50,7 @@ npm workspaces, one `config/` and one SQLite database shared by three deliverabl
 - `config/`: `duskfleet.yaml`, `agents/*.md` (builtin agents: YAML frontmatter + system
   prompt body), `projects.yaml` (repo-relative examples only). Meant to be committed.
   **This repo is public: no usernames, home paths or machine-specific values in versioned
-  files, docs or examples.** Personal projects live in `data/projects.yaml`, personal agents
+  files, docs or examples** (`npm run check:public` enforces it in CI; placeholders `<you>`, `me` are fine). Personal projects live in `data/projects.yaml`, personal agents
   in `data/agents/`, the MCP registration in `.mcp.json` (all git-ignored).
 - `data/`: `duskfleet.db`, `logs/<run_id>.jsonl` and `agents/*.md` (user agents written by
   `create_agent`; same id as a builtin overrides it). Git-ignored runtime state. Code must
@@ -66,15 +71,17 @@ npm workspaces, one `config/` and one SQLite database shared by three deliverabl
   Create/update validation is `scheduler/crud.ts`, shared by MCP, CLI and dashboard.
   `install-service` (`packages/mcp/src/service.ts`) renders a per-user unit (launchd,
   systemd --user, Task Scheduler XML) from machine paths: never version a unit, re-run it
-  after every build (it restarts the service). Not the OS crontab: see PLAN.md §7.
+  after every build (it restarts the service). Not the OS crontab.
 
 - **Verify every `claude` CLI flag against `claude --help` before using it.** Flags change
-  between versions; `PLAN.md` §1 lists the ones verified so far.
+  between versions; `docs/development.md` lists the ones verified so far.
 - Keep it small: three runtime deps (`@modelcontextprotocol/sdk`, `zod`, `yaml`), no
-  native addons, no new frameworks. The owner evolves this code by hand.
+  native addons, no new frameworks. The owner evolves this code by hand. Biome is the only
+  lint/format tool (`biome.json`); core importing the MCP SDK, React or Next.js is a lint error.
 - `RunManager` is the only place that changes a run's status; go through
   `assertTransition`. Schema changes are new entries in the migrations list in
-  `packages/core/src/storage/db.ts`, never edits to existing ones.
+  `packages/core/src/storage/db.ts`, never edits to existing ones; `test/migrations.test.js`
+  pins each shipped migration's digest and tells you the one to append for a new version.
 - Tests never launch a real Claude: `packages/mcp/test/fake-claude.js` replays the
   verified stream-json shapes. Add a case there when the parser learns a new event.
 - Real runs cost money. When one is needed to verify something, use `--model haiku`
@@ -140,9 +147,9 @@ npm workspaces, one `config/` and one SQLite database shared by three deliverabl
 - Git: public repo `github.com/duskfleet/duskfleet`, branch `main`, first commit 2026-10-11.
   Git commands that write `.git` fail inside the sandbox; run them outside it.
 
-## Roadmap (see PLAN.md §7)
+## Roadmap
 
 Next: scheduler (`packages/core/src/scheduler/types.ts` is the contract, no implementation),
 then deterministic evals (`tests_passed`, `build_passed`, `files_exist`) as post-run hooks,
 then LLM evals as a second read-only run, then metrics tools and Git integration. A Codex CLI
-executor as a second runtime is assessed in PLAN.md §7 (after evals).
+executor as a second runtime is assessed in the design notes (after evals).

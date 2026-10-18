@@ -20,7 +20,14 @@
 import type { RunManager } from "../orchestration/run-manager.js";
 import type { ScheduleRepository } from "../storage/schedules.js";
 import { logger } from "../util/log.js";
-import { createSchedule, nextRunAtFor, parseHolder, processIdentity, updateSchedule, type SchedulerRole } from "./crud.js";
+import {
+  createSchedule,
+  nextRunAtFor,
+  parseHolder,
+  processIdentity,
+  type SchedulerRole,
+  updateSchedule,
+} from "./crud.js";
 import type { Schedule, ScheduleInput, ScheduleOutcome, SchedulePatch } from "./types.js";
 
 const log = logger("scheduler");
@@ -73,7 +80,13 @@ export class Scheduler {
 
   create(input: ScheduleInput): Schedule {
     const created = createSchedule(this.repo, this.runs.config, input, this.now());
-    log.info("schedule created", { id: created.id, name: created.name, cron: created.cron, tz: created.timeZone, next: created.nextRunAt });
+    log.info("schedule created", {
+      id: created.id,
+      name: created.name,
+      cron: created.cron,
+      tz: created.timeZone,
+      next: created.nextRunAt,
+    });
     return created;
   }
 
@@ -178,7 +191,10 @@ export class Scheduler {
 
   // ---- internals -----------------------------------------------------------
 
-  private async fire(s: Schedule, manual: boolean): Promise<{ outcome: ScheduleOutcome; runId: string | null; error: string | null }> {
+  private async fire(
+    s: Schedule,
+    manual: boolean,
+  ): Promise<{ outcome: ScheduleOutcome; runId: string | null; error: string | null }> {
     const nextRunAt = s.enabled ? this.computeNext(s.cron, s.timeZone) : null;
     if (!s.enabled && !manual) {
       this.repo.recordFiring(s.id, "skipped_disabled", null, null, nextRunAt);
