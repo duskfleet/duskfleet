@@ -2,9 +2,9 @@
 
 Local platform that orchestrates, observes and (later) schedules and evaluates autonomous
 Claude Code agents. An MCP server (stdio) spawns `claude -p --output-format stream-json`
-with a target project as cwd and records every run in SQLite. Design notes: `notes/PLAN.md` (private). User
-docs: `README.md` (short entry page) and `docs/*.md` (one page per topic). Keep them in
-sync with `notes/PLAN.md` when behaviour changes.
+with a target project as cwd and records every run in SQLite. The design notes are private
+(not in the repo). User docs: `README.md` (short entry page) and `docs/*.md` (one page per
+topic). Keep them in sync when behaviour changes.
 
 ## Commands
 
@@ -66,10 +66,10 @@ npm workspaces, one `config/` and one SQLite database shared by three deliverabl
   Create/update validation is `scheduler/crud.ts`, shared by MCP, CLI and dashboard.
   `install-service` (`packages/mcp/src/service.ts`) renders a per-user unit (launchd,
   systemd --user, Task Scheduler XML) from machine paths: never version a unit, re-run it
-  after every build (it restarts the service). Not the OS crontab: see notes/PLAN.md §7.
+  after every build (it restarts the service). Not the OS crontab.
 
 - **Verify every `claude` CLI flag against `claude --help` before using it.** Flags change
-  between versions; `notes/PLAN.md` §1 lists the ones verified so far.
+  between versions; `docs/development.md` lists the ones verified so far.
 - Keep it small: three runtime deps (`@modelcontextprotocol/sdk`, `zod`, `yaml`), no
   native addons, no new frameworks. The owner evolves this code by hand.
 - `RunManager` is the only place that changes a run's status; go through
@@ -136,9 +136,9 @@ npm workspaces, one `config/` and one SQLite database shared by three deliverabl
 - Git: public repo `github.com/duskfleet/duskfleet`, branch `main`, first commit 2026-10-11.
   Git commands that write `.git` fail inside the sandbox; run them outside it.
 
-## Roadmap (see notes/PLAN.md §7)
+## Roadmap
 
 Next: scheduler (`packages/core/src/scheduler/types.ts` is the contract, no implementation),
 then deterministic evals (`tests_passed`, `build_passed`, `files_exist`) as post-run hooks,
 then LLM evals as a second read-only run, then metrics tools and Git integration. A Codex CLI
-executor as a second runtime is assessed in notes/PLAN.md §7 (after evals).
+executor as a second runtime is assessed in the design notes (after evals).

@@ -96,6 +96,25 @@ agents (`claude_agent`) and add only the unattended envelope: permission mode, `
 - **Run status changes**: only `RunManager`, through `assertTransition`.
 - **New dashboard view**: add a route under `apps/web/app/` and a query in `apps/web/lib/data.ts`.
 - **Evals**: implement the interfaces in `packages/core/src/evals/types.ts`; the run pipeline does not need to change.
-- **Claude CLI flags**: verify every flag against `claude --help` before using it.
+- **Claude CLI flags**: verify every flag against `claude --help` before using it. The ones the
+  executor uses, checked against `claude --help` of Claude Code 2.1.285:
+
+  | Flag | Purpose in DuskFleet |
+  |---|---|
+  | `-p, --print` | Non-interactive execution |
+  | `--output-format stream-json` + `--verbose` | Line-delimited JSON events (`stream-json` refuses to run without `--verbose`) |
+  | `--session-id <uuid>` | The run knows its session id before the process starts |
+  | `--model <model>` | Only passed when explicitly selected |
+  | `--permission-mode <mode>` | `acceptEdits`, `auto`, `manual`, `dontAsk`, `plan` (`bypassPermissions` is refused unattended) |
+  | `--permission-prompts none` | Unattended: anything that would prompt is denied instead of blocking |
+  | `--allowedTools` / `--disallowedTools` | Per-agent tool policy |
+  | `--append-system-prompt <text>` | Agent definition body becomes the appended system prompt |
+  | `--agent <name>` | Link agents: run as the project's `.claude/agents/<name>.md` |
+  | `--max-budget-usd <amount>` | Hard cost cap per run |
+  | `--effort <level>` | Optional per-agent effort |
+  | `--strict-mcp-config` | Isolate the child from user-level MCP servers (default on, configurable) |
+  | `--add-dir <dir>` | `add_dirs`: extra directories the run may touch |
+  | `--setting-sources <list>` | Restrict which settings files the child loads (`claude.setting_sources`) |
+  | `-r, --resume <id>` | Not used by the executor; surfaced as the "resume this run" command |
 
 Keep these pages in sync when behaviour changes.
