@@ -128,6 +128,19 @@ export interface RunAgent extends SubagentRecord {
   definitionHash: string | null;
 }
 
+/** A RunAgent under the names readers use (`type`, `brief`, `report`), same set on `get_run` and the CLI. */
+export type RunAgentView = Omit<RunAgent, "subagentType" | "prompt" | "resultText"> & {
+  type: string;
+  brief: string | null;
+  report: string | null;
+};
+
+/** The one renaming from stored names (subagentType / prompt / resultText) to reader names, `clip` applied to brief and report. */
+export function subagentView(s: RunAgent, clip: (t: string | null) => string | null = (t) => t): RunAgentView {
+  const { subagentType, prompt, resultText, ...rest } = s;
+  return { type: subagentType, brief: clip(prompt), report: clip(resultText), ...rest };
+}
+
 /**
  * Why a run needs a human to look at it. Anything that stopped the run before the agent
  * chose to stop, or that silently narrowed what it could do, counts: a run that failed

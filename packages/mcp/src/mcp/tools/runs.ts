@@ -1,4 +1,4 @@
-import { RUN_STATUSES, type Run, type RunAgent, summarizeRun } from "@duskfleet/core";
+import { RUN_STATUSES, type Run, type RunAgent, subagentView, summarizeRun } from "@duskfleet/core";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { errorResult, jsonResult, type ToolContext } from "../server.js";
@@ -25,11 +25,8 @@ function presentRun(run: Run, includeOutput: boolean) {
 
 /** Subagent rows are small except for prompt and report; those are shortened unless output was asked for. */
 function presentSubagent(s: RunAgent, includeOutput: boolean) {
-  const clip = (t: string | null) => (includeOutput || !t || t.length <= 300 ? t : t.slice(0, 297) + "...");
-  // type / brief / report are what a reader asks for; the stored names (subagentType / prompt /
-  // resultText) are dropped so the largest strings are sent, and clipped, once.
-  const { subagentType, prompt, resultText, ...rest } = s;
-  return { type: subagentType, brief: clip(prompt), report: clip(resultText), ...rest };
+  // Same names as the CLI run-info (subagentView): the largest strings are sent, and clipped, once.
+  return subagentView(s, (t) => (includeOutput || !t || t.length <= 300 ? t : t.slice(0, 297) + "..."));
 }
 
 export function registerRunTools(server: McpServer, ctx: ToolContext): void {

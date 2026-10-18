@@ -19,7 +19,7 @@ import { fileURLToPath } from "node:url";
  *   duskfleet doctor           # also reports the service and who holds the scheduler lease
  */
 import { parseArgs } from "node:util";
-import { findRepoRoot, parseHolder, RUN_STATUSES, type RunStatus, summarizeRun } from "@duskfleet/core";
+import { findRepoRoot, parseHolder, RUN_STATUSES, type RunStatus, subagentView, summarizeRun } from "@duskfleet/core";
 import { bootstrap } from "./bootstrap.js";
 import { installService, renderService, type ServiceTarget, serviceStatus, uninstallService } from "./service.js";
 import { buildToolCatalog } from "./tools-catalog.js";
@@ -238,7 +238,7 @@ async function main(): Promise<void> {
         process.stderr.write(`run not found: ${id}\n`);
         return done(1);
       }
-      const subagents = app.runs.agents(id);
+      const subagents = app.runs.agents(id).map((s) => subagentView(s)); // same names as get_run
       print(values.events ? { ...run, subagents, events: app.runs.events(id) } : { ...run, subagents });
       return done();
     }

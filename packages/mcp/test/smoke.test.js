@@ -290,6 +290,22 @@ test("subagent rows recorded by an older parser are repaired from the jsonl log 
   }
 });
 
+test("the backfill leaves open rows alone when the run's log is gone", async () => {
+  const app = makeApp();
+  try {
+    const started = await app.runs.startRun({ prompt: "subagent", projectPath: app.project });
+    const run = await app.runs.waitForRun(started.id, 10_000);
+    app.db.prepare("UPDATE run_agents SET status = 'running', ended_at = NULL WHERE run_id = ?").run(run.id);
+    rmSync(run.logPath, { force: true });
+    assert.deepEqual(await app.runs.repairSubagents(), { runsChecked: 1, rowsRepaired: 0 });
+    const [s] = app.runs.agents(run.id);
+    assert.equal(s.status, "running", "no log read: nothing says the run left it open");
+    assert.equal(s.endedAt, null);
+  } finally {
+    await app.cleanup();
+  }
+});
+
 test("a subagent still open when the run is cancelled is recorded as interrupted", async () => {
   const app = makeApp();
   try {

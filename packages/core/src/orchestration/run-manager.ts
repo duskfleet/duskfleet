@@ -292,8 +292,9 @@ export class RunManager {
    * brief, report or duration, still hold the raw hand-back frame, or were never closed, are
    * completed from the run's jsonl log with the current parser. Only terminal runs (status read
    * from the DB, so a run another process is still writing is never touched); a row is written
-   * only when the merge changes it, so re-running settles. A row still open after the merge
-   * belongs to a run that ended without closing it (orphan, crash) and becomes `interrupted`.
+   * only when the merge changes it and the stored row is unchanged since it was read, so
+   * re-running settles. A row still open after reading the log belongs to a run that ended
+   * without closing it (orphan, crash) and becomes `interrupted`; with no log, it is left alone.
    */
   async repairSubagents(): Promise<{ runsChecked: number; rowsRepaired: number }> {
     let runsChecked = 0;
@@ -304,14 +305,20 @@ export class RunManager {
       const rows = this.runs.agents(runId).filter(needsRepair);
       if (!rows.length) continue;
       runsChecked += 1;
-      const fromLog = new Map((await subagentsFromLog(run.logPath)).map((s) => [s.agentId, s]));
+      const records = await subagentsFromLog(run.logPath);
+      const fromLog = new Map((records ?? []).map((s) => [s.agentId, s]));
+      // The replay awaited: re-read, and update only rows nobody wrote in the meantime.
+      const current = new Map(this.runs.agents(runId).map((r) => [r.agentId, r]));
       for (const row of rows) {
+        const now = current.get(row.agentId);
+        if (!now || !sameSubagent(now, row)) continue;
         const { runId: _r, definitionHash, ...stored } = row;
         const merged = mergeSubagent(stored, fromLog.get(row.agentId));
-        if (merged.status === "running") {
-          merged.status = "interrupted";
-          merged.endedAt ??= run.endedAt ?? new Date().toISOString();
-        }
+        // Still open after reading the log: the run ended without closing it. With no log read
+        // (missing or empty) nothing says so, and the row is left as it is.
+        if (merged.status === "running" && records !== null) merged.status = "interrupted";
+        // Closed, but the log gave no end time (no timestamp on the closing line): the run's end bounds it.
+        if (merged.status !== "running") merged.endedAt ??= run.endedAt ?? new Date().toISOString();
         if (sameSubagent(stored, merged)) continue;
         this.runs.upsertAgent(runId, merged, definitionHash);
         rowsRepaired += 1;

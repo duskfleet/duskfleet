@@ -5,7 +5,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { cleanHandBack, createStreamState, ingestLine } from "@duskfleet/core";
+import { cleanHandBack, createStreamState, ingestLine, isRawHandBack } from "@duskfleet/core";
 
 const feed = (state, objects) => objects.flatMap((o) => ingestLine(state, JSON.stringify(o)));
 
@@ -258,6 +258,91 @@ test("the hand-back frame is stripped: preamble, two-space indent and the agentI
   assert.equal(cleanHandBack(raw), "Both frames verified.\n\n## 1. Desktop\n  - nested bullet");
   assert.equal(cleanHandBack("plain report"), "plain report", "no frame: unchanged");
   assert.equal(cleanHandBack("report\nagentId: x\n<usage>tool_uses: 1</usage>"), "report", "footer alone is dropped");
+  const own = "Report on the API.\n<usage>tokens: 12</usage>";
+  assert.equal(cleanHandBack(own), own, "a usage block the subagent wrote itself, with no agentId line, stays");
+  assert.equal(isRawHandBack(own), false, "and is not flagged raw");
+  assert.equal(cleanHandBack("  indented first line\nrest"), "  indented first line\nrest", "no frame: untouched");
+});
+
+const agentCall = (id, ts) => ({
+  type: "assistant",
+  timestamp: ts,
+  message: {
+    id: `m_${id}`,
+    content: [{ type: "tool_use", id, name: "Agent", input: { subagent_type: "x", prompt: "p" } }],
+  },
+  parent_tool_use_id: null,
+});
+
+test("a background Agent call (async_launched) stays open until its task_notification", () => {
+  const state = createStreamState();
+  const events = feed(state, [
+    agentCall("t_bg", "2026-10-14T08:30:00.000Z"),
+    {
+      type: "user",
+      message: {
+        content: [{ tool_use_id: "t_bg", type: "tool_result", content: "Async agent launched successfully." }],
+      },
+      timestamp: "2026-10-14T08:30:01.000Z",
+      tool_use_result: { status: "async_launched", agentId: "BG", agentType: "x" },
+    },
+  ]);
+  const [s] = [...state.subagents.values()];
+  assert.equal(s.status, "running", "the launch notice is not the end");
+  assert.equal(s.endedAt, null);
+  assert.equal(s.resultText, null, "the launch notice is not the report");
+  assert.ok(!events.some((e) => e.type === "subagent_end"));
+  const later = feed(state, [
+    {
+      type: "system",
+      subtype: "task_notification",
+      task_id: "BG",
+      status: "completed",
+      summary: "Background work done.",
+      timestamp: "2026-10-14T08:35:00.000Z",
+      usage: { total_tokens: 900, duration_ms: 299_000 },
+    },
+  ]);
+  assert.deepEqual(
+    later.map((e) => e.type),
+    ["subagent_end"],
+  );
+  assert.equal(s.status, "completed");
+  assert.equal(s.resultText, "Background work done.");
+  assert.equal(s.endedAt, "2026-10-14T08:35:00.000Z");
+  assert.equal(s.durationMs, 299_000);
+  assert.ok(state.measured.has("BG"));
+});
+
+test("a failed hand-back wins over an earlier completed task_notification", () => {
+  const state = createStreamState();
+  feed(state, [
+    agentCall("t_f", "2026-10-14T08:30:00.000Z"),
+    { type: "system", subtype: "task_started", task_id: "F", tool_use_id: "t_f" },
+    { type: "system", subtype: "task_notification", task_id: "F", status: "completed", usage: {} },
+    {
+      type: "user",
+      message: { content: [{ tool_use_id: "t_f", type: "tool_result", content: "it broke" }] },
+      timestamp: "2026-10-14T08:31:00.000Z",
+      tool_use_result: { status: "failed", agentId: "F", agentType: "x" },
+    },
+  ]);
+  const [s] = [...state.subagents.values()];
+  assert.equal(s.status, "failed");
+  assert.equal(s.endedAt, "2026-10-14T08:31:00.000Z");
+});
+
+test("a duration from the wall clock is not a measurement", () => {
+  const state = createStreamState();
+  feed(state, [
+    { type: "system", subtype: "task_started", task_id: "W", tool_use_id: "t_w" },
+    // No timestamps anywhere, no harness total: the duration is parse time minus parse time.
+    { type: "user", message: { content: [{ tool_use_id: "t_w", type: "tool_result", content: "ok" }] } },
+  ]);
+  const [s] = [...state.subagents.values()];
+  assert.equal(s.status, "completed");
+  assert.ok(!state.measured.has("W"));
+  assert.ok(state.wallClockEnd.has("W"));
 });
 
 test("type, brief, report, tool calls and duration come from the hand-back even without task_started or nested lines", () => {

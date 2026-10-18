@@ -9,19 +9,33 @@ import { createInterface } from "node:readline";
 import { cleanHandBack, createStreamState, ingestLine, isRawHandBack } from "./stream-json.js";
 import type { SubagentRecord } from "./types.js";
 
-/** Subagent records as the current parser reads them from the log; empty when the log is missing. Streams the file line by line. */
-export async function subagentsFromLog(logPath: string | null): Promise<SubagentRecord[]> {
-  if (!logPath || !existsSync(logPath)) return [];
+/**
+ * Subagent records as the current parser reads them from the log, or null when there is no log
+ * to read (missing file, or no stream-json line in it). Streams the file line by line.
+ *
+ * A replay runs long after the run, so anything the parser took from the wall clock is the
+ * replay's time: a duration is kept only when it was measured (harness total or two stream
+ * timestamps), and an end time only when the closing line carried a timestamp.
+ */
+export async function subagentsFromLog(logPath: string | null): Promise<SubagentRecord[] | null> {
+  if (!logPath || !existsSync(logPath)) return null;
   const state = createStreamState();
   const lines = createInterface({
     input: createReadStream(logPath, { encoding: "utf8" }),
     crlfDelay: Number.POSITIVE_INFINITY,
   });
+  let read = 0;
   for await (const line of lines) {
-    if (line.startsWith("#")) continue; // #stderr / #resume markers, not stream-json
+    if (line.startsWith("#") || !line.trim()) continue; // #stderr / #resume markers, not stream-json
     ingestLine(state, line);
+    read += 1;
   }
-  return [...state.subagents.values()];
+  if (read === 0) return null;
+  return [...state.subagents.values()].map((s) => ({
+    ...s,
+    durationMs: state.measured.has(s.agentId) ? s.durationMs : null,
+    endedAt: state.wallClockEnd.has(s.agentId) ? null : s.endedAt,
+  }));
 }
 
 /**
@@ -45,8 +59,9 @@ export function needsRepair(
 
 /**
  * The stored row completed with what the log says. Stored values win except where they are
- * missing or raw; the log wins for the harness's exact totals (duration, tokens, tool calls)
- * and, when the log closed the subagent, for its status and end time.
+ * missing or raw; the log wins for the harness's exact totals (duration when measured, tokens,
+ * tool calls) and, when the log closed a row still open, for its status and end time. A failed
+ * outcome in the log wins over a stored completed; nothing downgrades a stored failed/interrupted.
  */
 export function mergeSubagent(stored: SubagentRecord, fromLog: SubagentRecord | undefined): SubagentRecord {
   const merged: SubagentRecord = { ...stored, usage: { ...stored.usage }, tools: [...stored.tools] };
@@ -60,10 +75,17 @@ export function mergeSubagent(stored: SubagentRecord, fromLog: SubagentRecord | 
   merged.resultText = (rawStored ? fromLog.resultText : null) ?? merged.resultText ?? fromLog.resultText;
   merged.model ??= fromLog.model;
   merged.parentToolUseId ??= fromLog.parentToolUseId;
-  if (fromLog.endedAt !== null) {
-    merged.status = fromLog.status;
-    merged.endedAt = fromLog.endedAt;
+  if (fromLog.status !== "running") {
+    // The log closed the subagent. An open row takes its outcome and end time; a completed row
+    // becomes failed when the log says failed; a stored failed or interrupted is never downgraded.
+    if (merged.status === "running") {
+      merged.status = fromLog.status;
+      merged.endedAt = fromLog.endedAt ?? merged.endedAt;
+    } else if (merged.status === "completed" && fromLog.status === "failed") {
+      merged.status = "failed";
+    }
   }
+  // subagentsFromLog keeps a duration only when it was measured, never one from the replay's clock.
   merged.durationMs = fromLog.durationMs ?? merged.durationMs;
   merged.totalTokens = fromLog.totalTokens ?? merged.totalTokens;
   merged.toolCalls = Math.max(merged.toolCalls, fromLog.toolCalls);

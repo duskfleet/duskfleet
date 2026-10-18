@@ -64,6 +64,16 @@ export interface StreamState {
   agentCalls: Map<string, AgentCallInput>;
   /** Agent call tool_use id → agent id of the subagent it spawned (O(1) lookup on every tool_result). */
   subagentByParent: Map<string, string>;
+  /**
+   * Subagents whose durationMs is a measurement: a harness total (`totalDurationMs`,
+   * `task_notification.usage.duration_ms`) or the gap between two stream timestamps. Any other
+   * duration was derived from wall-clock time, which is meaningless during a log replay.
+   */
+  measured: Set<string>;
+  /** Subagents whose hand-back was a background launch (`async_launched`): their task_notification closes them. */
+  background: Set<string>;
+  /** Subagents whose endedAt is the wall clock at parse time (the closing line had no timestamp). */
+  wallClockEnd: Set<string>;
 }
 
 interface AgentCallInput {
@@ -88,6 +98,9 @@ export function createStreamState(): StreamState {
     stamped: new Set(),
     agentCalls: new Map(),
     subagentByParent: new Map(),
+    measured: new Set(),
+    background: new Set(),
+    wallClockEnd: new Set(),
   };
 }
 
@@ -178,14 +191,24 @@ export function ingestLine(state: StreamState, line: string): ExecutionEvent[] {
           const record = state.subagents.get(str(msg["task_id"]) ?? "");
           if (!record) break;
           const status = str(msg["status"]);
-          if (status === "failed" || status === "error") record.status = "failed";
-          else if (status) record.status = "completed";
+          const outcome = status === null ? null : terminalStatus(status);
+          // A failed outcome wins over an earlier completed; nothing downgrades failed.
+          if (outcome === "failed" || (outcome === "completed" && record.status === "running")) record.status = outcome;
           const usage = isObject(msg["usage"]) ? msg["usage"] : {};
-          record.durationMs = num(usage["duration_ms"]) ?? record.durationMs;
+          const duration = num(usage["duration_ms"]);
+          if (duration !== null) {
+            record.durationMs = duration;
+            state.measured.add(record.agentId);
+          }
           record.totalTokens = num(usage["total_tokens"]) ?? record.totalTokens;
           if (record.resultText === null) {
             const summary = str(msg["summary"]);
             record.resultText = summary === null ? null : cleanHandBack(summary);
+          }
+          // A background subagent's hand-back was only the launch notice: this line is its end.
+          if (outcome !== null && state.background.has(record.agentId) && record.endedAt === null) {
+            closeSubagent(state, record, str(msg["timestamp"]), null, null);
+            events.push({ type: "subagent_end", subagent: record });
           }
           break;
         }
@@ -276,25 +299,21 @@ export function ingestLine(state: StreamState, line: string): ExecutionEvent[] {
           }
           if (!record || record.endedAt !== null) continue;
           fillFromAgentCall(record, state.agentCalls.get(toolUseId));
-          if (handBack) fillFromHandBack(record, handBack);
+          if (handBack) fillFromHandBack(state, record, handBack);
+          // No tool_use_result (older CLIs): the tool_result itself is the end, as before.
+          const outcome = handBack ? terminalStatus(str(handBack["status"])) : "completed";
+          if (outcome === null) {
+            // Background launch (async_launched): the text is the launch notice, not the report,
+            // and the subagent is still working. Its task_notification closes it.
+            state.background.add(record.agentId);
+            continue;
+          }
           const text = toolResultText(block["content"]);
           if (text) record.resultText = cleanHandBack(text);
-          if (record.status === "running")
-            record.status = handBack && str(handBack["status"]) === "failed" ? "failed" : "completed";
-          record.endedAt = str(msg["timestamp"]) ?? new Date().toISOString();
-          // No nested line stamped the start (hand-back alone): startedAt is still the parse time,
-          // i.e. the end of the subagent or the time of a replay. Derive it from the harness total
-          // or, failing that, from the stream time of the Agent call.
-          if (!state.stamped.has(record.agentId)) {
-            const total = handBack ? num(handBack["totalDurationMs"]) : null;
-            const endMs = Date.parse(record.endedAt);
-            const callAt = state.agentCalls.get(toolUseId)?.at ?? null;
-            if (total !== null && Number.isFinite(endMs)) record.startedAt = new Date(endMs - total).toISOString();
-            else if (callAt) record.startedAt = callAt;
-            state.stamped.add(record.agentId);
-          }
-          if (record.durationMs === null)
-            record.durationMs = Math.max(0, Date.parse(record.endedAt) - Date.parse(record.startedAt));
+          // A failed hand-back wins even over a completed task_notification; nothing downgrades failed.
+          if (outcome === "failed" || record.status === "running") record.status = outcome;
+          const total = handBack ? num(handBack["totalDurationMs"]) : null;
+          closeSubagent(state, record, str(msg["timestamp"]), total, state.agentCalls.get(toolUseId)?.at ?? null);
           events.push({ type: "subagent_end", subagent: record });
         }
       }
@@ -391,23 +410,74 @@ function fillFromAgentCall(record: SubagentRecord, call: AgentCallInput | undefi
  * figures from the harness; they win over what was counted from forwarded lines, which
  * misses lines the CLI does not forward.
  */
-function fillFromHandBack(record: SubagentRecord, r: Json): void {
+function fillFromHandBack(state: StreamState, record: SubagentRecord, r: Json): void {
   const type = str(r["agentType"]);
   if (type && record.subagentType === "unknown") record.subagentType = type;
   if (record.prompt === null) record.prompt = str(r["prompt"]);
   if (record.model === null) record.model = str(r["resolvedModel"]);
-  record.durationMs = num(r["totalDurationMs"]) ?? record.durationMs;
+  const total = num(r["totalDurationMs"]);
+  if (total !== null) {
+    record.durationMs = total;
+    state.measured.add(record.agentId);
+  }
   record.totalTokens = num(r["totalTokens"]) ?? record.totalTokens;
   const toolUses = num(r["totalToolUseCount"]);
   if (toolUses !== null) record.toolCalls = Math.max(record.toolCalls, toolUses);
 }
 
-const HAND_BACK_PREAMBLE = /^\[Subagent hand-back\][\s\S]*?The report follows:\s*\n/;
-const HAND_BACK_FOOTER = /\n(?:agentId: [^\n]*\n)?<usage>[\s\S]*?<\/usage>\s*$/;
+/**
+ * The outcome a hand-back or task_notification status reports, or null when the subagent is
+ * still working (`async_launched` for a background Agent call, or any status not known to be
+ * final). A hand-back without a status (older CLIs) is final: callers pass "completed" for it.
+ */
+function terminalStatus(status: string | null): "completed" | "failed" | null {
+  if (status === null || status === "completed" || status === "success") return "completed";
+  if (status === "failed" || status === "error" || status === "killed") return "failed";
+  return null;
+}
 
-/** The text still carries Claude Code's hand-back frame (preamble or footer). Two regex tests, no rewrite. */
+/**
+ * Sets endedAt (stream time, else wall clock) and, when nothing measured it, the duration. A
+ * subagent no nested line stamped (hand-back alone) still has the parse time as startedAt, i.e.
+ * its end or the time of a replay: it is derived from the harness total or the Agent call time.
+ */
+function closeSubagent(
+  state: StreamState,
+  record: SubagentRecord,
+  endTs: string | null,
+  totalDurationMs: number | null,
+  callAt: string | null,
+): void {
+  record.endedAt = endTs ?? new Date().toISOString();
+  if (endTs === null) state.wallClockEnd.add(record.agentId);
+  if (!state.stamped.has(record.agentId)) {
+    const endMs = Date.parse(record.endedAt);
+    if (totalDurationMs !== null && Number.isFinite(endMs)) {
+      record.startedAt = new Date(endMs - totalDurationMs).toISOString();
+      state.stamped.add(record.agentId);
+    } else if (callAt) {
+      record.startedAt = callAt;
+      state.stamped.add(record.agentId);
+    }
+  }
+  if (record.durationMs !== null) return;
+  record.durationMs = Math.max(0, Date.parse(record.endedAt) - Date.parse(record.startedAt));
+  // Two stream timestamps make a measurement; wall-clock time (a replay's clock) does not.
+  if (endTs !== null && state.stamped.has(record.agentId)) state.measured.add(record.agentId);
+}
+
+const HAND_BACK_PREAMBLE = /^\[Subagent hand-back\][\s\S]*?The report follows:\s*\n/;
+/** Footer after a preamble: an optional `agentId:` line, then the `<usage>` block. */
+const HAND_BACK_FOOTER = /\n(?:agentId: [^\n]*\n)?<usage>[\s\S]*?<\/usage>\s*$/;
+/**
+ * Footer without a preamble: only with its `agentId:` line, so a report that itself ends with a
+ * literal `<usage>` block is left whole.
+ */
+const HAND_BACK_FOOTER_WITH_ID = /\nagentId: [^\n]*\n<usage>[\s\S]*?<\/usage>\s*$/;
+
+/** The text still carries Claude Code's hand-back frame (preamble, or the agentId footer). Two regex tests, no rewrite. */
 export function isRawHandBack(text: string): boolean {
-  return HAND_BACK_PREAMBLE.test(text) || HAND_BACK_FOOTER.test(text);
+  return HAND_BACK_PREAMBLE.test(text) || HAND_BACK_FOOTER_WITH_ID.test(text);
 }
 
 /**
@@ -417,7 +487,7 @@ export function isRawHandBack(text: string): boolean {
  */
 export function cleanHandBack(text: string): string {
   const m = HAND_BACK_PREAMBLE.exec(text);
-  if (!m) return text.replace(HAND_BACK_FOOTER, "").trimEnd();
+  if (!m) return HAND_BACK_FOOTER_WITH_ID.test(text) ? text.replace(HAND_BACK_FOOTER_WITH_ID, "").trimEnd() : text;
   const body = text.slice(m[0].length).replace(HAND_BACK_FOOTER, "");
   return body
     .split("\n")

@@ -230,11 +230,15 @@ that did part of the work:
 - `definitionHash`: a short hash of the project agent file at start time, so evals can tell
   which version of a persona produced a result.
 
-`get_run` returns them as `subagents`, each with `type`, `brief` and `report` (stored as
-`subagentType`, `prompt` and `resultText`; `get_run` sends only the plain-language names);
-`run-info` on the CLI prints the stored rows. The
+`get_run` and the CLI `run-info` both return them as `subagents`, each with `type`, `brief` and
+`report` (stored as `subagentType`, `prompt` and `resultText`; only the plain-language names are
+sent, on both surfaces). The
 report is stored as the subagent wrote it: Claude Code's hand-back frame (provenance preamble,
-two-space indent, `agentId` / `<usage>` footer) is stripped. When a stream lacks the
+two-space indent, `agentId` / `<usage>` footer) is stripped; without the preamble, a trailing
+`<usage>` block is stripped only after an `agentId:` line, so a report that ends with one of its
+own stays whole. A hand-back closes the subagent only with a final status: a failed one wins
+over an earlier completed, and a background `Agent` call (`async_launched`) stays open until
+its `task_notification`. When a stream lacks the
 `task_started` or nested lines, the hand-back's `tool_use_result` (`agentType`, `prompt`,
 `resolvedModel`, `totalDurationMs`, `totalTokens`, `totalToolUseCount`) and the parent's
 `Agent` call input still fill the row; the harness totals win over counted figures, and a
@@ -242,8 +246,12 @@ subagent seen only through its hand-back starts at `endedAt - totalDurationMs` (
 `Agent` call's stream time). Rows recorded by an older parser (missing any of these, still
 holding a raw frame, or left `running` by a process that died) are backfilled with
 `duskfleet repair-subagents`: it replays each finished run's `data/logs/<run_id>.jsonl` with
-the current parser, takes status and end time from the log when the log closed the subagent,
-marks the rest `interrupted`, and writes a row only when that changes it. Reads never write.
+the current parser, takes status and end time from the log when the log closed an open
+subagent (a failed outcome also replaces a stored completed; a stored failed or interrupted is
+never downgraded), takes a duration only when the log measured it (harness total or two stream
+timestamps, never the replay's clock), marks rows the log left open `interrupted` (rows of a
+run with no readable log are left alone), and writes a row only when that changes it and
+nobody wrote it since it was read. Reads never write.
 Tool-use
 events in the timeline carry the `agentId` they belong to (null for the main session).
 Nothing is spawned differently: the data comes from the `task_started` /
