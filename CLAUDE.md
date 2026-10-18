@@ -103,7 +103,9 @@ npm workspaces, one `config/` and one SQLite database shared by three deliverabl
 - **Runs have an owner** (`runs.owner`, `role@host:pid` from `processIdentity`, migration 7):
   several DuskFleet processes share the DB, so `recoverOrphans` (startup and the lease holder's
   once-a-minute sweep) fails a `running` row only when its owner is gone (dead pid on this host,
-  NULL owner, or this pid without the run in memory), never a live process's or another host's.
+  NULL owner older than the longest timeout + 1 min, or this pid without the run in memory),
+  never a live process's or another host's. A fresh NULL owner is a process on an old build
+  (a `serve` not reinstalled after a build): it is live, not an orphan.
 - **`CLAUDE_BIN` beats `claude.binary`**, so an inherited one would make the tests launch the
   real claude instead of fake-claude.js. Test files import `test/helpers.js` (drops it) before
   `@duskfleet/core` and spawn processes with `testEnv()`; `childEnv()` never passes it to runs.

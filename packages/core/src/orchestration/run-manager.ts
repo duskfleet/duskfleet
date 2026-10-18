@@ -190,12 +190,12 @@ export class RunManager {
   }
 
   /**
-   * Gone = no owner recorded (legacy row), an owner on this host without a usable pid
-   * or whose pid is not alive, or this very process without the run in memory (only
-   * after pid reuse).
+   * Gone = no owner recorded and older than any run may live (see `legacyRunIsOver`), an
+   * owner on this host without a usable pid or whose pid is not alive, or this very
+   * process without the run in memory (only after pid reuse).
    */
   private ownerIsGone(run: Run): boolean {
-    if (run.owner === null) return true;
+    if (run.owner === null) return this.legacyRunIsOver(run);
     const owner = parseHolder(run.owner);
     const self = parseHolder(this.owner);
     if (owner.host !== self.host) return false;
@@ -209,6 +209,21 @@ export class RunManager {
       // EPERM: alive, owned by another user. Only ESRCH proves it is gone.
       return (err as NodeJS.ErrnoException).code === "ESRCH";
     }
+  }
+
+  /**
+   * A row without owner comes from a build before run ownership, either from before the
+   * upgrade or from a process still running that old build (a `serve` not restarted after
+   * `npm run build`), whose run may be alive. It is over only once it started longer ago
+   * than the longest configured timeout plus a minute: the executor kills a run at its
+   * timeout, so nothing that old can still be running.
+   */
+  private legacyRunIsOver(run: Run): boolean {
+    const started = Date.parse(run.startedAt ?? run.createdAt);
+    if (Number.isNaN(started)) return true;
+    let longest = this.config.claude.defaultTimeoutMinutes;
+    for (const agent of this.config.agents.values()) longest = Math.max(longest, agent.timeoutMinutes ?? 0);
+    return Date.now() - started > (longest + 1) * 60_000;
   }
 
   activeCount(): number {
@@ -424,7 +439,7 @@ export class RunManager {
     // leave it running. It has to be cancelled through that process.
     if (!this.ownerIsGone(run)) {
       throw new Error(
-        `run ${id} is owned by ${run.owner}, another live DuskFleet process; cancel it from there (or stop that process).`,
+        `run ${id} is owned by ${run.owner ?? "(unrecorded: an older DuskFleet build)"}, another live DuskFleet process; cancel it from there (or stop that process).`,
       );
     }
     // Not active and its owner is gone (orphan) – close it out directly

@@ -22,7 +22,10 @@
 - **Runs failed with "orphaned: owning process ... is gone"**: the DuskFleet process that
   started them (named in the error) exited or crashed while they were running. Runs of a live
   process (another MCP server, `serve`) are never touched. Resume the Claude session with the
-  `resumeCommand` from `get_run` if you want to continue the work.
+  `resumeCommand` from `get_run` if you want to continue the work. "(unrecorded)" means the
+  run was started by a build without run ownership; such a row is failed only once it is older
+  than the longest configured timeout plus a minute, since it may come from a process still on
+  that build (a `serve` not restarted after `npm run build`: re-run `install-service`).
 - **A run stays `running` although nothing is running**: recovery only fails a run when its
   owner (`role@host:pid`) is provably gone. Two cases it cannot see: the owner's pid was
   reused by an unrelated live process, or the machine's hostname changed since the run
