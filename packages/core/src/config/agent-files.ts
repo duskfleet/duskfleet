@@ -175,6 +175,24 @@ export function agentKind(a: { claudeAgent?: string | undefined } | { claude_age
 }
 
 /**
+ * `wrap_up_reserve_usd` may take at most half of the budget (`max_budget_usd`, or the
+ * config default when the agent sets none). The run would silently cap a larger value
+ * (budgetPlan), so create/update reject it instead of reporting a different number.
+ */
+export function assertWrapUpReserve(
+  spec: Pick<AgentSpec, "max_budget_usd" | "wrap_up_reserve_usd">,
+  defaultMaxBudgetUsd: number,
+): void {
+  if (spec.wrap_up_reserve_usd === undefined) return;
+  const total = spec.max_budget_usd ?? defaultMaxBudgetUsd;
+  if (spec.wrap_up_reserve_usd > total / 2) {
+    throw new Error(
+      `wrap_up_reserve_usd (${spec.wrap_up_reserve_usd}) cannot exceed half of the budget (${spec.max_budget_usd !== undefined ? "max_budget_usd" : "default max budget"} ${total}, so at most ${Math.round((total / 2) * 100) / 100}). Lower it, raise max_budget_usd, or use 0 to disable the wrap-up pass.`,
+    );
+  }
+}
+
+/**
  * Checks that a spec is a well-formed agent of the declared kind:
  *  own  → system_prompt non-empty, no claude_agent
  *  link → claude_agent and project set, and the project really defines that agent

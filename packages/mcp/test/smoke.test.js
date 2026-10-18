@@ -521,6 +521,10 @@ test("the wrap-up pass runs claude --resume with the reserve budget and the fixe
     assert.equal(wrap.permissionMode, seen[0].permissionMode);
     assert.equal(wrap.appendSystemPrompt, seen[0].appendSystemPrompt, "same envelope as the main pass");
     assert.ok(wrap.timeoutMs <= 10 * 60_000);
+    assert.ok(
+      wrap.timeoutMs < seen[0].timeoutMs,
+      "the wrap-up only gets what is left of the run's timeout, never time on top of it",
+    );
     const argv = app.runs["executor"].buildArgv(wrap);
     const r = argv.indexOf("--resume");
     assert.equal(argv[r + 1], started.claudeSessionId);
@@ -597,6 +601,70 @@ test("cancelling during the wrap-up pass records the run as cancelled", async ()
     );
   } finally {
     delete process.env.FAKE_CLAUDE_RESUME;
+    await app.cleanup();
+  }
+});
+
+test("a cancel that races the budget stop prevents the wrap-up pass", async () => {
+  const app = makeApp();
+  try {
+    let calls = 0;
+    const executor = app.runs["executor"];
+    const original = executor.execute.bind(executor);
+    executor.execute = (req, onEvent) => {
+      calls++;
+      const h = original(req, onEvent);
+      // The child has already exited on its budget when cancel_run arrives: terminate() is a no-op.
+      const done = h.done.then((r) => {
+        for (const id of app.runs["active"].keys()) app.runs.cancelRun(id);
+        return r;
+      });
+      return { ...h, done };
+    };
+    const started = await app.runs.startRun({ prompt: "budget", projectPath: app.project });
+    const run = await app.runs.waitForRun(started.id, 15_000);
+    assert.equal(calls, 1, "no claude --resume after a cancel");
+    assert.deepEqual(
+      run.phases.map((p) => p.phase),
+      ["main"],
+    );
+    assert.equal(run.terminationReason, "budget_exhausted");
+    assert.ok(
+      app.runs
+        .events(run.id)
+        .some((e) => e.type === "note" && /wrap-up pass skipped: cancel requested/.test(JSON.stringify(e))),
+    );
+    assert.equal(app.runs.activeCount(), 0);
+  } finally {
+    await app.cleanup();
+  }
+});
+
+test("a wrap-up process that cannot spawn closes the run on the main pass, not as a failed wrap-up", async () => {
+  const app = makeApp();
+  try {
+    const executor = app.runs["executor"];
+    const original = executor.execute.bind(executor);
+    let calls = 0;
+    executor.execute = (req, onEvent) => {
+      if (++calls === 2) executor.binary = path.join(app.root, "no-such-claude");
+      return original(req, onEvent);
+    };
+    const started = await app.runs.startRun({ prompt: "budget", projectPath: app.project });
+    const run = await app.runs.waitForRun(started.id, 15_000);
+    assert.equal(calls, 2);
+    assert.equal(run.status, "failed");
+    assert.equal(run.terminationReason, "budget_exhausted");
+    assert.deepEqual(
+      run.phases.map((p) => p.phase),
+      ["main"],
+      "no wrap_up phase recorded",
+    );
+    const events = app.runs.events(run.id);
+    assert.equal(events.filter((e) => e.type === "phase").length, 0, "no phase started event");
+    assert.ok(events.some((e) => e.type === "note" && /wrap-up pass could not start/.test(JSON.stringify(e))));
+    assert.equal(app.runs.activeCount(), 0);
+  } finally {
     await app.cleanup();
   }
 });

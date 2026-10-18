@@ -63,6 +63,10 @@ interface ActiveRun {
   reserveUsd: number;
   /** Result of the main pass while the wrap-up pass runs. */
   mainResult: ExecutionResult | null;
+  /** cancel_run or shutdown() was called: never start a wrap-up pass after that, even if the main pass ended on its budget first. */
+  cancelRequested: boolean;
+  /** When the main pass was launched; the wrap-up pass only gets what is left of the run's timeout. */
+  startedAtMs: number;
 }
 
 /** What the wrap-up pass is told. It must not start new work; it must leave a trace of where the run stopped. */
@@ -70,7 +74,10 @@ export const WRAP_UP_PROMPT =
   "Your budget is exhausted. Do not start new work or call subagents. Record exactly where you stopped and why, " +
   "in the place your instructions say (ticket comment, PR comment, or final message), then stop.";
 
-/** The wrap-up pass is short by design; it never gets more time than the run itself. */
+/**
+ * The wrap-up pass is short by design: at most this, and never more than what is left of
+ * the run's own timeout (the run as a whole never outlasts `timeout_minutes`).
+ */
 const WRAP_UP_TIMEOUT_MS = 10 * 60_000;
 
 /**
@@ -369,6 +376,8 @@ export class RunManager {
       phases: [],
       reserveUsd: budget.reserve,
       mainResult: null,
+      cancelRequested: false,
+      startedAtMs: Date.now(),
     });
     this.transition(run, "running", { startedAt: new Date().toISOString(), command: handle.command });
     log.info("run started", {
@@ -392,6 +401,7 @@ export class RunManager {
     if (isTerminal(run.status)) return run;
     const active = this.active.get(id);
     if (active) {
+      active.cancelRequested = true;
       active.handle.cancel(); // completion path will record `cancelled`
       this.runs.addEvent(id, "note", { message: "cancel requested" });
       return run;
@@ -435,6 +445,7 @@ export class RunManager {
   shutdown(): void {
     for (const [id, a] of this.active) {
       log.warn("shutdown: cancelling active run", { runId: id });
+      a.cancelRequested = true;
       a.handle.cancel();
     }
   }
@@ -463,7 +474,10 @@ export class RunManager {
       active.reserveUsd > 0 &&
       runOpen
     ) {
-      if (this.startWrapUp(runId, active, result)) return;
+      // A cancel that raced the budget stop (the child had already exited) must still win.
+      if (active.cancelRequested)
+        this.runs.addEvent(runId, "note", { message: "wrap-up pass skipped: cancel requested" });
+      else if (this.startWrapUp(runId, active, result)) return;
     }
     if (active.phase === "wrap_up" && active.mainResult) {
       this.runs.addEvent(runId, "phase", {
@@ -482,13 +496,34 @@ export class RunManager {
 
   /** Resume the session with the reserve budget. Returns false when nothing could be started (the run then closes on the main result). */
   private startWrapUp(runId: string, active: ActiveRun, main: ExecutionResult): boolean {
+    const runTimeoutMs = active.request.timeoutMs;
+    const leftMs =
+      runTimeoutMs && runTimeoutMs > 0 ? runTimeoutMs - (Date.now() - active.startedAtMs) : WRAP_UP_TIMEOUT_MS;
+    if (leftMs <= 0) {
+      this.runs.addEvent(runId, "note", { message: "wrap-up pass skipped: the run's timeout is used up" });
+      return false;
+    }
     const request: ExecutionRequest = {
       ...active.request,
       prompt: WRAP_UP_PROMPT,
       resumeSessionId: main.sessionId || active.request.sessionId,
       maxBudgetUsd: active.reserveUsd,
-      timeoutMs: Math.min(active.request.timeoutMs ?? WRAP_UP_TIMEOUT_MS, WRAP_UP_TIMEOUT_MS),
+      timeoutMs: Math.min(leftMs, WRAP_UP_TIMEOUT_MS),
     };
+    const couldNotStart = (reason: string) => {
+      this.runs.addEvent(runId, "note", { message: `wrap-up pass could not start: ${reason}` });
+      return false;
+    };
+    let handle: ExecutionHandle;
+    try {
+      handle = this.executor.execute(request, (event) => this.onEvent(runId, event));
+    } catch (err) {
+      // Executors may throw before spawning (startRun handles the same case).
+      return couldNotStart(err instanceof Error ? err.message : String(err));
+    }
+    // ClaudeCodeExecutor does not throw on a spawn failure: it returns a handle without a pid
+    // whose `done` resolves failed. That is not a wrap-up pass that ran; close on the main result.
+    if (handle.pid === null) return couldNotStart("the process did not spawn (no pid)");
     this.runs.addEvent(runId, "phase", {
       phase: "wrap_up",
       status: "started",
@@ -496,15 +531,6 @@ export class RunManager {
       mainCostUsd: main.costUsd,
       reason: main.terminationReason,
     });
-    let handle: ExecutionHandle;
-    try {
-      handle = this.executor.execute(request, (event) => this.onEvent(runId, event));
-    } catch (err) {
-      this.runs.addEvent(runId, "note", {
-        message: `wrap-up pass could not start: ${err instanceof Error ? err.message : String(err)}`,
-      });
-      return false;
-    }
     active.handle = handle;
     active.phase = "wrap_up";
     active.mainResult = main;

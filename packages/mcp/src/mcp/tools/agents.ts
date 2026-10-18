@@ -7,6 +7,7 @@ import {
   agentSpecSchema,
   agentToSpec,
   assertAgentKind,
+  assertWrapUpReserve,
   budgetPlan,
   type DuskFleetConfig,
   deleteAgentFile,
@@ -37,6 +38,7 @@ function assertSpecLoadable(spec: AgentSpec, config: DuskFleetConfig): void {
 
 function assertKind(kind: "own" | "link", spec: AgentSpec, config: DuskFleetConfig): void {
   assertAgentKind(kind, spec, (id) => config.projects.get(id)?.path ?? null);
+  assertWrapUpReserve(spec, config.claude.defaultMaxBudgetUsd);
 }
 
 /**

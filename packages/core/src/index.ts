@@ -12,6 +12,7 @@ export {
   agentSpecSchema,
   agentToSpec,
   assertAgentKind,
+  assertWrapUpReserve,
   deleteAgentFile,
   listProjectAgents,
   type ProjectAgentInfo,

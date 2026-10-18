@@ -68,6 +68,8 @@ next eleven hourly ticks. To make a budget stop leave a trace, DuskFleet splits 
 
 The reserve is `wrap_up_reserve_usd` when set, otherwise 10% of `max_budget_usd` with a
 $0.50 floor; it is never more than half of the budget, and `0` disables the wrap-up pass.
+`create_agent` / `update_agent` refuse an explicit reserve above half of the budget
+(`max_budget_usd`, or `claude.default_max_budget_usd` when the agent sets none).
 `list_agents` and the Agents page show the effective value.
 
 The wrap-up pass is **not a separate run**. The run keeps one id and one session; its
@@ -77,10 +79,12 @@ timeline carries `phase` events around the wrap-up's own tool calls; the run's `
 is the wrap-up's final message (where it stopped), and the log file holds both passes with
 a `#resume` marker between them. The run's **status is still `failed`** with
 `terminationReason: budget_exhausted`: the task was not done. Only a wrap-up cancelled by
-`cancel_run` turns the run `cancelled`. A wrap-up pass that exhausts the reserve too ends
+`cancel_run` turns the run `cancelled`; a `cancel_run` (or a shutdown) that arrives while the
+main pass is already ending on its budget prevents the wrap-up pass. A wrap-up pass that exhausts the reserve too ends
 there: there is never a third pass, and the run never spends more than `max_budget_usd`.
-The wrap-up pass has at most ten minutes (less when the agent's `timeout_minutes` is shorter)
-and runs with the same permissions, tools and MCP servers as the main pass, so a ticket
+The wrap-up pass has at most ten minutes, and never more than what is left of the agent's
+`timeout_minutes` (none left: no wrap-up pass), so the whole run never outlasts its timeout. If the
+wrap-up process cannot be spawned, the run closes on the main pass with a note. It runs with the same permissions, tools and MCP servers as the main pass, so a ticket
 comment it needs to write must already be allow-listed.
 
 ## Permissions in unattended runs
