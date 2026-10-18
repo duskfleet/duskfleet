@@ -124,26 +124,35 @@ export class RunManager {
    */
   recoverOrphans(): number {
     const orphans = this.runs.listByStatus("running").filter((run) => this.ownerIsGone(run));
+    let recovered = 0;
     for (const run of orphans) {
-      this.transition(run, "failed", {
+      assertTransition(run.status, "failed");
+      // Compare-and-set: a starting process and the lease holder may sweep the same row.
+      const won = this.runs.updateIfStatus(run.id, "running", {
+        status: "failed",
         endedAt: new Date().toISOString(),
         error: `orphaned: owning process ${run.owner ?? "(unrecorded)"} is gone`,
       });
+      if (!won) continue;
+      this.runs.addEvent(run.id, "status_change", { from: run.status, to: "failed" });
+      recovered++;
     }
-    if (orphans.length) log.warn(`marked ${orphans.length} orphaned run(s) as failed`);
-    return orphans.length;
+    if (recovered) log.warn(`marked ${recovered} orphaned run(s) as failed`);
+    return recovered;
   }
 
   /**
-   * Gone = no owner recorded (legacy row), or an owner on this host whose pid is not
-   * alive, or this very process without the run in memory (only after pid reuse).
+   * Gone = no owner recorded (legacy row), an owner on this host without a usable pid
+   * or whose pid is not alive, or this very process without the run in memory (only
+   * after pid reuse).
    */
   private ownerIsGone(run: Run): boolean {
     if (run.owner === null) return true;
     const owner = parseHolder(run.owner);
     const self = parseHolder(this.owner);
     if (owner.host !== self.host) return false;
-    if (owner.pid === null) return true;
+    // pid 0 / negative would signal a process group and always "succeed".
+    if (owner.pid === null || !Number.isInteger(owner.pid) || owner.pid <= 0) return true;
     if (owner.pid === self.pid) return !this.active.has(run.id);
     try {
       process.kill(owner.pid, 0);
@@ -198,7 +207,12 @@ export class RunManager {
     if (this.active.size >= this.config.maxConcurrentRuns) {
       throw new Error(`max_concurrent_runs (${this.config.maxConcurrentRuns}) reached; wait for a run to finish`);
     }
-    const sameProject = [...this.active.entries()].filter(([, a]) => a.projectPath === projectPath);
+    // Count this process's runs plus the live runs of other DuskFleet processes on the same database.
+    const busy: Array<[string, { projectPath: string; agentId: string }]> = [...this.active.entries()];
+    for (const r of this.runs.listByStatus("running")) {
+      if (!this.active.has(r.id) && !this.ownerIsGone(r)) busy.push([r.id, r]);
+    }
+    const sameProject = busy.filter(([, a]) => a.projectPath === projectPath);
     if (sameProject.length >= this.config.maxConcurrentPerProject) {
       const [id, a] = sameProject[0]!;
       throw new Error(
@@ -206,7 +220,7 @@ export class RunManager {
           `max_concurrent_per_project is ${this.config.maxConcurrentPerProject}; wait, cancel_run, or raise it.`,
       );
     }
-    const sameAgent = [...this.active.entries()].filter(([, a]) => a.agentId === agent.id);
+    const sameAgent = busy.filter(([, a]) => a.agentId === agent.id);
     if (sameAgent.length >= this.config.maxConcurrentPerAgent) {
       const [id] = sameAgent[0]!;
       throw new Error(
@@ -329,7 +343,14 @@ export class RunManager {
       this.runs.addEvent(id, "note", { message: "cancel requested" });
       return run;
     }
-    // pending but not active (should not happen) – close it out directly
+    // Another live DuskFleet process owns the claude child; writing `cancelled` here would
+    // leave it running. It has to be cancelled through that process.
+    if (!this.ownerIsGone(run)) {
+      throw new Error(
+        `run ${id} is owned by ${run.owner}, another live DuskFleet process; cancel it from there (or stop that process).`,
+      );
+    }
+    // Not active and its owner is gone (orphan) – close it out directly
     this.transition(run, "cancelled", { endedAt: new Date().toISOString() });
     return this.runs.get(id)!;
   }

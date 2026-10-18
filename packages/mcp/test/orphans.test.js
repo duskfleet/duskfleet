@@ -76,7 +76,7 @@ test("a second process's startup recovery leaves a live owner's run alone; the o
   try {
     const started = await app.a.startRun({ prompt: "ok", projectPath: app.project });
     assert.equal(started.owner, app.a.owner);
-    assert.match(started.owner, new RegExp(`^unknown@${hostname()}:${process.pid}$`));
+    assert.equal(started.owner, formatHolder("unknown", hostname(), process.pid));
 
     const b = app.manager(formatHolder("mcp", hostname(), deadPid()));
     assert.equal(b.recoverOrphans(), 0, "owner pid is alive");
@@ -107,6 +107,38 @@ test("startup recovery fails runs of a dead owner and legacy rows, not runs of a
     assert.ok(failed.endedAt);
     assert.equal(b.getRun(legacyRun).status, "failed", "owner NULL is recovered as before");
     assert.equal(b.getRun(remoteRun).status, "running", "another host's pids cannot be checked from here");
+  } finally {
+    await app.cleanup();
+  }
+});
+
+test("an owner without a usable pid (0 or empty) is gone; a row is failed only once", async () => {
+  const app = makeApp();
+  try {
+    const zero = await runningRow(app, formatHolder("serve", hostname(), 0));
+    const empty = await runningRow(app, `serve@${hostname()}:`);
+    const b = app.manager(formatHolder("cli", hostname(), deadPid()));
+    const c = app.manager(formatHolder("mcp", hostname(), deadPid()));
+    assert.equal(b.recoverOrphans(), 2, "pid 0 would otherwise hit process.kill(0, 0)");
+    assert.equal(c.recoverOrphans(), 0, "already failed: no second transition");
+    for (const id of [zero, empty]) {
+      assert.equal(b.getRun(id).status, "failed");
+      const changes = b.events(id).filter((e) => e.type === "status_change" && e.payload.to === "failed");
+      assert.equal(changes.length, 1);
+    }
+  } finally {
+    await app.cleanup();
+  }
+});
+
+test("another live process's run counts for the busy guards and cannot be cancelled from here", async () => {
+  const app = makeApp();
+  try {
+    // A live owner that is not this RunManager: the parent of this test process.
+    const other = await runningRow(app, formatHolder("serve", hostname(), process.ppid));
+    await assert.rejects(app.a.startRun({ prompt: "ok", projectPath: app.project }), /project busy: run /);
+    assert.throws(() => app.a.cancelRun(other), /owned by .*another live DuskFleet process/);
+    assert.equal(app.a.getRun(other).status, "running");
   } finally {
     await app.cleanup();
   }

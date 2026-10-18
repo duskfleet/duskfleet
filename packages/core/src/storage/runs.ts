@@ -206,6 +206,18 @@ export class RunRepository {
   }
 
   update(id: string, patch: RunPatch): void {
+    this.updateWhere(id, patch, null);
+  }
+
+  /**
+   * Apply the patch only while the row still has status `expected` (compare-and-set
+   * between processes sharing the database). Returns false when another writer got there first.
+   */
+  updateIfStatus(id: string, expected: RunStatus, patch: RunPatch): boolean {
+    return this.updateWhere(id, patch, expected);
+  }
+
+  private updateWhere(id: string, patch: RunPatch, expected: RunStatus | null): boolean {
     const sets: string[] = [];
     const values: Array<string | number | null> = [];
     for (const [key, value] of Object.entries(patch) as Array<[keyof RunPatch, unknown]>) {
@@ -215,9 +227,15 @@ export class RunRepository {
       else if (typeof value === "object" && value !== null) values.push(JSON.stringify(value));
       else values.push(value as string | number | null);
     }
-    if (sets.length === 0) return;
+    if (sets.length === 0) return false;
     values.push(id);
-    this.db.prepare(`UPDATE runs SET ${sets.join(", ")} WHERE id = ?`).run(...values);
+    let where = "id = ?";
+    if (expected !== null) {
+      where += " AND status = ?";
+      values.push(expected);
+    }
+    const r = this.db.prepare(`UPDATE runs SET ${sets.join(", ")} WHERE ${where}`).run(...values);
+    return Number(r.changes) > 0;
   }
 
   get(id: string): Run | null {

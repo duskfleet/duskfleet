@@ -170,8 +170,14 @@ export class Scheduler {
 
       const nowMs = this.now().getTime();
       if (nowMs - this.lastSweepMs >= ORPHAN_SWEEP_MS) {
-        this.lastSweepMs = nowMs;
-        this.runs.recoverOrphans();
+        // Own try: a failed sweep (e.g. SQLITE_BUSY) must not skip run-now requests and due
+        // schedules, and is retried on the next tick instead of a minute later.
+        try {
+          this.runs.recoverOrphans();
+          this.lastSweepMs = nowMs;
+        } catch (err) {
+          log.error("orphan sweep failed", { err: err instanceof Error ? err.message : String(err) });
+        }
       }
 
       // Manual "run now" requests (dashboard) first: they fire even when paused, like fireNow.

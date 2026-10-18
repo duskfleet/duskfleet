@@ -7,8 +7,11 @@ npm run mcp            # = node packages/mcp/dist/index.js
 The server speaks MCP over stdio; logs go to stderr. Runs execute as child processes of the
 server, so keep it alive while runs are in progress. Each run records the process that owns
 it; a run still marked `running` whose owner is gone is closed as `failed` with an "orphaned"
-error, at the next start of any DuskFleet process or within a minute by the scheduler lease
-holder. Runs owned by another live process are left alone. The server also ticks the
+error, at the next start of any DuskFleet process, or within a minute by the scheduler lease
+holder while `scheduler.enabled` is true and some process holds the lease. Runs owned by
+another live process are left alone: they count toward `max_concurrent_per_project` /
+`max_concurrent_per_agent` here too, and `cancel_run` refuses them (cancel them from the
+process that owns them, named in the error). The server also ticks the
 [scheduler](schedules.md) while it is alive.
 
 After `npm run build`, restart the host (Claude Desktop, or the Claude Code session) to load
