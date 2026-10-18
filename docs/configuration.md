@@ -57,6 +57,12 @@ two agents out of the same working copy; `max_concurrent_per_agent` (default 1) 
 agent's WIP limit, so a scheduler tick whose previous run is still going is refused with
 `agent busy` rather than doubled. Refusals are errors, not a queue.
 
+The two per-scope limits are defaults an agent may override in its frontmatter:
+`max_concurrent: <n>` replaces `max_concurrent_per_agent` for that agent, and `isolated: true`
+takes its runs out of `max_concurrent_per_project` (they neither count against it nor wait
+for it). `max_concurrent_runs` always stays the hard cap. See
+[Running an agent in parallel](agents.md#running-an-agent-in-parallel).
+
 ## Environment variables
 
 | Variable | Purpose |

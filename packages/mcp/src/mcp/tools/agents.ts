@@ -123,6 +123,9 @@ function presentAgent(a: AgentDefinition, config: DuskFleetConfig) {
     addDirs: a.addDirs ?? [],
     claudeAgent: a.claudeAgent ?? null,
     project: a.project ?? null,
+    /** Runs of this agent allowed at once: its own max_concurrent, else the global max_concurrent_per_agent. */
+    maxConcurrent: a.maxConcurrent ?? config.maxConcurrentPerAgent,
+    isolated: a.isolated ?? false,
     systemPrompt: a.systemPrompt,
     path: a.sourcePath,
   };
@@ -197,6 +200,20 @@ const agentFields = {
     .optional()
     .describe(
       "Reuse an agent the target project already defines in .claude/agents/<name>.md (see list_project_agents): the run adopts its prompt, tools and model via `claude --agent`. This DuskFleet agent then only supplies the unattended envelope: permissions, allow-list, budget, MCP",
+    ),
+  max_concurrent: z
+    .number()
+    .int()
+    .min(1)
+    .optional()
+    .describe(
+      "Runs of this agent allowed at the same time (whole number >= 1). Omit for the global max_concurrent_per_agent (default 1). max_concurrent_runs stays the hard cap",
+    ),
+  isolated: z
+    .boolean()
+    .optional()
+    .describe(
+      "true = the agent never edits the project checkout (read-only, or works in its own git worktree): its runs neither count against nor wait for max_concurrent_per_project. A promise the prompt must keep; DuskFleet does not check it. Default false",
     ),
   system_prompt: z.string().optional().describe("Appended to Claude Code's system prompt for every run of this agent"),
 };
@@ -317,6 +334,8 @@ export function registerAgentTools(server: McpServer, ctx: ToolContext): void {
               "add_dirs",
               "claude_agent",
               "project",
+              "max_concurrent",
+              "isolated",
             ]),
           )
           .optional()

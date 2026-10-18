@@ -28,7 +28,8 @@ import {
 const here = path.dirname(fileURLToPath(import.meta.url));
 const fakeBinary = path.join(here, "fake-claude.js");
 
-function makeApp() {
+/** `extraYaml` is appended to duskfleet.yaml; `agents` maps an id to extra agent files (full Markdown). */
+function makeApp({ extraYaml = "", agents = {} } = {}) {
   const root = mkdtempSync(path.join(tmpdir(), "duskfleet-test-"));
   const configDir = path.join(root, "config");
   mkdirSync(path.join(configDir, "agents"), { recursive: true });
@@ -37,9 +38,12 @@ function makeApp() {
   const realProject = realpathSync(project); // validation resolves symlinks (/tmp -> /private/tmp on macOS)
   writeFileSync(
     path.join(configDir, "duskfleet.yaml"),
-    `data_dir: ../data\nallowed_project_roots: ["${root}"]\ndefault_agent: coder\nclaude:\n  binary: "${fakeBinary}"\n  default_timeout_minutes: 0.05\n`,
+    `data_dir: ../data\nallowed_project_roots: ["${root}"]\ndefault_agent: coder\nclaude:\n  binary: "${fakeBinary}"\n  default_timeout_minutes: 0.05\n${extraYaml}`,
   );
   writeFileSync(path.join(configDir, "agents", "coder.md"), `---\npermission_mode: acceptEdits\n---\nBe brief.\n`);
+  for (const [id, content] of Object.entries(agents)) {
+    writeFileSync(path.join(configDir, "agents", `${id}.md`), content);
+  }
   writeFileSync(
     path.join(configDir, "agents", "no-reserve.md"),
     `---\nmax_budget_usd: 2\nwrap_up_reserve_usd: 0\n---\nNo wrap-up.\n`,
@@ -366,7 +370,7 @@ test("a second run on a busy project or a busy agent is refused, not queued", as
     );
     await assert.rejects(
       () => app.runs.startRun({ prompt: "ok", projectPath: realpathSync(other) }),
-      /agent busy: coder/,
+      /agent busy: agent coder already has 1 of 1 runs/,
     );
     const okRun = await app.runs.startRun({ prompt: "ok", projectPath: realpathSync(other), agentId: "connected" });
     assert.equal(okRun.status, "running", "different project and different agent is fine");
@@ -375,6 +379,90 @@ test("a second run on a busy project or a busy agent is refused, not queued", as
     await app.runs.waitForRun(okRun.id, 10_000);
   } finally {
     await app.cleanup();
+  }
+});
+
+const parallelAgents = {
+  reviewer: `---\npermission_mode: dontAsk\nmax_concurrent: 3\nisolated: true\n---\nRead only.\n`,
+};
+
+test("an agent with max_concurrent: 3 runs three at once; the fourth is refused", async () => {
+  const app = makeApp({ extraYaml: "max_concurrent_runs: 10\n", agents: parallelAgents });
+  try {
+    assert.equal(app.config.agents.get("reviewer").maxConcurrent, 3);
+    assert.equal(app.config.agents.get("reviewer").isolated, true);
+    assert.equal(app.config.agents.get("coder").maxConcurrent, undefined, "default agents keep the global limit");
+    const started = [];
+    for (let i = 0; i < 3; i++) {
+      started.push(await app.runs.startRun({ prompt: "hang", projectPath: app.project, agentId: "reviewer" }));
+    }
+    assert.ok(started.every((r) => r.status === "running"));
+    await assert.rejects(
+      () => app.runs.startRun({ prompt: "ok", projectPath: app.project, agentId: "reviewer" }),
+      (err) => {
+        assert.match(err.message, /^agent busy: agent reviewer already has 3 of 3 runs/);
+        for (const r of started) assert.ok(err.message.includes(r.id), "the message lists the active runs");
+        assert.match(err.message, /its max_concurrent is 3/);
+        return true;
+      },
+    );
+    for (const r of started) app.runs.cancelRun(r.id);
+    for (const r of started) await app.runs.waitForRun(r.id, 10_000);
+  } finally {
+    await app.cleanup();
+  }
+});
+
+test("max_concurrent_runs stays the hard cap over an agent's max_concurrent", async () => {
+  const app = makeApp({ agents: parallelAgents }); // max_concurrent_runs defaults to 2
+  try {
+    const a = await app.runs.startRun({ prompt: "hang", projectPath: app.project, agentId: "reviewer" });
+    const b = await app.runs.startRun({ prompt: "hang", projectPath: app.project, agentId: "reviewer" });
+    await assert.rejects(
+      () => app.runs.startRun({ prompt: "ok", projectPath: app.project, agentId: "reviewer" }),
+      /max_concurrent_runs \(2\) reached/,
+    );
+    app.runs.cancelRun(a.id);
+    app.runs.cancelRun(b.id);
+    await app.runs.waitForRun(a.id, 10_000);
+    await app.runs.waitForRun(b.id, 10_000);
+  } finally {
+    await app.cleanup();
+  }
+});
+
+test("an isolated agent and a normal agent share a project; two normal agents do not", async () => {
+  const app = makeApp({ extraYaml: "max_concurrent_runs: 10\n", agents: parallelAgents });
+  try {
+    // isolated first, then a normal agent: the isolated run does not occupy the project
+    const isolated = await app.runs.startRun({ prompt: "hang", projectPath: app.project, agentId: "reviewer" });
+    const normal = await app.runs.startRun({ prompt: "hang", projectPath: app.project, agentId: "coder" });
+    assert.equal(normal.status, "running");
+    // normal first, then another isolated run: not blocked by the per-project guard
+    const isolated2 = await app.runs.startRun({ prompt: "hang", projectPath: app.project, agentId: "reviewer" });
+    assert.equal(isolated2.status, "running");
+    // a second normal agent in the same project is still refused
+    await assert.rejects(
+      () => app.runs.startRun({ prompt: "ok", projectPath: app.project, agentId: "connected" }),
+      /project busy: run .* \(agent coder\)/,
+    );
+    for (const r of [isolated, normal, isolated2]) app.runs.cancelRun(r.id);
+    for (const r of [isolated, normal, isolated2]) await app.runs.waitForRun(r.id, 10_000);
+  } finally {
+    await app.cleanup();
+  }
+});
+
+test("max_concurrent must be a whole number >= 1", () => {
+  for (const bad of ["0", "1.5", '"two"']) {
+    assert.throws(
+      () => makeApp({ agents: { broken: `---\nmax_concurrent: ${bad}\n---\nx\n` } }),
+      (err) => {
+        assert.match(err.message, /invalid agent file .*broken\.md: max_concurrent: /);
+        assert.match(err.message, /max_concurrent must be a whole number >= 1/);
+        return true;
+      },
+    );
   }
 });
 

@@ -4,7 +4,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { parse as parseYaml } from "yaml";
 import { z } from "zod";
-import { AGENT_ID_PATTERN } from "./agent-files.js";
+import { AGENT_ID_PATTERN, maxConcurrentSchema } from "./agent-files.js";
 import {
   type AgentDefinition,
   type AgentSource,
@@ -97,6 +97,8 @@ const agentFrontmatterSchema = z.object({
   add_dirs: z.array(z.string()).optional(),
   claude_agent: z.string().min(1).optional(),
   project: z.string().min(1).optional(),
+  max_concurrent: maxConcurrentSchema.optional(),
+  isolated: z.boolean().optional(),
 });
 
 const projectsSchema = z.object({
@@ -199,7 +201,12 @@ export function loadAgents(agentsDir: string, source: AgentSource = "builtin"): 
     .sort()) {
     const sourcePath = path.join(agentsDir, file);
     const { frontmatter, body } = splitFrontmatter(readFileSync(sourcePath, "utf8"));
-    const fm = agentFrontmatterSchema.parse(frontmatter);
+    const parsed = agentFrontmatterSchema.safeParse(frontmatter);
+    if (!parsed.success) {
+      const issues = parsed.error.issues.map((i) => `${i.path.join(".") || "(frontmatter)"}: ${i.message}`);
+      throw new Error(`invalid agent file ${sourcePath}: ${issues.join("; ")}`);
+    }
+    const fm = parsed.data;
     const id = fm.id ?? file.replace(/\.md$/, "");
     if (agents.has(id)) throw new Error(`Duplicate agent id "${id}" in ${sourcePath}`);
 
@@ -223,6 +230,8 @@ export function loadAgents(agentsDir: string, source: AgentSource = "builtin"): 
     if (fm.add_dirs !== undefined) agent.addDirs = fm.add_dirs.map(expandHome);
     if (fm.claude_agent !== undefined) agent.claudeAgent = fm.claude_agent;
     if (fm.project !== undefined) agent.project = fm.project;
+    if (fm.max_concurrent !== undefined) agent.maxConcurrent = fm.max_concurrent;
+    if (fm.isolated !== undefined) agent.isolated = fm.isolated;
     agents.set(id, agent);
   }
   return agents;

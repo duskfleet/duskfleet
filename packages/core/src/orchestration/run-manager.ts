@@ -49,6 +49,8 @@ interface ActiveRun {
   handle: ExecutionHandle;
   agentId: string;
   projectPath: string;
+  /** The agent promised not to edit the project checkout: ignored by the per-project guard. */
+  isolated: boolean;
   /** Allow-listed MCP entries, to compare with what actually mounted. */
   allowedTools: string[];
   mounted: McpServerInfo[];
@@ -254,23 +256,34 @@ export class RunManager {
       throw new Error(`max_concurrent_runs (${this.config.maxConcurrentRuns}) reached; wait for a run to finish`);
     }
     // Count this process's runs plus the live runs of other DuskFleet processes on the same database.
-    const busy: Array<[string, { projectPath: string; agentId: string }]> = [...this.active.entries()];
+    const busy: Array<[string, { projectPath: string; agentId: string; isolated: boolean }]> = [
+      ...this.active.entries(),
+    ];
     for (const r of this.runs.listByStatus("running")) {
-      if (!this.active.has(r.id) && !this.ownerIsGone(r)) busy.push([r.id, r]);
+      if (!this.active.has(r.id) && !this.ownerIsGone(r)) {
+        busy.push([r.id, { ...r, isolated: this.config.agents.get(r.agentId)?.isolated === true }]);
+      }
     }
-    const sameProject = busy.filter(([, a]) => a.projectPath === projectPath);
-    if (sameProject.length >= this.config.maxConcurrentPerProject) {
-      const [id, a] = sameProject[0]!;
-      throw new Error(
-        `project busy: run ${id} (agent ${a.agentId}) is still running in ${projectPath}. ` +
-          `max_concurrent_per_project is ${this.config.maxConcurrentPerProject}; wait, cancel_run, or raise it.`,
-      );
+    // Isolated agents never edit the checkout: they neither count against nor wait for the
+    // per-project limit. Only non-isolated runs compete for a working copy.
+    if (!agent.isolated) {
+      const sameProject = busy.filter(([, a]) => a.projectPath === projectPath && !a.isolated);
+      if (sameProject.length >= this.config.maxConcurrentPerProject) {
+        const [id, a] = sameProject[0]!;
+        throw new Error(
+          `project busy: run ${id} (agent ${a.agentId}) is still running in ${projectPath}. ` +
+            `max_concurrent_per_project is ${this.config.maxConcurrentPerProject}; wait, cancel_run, or raise it ` +
+            `(an agent that never edits the checkout can set isolated: true).`,
+        );
+      }
     }
-    const sameAgent = busy.filter(([, a]) => a.agentId === agent.id);
-    if (sameAgent.length >= this.config.maxConcurrentPerAgent) {
-      const [id] = sameAgent[0]!;
+    const agentLimit = agent.maxConcurrent ?? this.config.maxConcurrentPerAgent;
+    const sameAgent = busy.filter(([, a]) => a.agentId === agent.id).map(([id]) => id);
+    if (sameAgent.length >= agentLimit) {
+      const limitSource = agent.maxConcurrent !== undefined ? "its max_concurrent" : "max_concurrent_per_agent";
       throw new Error(
-        `agent busy: ${agent.id} is still running (run ${id}). max_concurrent_per_agent is ${this.config.maxConcurrentPerAgent}; the tick is skipped.`,
+        `agent busy: agent ${agent.id} already has ${sameAgent.length} of ${agentLimit} runs (${sameAgent.join(", ")}). ` +
+          `${limitSource} is ${agentLimit}; wait, cancel_run, or raise it.`,
       );
     }
 
@@ -368,6 +381,7 @@ export class RunManager {
       handle,
       agentId: agent.id,
       projectPath,
+      isolated: agent.isolated === true,
       allowedTools: agent.allowedTools ?? [],
       mounted: [],
       usedServers: new Set(),

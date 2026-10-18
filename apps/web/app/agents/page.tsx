@@ -241,6 +241,8 @@ export default function AgentsPage() {
                           · no wrap-up reserve
                         </span>
                       )}
+                      {!a.maxConcurrentIsDefault && <> · up to {a.maxConcurrent} runs at once</>}
+                      {a.isolated && <> · isolated (never edits the checkout)</>}
                       {a.addDirs && a.addDirs.length > 0 && <> · also reads {a.addDirs.map(shortPath).join(", ")}</>}
                     </dd>
                   </dl>

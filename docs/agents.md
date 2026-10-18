@@ -41,6 +41,8 @@ permission_mode: acceptEdits      # acceptEdits | dontAsk | auto | manual  (plan
 # inherit_mcp: true               # see "MCP servers inside runs"
 # add_dirs: ["~/Documents/Projects/other-repo"]        # --add-dir; runs are confined to the project otherwise
 # effort: high
+# max_concurrent: 3               # runs of this agent at once (whole number >= 1); default max_concurrent_per_agent (1)
+# isolated: true                  # never edits the project checkout: ignores max_concurrent_per_project
 timeout_minutes: 30
 max_budget_usd: 5
 # wrap_up_reserve_usd: 0.5     # part of max_budget_usd kept for the wrap-up pass; default 10%, min $0.50, 0 = off
@@ -86,6 +88,28 @@ The wrap-up pass has at most ten minutes, and never more than what is left of th
 `timeout_minutes` (none left: no wrap-up pass), so the whole run never outlasts its timeout. If the
 wrap-up process cannot be spawned, the run closes on the main pass with a note. It runs with the same permissions, tools and MCP servers as the main pass, so a ticket
 comment it needs to write must already be allow-listed.
+
+## Running an agent in parallel
+
+By default an agent has one run at a time and a project directory has one run at a time
+(`max_concurrent_per_agent`, `max_concurrent_per_project`, see
+[Concurrency](configuration.md#concurrency)). That is right for agents that edit the checkout in
+place, but wrong for a read-only reviewer or for an agent that works in its own git worktree.
+Two frontmatter fields lift the limits per agent:
+
+- `max_concurrent: <n>`: up to `n` runs of this agent may be active at once. The `n + 1`-th
+  `run_agent` is refused with `agent busy: agent <id> already has n of n runs (...)`; a schedule
+  of the agent fires while fewer than `n` runs are active and records `skipped_busy` otherwise.
+- `isolated: true`: the agent never edits the project checkout. Its runs do not count against
+  `max_concurrent_per_project` and are not blocked by it, so an isolated reviewer and a normal
+  coder can work on the same project at the same time (two normal agents still cannot). This
+  is a promise the agent's prompt keeps (read-only tools, or a worktree of its own); DuskFleet
+  does not check it.
+
+`max_concurrent_runs` stays the hard cap over everything. A non-integer or a value below 1
+for `max_concurrent` is a config error naming the file. `list_agents` reports both fields
+(`maxConcurrent` is the effective limit) and the dashboard shows them in the limits row when
+they differ from the defaults.
 
 ## Permissions in unattended runs
 

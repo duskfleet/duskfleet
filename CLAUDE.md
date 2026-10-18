@@ -119,7 +119,10 @@ npm workspaces, one `config/` and one SQLite database shared by three deliverabl
   combination before any file is written. Prefer link when the project already has the agent.
 - **Concurrency guards live in `RunManager.startRun`**: one run per project directory and
   one per agent by default (`max_concurrent_per_project`, `max_concurrent_per_agent`).
-  Refuse, never queue; a scheduler must treat "busy" as "skip this tick".
+  Per agent, `max_concurrent: n` overrides the agent limit and `isolated: true` (a promise
+  never to edit the checkout, not checked) skips the project guard; `max_concurrent_runs`
+  stays the hard cap. Refuse, never queue; keep "agent busy" / "project busy" in the error
+  text, the scheduler matches it for `skipped_busy`; a scheduler must treat "busy" as "skip this tick".
 - **Subagents are rows, not prose** (`run_agents`, migration 5): the parser folds Claude Code's
   `task_started` / `task_notification` lines and the `agent_id` of nested messages into one
   `SubagentRecord` per Agent call; `RunManager` writes them on `subagent_start` / `subagent_end`

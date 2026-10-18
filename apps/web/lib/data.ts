@@ -102,6 +102,8 @@ export function listAgents() {
       maxBudgetUsd: a.maxBudgetUsd ?? cfg.claude.defaultMaxBudgetUsd,
       /** Dollars of the budget held back for the wrap-up pass after a budget exhaustion (0 = disabled). */
       wrapUpReserveUsd: budgetPlan(a, cfg).reserve,
+      maxConcurrent: a.maxConcurrent ?? cfg.maxConcurrentPerAgent,
+      maxConcurrentIsDefault: (a.maxConcurrent ?? cfg.maxConcurrentPerAgent) === cfg.maxConcurrentPerAgent,
       isDefault: a.id === cfg.defaultAgent,
       linked,
       effectiveModel,

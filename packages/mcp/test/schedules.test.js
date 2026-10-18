@@ -226,6 +226,66 @@ test("tick fires due schedules, honours the kill switch, and only the lease hold
   }
 });
 
+test("a schedule of a max_concurrent: 2 agent fires while one run is active and skips while two are", async () => {
+  const { root, configDir } = makeRoot();
+  writeFileSync(
+    path.join(configDir, "duskfleet.yaml"),
+    `data_dir: ../data\ndefault_agent: coder\nmax_concurrent_runs: 10\nscheduler:\n  enabled: true\n  tick_seconds: 5\nclaude:\n  binary: "${fakeBinary}"\n  default_timeout_minutes: 0.05\n`,
+  );
+  writeFileSync(
+    path.join(configDir, "agents", "pair.md"),
+    `---\nproject: demo\nmax_concurrent: 2\nisolated: true\n---\nWorks in its own worktree.\n`,
+  );
+  const config = loadConfig(configDir);
+  const db = openDatabase(config.dataDir);
+  const runs = new RunManager(
+    config,
+    new RunRepository(db),
+    new ClaudeCodeExecutor({ binary: config.claude.binary, strictMcpConfig: true, allowBypassPermissions: false }),
+  );
+  const repo = new ScheduleRepository(db);
+  const a = new Scheduler(repo, runs, { tickMs: 1000, holder: "A" });
+  const fired = [];
+  try {
+    const s = a.create({ name: "pair every minute", agentId: "pair", prompt: "hang", cron: "* * * * *" });
+    const due = () => repo.update(s.id, { nextRunAt: new Date(Date.now() - 1000).toISOString() });
+
+    due();
+    await a.tick();
+    let after = repo.get(s.id);
+    assert.equal(after.lastOutcome, "started");
+    fired.push(after.lastRunId);
+
+    // one run of the agent is still active: the limit is 2, so the next tick fires too
+    due();
+    await a.tick();
+    after = repo.get(s.id);
+    assert.equal(after.lastOutcome, "started", "fires while one run is active");
+    assert.notEqual(after.lastRunId, fired[0]);
+    fired.push(after.lastRunId);
+    assert.equal(runs.activeCount(), 2);
+
+    // two active: busy → skipped, not queued
+    due();
+    await a.tick();
+    after = repo.get(s.id);
+    assert.equal(after.lastOutcome, "skipped_busy");
+    assert.equal(after.skips, 1);
+    assert.equal(after.fires, 2);
+    const skip = repo.firings(s.id).find((f) => f.outcome === "skipped_busy");
+    assert.ok(skip, "the skipped firing is recorded");
+    assert.match(skip.error, /agent busy: agent pair already has 2 of 2 runs/);
+  } finally {
+    a.stop();
+    for (const id of fired) runs.cancelRun(id);
+    for (const id of fired) await runs.waitForRun(id, 10_000);
+    runs.shutdown();
+    await new Promise((r) => setTimeout(r, 300));
+    db.close();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("a run request (dashboard 'Run now') is fired by the lease holder on its next tick, even when paused, and cleared", async () => {
   const { root, configDir } = makeRoot();
   const config = loadConfig(configDir);

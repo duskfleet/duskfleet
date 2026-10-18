@@ -20,6 +20,12 @@ import { type AgentDefinition, EFFORT_LEVELS, PERMISSION_MODES } from "./types.j
 
 export const AGENT_ID_PATTERN = /^[a-z0-9][a-z0-9-_]*$/;
 
+/** Per-agent concurrency limit: a whole number of runs, at least 1. */
+export const maxConcurrentSchema = z
+  .number({ error: "max_concurrent must be a whole number >= 1" })
+  .int("max_concurrent must be a whole number >= 1")
+  .min(1, "max_concurrent must be a whole number >= 1");
+
 /** Everything an agent file can contain, flattened (frontmatter + body). */
 export const agentSpecSchema = z.object({
   id: z.string().regex(AGENT_ID_PATTERN, "agent id must be lowercase letters, digits, - or _"),
@@ -37,6 +43,8 @@ export const agentSpecSchema = z.object({
   add_dirs: z.array(z.string().min(1)).optional(),
   claude_agent: z.string().min(1).optional(),
   project: z.string().min(1).optional(),
+  max_concurrent: maxConcurrentSchema.optional(),
+  isolated: z.boolean().optional(),
   system_prompt: z.string().default(""),
 });
 export type AgentSpec = z.infer<typeof agentSpecSchema>;
@@ -89,6 +97,8 @@ export function agentToSpec(a: AgentDefinition): AgentSpec {
   if (a.addDirs !== undefined) spec.add_dirs = a.addDirs;
   if (a.claudeAgent !== undefined) spec.claude_agent = a.claudeAgent;
   if (a.project !== undefined) spec.project = a.project;
+  if (a.maxConcurrent !== undefined) spec.max_concurrent = a.maxConcurrent;
+  if (a.isolated !== undefined) spec.isolated = a.isolated;
   return spec;
 }
 

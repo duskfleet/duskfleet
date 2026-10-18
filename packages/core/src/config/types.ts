@@ -54,6 +54,17 @@ export interface AgentDefinition {
    * Unset = general-purpose agent, runs anywhere.
    */
   project?: string;
+  /**
+   * Runs of this agent allowed at the same time (integer >= 1). Unset = the global
+   * max_concurrent_per_agent (default 1). max_concurrent_runs stays the hard cap.
+   */
+  maxConcurrent?: number;
+  /**
+   * The agent never edits the project checkout (read-only, or works in its own git worktree).
+   * Its runs neither count against nor wait for max_concurrent_per_project. A promise the
+   * agent's prompt keeps; DuskFleet does not check it. Default false.
+   */
+  isolated?: boolean;
   /** Markdown body of the agent file. Sent via --append-system-prompt when non-empty. */
   systemPrompt: string;
   /** Absolute path of the file this agent was loaded from. */
