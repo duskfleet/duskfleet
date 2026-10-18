@@ -57,6 +57,26 @@ the real `stream-json` event shapes, so they never launch a real Claude. They co
 executor, state machine, SQLite storage, validation, scheduler, legacy database adoption and the
 MCP server driven over stdio. Add a case to the fake binary when the parser learns a new event.
 
+## Pull request review by agents
+
+Two project skills in `.claude/skills/` turn a pair of DuskFleet agents into a review loop for
+this repository's own PRs. A run loads the project's skills (verified with Claude Code 2.1.302:
+`--permission-prompts none` with `--setting-sources project,local` still mounts `.claude/skills`
+and the built-in skills), so an agent only needs `Skill` in its `allowed_tools`.
+
+- `duskfleet-pr-review`: the reviewer picks the oldest open PR without a `VERDICT:` comment newer
+  than its last commit, runs the built-in `code-review` skill with `--comment` (inline
+  correctness findings), then checks the rules of this repo (CLAUDE.md) and posts one summary
+  comment ending with `VERDICT: approve` or `VERDICT: changes`. Read-only agent.
+- `duskfleet-pr-fix`: the developer picks the oldest PR with unresolved review threads, works in
+  a worktree on the PR branch (`scripts/pr-worktree.sh <name> <branch> <base>`), pushes one fix
+  commit, replies to every thread with the `[df-pr-developer]` prefix and resolves the ones it
+  fixed. Declined threads stay open for a human. The new commit makes the reviewer look again.
+
+The agent files themselves are personal (`data/agents/df-pr-reviewer.md`,
+`data/agents/df-pr-developer.md`, created over MCP) because they allow-list `gh`, `git` and the
+helper script by path; see `docs/agents.md` for the frontmatter.
+
 ## Security model
 
 - The project path is passed as the child's **working directory**; nothing is ever built into a
