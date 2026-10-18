@@ -4,7 +4,7 @@
  * Everything CLI-specific lives here: flag names, output parsing, process
  * lifecycle. The rest of DuskFleet only sees `Executor` / `ExecutionResult`.
  *
- * Flags used were verified against `claude --help` for 2.1.285 (see PLAN.md §1).
+ * Flags used were verified against `claude --help` for 2.1.285.
  */
 import { spawn, execFile, type ChildProcess } from "node:child_process";
 import { createWriteStream, existsSync, mkdirSync, type WriteStream } from "node:fs";

@@ -76,12 +76,11 @@ Real runs cost money. An agent without an explicit `model` uses the Claude Code 
 | [Dashboard](docs/dashboard.md) | The five views and what "needs review" means |
 | [Development](docs/development.md) | Repository layout, code map, build and tests, security model, extending |
 | [Troubleshooting](docs/troubleshooting.md) | Stuck runs, denials, orphaned runs, `doctor` failures |
-| [PLAN.md](PLAN.md) | Design document and roadmap |
 
 ## Status
 
 Working today: agents, runs, scheduler, dashboard, 15 MCP tools. On the roadmap: deterministic
-and LLM evals as post-run hooks, metrics, Git integration (see `PLAN.md` §7).
+and LLM evals as post-run hooks, metrics, Git integration.
 
 ## License
 

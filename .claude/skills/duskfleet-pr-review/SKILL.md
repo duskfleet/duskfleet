@@ -49,8 +49,8 @@ Rules:
 - **Run status**: only `RunManager` changes a run's status, always through `assertTransition`.
 - **Tests**: new behaviour is covered by `packages/mcp/test/*.test.js` without launching a real
   Claude (`fake-claude.js` replays stream-json; a new event shape gets a case there).
-- **Docs in sync**: PLAN.md, README.md, docs/*.md (and CLAUDE.md when rules change) reflect a
-  behaviour change. A new `claude` CLI flag is listed as verified in PLAN.md section 1.
+- **Docs in sync**: README.md, docs/*.md (and CLAUDE.md when rules change) reflect a
+  behaviour change. A new `claude` CLI flag was verified against `claude --help` (the PR says so).
 - **Dependencies**: no new runtime dependency beyond `@modelcontextprotocol/sdk`, `zod`, `yaml`;
   no native addons; no new framework.
 - **Public repo**: no usernames, home paths, machine-specific values, or references to `notes/`

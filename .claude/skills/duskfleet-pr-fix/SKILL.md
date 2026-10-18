@@ -40,7 +40,7 @@ Read the summary comment and every open thread. For each thread decide:
 - **Fix it**: change the code in the worktree. Keep the fix minimal and in the spirit of the
   PR. A suggestion that calls for more work than a one-liner (a column, a migration, a test) is
   still implemented in full, not acknowledged.
-- **Decline it**: only when the comment is factually wrong or contradicts CLAUDE.md / PLAN.md.
+- **Decline it**: only when the comment is factually wrong or contradicts CLAUDE.md.
   Explain why in the reply and leave the thread unresolved for a human.
 
 Verify inside the worktree, one command each: `npm run build`, `npm run typecheck`,

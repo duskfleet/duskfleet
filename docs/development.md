@@ -97,6 +97,6 @@ permission mode, `gh` / `git` / `npm` allow-list, budget and timeout. See `docs/
 - **Run status changes**: only `RunManager`, through `assertTransition`.
 - **New dashboard view**: add a route under `apps/web/app/` and a query in `apps/web/lib/data.ts`.
 - **Evals**: implement the interfaces in `packages/core/src/evals/types.ts`; the run pipeline does not need to change.
-- **Claude CLI flags**: verify every flag against `claude --help` before using it; `PLAN.md` §1 lists the ones verified so far.
+- **Claude CLI flags**: verify every flag against `claude --help` before using it.
 
-The design document is [PLAN.md](../PLAN.md); keep it and these pages in sync when behaviour changes.
+Keep these pages in sync when behaviour changes.
