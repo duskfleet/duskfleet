@@ -29,6 +29,13 @@ export function fmtTime(iso: string | null | undefined): string {
   return new Date(iso).toLocaleString();
 }
 
+/** Page header clock, e.g. "Sunday 12 Oct · 21:08". */
+export function fmtDayClock(d: Date): string {
+  const day = d.toLocaleDateString("en-GB", { weekday: "long", day: "numeric", month: "short" }).replace(",", "");
+  const clock = d.toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit", hour12: false });
+  return `${day} · ${clock}`;
+}
+
 /** "just now", "3 min ago", "2 h ago", "today 14:32", "yesterday 09:10", "4 days ago", else a short date. */
 export function fmtRelative(iso: string | null | undefined, now = Date.now()): string {
   if (!iso) return "–";
