@@ -73,9 +73,11 @@ and the built-in skills), so an agent only needs `Skill` in its `allowed_tools`.
   commit, replies to every thread with the `[df-pr-developer]` prefix and resolves the ones it
   fixed. Declined threads stay open for a human. The new commit makes the reviewer look again.
 
-The agent files themselves are personal (`data/agents/df-pr-reviewer.md`,
-`data/agents/df-pr-developer.md`, created over MCP) because they allow-list `gh`, `git` and the
-helper script by path; see `docs/agents.md` for the frontmatter.
+The agents are ordinary Claude Code agents of this repo, `.claude/agents/df-pr-reviewer.md` and
+`.claude/agents/df-pr-developer.md` (persona, model, tools), so they also work interactively
+(`claude --agent df-pr-reviewer`). The builtin DuskFleet agents of the same ids in
+`config/agents/` are links to them (`claude_agent`) that only add the unattended envelope:
+permission mode, `gh` / `git` / `npm` allow-list, budget and timeout. See `docs/agents.md`.
 
 ## Security model
 

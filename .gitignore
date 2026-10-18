@@ -14,3 +14,8 @@ playground/
 # private notes (journal, TODO, research) and the Obsidian vault config: never committed
 notes/
 .obsidian/
+
+# Claude Code session state next to the versioned .claude/agents and .claude/skills
+.claude/worktrees/
+.claude/settings.local.json
+.claude/.cc-writes/
