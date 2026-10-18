@@ -6,8 +6,7 @@ data/
 *.tsbuildinfo
 *.log
 .DS_Store
-# local scratch project used as a run target when trying things out; not part of the repo
-playground/
+
 # machine-specific MCP registration; copy from .mcp.json.example
 .mcp.json
 
@@ -15,7 +14,7 @@ playground/
 notes/
 .obsidian/
 
-# Claude Code session state next to the versioned .claude/agents and .claude/skills
-.claude/worktrees/
-.claude/settings.local.json
-.claude/.cc-writes/
+# Claude Code: session state (worktrees, local settings) stays local; agents and skills are versioned
+.claude/*
+!.claude/agents/
+!.claude/skills/
