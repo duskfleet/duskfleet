@@ -1,4 +1,5 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 .5 15 15" fill="none">
+  <title>DuskFleet</title>
   <defs>
     <linearGradient id="sunset" x1="2.5" y1="1.75" x2="14.93" y2="12.94" gradientUnits="userSpaceOnUse">
       <stop stop-color="#F6B24A"/>
