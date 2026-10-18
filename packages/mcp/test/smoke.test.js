@@ -10,6 +10,9 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
+
+import "./helpers.js"; // before @duskfleet/core: drops an inherited CLAUDE_BIN
+
 import {
   ClaudeCodeExecutor,
   loadConfig,
@@ -235,6 +238,20 @@ test("a subagent still open when the run is cancelled is recorded as interrupted
     assert.equal(s.definitionHash, null, "no .claude/agents/reviewer.md in this project");
     assert.equal(app.runs.events(run.id).filter((e) => e.type === "subagent_end").length, 1);
   } finally {
+    await app.cleanup();
+  }
+});
+
+test("CLAUDE_BIN is not passed on to the run's child", async () => {
+  const app = makeApp();
+  process.env.CLAUDE_BIN = path.join(app.root, "no-such-claude"); // missing: resolution falls through to claude.binary
+  try {
+    const started = await app.runs.startRun({ prompt: "env", projectPath: app.project });
+    const run = await app.runs.waitForRun(started.id, 10_000);
+    assert.equal(run.status, "completed");
+    assert.equal(run.resultText, "CLAUDE_BIN unset");
+  } finally {
+    delete process.env.CLAUDE_BIN;
     await app.cleanup();
   }
 });

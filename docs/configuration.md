@@ -62,5 +62,5 @@ agent's WIP limit, so a scheduler tick whose previous run is still going is refu
 | Variable | Purpose |
 |---|---|
 | `DUSKFLEET_CONFIG` | Directory containing `duskfleet.yaml` (default: the closest ancestor `config/` of the running package / cwd) |
-| `CLAUDE_BIN` | Path to the Claude Code binary (overrides `claude.binary`) |
+| `CLAUDE_BIN` | Path to the Claude Code binary (overrides `claude.binary`). Read by DuskFleet only: it is not passed on to agent runs. |
 | `DUSKFLEET_LOG_LEVEL` | `debug` \| `info` \| `warn` \| `error` |

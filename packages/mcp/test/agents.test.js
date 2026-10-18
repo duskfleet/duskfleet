@@ -20,6 +20,7 @@ import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
+import { testEnv } from "./helpers.js";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const fakeBinary = path.join(here, "fake-claude.js");
@@ -50,7 +51,7 @@ test("agents can be created, updated, run and deleted over MCP without touching 
   const transport = new StdioClientTransport({
     command: process.execPath,
     args: [serverEntry],
-    env: { ...process.env, DUSKFLEET_CONFIG: configDir, DUSKFLEET_LOG_LEVEL: "warn" },
+    env: testEnv({ DUSKFLEET_CONFIG: configDir, DUSKFLEET_LOG_LEVEL: "warn" }),
     stderr: "pipe",
   });
   const client = new Client({ name: "test-client", version: "0.0.0" });

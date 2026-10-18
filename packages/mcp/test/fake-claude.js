@@ -12,6 +12,7 @@
  *                 messages with agent_id/parent_tool_use_id, task_notification,
  *                 hand-back tool_result), shapes from a real run of 2026-10-12
  *   "subagent-hang" -> same, but the process is killed before the hand-back
+ *   "env"      -> like "ok", result text says whether CLAUDE_BIN reached the child
  */
 const args = process.argv.slice(2);
 const prompt = args[args.length - 1] ?? "ok";
@@ -251,6 +252,11 @@ if (prompt === "hang") {
     },
   });
   const isError = prompt === "error";
+  const result = isError
+    ? "API Error: something went wrong"
+    : prompt === "env"
+      ? `CLAUDE_BIN ${process.env.CLAUDE_BIN === undefined ? "unset" : "set"}`
+      : "Done: created hello.txt";
   out({
     type: "result",
     subtype: isError ? "error_during_execution" : "success",
@@ -258,7 +264,7 @@ if (prompt === "hang") {
     duration_ms: 1234,
     duration_api_ms: 1000,
     num_turns: 2,
-    result: isError ? "API Error: something went wrong" : "Done: created hello.txt",
+    result,
     session_id: sessionId,
     total_cost_usd: 0.0123,
     usage: { input_tokens: 22, output_tokens: 13, cache_creation_input_tokens: 328, cache_read_input_tokens: 24254 },

@@ -9,6 +9,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
+import { testEnv } from "./helpers.js";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const fakeBinary = path.join(here, "fake-claude.js");
@@ -33,9 +34,9 @@ function makeRoot() {
   return { root, configDir, project: realpathSync(project) };
 }
 
-function cli(configDir, args) {
+function cli(configDir, args, extraEnv = {}) {
   return spawnSync(process.execPath, [cliEntry, ...args], {
-    env: { ...process.env, DUSKFLEET_CONFIG: configDir, DUSKFLEET_LOG_LEVEL: "warn" },
+    env: testEnv({ DUSKFLEET_CONFIG: configDir, DUSKFLEET_LOG_LEVEL: "warn", ...extraEnv }),
     encoding: "utf8",
   });
 }
@@ -68,6 +69,21 @@ test("cli run --project accepts a registered id or a path; unknown ids, relative
     const both = cli(configDir, ["run", "--project", "demo", "--project-id", "demo", "--", "hello"]);
     assert.notEqual(both.status, 0);
     assert.match(both.stderr, /mutually exclusive/);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("a CLAUDE_BIN that does not exist falls through to claude.binary and never reaches the run's child", () => {
+  const { root, configDir } = makeRoot();
+  try {
+    const res = cli(configDir, ["run", "--project", "demo", "--", "env"], {
+      CLAUDE_BIN: path.join(root, "no-such-claude"),
+    });
+    assert.equal(res.status, 0, res.stderr);
+    const run = JSON.parse(res.stdout);
+    assert.equal(run.command.binary, fakeBinary);
+    assert.equal(run.resultText, "CLAUDE_BIN unset");
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

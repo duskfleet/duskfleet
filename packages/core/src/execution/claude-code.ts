@@ -278,6 +278,8 @@ function childEnv(): NodeJS.ProcessEnv {
   for (const key of Object.keys(env)) {
     if (key === "CLAUDECODE" || key === "CLAUDE_CODE_ENTRYPOINT" || key.startsWith("CLAUDE_CODE_SSE_")) delete env[key];
   }
+  // DuskFleet's own variable: an agent running `npm test` here would launch the real claude.
+  delete env["CLAUDE_BIN"];
   return env;
 }
 

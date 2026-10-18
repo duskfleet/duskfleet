@@ -20,6 +20,7 @@ import {
 } from "@duskfleet/core";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
+import { testEnv } from "./helpers.js"; // drops an inherited CLAUDE_BIN before any executor is built
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const fakeBinary = path.join(here, "fake-claude.js");
@@ -55,7 +56,7 @@ test("schedules over MCP: create, list, update, run now, delete; validation erro
   const transport = new StdioClientTransport({
     command: process.execPath,
     args: [serverEntry],
-    env: { ...process.env, DUSKFLEET_CONFIG: configDir, DUSKFLEET_LOG_LEVEL: "warn" },
+    env: testEnv({ DUSKFLEET_CONFIG: configDir, DUSKFLEET_LOG_LEVEL: "warn" }),
     stderr: "pipe",
   });
   const client = new Client({ name: "test-client", version: "0.0.0" });
@@ -337,7 +338,7 @@ test("`duskfleet serve` stays alive past its first tick and holds the lease unti
   const { root, configDir } = makeRoot();
   const cliEntry = path.join(here, "..", "dist", "cli.js");
   const child = spawn(process.execPath, [cliEntry, "serve"], {
-    env: { ...process.env, DUSKFLEET_CONFIG: configDir },
+    env: testEnv({ DUSKFLEET_CONFIG: configDir }),
     stdio: ["ignore", "pipe", "pipe"],
   });
   let stderr = "";
