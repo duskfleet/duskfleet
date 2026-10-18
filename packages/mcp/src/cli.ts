@@ -10,6 +10,7 @@ import { fileURLToPath } from "node:url";
  *   duskfleet run --project <id or path> [--agent <id>] [--model <m>] [--no-wait] -- "<prompt>"
  *   duskfleet runs [--status <s>] [--limit <n>]
  *   duskfleet run-info <run_id> [--events]
+ *   duskfleet repair-subagents # backfill subagent rows of finished runs from their logs
  *   duskfleet schedules
  *   duskfleet tools            # MCP tool catalogue (names, descriptions, input schemas)
  *   duskfleet serve            # long-running scheduler process (what the service runs)
@@ -36,6 +37,7 @@ function usage(): never {
       '  duskfleet run --project <id or path> [--agent <id>] [--model <m>] [--no-wait] -- "<prompt>"',
       "  duskfleet runs [--status <status>] [--limit <n>]",
       "  duskfleet run-info <run_id> [--events]",
+      "  duskfleet repair-subagents",
       "  duskfleet schedules",
       "  duskfleet tools",
       "  duskfleet serve",
@@ -238,6 +240,11 @@ async function main(): Promise<void> {
       }
       const subagents = app.runs.agents(id);
       print(values.events ? { ...run, subagents, events: app.runs.events(id) } : { ...run, subagents });
+      return done();
+    }
+    case "repair-subagents": {
+      // One-shot backfill of subagent rows recorded by an older parser, from each finished run's log.
+      print(await app.runs.repairSubagents());
       return done();
     }
     default:

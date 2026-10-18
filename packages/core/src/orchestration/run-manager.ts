@@ -9,7 +9,7 @@ import path from "node:path";
 import { listProjectAgents, projectAgentDefinitionHash } from "../config/agent-files.js";
 import { loadConfig } from "../config/loader.js";
 import type { AgentDefinition, DuskFleetConfig, ProjectDefinition } from "../config/types.js";
-import { mergeSubagent, needsRepair, subagentsFromLog } from "../execution/log-replay.js";
+import { mergeSubagent, needsRepair, sameSubagent, subagentsFromLog } from "../execution/log-replay.js";
 import type {
   ExecutionEvent,
   ExecutionHandle,
@@ -282,22 +282,42 @@ export class RunManager {
     return this.runs.events(runId);
   }
 
-  /**
-   * Subagent invocations recorded for a run (see RunAgent). Rows of a finished run that miss
-   * type, brief, report or duration, or still hold the raw hand-back frame, are repaired once
-   * from the run's jsonl log with the current parser and written back.
-   */
+  /** Subagent invocations recorded for a run (see RunAgent). A pure read. */
   agents(runId: string): RunAgent[] {
-    const rows = this.runs.agents(runId);
-    if (this.active.has(runId) || !rows.some(needsRepair)) return rows;
-    const run = this.runs.get(runId);
-    const fromLog = new Map(subagentsFromLog(run?.logPath ?? null).map((s) => [s.agentId, s]));
-    for (const row of rows) {
-      if (!needsRepair(row)) continue;
-      const { runId: _r, definitionHash, ...stored } = row;
-      this.runs.upsertAgent(runId, mergeSubagent(stored, fromLog.get(row.agentId)), definitionHash);
-    }
     return this.runs.agents(runId);
+  }
+
+  /**
+   * One-shot backfill (CLI `repair-subagents`): subagent rows of finished runs that miss type,
+   * brief, report or duration, still hold the raw hand-back frame, or were never closed, are
+   * completed from the run's jsonl log with the current parser. Only terminal runs (status read
+   * from the DB, so a run another process is still writing is never touched); a row is written
+   * only when the merge changes it, so re-running settles. A row still open after the merge
+   * belongs to a run that ended without closing it (orphan, crash) and becomes `interrupted`.
+   */
+  async repairSubagents(): Promise<{ runsChecked: number; rowsRepaired: number }> {
+    let runsChecked = 0;
+    let rowsRepaired = 0;
+    for (const runId of this.runs.finishedRunIdsWithAgents()) {
+      const run = this.runs.get(runId);
+      if (!run || !isTerminal(run.status)) continue;
+      const rows = this.runs.agents(runId).filter(needsRepair);
+      if (!rows.length) continue;
+      runsChecked += 1;
+      const fromLog = new Map((await subagentsFromLog(run.logPath)).map((s) => [s.agentId, s]));
+      for (const row of rows) {
+        const { runId: _r, definitionHash, ...stored } = row;
+        const merged = mergeSubagent(stored, fromLog.get(row.agentId));
+        if (merged.status === "running") {
+          merged.status = "interrupted";
+          merged.endedAt ??= run.endedAt ?? new Date().toISOString();
+        }
+        if (sameSubagent(stored, merged)) continue;
+        this.runs.upsertAgent(runId, merged, definitionHash);
+        rowsRepaired += 1;
+      }
+    }
+    return { runsChecked, rowsRepaired };
   }
 
   /** The run that resumed `runId` (on_failure: resume_once), if any. */

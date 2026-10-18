@@ -323,6 +323,36 @@ test("type, brief, report, tool calls and duration come from the hand-back even 
   assert.equal(s.toolCalls, 17, "harness total, not the zero counted from (absent) nested lines");
   assert.equal(s.durationMs, 426333);
   assert.equal(s.totalTokens, 121810);
+  assert.equal(
+    s.startedAt,
+    new Date(Date.parse("2026-10-14T08:39:05.043Z") - 426333).toISOString(),
+    "start = end - harness total, not the parse time",
+  );
+  assert.equal(s.endedAt, "2026-10-14T08:39:05.043Z");
+});
+
+test("a hand-back without totalDurationMs starts at the Agent call's stream time", () => {
+  const state = createStreamState();
+  feed(state, [
+    {
+      type: "assistant",
+      timestamp: "2026-10-14T08:30:00.000Z",
+      message: {
+        id: "m1",
+        content: [{ type: "tool_use", id: "t_agent", name: "Agent", input: { subagent_type: "x", prompt: "p" } }],
+      },
+      parent_tool_use_id: null,
+    },
+    {
+      type: "user",
+      message: { content: [{ tool_use_id: "t_agent", type: "tool_result", content: "done" }] },
+      timestamp: "2026-10-14T08:31:00.000Z",
+      tool_use_result: { status: "completed", agentId: "A2", agentType: "x" },
+    },
+  ]);
+  const [s] = [...state.subagents.values()];
+  assert.equal(s.startedAt, "2026-10-14T08:30:00.000Z");
+  assert.equal(s.durationMs, 60_000);
 });
 
 test("a task_started without subagent_type takes it from the Agent call", () => {

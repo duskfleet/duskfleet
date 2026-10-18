@@ -10,6 +10,7 @@ npm run cli -- run --project my-app --agent my-reviewer --model sonnet -- "Revie
 npm run cli -- run --no-wait --project /path -- "..."     # return immediately
 npm run cli -- runs --status completed --limit 10
 npm run cli -- run-info <run_id> --events   # includes subagents; --events adds the timeline
+npm run cli -- repair-subagents             # backfill subagent rows of finished runs from their logs
 npm run cli -- agents
 npm run cli -- projects
 npm run cli -- schedules

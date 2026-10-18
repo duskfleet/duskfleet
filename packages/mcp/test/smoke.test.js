@@ -232,21 +232,42 @@ test("subagent invocations are recorded as run_agents rows with the persona hash
   }
 });
 
-test("subagent rows recorded by an older parser are repaired from the jsonl log on read", async () => {
+test("subagent rows recorded by an older parser are repaired from the jsonl log by the backfill, never on read", async () => {
   const app = makeApp();
   try {
     const started = await app.runs.startRun({ prompt: "subagent", projectPath: app.project });
     const run = await app.runs.waitForRun(started.id, 10_000);
-    // What the 2026-10-14 run looked like to its reader: no type, no brief, raw report, no duration.
+    // What the 2026-10-14 run looked like to its reader: no type, no brief, raw report, no duration,
+    // and left open (the process died before closing it) although the log has its hand-back.
     app.db
       .prepare(
-        "UPDATE run_agents SET subagent_type = 'unknown', description = NULL, prompt = NULL, result_text = ?, duration_ms = NULL, total_tokens = NULL, tool_calls = 0 WHERE run_id = ?",
+        "UPDATE run_agents SET subagent_type = 'unknown', description = NULL, prompt = NULL, result_text = ?, duration_ms = NULL, total_tokens = NULL, tool_calls = 0, status = 'running', ended_at = NULL WHERE run_id = ?",
       )
       .run(
         "[Subagent hand-back] frame. The report follows:\n  raw report\nagentId: x\n<usage>tool_uses: 2</usage>",
         run.id,
       );
-    const [s] = app.runs.agents(run.id);
+    // A row the log knows nothing about, never closed: interrupted by the backfill.
+    const [orig] = app.runs.agents(run.id);
+    const { runId: _r, definitionHash: _h, ...ghost } = orig;
+    new RunRepository(app.db).upsertAgent(
+      run.id,
+      { ...ghost, agentId: "ghost", parentToolUseId: null, resultText: null, status: "running", endedAt: null },
+      null,
+    );
+
+    assert.equal(app.runs.agents(run.id)[0].subagentType, "unknown", "a read does not write");
+    assert.deepEqual(await app.runs.repairSubagents(), { runsChecked: 1, rowsRepaired: 2 });
+    assert.deepEqual(
+      await app.runs.repairSubagents(),
+      { runsChecked: 1, rowsRepaired: 0 },
+      "re-running settles: nothing left to write",
+    );
+    const [s, g] = app.runs.agents(run.id);
+    assert.equal(s.status, "completed", "closed from the log's hand-back");
+    assert.ok(s.endedAt);
+    assert.equal(g.status, "interrupted");
+    assert.equal(g.endedAt, run.endedAt);
     assert.equal(s.subagentType, "reviewer");
     assert.equal(s.description, "Review the diff");
     assert.equal(s.prompt, "Review the diff and report problems. Do not edit files.");

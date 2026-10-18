@@ -62,12 +62,16 @@ export interface StreamState {
   stamped: Set<string>;
   /** Agent tool calls seen in any session, by tool_use id: what was delegated, from the call's input. */
   agentCalls: Map<string, AgentCallInput>;
+  /** Agent call tool_use id → agent id of the subagent it spawned (O(1) lookup on every tool_result). */
+  subagentByParent: Map<string, string>;
 }
 
 interface AgentCallInput {
   subagentType: string | null;
   description: string | null;
   prompt: string | null;
+  /** Stream timestamp of the line that issued the call: the subagent's start when no nested line is seen. */
+  at: string | null;
 }
 
 export function createStreamState(): StreamState {
@@ -83,6 +87,7 @@ export function createStreamState(): StreamState {
     countedMessages: new Set(),
     stamped: new Set(),
     agentCalls: new Map(),
+    subagentByParent: new Map(),
   };
 }
 
@@ -216,13 +221,15 @@ export function ingestLine(state: StreamState, line: string): ExecutionEvent[] {
           // The Agent call's input is the authoritative brief: subagent_type, description, prompt.
           if (id && (name === "Agent" || name === "Task") && isObject(block["input"])) {
             const input = block["input"];
-            state.agentCalls.set(id, {
+            const call = {
               subagentType: str(input["subagent_type"]),
               description: str(input["description"]),
               prompt: str(input["prompt"]),
-            });
-            const existing = [...state.subagents.values()].find((s) => s.parentToolUseId === id);
-            if (existing) fillFromAgentCall(existing, state.agentCalls.get(id));
+              at: str(msg["timestamp"]),
+            };
+            state.agentCalls.set(id, call);
+            const existing = subagentByParent(state, id);
+            if (existing) fillFromAgentCall(existing, call);
           }
           if (record) {
             record.toolCalls += 1;
@@ -256,7 +263,7 @@ export function ingestLine(state: StreamState, line: string): ExecutionEvent[] {
           const toolUseId = str(block["tool_use_id"]);
           if (!toolUseId) continue;
           const handBack = isObject(msg["tool_use_result"]) ? msg["tool_use_result"] : null;
-          let record = [...state.subagents.values()].find((s) => s.parentToolUseId === toolUseId);
+          let record = subagentByParent(state, toolUseId);
           // No task_started and no nested lines (older CLI, or a stream without them): the
           // hand-back alone still identifies the subagent through tool_use_result.agentId.
           const handBackAgentId = handBack ? str(handBack["agentId"]) : null;
@@ -275,6 +282,17 @@ export function ingestLine(state: StreamState, line: string): ExecutionEvent[] {
           if (record.status === "running")
             record.status = handBack && str(handBack["status"]) === "failed" ? "failed" : "completed";
           record.endedAt = str(msg["timestamp"]) ?? new Date().toISOString();
+          // No nested line stamped the start (hand-back alone): startedAt is still the parse time,
+          // i.e. the end of the subagent or the time of a replay. Derive it from the harness total
+          // or, failing that, from the stream time of the Agent call.
+          if (!state.stamped.has(record.agentId)) {
+            const total = handBack ? num(handBack["totalDurationMs"]) : null;
+            const endMs = Date.parse(record.endedAt);
+            const callAt = state.agentCalls.get(toolUseId)?.at ?? null;
+            if (total !== null && Number.isFinite(endMs)) record.startedAt = new Date(endMs - total).toISOString();
+            else if (callAt) record.startedAt = callAt;
+            state.stamped.add(record.agentId);
+          }
           if (record.durationMs === null)
             record.durationMs = Math.max(0, Date.parse(record.endedAt) - Date.parse(record.startedAt));
           events.push({ type: "subagent_end", subagent: record });
@@ -346,10 +364,18 @@ function subagentFor(
     usage: emptyUsage(),
     totalTokens: null,
   };
-  if (parent) fillFromAgentCall(record, state.agentCalls.get(parent));
+  if (parent) {
+    fillFromAgentCall(record, state.agentCalls.get(parent));
+    if (!state.subagentByParent.has(parent)) state.subagentByParent.set(parent, agentId);
+  }
   state.subagents.set(agentId, record);
   events.push({ type: "subagent_start", subagent: record });
   return record;
+}
+
+function subagentByParent(state: StreamState, parentToolUseId: string): SubagentRecord | undefined {
+  const agentId = state.subagentByParent.get(parentToolUseId);
+  return agentId === undefined ? undefined : state.subagents.get(agentId);
 }
 
 function fillFromAgentCall(record: SubagentRecord, call: AgentCallInput | undefined): void {
@@ -378,6 +404,11 @@ function fillFromHandBack(record: SubagentRecord, r: Json): void {
 
 const HAND_BACK_PREAMBLE = /^\[Subagent hand-back\][\s\S]*?The report follows:\s*\n/;
 const HAND_BACK_FOOTER = /\n(?:agentId: [^\n]*\n)?<usage>[\s\S]*?<\/usage>\s*$/;
+
+/** The text still carries Claude Code's hand-back frame (preamble or footer). Two regex tests, no rewrite. */
+export function isRawHandBack(text: string): boolean {
+  return HAND_BACK_PREAMBLE.test(text) || HAND_BACK_FOOTER.test(text);
+}
 
 /**
  * The report as the subagent wrote it. Claude Code wraps it in a hand-back frame (a

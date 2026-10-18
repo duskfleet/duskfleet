@@ -437,6 +437,17 @@ export class RunRepository {
       );
   }
 
+  /** Ids of finished runs with a log and at least one subagent row (the subagent backfill's candidates). */
+  finishedRunIdsWithAgents(): string[] {
+    const rows = this.db
+      .prepare(
+        `SELECT DISTINCT r.id FROM runs r JOIN run_agents a ON a.run_id = r.id
+         WHERE r.status IN ('completed', 'failed', 'cancelled', 'timed_out') AND r.log_path IS NOT NULL`,
+      )
+      .all() as Array<{ id: string }>;
+    return rows.map((r) => r.id);
+  }
+
   /** Subagent invocations of a run, in start order. */
   agents(runId: string): RunAgent[] {
     return (
