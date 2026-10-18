@@ -6,11 +6,27 @@
  * schedule rows (app/schedules/actions.ts), both on the core API.
  */
 import "server-only";
-import { describeCron, findRepoRoot, listProjectAgents, loadConfig, nextFire, openDatabase, parseCron, resolveClaudeBinary, resolveConfigDir, RunRepository, ScheduleRepository, type DuskFleetConfig, type ProjectAgentInfo, type Run, type RunStatus } from "@duskfleet/core";
-import { homedir } from "node:os";
 import { existsSync, readFileSync } from "node:fs";
+import { homedir } from "node:os";
 import path from "node:path";
 import type { DatabaseSync } from "node:sqlite";
+import {
+  type DuskFleetConfig,
+  describeCron,
+  findRepoRoot,
+  listProjectAgents,
+  loadConfig,
+  nextFire,
+  openDatabase,
+  type ProjectAgentInfo,
+  parseCron,
+  type Run,
+  RunRepository,
+  type RunStatus,
+  resolveClaudeBinary,
+  resolveConfigDir,
+  ScheduleRepository,
+} from "@duskfleet/core";
 
 interface Services {
   configDir: string;
@@ -66,7 +82,9 @@ export function listAgents() {
       projectAgents.set(project.id, list);
     }
     const hit = list.find((p) => p.name === name);
-    return hit ? { name, found: true, model: hit.model, path: hit.path } : { name, found: false, model: null, path: null };
+    return hit
+      ? { name, found: true, model: hit.model, path: hit.path }
+      : { name, found: false, model: null, path: null };
   };
 
   return [...cfg.agents.values()].map(({ systemPrompt, ...a }) => {
@@ -110,14 +128,20 @@ export type RunWithProject = Run & { projectLabel: string };
 function projectLabeller(): (run: Run) => string {
   const byPath = new Map<string, string>();
   for (const p of config().projects.values()) byPath.set(p.path.replace(/\/+$/, ""), p.id);
-  return (run) => run.projectId ?? byPath.get(run.projectPath.replace(/\/+$/, "")) ?? (run.projectPath.split("/").filter(Boolean).pop() ?? run.projectPath);
+  return (run) =>
+    run.projectId ??
+    byPath.get(run.projectPath.replace(/\/+$/, "")) ??
+    run.projectPath.split("/").filter(Boolean).pop() ??
+    run.projectPath;
 }
 
 export function listRuns(filter: RunsFilter = {}): RunWithProject[] {
   const { runs } = services();
   const inMemory = Boolean(filter.scheduleId || filter.q);
   const limit = filter.limit ?? 50;
-  const f: { status?: RunStatus; agentId?: string; projectPath?: string; limit: number } = { limit: inMemory ? 200 : limit };
+  const f: { status?: RunStatus; agentId?: string; projectPath?: string; limit: number } = {
+    limit: inMemory ? 200 : limit,
+  };
   if (filter.status) f.status = filter.status;
   if (filter.agentId) f.agentId = filter.agentId;
   if (filter.projectPath) f.projectPath = filter.projectPath;
@@ -143,15 +167,24 @@ export function homeDir(): string {
 }
 
 /** Neighbours of a run among the same agent's runs, for Previous / Next navigation. */
-export function adjacentRuns(run: Run): { prev: Pick<Run, "id" | "prompt" | "createdAt"> | null; next: Pick<Run, "id" | "prompt" | "createdAt"> | null } {
+export function adjacentRuns(run: Run): {
+  prev: Pick<Run, "id" | "prompt" | "createdAt"> | null;
+  next: Pick<Run, "id" | "prompt" | "createdAt"> | null;
+} {
   const { db } = services();
   const pick = (sql: string) => {
-    const r = db.prepare(sql).get(run.agentId, run.createdAt) as { id: string; prompt: string; created_at: string } | undefined;
+    const r = db.prepare(sql).get(run.agentId, run.createdAt) as
+      | { id: string; prompt: string; created_at: string }
+      | undefined;
     return r ? { id: r.id, prompt: r.prompt, createdAt: r.created_at } : null;
   };
   return {
-    prev: pick("SELECT id, prompt, created_at FROM runs WHERE agent_id = ? AND created_at < ? ORDER BY created_at DESC LIMIT 1"),
-    next: pick("SELECT id, prompt, created_at FROM runs WHERE agent_id = ? AND created_at > ? ORDER BY created_at ASC LIMIT 1"),
+    prev: pick(
+      "SELECT id, prompt, created_at FROM runs WHERE agent_id = ? AND created_at < ? ORDER BY created_at DESC LIMIT 1",
+    ),
+    next: pick(
+      "SELECT id, prompt, created_at FROM runs WHERE agent_id = ? AND created_at > ? ORDER BY created_at ASC LIMIT 1",
+    ),
   };
 }
 
@@ -197,8 +230,16 @@ export function agentStats(): AgentStats[] {
        FROM runs GROUP BY agent_id ORDER BY total DESC`,
     )
     .all() as Array<{
-    agent_id: string; total: number; running: number; completed: number; failed: number;
-    needs_review: number; cost_usd: number; avg_duration_ms: number | null; last_run_at: string | null; last_model_used: string | null;
+    agent_id: string;
+    total: number;
+    running: number;
+    completed: number;
+    failed: number;
+    needs_review: number;
+    cost_usd: number;
+    avg_duration_ms: number | null;
+    last_run_at: string | null;
+    last_model_used: string | null;
   }>;
   return rows.map((r) => ({
     agentId: r.agent_id,
@@ -236,8 +277,20 @@ export function modelStats(): ModelStats[] {
        WHERE status IN ('completed','failed','timed_out','cancelled')
        GROUP BY 1 ORDER BY cost_usd DESC`,
     )
-    .all() as Array<{ model: string; runs: number; avg_duration_ms: number | null; avg_cost_usd: number | null; cost_usd: number }>;
-  return rows.map((r) => ({ model: r.model, runs: r.runs, avgDurationMs: r.avg_duration_ms, avgCostUsd: r.avg_cost_usd, costUsd: r.cost_usd }));
+    .all() as Array<{
+    model: string;
+    runs: number;
+    avg_duration_ms: number | null;
+    avg_cost_usd: number | null;
+    cost_usd: number;
+  }>;
+  return rows.map((r) => ({
+    model: r.model,
+    runs: r.runs,
+    avgDurationMs: r.avg_duration_ms,
+    avgCostUsd: r.avg_cost_usd,
+    costUsd: r.cost_usd,
+  }));
 }
 
 export interface Overview {
@@ -280,7 +333,17 @@ export function overview(filter: Pick<RunsFilter, "agentId" | "projectPath"> = {
               COALESCE(SUM(CASE WHEN created_at >= ? THEN cost_usd END), 0) AS cost_24h
        FROM runs ${where.length ? "WHERE " + where.join(" AND ") : ""}`,
     )
-    .get(...values) as { total: number; running: number | null; finished: number | null; completed: number | null; clean: number | null; failed: number | null; needs_review: number | null; cost_usd: number; cost_24h: number };
+    .get(...values) as {
+    total: number;
+    running: number | null;
+    finished: number | null;
+    completed: number | null;
+    clean: number | null;
+    failed: number | null;
+    needs_review: number | null;
+    cost_usd: number;
+    cost_24h: number;
+  };
   return {
     total: r.total,
     running: r.running ?? 0,

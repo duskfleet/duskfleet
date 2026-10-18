@@ -1,0 +1,59 @@
+# Quality gates for every pull request (docs/development.md "Quality gates"). Everything here runs without a Claude
+# login and without network beyond npm: the tests replay recorded stream-json through
+# packages/mcp/test/fake-claude.js, so a CI run never spawns Claude and never costs money.
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  checks:
+    name: checks
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Install
+        run: npm ci
+
+      - name: Public repo hygiene (no home paths, usernames or machine-specific values)
+        run: npm run check:public
+
+      - name: Lint and format (Biome)
+        run: npm run lint
+
+      - name: Build core + mcp
+        run: npm run build
+
+      - name: Typecheck (core, mcp, web)
+        run: |
+          npm run typecheck
+          npm run typecheck -w @duskfleet/web
+
+      - name: Tests with coverage floor
+        run: npm run test:coverage
+
+      - name: Build dashboard
+        run: npm run build:web
+
+      # Report-only until the Next 16 upgrade: Next 15 pins postcss 8.4.31, which carries a high
+      # advisory, and an npm override does not take (npm drops the package instead). The step
+      # stays visible in the run summary; make it blocking again once `npm audit` is clean.
+      - name: Dependency audit (high and critical; report-only, see docs/development.md "Quality gates")
+        run: npm audit --audit-level=high
+        continue-on-error: true

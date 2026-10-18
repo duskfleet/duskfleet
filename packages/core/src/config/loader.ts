@@ -1,4 +1,4 @@
-import { readFileSync, readdirSync, existsSync, statSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -6,11 +6,11 @@ import { parse as parseYaml } from "yaml";
 import { z } from "zod";
 import { AGENT_ID_PATTERN } from "./agent-files.js";
 import {
-  EFFORT_LEVELS,
-  PERMISSION_MODES,
   type AgentDefinition,
   type AgentSource,
   type DuskFleetConfig,
+  EFFORT_LEVELS,
+  PERMISSION_MODES,
   type ProjectDefinition,
 } from "./types.js";
 
@@ -63,7 +63,10 @@ const globalSchema = z.object({
     .object({
       binary: z.string().nullable().default(null),
       strict_mcp_config: z.boolean().default(true),
-      setting_sources: z.array(z.enum(["user", "project", "local"])).nullable().default(null),
+      setting_sources: z
+        .array(z.enum(["user", "project", "local"]))
+        .nullable()
+        .default(null),
       allow_bypass_permissions: z.boolean().default(false),
       default_timeout_minutes: z.number().positive().default(30),
       default_max_budget_usd: z.number().positive().default(5),
@@ -190,7 +193,9 @@ export function loadAgents(agentsDir: string, source: AgentSource = "builtin"): 
   const agents = new Map<string, AgentDefinition>();
   if (!existsSync(agentsDir)) return agents;
 
-  for (const file of readdirSync(agentsDir).filter((f) => f.endsWith(".md")).sort()) {
+  for (const file of readdirSync(agentsDir)
+    .filter((f) => f.endsWith(".md"))
+    .sort()) {
     const sourcePath = path.join(agentsDir, file);
     const { frontmatter, body } = splitFrontmatter(readFileSync(sourcePath, "utf8"));
     const fm = agentFrontmatterSchema.parse(frontmatter);

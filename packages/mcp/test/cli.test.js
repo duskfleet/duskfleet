@@ -4,7 +4,7 @@
  */
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, writeFileSync, mkdirSync, rmSync, realpathSync } from "node:fs";
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { test } from "node:test";
@@ -21,8 +21,14 @@ function makeRoot() {
   const project = path.join(root, "project");
   mkdirSync(project);
   // JSON strings are valid YAML: paths with quotes, `: `, `#` or backslashes stay intact.
-  writeFileSync(path.join(configDir, "duskfleet.yaml"), `data_dir: ../data\ndefault_agent: coder\nclaude:\n  binary: ${JSON.stringify(fakeBinary)}\n  default_timeout_minutes: 0.05\n`);
-  writeFileSync(path.join(configDir, "projects.yaml"), `projects:\n  demo:\n    path: ${JSON.stringify(realpathSync(project))}\n`); // resolved: core matches path-launched runs to projects by exact path
+  writeFileSync(
+    path.join(configDir, "duskfleet.yaml"),
+    `data_dir: ../data\ndefault_agent: coder\nclaude:\n  binary: ${JSON.stringify(fakeBinary)}\n  default_timeout_minutes: 0.05\n`,
+  );
+  writeFileSync(
+    path.join(configDir, "projects.yaml"),
+    `projects:\n  demo:\n    path: ${JSON.stringify(realpathSync(project))}\n`,
+  ); // resolved: core matches path-launched runs to projects by exact path
   writeFileSync(path.join(configDir, "agents", "coder.md"), `---\npermission_mode: acceptEdits\n---\nBe brief.\n`);
   return { root, configDir, project: realpathSync(project) };
 }
@@ -49,7 +55,11 @@ test("cli run --project accepts a registered id or a path; unknown ids, relative
 
     const unknown = cli(configDir, ["run", "--project", "nope", "--", "hello"]);
     assert.notEqual(unknown.status, 0);
-    assert.match(unknown.stderr, /unknown project "nope"\. Known projects: demo/, "a value that is not path-like is an id");
+    assert.match(
+      unknown.stderr,
+      /unknown project "nope"\. Known projects: demo/,
+      "a value that is not path-like is an id",
+    );
 
     const relative = cli(configDir, ["run", "--project", "./project", "--", "hello"]);
     assert.notEqual(relative.status, 0);

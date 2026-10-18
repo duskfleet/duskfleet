@@ -1,6 +1,6 @@
+import { RUN_STATUSES, type Run, type RunAgent, summarizeRun } from "@duskfleet/core";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
-import { RUN_STATUSES, summarizeRun, type Run, type RunAgent } from "@duskfleet/core";
 import { errorResult, jsonResult, type ToolContext } from "../server.js";
 
 const MAX_WAIT_SECONDS = 300;
@@ -17,7 +17,9 @@ function presentRun(run: Run, includeOutput: boolean) {
         ? resultText.slice(0, 297) + "..."
         : resultText,
     resultTruncated: includeOutput && resultText !== null && resultText.length > OUTPUT_LIMIT,
-    ...(includeOutput && resultText && resultText.length > OUTPUT_LIMIT ? { resultText: resultText.slice(0, OUTPUT_LIMIT) } : {}),
+    ...(includeOutput && resultText && resultText.length > OUTPUT_LIMIT
+      ? { resultText: resultText.slice(0, OUTPUT_LIMIT) }
+      : {}),
   };
 }
 
@@ -39,11 +41,33 @@ export function registerRunTools(server: McpServer, ctx: ToolContext): void {
         "Poll with get_run afterwards.",
       inputSchema: {
         prompt: z.string().min(1).describe("The task for the agent"),
-        project_path: z.string().optional().describe("Absolute path of the project (or ~/...); a registered project id is accepted too. Mutually exclusive with project_id"),
-        project_id: z.string().optional().describe("Id of a project from list_projects. Optional when the agent is bound to a project (list_agents → project)"),
-        agent_id: z.string().optional().describe("Agent id from list_agents; required unless duskfleet.yaml sets default_agent"),
-        model: z.string().optional().describe("Claude model alias or id, e.g. 'sonnet', 'opus'. Omit to use the agent/CLI default"),
-        wait_seconds: z.number().int().min(0).max(MAX_WAIT_SECONDS).optional().describe(`Wait up to N seconds (max ${MAX_WAIT_SECONDS}) for the run to finish`),
+        project_path: z
+          .string()
+          .optional()
+          .describe(
+            "Absolute path of the project (or ~/...); a registered project id is accepted too. Mutually exclusive with project_id",
+          ),
+        project_id: z
+          .string()
+          .optional()
+          .describe(
+            "Id of a project from list_projects. Optional when the agent is bound to a project (list_agents → project)",
+          ),
+        agent_id: z
+          .string()
+          .optional()
+          .describe("Agent id from list_agents; required unless duskfleet.yaml sets default_agent"),
+        model: z
+          .string()
+          .optional()
+          .describe("Claude model alias or id, e.g. 'sonnet', 'opus'. Omit to use the agent/CLI default"),
+        wait_seconds: z
+          .number()
+          .int()
+          .min(0)
+          .max(MAX_WAIT_SECONDS)
+          .optional()
+          .describe(`Wait up to N seconds (max ${MAX_WAIT_SECONDS}) for the run to finish`),
       },
     },
     async (args) => {
@@ -82,7 +106,9 @@ export function registerRunTools(server: McpServer, ctx: ToolContext): void {
       if (!run) return errorResult(`run not found: ${run_id}`);
       const view = presentRun(run, Boolean(include_output));
       const subagents = ctx.runs.agents(run_id).map((s) => presentSubagent(s, Boolean(include_output)));
-      return jsonResult(include_output ? { ...view, subagents, events: ctx.runs.events(run_id) } : { ...view, subagents });
+      return jsonResult(
+        include_output ? { ...view, subagents, events: ctx.runs.events(run_id) } : { ...view, subagents },
+      );
     },
   );
 

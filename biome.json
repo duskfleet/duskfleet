@@ -1,0 +1,75 @@
+{
+  "$schema": "https://biomejs.dev/schemas/2.5.15/schema.json",
+  "vcs": { "enabled": true, "clientKind": "git", "useIgnoreFile": true },
+  "files": {
+    "includes": [
+      "packages/*/src/**",
+      "packages/mcp/test/**",
+      "apps/web/app/**",
+      "apps/web/lib/**",
+      "apps/web/components/**",
+      "scripts/**",
+      "*.json",
+      "!!**/dist",
+      "!!**/.next",
+      "!package-lock.json"
+    ]
+  },
+  "formatter": {
+    "enabled": true,
+    "indentStyle": "space",
+    "indentWidth": 2,
+    "lineWidth": 120
+  },
+  "javascript": {
+    "formatter": { "quoteStyle": "double", "trailingCommas": "all", "semicolons": "always" }
+  },
+  "linter": {
+    "enabled": true,
+    "rules": {
+      "recommended": true,
+      "correctness": {
+        "noUnusedImports": "error",
+        "noUnusedVariables": "warn"
+      },
+      "style": {
+        "useTemplate": "off",
+        "noNonNullAssertion": "warn"
+      },
+      "complexity": {
+        "useLiteralKeys": "off"
+      },
+      "suspicious": {
+        "noExplicitAny": "warn",
+        "noArrayIndexKey": "warn",
+        "noAssignInExpressions": "warn"
+      },
+      "a11y": {
+        "noAutofocus": "warn"
+      }
+    }
+  },
+  "overrides": [
+    {
+      "includes": ["packages/core/src/**"],
+      "linter": {
+        "rules": {
+          "style": {
+            "noRestrictedImports": {
+              "level": "error",
+              "options": {
+                "paths": {
+                  "@modelcontextprotocol/sdk": "core must not depend on the MCP SDK (CLAUDE.md: core imports nothing from MCP or React)",
+                  "@duskfleet/mcp": "core must not depend on the MCP package",
+                  "react": "core must not depend on React",
+                  "react-dom": "core must not depend on React",
+                  "next": "core must not depend on Next.js"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  ]
+}

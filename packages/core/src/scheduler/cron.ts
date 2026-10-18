@@ -32,7 +32,9 @@ export class CronError extends Error {}
 export function parseCron(expression: string): CronSpec {
   const fields = expression.trim().split(/\s+/);
   if (fields.length !== 5) {
-    throw new CronError(`cron expression must have 5 fields (minute hour day month weekday), got ${fields.length}: "${expression}"`);
+    throw new CronError(
+      `cron expression must have 5 fields (minute hour day month weekday), got ${fields.length}: "${expression}"`,
+    );
   }
   const [min, hr, dom, mon, dow] = fields as [string, string, string, string, string];
   return {
@@ -194,7 +196,8 @@ export function describeCron(spec: CronSpec): string {
   if (!spec.month.size || spec.month.size !== 12) return spec.expression;
   let when: string;
   if (minutes.length === 1 && hours.length === 1) when = `at ${pad(hours[0]!)}:${pad(minutes[0]!)}`;
-  else if (minutes.length === 1 && isContiguous(hours)) when = `${pad(hours[0]!)}–${pad(hours[hours.length - 1]!)} at :${pad(minutes[0]!)}`;
+  else if (minutes.length === 1 && isContiguous(hours))
+    when = `${pad(hours[0]!)}–${pad(hours[hours.length - 1]!)} at :${pad(minutes[0]!)}`;
   else if (minutes.length === 1 && hours.length === 24) when = `hourly at :${pad(minutes[0]!)}`;
   else return spec.expression;
   return `${days} ${when}`;
