@@ -6,11 +6,13 @@ data/
 *.tsbuildinfo
 *.log
 .DS_Store
-# local scratch project used as a run target when trying things out; not part of the repo
-playground/
+
 # machine-specific MCP registration; copy from .mcp.json.example
 .mcp.json
 
 # private notes (journal, TODO, research) and the Obsidian vault config: never committed
 notes/
 .obsidian/
+
+# Claude Code configuration (local agents, skills, settings) and worktrees
+.claude/

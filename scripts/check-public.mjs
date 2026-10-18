@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Public-repo hygiene gate (PLAN.md §8, CLAUDE.md "This repo is public").
+ * Public-repo hygiene gate (CLAUDE.md "This repo is public", docs/development.md "Quality gates").
  *
  * Fails when a versioned file contains a home directory path, the current user's name or
  * host name, or when the index holds a symbolic link (a symlink to an absolute path leaked

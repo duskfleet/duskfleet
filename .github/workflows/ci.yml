@@ -1,4 +1,4 @@
-# Quality gates for every pull request (PLAN.md §8). Everything here runs without a Claude
+# Quality gates for every pull request (docs/development.md "Quality gates"). Everything here runs without a Claude
 # login and without network beyond npm: the tests replay recorded stream-json through
 # packages/mcp/test/fake-claude.js, so a CI run never spawns Claude and never costs money.
 name: CI
@@ -54,6 +54,6 @@ jobs:
       # Report-only until the Next 16 upgrade: Next 15 pins postcss 8.4.31, which carries a high
       # advisory, and an npm override does not take (npm drops the package instead). The step
       # stays visible in the run summary; make it blocking again once `npm audit` is clean.
-      - name: Dependency audit (high and critical; report-only, see PLAN.md §8)
+      - name: Dependency audit (high and critical; report-only, see docs/development.md "Quality gates")
         run: npm audit --audit-level=high
         continue-on-error: true
