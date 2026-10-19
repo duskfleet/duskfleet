@@ -515,13 +515,7 @@ function capEntries(entries: Entry[], limit: number | null): Shown[] {
 function resultRow(run: Run, t0: number): Row | null {
   if (!run.endedAt) return null;
   const kind: Kind =
-    run.status === "completed"
-      ? needsReview(run)
-        ? "warn"
-        : "ok"
-      : run.status === "cancelled"
-        ? "muted"
-        : "bad";
+    run.status === "completed" ? (needsReview(run) ? "warn" : "ok") : run.status === "cancelled" ? "muted" : "bad";
   const detail = [
     needsReview(run) ? "needs review" : null,
     run.terminationReason ?? run.status,

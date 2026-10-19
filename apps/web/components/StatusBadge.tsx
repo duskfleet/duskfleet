@@ -15,13 +15,7 @@ export function needsReview(run: ReviewFields): boolean {
  * denial, exhausted context) is shown in amber, not green. The raw status
  * is still visible in the title.
  */
-export function StatusBadge({
-  run,
-  status,
-}: {
-  run?: ReviewFields;
-  status?: RunStatus;
-}) {
+export function StatusBadge({ run, status }: { run?: ReviewFields; status?: RunStatus }) {
   const s = run?.status ?? status ?? "pending";
   const mcpMissing = (run?.mcp?.allowListedMissing ?? []).length > 0;
   const attention = run !== undefined && needsReview(run);
