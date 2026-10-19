@@ -4,14 +4,23 @@
  * processes cannot both hold the lease.
  */
 import assert from "node:assert/strict";
-import { mkdtempSync, writeFileSync, mkdirSync, rmSync, realpathSync } from "node:fs";
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
+import {
+  ClaudeCodeExecutor,
+  loadConfig,
+  openDatabase,
+  RunManager,
+  RunRepository,
+  ScheduleRepository,
+  Scheduler,
+} from "@duskfleet/core";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
-import { ClaudeCodeExecutor, RunManager, RunRepository, ScheduleRepository, Scheduler, loadConfig, openDatabase } from "@duskfleet/core";
+import { testEnv } from "./helpers.js"; // drops an inherited CLAUDE_BIN before any executor is built
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const fakeBinary = path.join(here, "fake-claude.js");
@@ -23,7 +32,10 @@ function makeRoot() {
   mkdirSync(path.join(configDir, "agents"), { recursive: true });
   const project = path.join(root, "project");
   mkdirSync(project);
-  writeFileSync(path.join(configDir, "duskfleet.yaml"), `data_dir: ../data\ndefault_agent: coder\nscheduler:\n  enabled: true\n  tick_seconds: 5\nclaude:\n  binary: "${fakeBinary}"\n  default_timeout_minutes: 0.05\n`);
+  writeFileSync(
+    path.join(configDir, "duskfleet.yaml"),
+    `data_dir: ../data\ndefault_agent: coder\nscheduler:\n  enabled: true\n  tick_seconds: 5\nclaude:\n  binary: "${fakeBinary}"\n  default_timeout_minutes: 0.05\n`,
+  );
   writeFileSync(path.join(configDir, "projects.yaml"), `projects:\n  demo:\n    path: ${project}\n`);
   writeFileSync(path.join(configDir, "agents", "coder.md"), `---\nproject: demo\n---\nBe brief.\n`);
   writeFileSync(path.join(configDir, "agents", "free.md"), `---\n---\nUnbound.\n`);
@@ -44,37 +56,80 @@ test("schedules over MCP: create, list, update, run now, delete; validation erro
   const transport = new StdioClientTransport({
     command: process.execPath,
     args: [serverEntry],
-    env: { ...process.env, DUSKFLEET_CONFIG: configDir, DUSKFLEET_LOG_LEVEL: "warn" },
+    env: testEnv({ DUSKFLEET_CONFIG: configDir, DUSKFLEET_LOG_LEVEL: "warn" }),
     stderr: "pipe",
   });
   const client = new Client({ name: "test-client", version: "0.0.0" });
   try {
     await client.connect(transport);
     const tools = (await client.listTools()).tools.map((t) => t.name);
-    for (const t of ["list_schedules", "create_schedule", "update_schedule", "delete_schedule", "run_schedule_now"]) assert.ok(tools.includes(t), t);
+    for (const t of ["list_schedules", "create_schedule", "update_schedule", "delete_schedule", "run_schedule_now"])
+      assert.ok(tools.includes(t), t);
 
-    const created = ok(await client.callTool({ name: "create_schedule", arguments: { name: "coder hourly", agent_id: "coder", prompt: "ok", cron: "0 8-20 * * 1-5" } }));
+    const created = ok(
+      await client.callTool({
+        name: "create_schedule",
+        arguments: { name: "coder hourly", agent_id: "coder", prompt: "ok", cron: "0 8-20 * * 1-5" },
+      }),
+    );
     assert.equal(created.schedule.timeZone, "Europe/London");
     assert.equal(created.schedule.cronHuman, "weekdays 08–20 at :00");
     assert.equal(created.schedule.projectId, null, "bound agent: project comes from the agent");
     assert.ok(created.schedule.nextRunAt, "next_run_at computed");
     assert.equal(created.schedule.enabled, true);
 
-    fails(await client.callTool({ name: "create_schedule", arguments: { name: "coder hourly", agent_id: "coder", prompt: "ok", cron: "0 * * * *" } }), /already exists/);
-    fails(await client.callTool({ name: "create_schedule", arguments: { name: "bad cron", agent_id: "coder", prompt: "ok", cron: "0 8" } }), /5 fields/);
-    fails(await client.callTool({ name: "create_schedule", arguments: { name: "bad tz", agent_id: "coder", prompt: "ok", cron: "0 * * * *", time_zone: "Mars/Olympus" } }), /unknown time zone/);
-    fails(await client.callTool({ name: "create_schedule", arguments: { name: "no project", agent_id: "free", prompt: "ok", cron: "0 * * * *" } }), /not bound to a project; pass project_id/);
-    fails(await client.callTool({ name: "create_schedule", arguments: { name: "no agent", agent_id: "ghost", prompt: "ok", cron: "0 * * * *" } }), /unknown agent/);
+    fails(
+      await client.callTool({
+        name: "create_schedule",
+        arguments: { name: "coder hourly", agent_id: "coder", prompt: "ok", cron: "0 * * * *" },
+      }),
+      /already exists/,
+    );
+    fails(
+      await client.callTool({
+        name: "create_schedule",
+        arguments: { name: "bad cron", agent_id: "coder", prompt: "ok", cron: "0 8" },
+      }),
+      /5 fields/,
+    );
+    fails(
+      await client.callTool({
+        name: "create_schedule",
+        arguments: { name: "bad tz", agent_id: "coder", prompt: "ok", cron: "0 * * * *", time_zone: "Mars/Olympus" },
+      }),
+      /unknown time zone/,
+    );
+    fails(
+      await client.callTool({
+        name: "create_schedule",
+        arguments: { name: "no project", agent_id: "free", prompt: "ok", cron: "0 * * * *" },
+      }),
+      /not bound to a project; pass project_id/,
+    );
+    fails(
+      await client.callTool({
+        name: "create_schedule",
+        arguments: { name: "no agent", agent_id: "ghost", prompt: "ok", cron: "0 * * * *" },
+      }),
+      /unknown agent/,
+    );
 
     const listed = ok(await client.callTool({ name: "list_schedules", arguments: {} }));
     assert.equal(listed.schedules.length, 1);
     assert.equal(listed.scheduler.enabled, true);
     assert.equal(listed.scheduler.running, true, "the MCP server ticks");
 
-    const paused = ok(await client.callTool({ name: "update_schedule", arguments: { id: created.schedule.id, enabled: false } }));
+    const paused = ok(
+      await client.callTool({ name: "update_schedule", arguments: { id: created.schedule.id, enabled: false } }),
+    );
     assert.equal(paused.schedule.enabled, false);
     assert.equal(paused.schedule.nextRunAt, null, "paused schedules have no next run");
-    const resumed = ok(await client.callTool({ name: "update_schedule", arguments: { id: created.schedule.id, enabled: true, cron: "30 9 * * 1-5", model: "haiku" } }));
+    const resumed = ok(
+      await client.callTool({
+        name: "update_schedule",
+        arguments: { id: created.schedule.id, enabled: true, cron: "30 9 * * 1-5", model: "haiku" },
+      }),
+    );
     assert.equal(resumed.schedule.cronHuman, "weekdays at 09:30");
     assert.equal(resumed.schedule.model, "haiku");
 
@@ -107,7 +162,11 @@ test("tick fires due schedules, honours the kill switch, and only the lease hold
   const { root, configDir, project } = makeRoot();
   const config = loadConfig(configDir);
   const db = openDatabase(config.dataDir);
-  const runs = new RunManager(config, new RunRepository(db), new ClaudeCodeExecutor({ binary: config.claude.binary, strictMcpConfig: true, allowBypassPermissions: false }));
+  const runs = new RunManager(
+    config,
+    new RunRepository(db),
+    new ClaudeCodeExecutor({ binary: config.claude.binary, strictMcpConfig: true, allowBypassPermissions: false }),
+  );
   const repo = new ScheduleRepository(db);
   const a = new Scheduler(repo, runs, { tickMs: 1000, holder: "A" });
   const b = new Scheduler(repo, runs, { tickMs: 1000, holder: "B" });
@@ -138,7 +197,10 @@ test("tick fires due schedules, honours the kill switch, and only the lease hold
     assert.equal(repo.firings(s.id).length, 2);
 
     // kill switch
-    writeFileSync(path.join(configDir, "duskfleet.yaml"), `data_dir: ../data\ndefault_agent: coder\nscheduler:\n  enabled: false\nclaude:\n  binary: "${fakeBinary}"\n`);
+    writeFileSync(
+      path.join(configDir, "duskfleet.yaml"),
+      `data_dir: ../data\ndefault_agent: coder\nscheduler:\n  enabled: false\nclaude:\n  binary: "${fakeBinary}"\n`,
+    );
     await runs.waitForRun(after.lastRunId, 10_000);
     repo.update(s.id, { nextRunAt: new Date(Date.now() - 1000).toISOString() });
     await a.tick();
@@ -147,7 +209,10 @@ test("tick fires due schedules, honours the kill switch, and only the lease hold
     assert.equal(a.status().leaseHeldByThisProcess, false, "lease released");
 
     // with A gone, B takes over
-    writeFileSync(path.join(configDir, "duskfleet.yaml"), `data_dir: ../data\ndefault_agent: coder\nscheduler:\n  enabled: true\nclaude:\n  binary: "${fakeBinary}"\n`);
+    writeFileSync(
+      path.join(configDir, "duskfleet.yaml"),
+      `data_dir: ../data\ndefault_agent: coder\nscheduler:\n  enabled: true\nclaude:\n  binary: "${fakeBinary}"\n`,
+    );
     await b.tick();
     assert.equal(b.status().leaseHeldByThisProcess, true);
     assert.equal(repo.get(s.id).fires, 2);
@@ -161,11 +226,75 @@ test("tick fires due schedules, honours the kill switch, and only the lease hold
   }
 });
 
+test("a schedule of a max_concurrent: 2 agent fires while one run is active and skips while two are", async () => {
+  const { root, configDir } = makeRoot();
+  writeFileSync(
+    path.join(configDir, "duskfleet.yaml"),
+    `data_dir: ../data\ndefault_agent: coder\nmax_concurrent_runs: 10\nscheduler:\n  enabled: true\n  tick_seconds: 5\nclaude:\n  binary: "${fakeBinary}"\n  default_timeout_minutes: 0.05\n`,
+  );
+  writeFileSync(
+    path.join(configDir, "agents", "pair.md"),
+    `---\nproject: demo\nmax_concurrent: 2\nisolated: true\n---\nWorks in its own worktree.\n`,
+  );
+  const config = loadConfig(configDir);
+  const db = openDatabase(config.dataDir);
+  const runs = new RunManager(
+    config,
+    new RunRepository(db),
+    new ClaudeCodeExecutor({ binary: config.claude.binary, strictMcpConfig: true, allowBypassPermissions: false }),
+  );
+  const repo = new ScheduleRepository(db);
+  const a = new Scheduler(repo, runs, { tickMs: 1000, holder: "A" });
+  const fired = [];
+  try {
+    const s = a.create({ name: "pair every minute", agentId: "pair", prompt: "hang", cron: "* * * * *" });
+    const due = () => repo.update(s.id, { nextRunAt: new Date(Date.now() - 1000).toISOString() });
+
+    due();
+    await a.tick();
+    let after = repo.get(s.id);
+    assert.equal(after.lastOutcome, "started");
+    fired.push(after.lastRunId);
+
+    // one run of the agent is still active: the limit is 2, so the next tick fires too
+    due();
+    await a.tick();
+    after = repo.get(s.id);
+    assert.equal(after.lastOutcome, "started", "fires while one run is active");
+    assert.notEqual(after.lastRunId, fired[0]);
+    fired.push(after.lastRunId);
+    assert.equal(runs.activeCount(), 2);
+
+    // two active: busy → skipped, not queued
+    due();
+    await a.tick();
+    after = repo.get(s.id);
+    assert.equal(after.lastOutcome, "skipped_busy");
+    assert.equal(after.skips, 1);
+    assert.equal(after.fires, 2);
+    const skip = repo.firings(s.id).find((f) => f.outcome === "skipped_busy");
+    assert.ok(skip, "the skipped firing is recorded");
+    assert.match(skip.error, /agent busy: agent pair already has 2 of 2 runs/);
+  } finally {
+    a.stop();
+    for (const id of fired) runs.cancelRun(id);
+    for (const id of fired) await runs.waitForRun(id, 10_000);
+    runs.shutdown();
+    await new Promise((r) => setTimeout(r, 300));
+    db.close();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("a run request (dashboard 'Run now') is fired by the lease holder on its next tick, even when paused, and cleared", async () => {
   const { root, configDir } = makeRoot();
   const config = loadConfig(configDir);
   const db = openDatabase(config.dataDir);
-  const runs = new RunManager(config, new RunRepository(db), new ClaudeCodeExecutor({ binary: config.claude.binary, strictMcpConfig: true, allowBypassPermissions: false }));
+  const runs = new RunManager(
+    config,
+    new RunRepository(db),
+    new ClaudeCodeExecutor({ binary: config.claude.binary, strictMcpConfig: true, allowBypassPermissions: false }),
+  );
   const repo = new ScheduleRepository(db);
   const a = new Scheduler(repo, runs, { tickMs: 1000, holder: "A" });
   const b = new Scheduler(repo, runs, { tickMs: 1000, holder: "B" });
@@ -176,7 +305,11 @@ test("a run request (dashboard 'Run now') is fired by the lease holder on its ne
     // the request is a timestamp on the row, idempotent
     const requested = repo.requestRun(s.id);
     assert.ok(requested.runRequestedAt);
-    assert.equal(repo.requestRun(s.id).runRequestedAt, requested.runRequestedAt, "second request keeps the first timestamp");
+    assert.equal(
+      repo.requestRun(s.id).runRequestedAt,
+      requested.runRequestedAt,
+      "second request keeps the first timestamp",
+    );
     assert.equal(repo.requestRun("nope"), null);
 
     // a non-holder does not consume it
@@ -213,7 +346,11 @@ test("`serve` takes the lease from a live mcp / role-less holder; the displaced 
   const { root, configDir } = makeRoot();
   const config = loadConfig(configDir);
   const db = openDatabase(config.dataDir);
-  const runs = new RunManager(config, new RunRepository(db), new ClaudeCodeExecutor({ binary: config.claude.binary, strictMcpConfig: true, allowBypassPermissions: false }));
+  const runs = new RunManager(
+    config,
+    new RunRepository(db),
+    new ClaudeCodeExecutor({ binary: config.claude.binary, strictMcpConfig: true, allowBypassPermissions: false }),
+  );
   const repo = new ScheduleRepository(db);
   const stale = new Scheduler(repo, runs, { tickMs: 1000, holder: "host:523" }); // pre-role build, still ticking
   const mcp = new Scheduler(repo, runs, { tickMs: 1000, role: "mcp" });
@@ -260,7 +397,10 @@ test("`duskfleet serve` stays alive past its first tick and holds the lease unti
   const { spawn } = await import("node:child_process");
   const { root, configDir } = makeRoot();
   const cliEntry = path.join(here, "..", "dist", "cli.js");
-  const child = spawn(process.execPath, [cliEntry, "serve"], { env: { ...process.env, DUSKFLEET_CONFIG: configDir }, stdio: ["ignore", "pipe", "pipe"] });
+  const child = spawn(process.execPath, [cliEntry, "serve"], {
+    env: testEnv({ DUSKFLEET_CONFIG: configDir }),
+    stdio: ["ignore", "pipe", "pipe"],
+  });
   let stderr = "";
   child.stderr.on("data", (d) => (stderr += d));
   let exited = null;

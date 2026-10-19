@@ -29,6 +29,13 @@ export function fmtTime(iso: string | null | undefined): string {
   return new Date(iso).toLocaleString();
 }
 
+/** Page header clock, e.g. "Sunday 12 Oct · 21:08". */
+export function fmtDayClock(d: Date): string {
+  const day = d.toLocaleDateString("en-GB", { weekday: "long", day: "numeric", month: "short" }).replace(",", "");
+  const clock = d.toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit", hour12: false });
+  return `${day} · ${clock}`;
+}
+
 /** "just now", "3 min ago", "2 h ago", "today 14:32", "yesterday 09:10", "4 days ago", else a short date. */
 export function fmtRelative(iso: string | null | undefined, now = Date.now()): string {
   if (!iso) return "–";
@@ -40,10 +47,16 @@ export function fmtRelative(iso: string | null | undefined, now = Date.now()): s
   const h = Math.round(min / 60);
   const clock = t.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" });
   const today = new Date(now);
-  const sameDay = t.getFullYear() === today.getFullYear() && t.getMonth() === today.getMonth() && t.getDate() === today.getDate();
+  const sameDay =
+    t.getFullYear() === today.getFullYear() && t.getMonth() === today.getMonth() && t.getDate() === today.getDate();
   if (sameDay) return h < 6 ? `${h} h ago` : `today ${clock}`;
   const yesterday = new Date(today.getFullYear(), today.getMonth(), today.getDate() - 1);
-  if (t.getFullYear() === yesterday.getFullYear() && t.getMonth() === yesterday.getMonth() && t.getDate() === yesterday.getDate()) return `yesterday ${clock}`;
+  if (
+    t.getFullYear() === yesterday.getFullYear() &&
+    t.getMonth() === yesterday.getMonth() &&
+    t.getDate() === yesterday.getDate()
+  )
+    return `yesterday ${clock}`;
   const d = Math.round(h / 24);
   if (d < 7) return `${d} days ago`;
   return t.toLocaleDateString(undefined, { day: "numeric", month: "short" });
@@ -64,13 +77,6 @@ export function fmtClock(iso: string | null | undefined, now = Date.now()): stri
   if (t.getTime() >= since(1)) return `yesterday ${clock(t)}`;
   if (t.getTime() >= since(6)) return `${t.toLocaleDateString(undefined, { weekday: "short" })} ${clock(t)}`;
   return t.toLocaleDateString(undefined, { day: "numeric", month: "short" });
-}
-
-/** Page header date: "Sunday 12 Oct · 21:08". */
-export function fmtToday(now = new Date()): string {
-  const weekday = now.toLocaleDateString(undefined, { weekday: "long" });
-  const date = now.toLocaleDateString(undefined, { day: "numeric", month: "short" });
-  return `${weekday} ${date} · ${clock(now)}`;
 }
 
 export function fmtInt(n: number | null | undefined): string {
@@ -111,7 +117,10 @@ export function runTitle(prompt: string, max = 80): string {
     .map((l) => l.trim())
     .find((l) => l.length > 0);
   if (!line) return "(empty prompt)";
-  const clean = line.replace(/^#+\s*/, "").replace(/\*\*/g, "").replace(/^[-*]\s+/, "");
+  const clean = line
+    .replace(/^#+\s*/, "")
+    .replace(/\*\*/g, "")
+    .replace(/^[-*]\s+/, "");
   if (clean.length <= max) return clean;
   const cut = clean.slice(0, max);
   const sp = cut.lastIndexOf(" ");
@@ -128,7 +137,11 @@ export function tildePath(p: string | null | undefined, home: string): string {
 /** Same as tildePath but for every occurrence inside free text (commands, log lines). */
 export function tildeText(text: string, home: string): string {
   if (!home) return text;
-  return text.split(home + "/").join("~/").split(home).join("~");
+  return text
+    .split(home + "/")
+    .join("~/")
+    .split(home)
+    .join("~");
 }
 
 /** "1.2k", "840" */

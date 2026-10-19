@@ -57,10 +57,16 @@ two agents out of the same working copy; `max_concurrent_per_agent` (default 1) 
 agent's WIP limit, so a scheduler tick whose previous run is still going is refused with
 `agent busy` rather than doubled. Refusals are errors, not a queue.
 
+The two per-scope limits are defaults an agent may override in its frontmatter:
+`max_concurrent: <n>` replaces `max_concurrent_per_agent` for that agent, and `isolated: true`
+takes its runs out of `max_concurrent_per_project` (they neither count against it nor wait
+for it). `max_concurrent_runs` always stays the hard cap. See
+[Running an agent in parallel](agents.md#running-an-agent-in-parallel).
+
 ## Environment variables
 
 | Variable | Purpose |
 |---|---|
 | `DUSKFLEET_CONFIG` | Directory containing `duskfleet.yaml` (default: the closest ancestor `config/` of the running package / cwd) |
-| `CLAUDE_BIN` | Path to the Claude Code binary (overrides `claude.binary`) |
+| `CLAUDE_BIN` | Path to the Claude Code binary (overrides `claude.binary`). Read by DuskFleet only: it is not passed on to agent runs. |
 | `DUSKFLEET_LOG_LEVEL` | `debug` \| `info` \| `warn` \| `error` |

@@ -2,14 +2,22 @@
 
 import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
-import { deleteAgentAction, unlinkAgentAction, type ActionResult } from "@/app/agents/actions";
+import { type ActionResult, deleteAgentAction, unlinkAgentAction } from "@/app/agents/actions";
 
 /**
  * Delete / unlink for user agents. Two-step confirmation inline (no browser
  * dialogs), result message shown in place. Builtins render nothing: they are
  * edited in the repo.
  */
-export function AgentActions({ id, source, linked }: { id: string; source: "builtin" | "user"; linked: string | null }) {
+export function AgentActions({
+  id,
+  source,
+  linked,
+}: {
+  id: string;
+  source: "builtin" | "user";
+  linked: string | null;
+}) {
   const router = useRouter();
   const [pending, start] = useTransition();
   const [confirm, setConfirm] = useState<"delete" | "unlink" | null>(null);
@@ -17,7 +25,11 @@ export function AgentActions({ id, source, linked }: { id: string; source: "buil
 
   if (source !== "user") {
     return (
-      <span className="faint" style={{ fontSize: "0.78rem" }} title={`Builtin agents live in config/agents and are versioned with the repo. To edit, unlink or delete it from here or via update_agent, move the file: mv config/agents/${id}.md data/agents/`}>
+      <span
+        className="faint"
+        style={{ fontSize: "0.78rem" }}
+        title={`Builtin agents live in config/agents and are versioned with the repo. To edit, unlink or delete it from here or via update_agent, move the file: mv config/agents/${id}.md data/agents/`}
+      >
         builtin · read-only · move to data/agents to edit
       </span>
     );
@@ -36,25 +48,44 @@ export function AgentActions({ id, source, linked }: { id: string; source: "buil
       {confirm ? (
         <>
           <span className="muted">{confirm === "delete" ? `Delete "${id}"?` : `Remove link to ${linked}?`}</span>
-          <button type="button" className={`copy-btn ${confirm === "delete" ? "danger" : ""}`} disabled={pending} onClick={() => run(confirm)}>
+          <button
+            type="button"
+            className={`copy-btn ${confirm === "delete" ? "danger" : ""}`}
+            disabled={pending}
+            onClick={() => run(confirm)}
+          >
             {pending ? "…" : confirm === "delete" ? "Yes, delete" : "Yes, unlink"}
           </button>
-          <button type="button" className="copy-btn" disabled={pending} onClick={() => setConfirm(null)}>Cancel</button>
+          <button type="button" className="copy-btn" disabled={pending} onClick={() => setConfirm(null)}>
+            Cancel
+          </button>
         </>
       ) : (
         <>
           {linked && (
-            <button type="button" className="copy-btn" onClick={() => setConfirm("unlink")} title={`Keep the agent, drop the claude_agent link to ${linked}`}>
+            <button
+              type="button"
+              className="copy-btn"
+              onClick={() => setConfirm("unlink")}
+              title={`Keep the agent, drop the claude_agent link to ${linked}`}
+            >
               Unlink
             </button>
           )}
-          <button type="button" className="copy-btn danger" onClick={() => setConfirm("delete")} title="Remove the agent file from data/agents">
+          <button
+            type="button"
+            className="copy-btn danger"
+            onClick={() => setConfirm("delete")}
+            title="Remove the agent file from data/agents"
+          >
             Delete
           </button>
         </>
       )}
       {result && (
-        <span className={result.ok ? "muted" : ""} style={{ color: result.ok ? undefined : "var(--bad)" }}>{result.message}</span>
+        <span className={result.ok ? "muted" : ""} style={{ color: result.ok ? undefined : "var(--bad)" }}>
+          {result.message}
+        </span>
       )}
     </span>
   );

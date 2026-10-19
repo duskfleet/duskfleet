@@ -1,13 +1,26 @@
+import { type RunEvent, wrapUpPhase } from "@duskfleet/core";
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import type { RunEvent } from "@duskfleet/core";
 import { AutoRefresh } from "@/components/AutoRefresh";
 import { CopyButton } from "@/components/CopyButton";
 import { Expandable } from "@/components/Expandable";
 import { Prose } from "@/components/Prose";
 import { StatusBadge } from "@/components/StatusBadge";
 import { adjacentRuns, getRun, homeDir, projectLabel } from "@/lib/data";
-import { elapsedSince, fmtCompact, fmtCost, fmtDuration, fmtInt, fmtOffset, fmtRelative, fmtTime, runTitle, shortModel, tildePath, tildeText } from "@/lib/format";
+import {
+  elapsedSince,
+  fmtCompact,
+  fmtCost,
+  fmtDuration,
+  fmtInt,
+  fmtOffset,
+  fmtRelative,
+  fmtTime,
+  runTitle,
+  shortModel,
+  tildePath,
+  tildeText,
+} from "@/lib/format";
 
 export const dynamic = "force-dynamic";
 
@@ -27,9 +40,17 @@ export default async function RunPage({ params }: { params: Promise<{ id: string
   const duration = live ? elapsedSince(run.startedAt) : run.durationMs;
   const denials = run.permissionDenials ?? 0;
   const mcpMissing = run.mcp?.allowListedMissing ?? [];
-  const hasIssues = denials > 0 || mcpMissing.length > 0 || run.contextExhausted || Boolean(run.error);
-  const needsAttention = run.status === "failed" || run.status === "timed_out" || (run.status === "completed" && (run.humanIntervention || run.contextExhausted));
-  const resume = run.claudeSessionId ? `cd ${shellQuote(run.projectPath)} && claude --resume ${run.claudeSessionId}` : null;
+  const wrapUp = wrapUpPhase(run);
+  const mainPhase = run.phases.find((p) => p.phase === "main") ?? null;
+  const hasIssues =
+    denials > 0 || mcpMissing.length > 0 || run.contextExhausted || Boolean(run.error) || wrapUp !== null;
+  const needsAttention =
+    run.status === "failed" ||
+    run.status === "timed_out" ||
+    (run.status === "completed" && (run.humanIntervention || run.contextExhausted));
+  const resume = run.claudeSessionId
+    ? `cd ${shellQuote(run.projectPath)} && claude --resume ${run.claudeSessionId}`
+    : null;
   const t0 = new Date(run.startedAt ?? run.createdAt).getTime();
   const fullCommand = `${run.command.binary} ${run.command.argv.map((a) => shellQuote(a, 160)).join(" ")}`;
   const again = [
@@ -38,7 +59,9 @@ export default async function RunPage({ params }: { params: Promise<{ id: string
     `--agent ${run.agentId}`,
     run.modelRequested ? `--model ${run.modelRequested}` : null,
     `-- ${shellQuote(run.prompt)}`,
-  ].filter(Boolean).join(" ");
+  ]
+    .filter(Boolean)
+    .join(" ");
   const { prev, next } = adjacentRuns(run);
   const project = projectLabel(run);
   const started = run.startedAt ?? run.createdAt;
@@ -56,8 +79,28 @@ export default async function RunPage({ params }: { params: Promise<{ id: string
           <span className="sep">/</span>
           <span title={run.projectPath}>{project}</span>
           <span className="nav-runs">
-            {prev ? <Link href={`/runs/${prev.id}`} className="chip-link" title={`Previous run of ${run.agentId}: ${runTitle(prev.prompt, 60)}`}>← older</Link> : <span className="faint">← older</span>}
-            {next ? <Link href={`/runs/${next.id}`} className="chip-link" title={`Next run of ${run.agentId}: ${runTitle(next.prompt, 60)}`}>newer →</Link> : <span className="faint">newer →</span>}
+            {prev ? (
+              <Link
+                href={`/runs/${prev.id}`}
+                className="chip-link"
+                title={`Previous run of ${run.agentId}: ${runTitle(prev.prompt, 60)}`}
+              >
+                ← older
+              </Link>
+            ) : (
+              <span className="faint">← older</span>
+            )}
+            {next ? (
+              <Link
+                href={`/runs/${next.id}`}
+                className="chip-link"
+                title={`Next run of ${run.agentId}: ${runTitle(next.prompt, 60)}`}
+              >
+                newer →
+              </Link>
+            ) : (
+              <span className="faint">newer →</span>
+            )}
           </span>
         </div>
         <h1 title={run.prompt}>{runTitle(run.prompt, 110)}</h1>
@@ -68,19 +111,25 @@ export default async function RunPage({ params }: { params: Promise<{ id: string
           <span className="sep">·</span>
           <span title={run.projectPath}>{project}</span>
           <span className="sep">·</span>
-          <span className="pill model" title={run.modelUsed ?? run.modelRequested ?? "CLI default"}>{shortModel(run.modelUsed ?? run.modelRequested)}</span>
+          <span className="pill model" title={run.modelUsed ?? run.modelRequested ?? "CLI default"}>
+            {shortModel(run.modelUsed ?? run.modelRequested)}
+          </span>
           <span className="sep">·</span>
           <span title={fmtTime(started)}>{fmtRelative(started)}</span>
           {run.scheduleId && (
             <>
               <span className="sep">·</span>
-              <Link href={`/schedules#${run.scheduleId}`} title={run.scheduleId}>scheduled</Link>
+              <Link href={`/schedules#${run.scheduleId}`} title={run.scheduleId}>
+                scheduled
+              </Link>
             </>
           )}
           {hasIssues && (
             <>
               <span className="sep">·</span>
-              <a href="#issues" className="muted">see issues ↓</a>
+              <a href="#issues" className="muted">
+                see issues ↓
+              </a>
             </>
           )}
         </div>
@@ -93,10 +142,18 @@ export default async function RunPage({ params }: { params: Promise<{ id: string
         <Fact label="Tool calls" value={fmtInt(run.toolCalls)} />
         <Fact
           label="Tokens in / out"
-          value={tokensIn === null && tokensOut === null ? "–" : `${tokensIn === null ? "–" : fmtCompact(tokensIn)} / ${tokensOut === null ? "–" : fmtCompact(tokensOut)}`}
+          value={
+            tokensIn === null && tokensOut === null
+              ? "–"
+              : `${tokensIn === null ? "–" : fmtCompact(tokensIn)} / ${tokensOut === null ? "–" : fmtCompact(tokensOut)}`
+          }
           title={`input ${fmtInt(tokensIn)} · output ${fmtInt(tokensOut)} · cache read ${fmtInt(run.cacheReadTokens)} · cache write ${fmtInt(run.cacheCreationTokens)}`}
         />
-        <Fact label="Denials" value={live && run.permissionDenials === null ? "–" : String(denials)} tone={denials > 0 ? "warn" : "neutral"} />
+        <Fact
+          label="Denials"
+          value={live && run.permissionDenials === null ? "–" : String(denials)}
+          tone={denials > 0 ? "warn" : "neutral"}
+        />
       </div>
 
       <div id="issues">
@@ -104,9 +161,12 @@ export default async function RunPage({ params }: { params: Promise<{ id: string
           <div className="callout warn">
             <span className="icon">!</span>
             <div>
-              <strong>{denials} tool call{denials > 1 ? "s were" : " was"} denied.</strong> Unattended runs get no prompts, so
-              anything outside the agent's <code>allowed_tools</code> is refused. Add the tool if it should have been permitted.
-              {" "}The denied calls are <span className="flag warn">highlighted</span> in the timeline below.
+              <strong>
+                {denials} tool call{denials > 1 ? "s were" : " was"} denied.
+              </strong>{" "}
+              Unattended runs get no prompts, so anything outside the agent's <code>allowed_tools</code> is refused. Add
+              the tool if it should have been permitted. The denied calls are{" "}
+              <span className="flag warn">highlighted</span> in the timeline below.
               {(run.deniedTools ?? []).length > 0 && (
                 <ul style={{ margin: "6px 0 0", paddingLeft: 18 }}>
                   {(run.deniedTools ?? []).map((d, i) => (
@@ -125,22 +185,54 @@ export default async function RunPage({ params }: { params: Promise<{ id: string
             <span className="icon">!</span>
             <div>
               <strong>Allow-listed MCP server{mcpMissing.length > 1 ? "s" : ""} never mounted:</strong>{" "}
-              {mcpMissing.map((p, i) => <code key={i}>{p}{i < mcpMissing.length - 1 ? ", " : ""}</code>)}.
-              {" "}Mounted in this run: {run.mcp.mounted.length ? run.mcp.mounted.map((m) => m.name).join(", ") : "none reported"}
-              {run.mcp.used.length ? <>; used: {run.mcp.used.join(", ")}</> : null}. The names differ (e.g. <code>mcp__plugin_*</code> vs <code>mcp__claude_ai_*</code>); fix the agent's <code>allowed_tools</code>.
+              {mcpMissing.map((p, i) => (
+                <code key={i}>
+                  {p}
+                  {i < mcpMissing.length - 1 ? ", " : ""}
+                </code>
+              ))}
+              . Mounted in this run:{" "}
+              {run.mcp.mounted.length ? run.mcp.mounted.map((m) => m.name).join(", ") : "none reported"}
+              {run.mcp.used.length ? <>; used: {run.mcp.used.join(", ")}</> : null}. The names differ (e.g.{" "}
+              <code>mcp__plugin_*</code> vs <code>mcp__claude_ai_*</code>); fix the agent's <code>allowed_tools</code>.
             </div>
           </div>
         )}
         {run.contextExhausted && (
           <div className="callout bad">
             <span className="icon">!</span>
-            <div><strong>Context window exhausted.</strong> The run stopped before finishing. Split the task or give the agent a narrower prompt.</div>
+            <div>
+              <strong>Context window exhausted.</strong> The run stopped before finishing. Split the task or give the
+              agent a narrower prompt.
+            </div>
           </div>
         )}
         {run.error && (
           <div className="callout bad">
             <span className="icon">×</span>
-            <div><strong>Error.</strong> {tildeText(run.error, home)}</div>
+            <div>
+              <strong>Error.</strong> {tildeText(run.error, home)}
+            </div>
+          </div>
+        )}
+        {wrapUp && (
+          <div className={`callout ${wrapUp.outcome === "completed" ? "warn" : "bad"}`}>
+            <span className="icon">!</span>
+            <div>
+              <strong>
+                Budget exhausted
+                {mainPhase ? ` after ${fmtCost(mainPhase.costUsd)} of ${fmtCost(mainPhase.budgetUsd)}` : ""}.
+              </strong>{" "}
+              A wrap-up pass resumed the session with the {fmtCost(wrapUp.budgetUsd)} reserve and{" "}
+              {wrapUp.outcome === "completed"
+                ? "recorded where it stopped"
+                : `ended ${wrapUp.outcome.replace("_", " ")}${wrapUp.terminationReason ? ` (${wrapUp.terminationReason})` : ""}`}
+              : {fmtCost(wrapUp.costUsd)}, {fmtDuration(wrapUp.durationMs)}, {fmtInt(wrapUp.numTurns)} turn
+              {wrapUp.numTurns === 1 ? "" : "s"}.
+              {wrapUp.outcome === "completed"
+                ? " Its final message is the result below; the task itself was not finished."
+                : " The task was not finished and nothing may have been recorded: check the result and the place the agent reports to."}
+            </div>
           </div>
         )}
       </div>
@@ -157,7 +249,9 @@ export default async function RunPage({ params }: { params: Promise<{ id: string
               <Prose text={run.resultText} />
             )
           ) : (
-            <div className="prose quiet">{live ? "Working… the result appears here when the run finishes." : "The run produced no final text."}</div>
+            <div className="prose quiet">
+              {live ? "Working… the result appears here when the run finishes." : "The run produced no final text."}
+            </div>
           )}
 
           <h2>
@@ -190,9 +284,13 @@ export default async function RunPage({ params }: { params: Promise<{ id: string
           </div>
 
           <div>
-            <h2 style={{ marginTop: 0 }}>Prompt <span className="count">{fmtInt(run.prompt.length)} chars</span></h2>
+            <h2 style={{ marginTop: 0 }}>
+              Prompt <span className="count">{fmtInt(run.prompt.length)} chars</span>
+            </h2>
             <div className="cmd">
-              <blockquote className="quote" style={{ flex: 1 }}>{run.prompt}</blockquote>
+              <blockquote className="quote" style={{ flex: 1 }}>
+                {run.prompt}
+              </blockquote>
               <CopyButton text={run.prompt} />
             </div>
           </div>
@@ -201,27 +299,55 @@ export default async function RunPage({ params }: { params: Promise<{ id: string
             <summary>Technical details</summary>
             <div className="body">
               <dl className="kv">
-                <dt>run id</dt><dd className="mono">{run.id}</dd>
-                <dt>session</dt><dd className="mono">{run.claudeSessionId ?? "–"}</dd>
-                <dt>project</dt><dd className="mono" title={run.projectPath}>{tildePath(run.projectPath, home)}</dd>
-                <dt>permissions</dt><dd className="mono">{run.permissionMode}</dd>
-                <dt>model used</dt><dd className="mono">{run.modelUsed ?? "–"}</dd>
-                <dt>model requested</dt><dd className="mono">{run.modelRequested ?? "agent / CLI default"}</dd>
-                <dt>created</dt><dd>{fmtTime(run.createdAt)}</dd>
-                <dt>started</dt><dd>{fmtTime(run.startedAt)}</dd>
-                <dt>ended</dt><dd>{fmtTime(run.endedAt)}</dd>
-                <dt>exit code</dt><dd>{run.exitCode ?? "–"}</dd>
-                <dt>termination</dt><dd className="mono">{run.terminationReason ?? "–"}</dd>
-                <dt>input tokens</dt><dd>{fmtInt(run.inputTokens)}</dd>
-                <dt>output tokens</dt><dd>{fmtInt(run.outputTokens)}</dd>
-                <dt>cache read</dt><dd>{fmtInt(run.cacheReadTokens)}</dd>
-                <dt>cache write</dt><dd>{fmtInt(run.cacheCreationTokens)}</dd>
-                <dt>mcp mounted</dt><dd className="mono">{run.mcp?.mounted?.length ? run.mcp.mounted.map((m) => `${m.name} (${m.status})`).join(", ") : "none reported"}</dd>
-                <dt>mcp used</dt><dd className="mono">{run.mcp?.used?.length ? run.mcp.used.join(", ") : "–"}</dd>
-                <dt>log</dt><dd className="mono" title={run.logPath ?? undefined}>{tildePath(run.logPath, home)}</dd>
+                <dt>run id</dt>
+                <dd className="mono">{run.id}</dd>
+                <dt>session</dt>
+                <dd className="mono">{run.claudeSessionId ?? "–"}</dd>
+                <dt>project</dt>
+                <dd className="mono" title={run.projectPath}>
+                  {tildePath(run.projectPath, home)}
+                </dd>
+                <dt>permissions</dt>
+                <dd className="mono">{run.permissionMode}</dd>
+                <dt>model used</dt>
+                <dd className="mono">{run.modelUsed ?? "–"}</dd>
+                <dt>model requested</dt>
+                <dd className="mono">{run.modelRequested ?? "agent / CLI default"}</dd>
+                <dt>created</dt>
+                <dd>{fmtTime(run.createdAt)}</dd>
+                <dt>started</dt>
+                <dd>{fmtTime(run.startedAt)}</dd>
+                <dt>ended</dt>
+                <dd>{fmtTime(run.endedAt)}</dd>
+                <dt>exit code</dt>
+                <dd>{run.exitCode ?? "–"}</dd>
+                <dt>termination</dt>
+                <dd className="mono">{run.terminationReason ?? "–"}</dd>
+                <dt>input tokens</dt>
+                <dd>{fmtInt(run.inputTokens)}</dd>
+                <dt>output tokens</dt>
+                <dd>{fmtInt(run.outputTokens)}</dd>
+                <dt>cache read</dt>
+                <dd>{fmtInt(run.cacheReadTokens)}</dd>
+                <dt>cache write</dt>
+                <dd>{fmtInt(run.cacheCreationTokens)}</dd>
+                <dt>mcp mounted</dt>
+                <dd className="mono">
+                  {run.mcp?.mounted?.length
+                    ? run.mcp.mounted.map((m) => `${m.name} (${m.status})`).join(", ")
+                    : "none reported"}
+                </dd>
+                <dt>mcp used</dt>
+                <dd className="mono">{run.mcp?.used?.length ? run.mcp.used.join(", ") : "–"}</dd>
+                <dt>log</dt>
+                <dd className="mono" title={run.logPath ?? undefined}>
+                  {tildePath(run.logPath, home)}
+                </dd>
               </dl>
               <div>
-                <div className="muted" style={{ fontSize: "0.8rem", marginBottom: 6 }}>Exact command</div>
+                <div className="muted" style={{ fontSize: "0.8rem", marginBottom: 6 }}>
+                  Exact command
+                </div>
                 <div className="cmd">
                   <pre className="block">{tildeText(fullCommand, home)}</pre>
                   <CopyButton text={fullCommand} />
@@ -235,11 +361,23 @@ export default async function RunPage({ params }: { params: Promise<{ id: string
   );
 }
 
-function Fact({ label, value, title, tone }: { label: string; value: string; title?: string; tone?: "ok" | "warn" | "bad" | "neutral" }) {
+function Fact({
+  label,
+  value,
+  title,
+  tone,
+}: {
+  label: string;
+  value: string;
+  title?: string;
+  tone?: "ok" | "warn" | "bad" | "neutral";
+}) {
   return (
     <div className="fact">
       <div className="label">{label}</div>
-      <div className={`value ${tone ?? ""}`} title={title}>{value}</div>
+      <div className={`value ${tone ?? ""}`} title={title}>
+        {value}
+      </div>
     </div>
   );
 }
@@ -270,19 +408,34 @@ const LEGEND: Array<{ cls: string; icon: string; label: string }> = [
   { cls: "denied", icon: "✗", label: "denied call" },
 ];
 
-function Timeline({ events, t0, cwd, home, denied }: { events: RunEvent[]; t0: number; cwd: string; home: string; denied: Array<{ tool: string; summary: string | null }> }) {
+function Timeline({
+  events,
+  t0,
+  cwd,
+  home,
+  denied,
+}: {
+  events: RunEvent[];
+  t0: number;
+  cwd: string;
+  home: string;
+  denied: Array<{ tool: string; summary: string | null }>;
+}) {
   const rows = markDenied(events.map(toRow(t0, cwd, home)), denied);
   if (rows.length === 0) return <div className="empty">No events recorded.</div>;
   const entries = groupRuns(rows);
   const used = new Set(rows.map((r) => (r.denied ? "denied" : r.iconCls)));
   return (
     <>
-      <div className="legend" aria-label="Legend">
+      <section className="legend" aria-label="Legend">
         {LEGEND.filter((l) => used.has(l.cls)).map((l) => (
-          <span key={l.cls}><span className={`ic ${l.cls}`}>{l.icon}</span>{l.label}</span>
+          <span key={l.cls}>
+            <span className={`ic ${l.cls}`}>{l.icon}</span>
+            {l.label}
+          </span>
         ))}
         <span className="faint">· click a line to see it in full</span>
-      </div>
+      </section>
       <ul className="timeline">
         {entries.map((e, i) =>
           e.kind === "row" ? (
@@ -293,13 +446,23 @@ function Timeline({ events, t0, cwd, home, denied }: { events: RunEvent[]; t0: n
                 <summary>
                   <span className="off">{fmtOffset(e.rows[0]!.offsetMs)}</span>
                   <span className={`ic ${e.rows[0]!.iconCls}`}>{e.rows[0]!.icon}</span>
-                  <span className="name">{e.rows[0]!.name} <span className="count-tag">×{e.rows.length}</span></span>
+                  <span className="name">
+                    {e.rows[0]!.name} <span className="count-tag">×{e.rows.length}</span>
+                  </span>
                   <span className="detail plain">
-                    {fmtOffset(e.rows[0]!.offsetMs)} → {fmtOffset(e.rows[e.rows.length - 1]!.offsetMs)} · {e.rows.map((r) => r.detail).filter(Boolean).slice(0, 3).join(", ")}{e.rows.length > 3 ? ", …" : ""}
+                    {fmtOffset(e.rows[0]!.offsetMs)} → {fmtOffset(e.rows[e.rows.length - 1]!.offsetMs)} ·{" "}
+                    {e.rows
+                      .map((r) => r.detail)
+                      .filter(Boolean)
+                      .slice(0, 3)
+                      .join(", ")}
+                    {e.rows.length > 3 ? ", …" : ""}
                   </span>
                 </summary>
                 <ul>
-                  {e.rows.map((r) => <TimelineRow key={r.key} r={r} />)}
+                  {e.rows.map((r) => (
+                    <TimelineRow key={r.key} r={r} />
+                  ))}
                 </ul>
               </details>
             </li>
@@ -312,11 +475,24 @@ function Timeline({ events, t0, cwd, home, denied }: { events: RunEvent[]; t0: n
 
 function TimelineRow({ r }: { r: Row }) {
   return (
-    <li id={`ev-${r.key}`} className={`${r.isStatus ? "status-row" : ""} ${r.denied ? "denied" : ""}`} title={r.denied ? "This call was denied: the tool is not in the agent's allowed_tools" : undefined}>
+    <li
+      id={`ev-${r.key}`}
+      className={`${r.isStatus ? "status-row" : ""} ${r.denied ? "denied" : ""}`}
+      title={r.denied ? "This call was denied: the tool is not in the agent's allowed_tools" : undefined}
+    >
       <span className="off">{fmtOffset(r.offsetMs)}</span>
       <span className={`ic ${r.denied ? "denied" : r.iconCls}`}>{r.denied ? "✗" : r.icon}</span>
-      <span className="name">{r.name}{r.denied && <span className="count-tag"> denied</span>}</span>
-      <span className={`detail ${r.mono ? "" : "plain"}`} tabIndex={r.detail.length > 60 ? 0 : undefined} title={r.detail}>{r.detail}</span>
+      <span className="name">
+        {r.name}
+        {r.denied && <span className="count-tag"> denied</span>}
+      </span>
+      <span
+        className={`detail ${r.mono ? "" : "plain"}`}
+        tabIndex={r.detail.length > 60 ? 0 : undefined}
+        title={r.detail}
+      >
+        {r.detail}
+      </span>
     </li>
   );
 }
@@ -348,7 +524,13 @@ function markDenied(rows: Row[], denied: Array<{ tool: string; summary: string |
   const out = rows.map((r) => ({ ...r }));
   for (const r of out) {
     if (!r.toolName) continue;
-    const idx = pending.findIndex((d) => d.tool === r.toolName && d.summary !== null && r.detail !== "" && (d.summary === r.detail || d.summary.endsWith(r.detail) || r.detail.endsWith(d.summary!)));
+    const idx = pending.findIndex(
+      (d) =>
+        d.tool === r.toolName &&
+        d.summary !== null &&
+        r.detail !== "" &&
+        (d.summary === r.detail || d.summary.endsWith(r.detail) || r.detail.endsWith(d.summary!)),
+    );
     if (idx >= 0) {
       r.denied = true;
       pending.splice(idx, 1);
@@ -365,23 +547,91 @@ function toRow(t0: number, cwd: string, home: string) {
   return (e: RunEvent): Row => {
     const p = (e.payload ?? {}) as Record<string, unknown>;
     const offsetMs = new Date(e.ts).getTime() - t0;
-    const base = { key: String(e.id), offsetMs, mono: true, isStatus: false, denied: false, toolName: null as string | null };
+    const base = {
+      key: String(e.id),
+      offsetMs,
+      mono: true,
+      isStatus: false,
+      denied: false,
+      toolName: null as string | null,
+    };
     switch (e.type) {
       case "status_change":
-        return { ...base, icon: "◆", iconCls: "status", name: String(p["to"] ?? "status"), detail: p["from"] ? `from ${String(p["from"])}` : "run created", mono: false, isStatus: true };
+        return {
+          ...base,
+          icon: "◆",
+          iconCls: "status",
+          name: String(p["to"] ?? "status"),
+          detail: p["from"] ? `from ${String(p["from"])}` : "run created",
+          mono: false,
+          isStatus: true,
+        };
       case "init":
-        return { ...base, icon: "▶", iconCls: "status", name: "session", detail: [p["model"] ? shortModel(String(p["model"])) : null, p["cliVersion"] ? `Claude Code ${String(p["cliVersion"])}` : null, p["tools"] !== undefined ? `${String(p["tools"])} tools` : null].filter(Boolean).join(" · "), mono: false };
+        return {
+          ...base,
+          icon: "▶",
+          iconCls: "status",
+          name: "session",
+          detail: [
+            p["model"] ? shortModel(String(p["model"])) : null,
+            p["cliVersion"] ? `Claude Code ${String(p["cliVersion"])}` : null,
+            p["tools"] !== undefined ? `${String(p["tools"])} tools` : null,
+          ]
+            .filter(Boolean)
+            .join(" · "),
+          mono: false,
+        };
       case "tool_use": {
         const name = String(p["name"] ?? "tool");
         const raw = typeof p["summary"] === "string" ? p["summary"] : "";
         // Paths inside the project read better relative to it; others relative to home.
         const summary = tildeText(raw.split(cwd.endsWith("/") ? cwd : cwd + "/").join(""), home);
-        return { ...base, icon: toolIcon(name), iconCls: toolClass(name), name: shortToolName(name), detail: summary, toolName: name };
+        return {
+          ...base,
+          icon: toolIcon(name),
+          iconCls: toolClass(name),
+          name: shortToolName(name),
+          detail: summary,
+          toolName: name,
+        };
       }
       case "error":
-        return { ...base, icon: "×", iconCls: "err", name: "error", detail: tildeText(String(p["parseError"] ?? p["message"] ?? JSON.stringify(p)), home) };
+        return {
+          ...base,
+          icon: "×",
+          iconCls: "err",
+          name: "error",
+          detail: tildeText(String(p["parseError"] ?? p["message"] ?? JSON.stringify(p)), home),
+        };
       case "note":
-        return { ...base, icon: "·", iconCls: "", name: "note", detail: tildeText(String(p["message"] ?? JSON.stringify(p)), home), mono: false };
+        return {
+          ...base,
+          icon: "·",
+          iconCls: "",
+          name: "note",
+          detail: tildeText(String(p["message"] ?? JSON.stringify(p)), home),
+          mono: false,
+        };
+      case "phase": {
+        const started = p["status"] === "started";
+        const name = `${String(p["phase"] ?? "phase").replace("_", "-")} ${started ? "started" : "ended"}`;
+        const detail = started
+          ? [
+              p["budgetUsd"] !== undefined ? `budget ${fmtCost(Number(p["budgetUsd"]))}` : null,
+              p["mainCostUsd"] !== undefined ? `main pass spent ${fmtCost(Number(p["mainCostUsd"]))}` : null,
+              p["reason"] ? String(p["reason"]) : null,
+            ]
+              .filter(Boolean)
+              .join(" · ")
+          : [
+              p["outcome"] ? String(p["outcome"]) : null,
+              p["costUsd"] !== undefined ? fmtCost(Number(p["costUsd"])) : null,
+              p["durationMs"] !== undefined ? fmtDuration(Number(p["durationMs"])) : null,
+            ]
+              .filter(Boolean)
+              .join(" · ");
+        return { ...base, icon: "◆", iconCls: "status", name, detail, mono: false, isStatus: true };
+      }
       default:
         return { ...base, icon: "·", iconCls: "", name: String(e.type), detail: JSON.stringify(p) };
     }
