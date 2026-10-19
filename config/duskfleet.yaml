@@ -41,7 +41,9 @@ scheduler:
   default_time_zone: Europe/London
   # Final message of a scheduled run that found no work; feeds the 7-day idle-cost stats.
   # A regex literal or a plain case-insensitive regex; a schedule can override it.
-  noop_pattern: "/nothing to do|no .* in ready/i"
+  # Anchored at the start: a run that did work and mentions "nothing to do" later is not idle.
+  # An invalid pattern is ignored with a warning (the default applies).
+  noop_pattern: '/^\s*(nothing to do|no .* in ready)/i'
 
 claude:
   # Path to the Claude Code binary. Resolution order: CLAUDE_BIN env var, this

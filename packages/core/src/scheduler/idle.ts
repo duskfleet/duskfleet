@@ -5,26 +5,48 @@
  * from `scheduler.noop_pattern`). Generic: the pattern is whatever the agent says when idle.
  */
 import type { Run } from "../observability/run.js";
+import type { RunOutcomes } from "./types.js";
 
-/** What scheduled agents typically say when they find no work. Matched case-insensitively. */
-export const DEFAULT_NOOP_PATTERN = "/nothing to do|no .* in ready/i";
+/**
+ * What scheduled agents typically say when they find no work, matched case-insensitively at
+ * the start of the final message: a run that did work and mentions "nothing to do" later on
+ * is not idle.
+ */
+export const DEFAULT_NOOP_PATTERN = "/^\\s*(nothing to do|no .* in ready)/i";
+
+/**
+ * How much of a final message the marker is tested against. Bounds a user (or LLM) supplied
+ * regex with bad backtracking: it runs on the MCP / serve event loop.
+ */
+export const NOOP_TEXT_LIMIT = 2000;
 
 /**
  * Parse a no-op marker: `/source/flags` (a JavaScript regex literal) or a plain string, which
- * is matched as a case-insensitive regex. Throws on an invalid expression.
+ * is matched as a case-insensitive regex. Surrounding whitespace is ignored. Throws on an
+ * empty or invalid expression.
  */
 export function parseNoopPattern(pattern: string): RegExp {
-  const literal = /^\/(.+)\/([a-z]*)$/s.exec(pattern.trim());
+  const p = pattern.trim();
+  if (p === "") throw new Error("invalid noop_pattern: empty");
+  const literal = /^\/(.+)\/([a-z]*)$/s.exec(p);
   try {
-    return literal ? new RegExp(literal[1]!, literal[2]!.replace(/[gy]/g, "")) : new RegExp(pattern, "i");
+    return literal ? new RegExp(literal[1]!, literal[2]!.replace(/[gy]/g, "")) : new RegExp(p, "i");
   } catch (err) {
-    throw new Error(`invalid noop_pattern ${JSON.stringify(pattern)}: ${err instanceof Error ? err.message : String(err)}`);
+    throw new Error(
+      `invalid noop_pattern ${JSON.stringify(pattern)}: ${err instanceof Error ? err.message : String(err)}`,
+    );
   }
 }
 
-/** A finished run whose final message matches the marker. Failed runs are never no-ops: they need review instead. */
+/**
+ * A finished run whose final message matches the marker. Failed runs are never no-ops: they
+ * need review instead (so do completed runs with review reasons, filtered out by
+ * `runOutcomesSince`).
+ */
 export function isNoopRun(run: Pick<Run, "status" | "resultText">, pattern: RegExp): boolean {
-  return run.status === "completed" && run.resultText !== null && pattern.test(run.resultText);
+  return (
+    run.status === "completed" && run.resultText !== null && pattern.test(run.resultText.slice(0, NOOP_TEXT_LIMIT))
+  );
 }
 
 export interface IdleStats {
@@ -44,20 +66,19 @@ export interface IdleStats {
   costUsd: number;
   /** The marker used, as written. */
   noopPattern: string;
-  /** Ticks on which the gate ran (command or agent). */
-  gateChecks: number;
-  /** Ticks the gate skipped (no work). */
-  gateSkips: number;
-  /** What the gate agent runs cost (command gates cost nothing). Not included in costUsd. */
-  gateCostUsd: number;
+  /**
+   * Why the stored marker could not be parsed (a manual DB edit, or stricter parse rules than
+   * when it was saved), else null. Then noopRuns and noopCostUsd are 0: only this schedule's
+   * stats degrade, never list_schedules, the CLI or the dashboard as a whole.
+   */
+  noopPatternError: string | null;
 }
 
 /** Idle stats of one schedule over the last `days` (default 7), read from its firings and runs. */
 export function scheduleIdleStats(
   repo: {
     firingCountsSince(id: string, since: string): Record<string, number>;
-    runOutcomesSince(id: string, since: string): Array<Pick<Run, "status" | "resultText" | "costUsd">>;
-    gateSpendSince(id: string, since: string): { gateChecks: number; gateCostUsd: number };
+    runOutcomesSince(id: string, since: string, textLimit: number): RunOutcomes;
   },
   schedule: { id: string; noopPattern: string | null },
   defaultPattern: string,
@@ -68,30 +89,35 @@ export function scheduleIdleStats(
   const counts = repo.firingCountsSince(schedule.id, since);
   const ticks = Object.values(counts).reduce((a, b) => a + b, 0);
   const fires = (counts["started"] ?? 0) + (counts["resumed"] ?? 0);
-  const gates = repo.gateSpendSince(schedule.id, since);
-  return {
-    ...computeIdleStats({ runs: repo.runOutcomesSince(schedule.id, since), ticks, fires, pattern: schedule.noopPattern ?? defaultPattern, since, days }),
-    gateSkips: counts["skipped_gate"] ?? 0,
-    gateChecks: gates.gateChecks,
-    gateCostUsd: Math.round(gates.gateCostUsd * 10_000) / 10_000,
-  };
+  return computeIdleStats({
+    outcomes: repo.runOutcomesSince(schedule.id, since, NOOP_TEXT_LIMIT),
+    ticks,
+    fires,
+    pattern: schedule.noopPattern ?? defaultPattern,
+    since,
+    days,
+  });
 }
 
 export function computeIdleStats(input: {
-  runs: Array<Pick<Run, "status" | "resultText" | "costUsd">>;
+  outcomes: RunOutcomes;
   ticks: number;
   fires: number;
   pattern: string;
   since: string;
   days: number;
-}): Omit<IdleStats, "gateChecks" | "gateSkips" | "gateCostUsd"> {
-  const re = parseNoopPattern(input.pattern);
+}): IdleStats {
+  let re: RegExp | null = null;
+  let noopPatternError: string | null = null;
+  try {
+    re = parseNoopPattern(input.pattern);
+  } catch (err) {
+    noopPatternError = err instanceof Error ? err.message : String(err);
+  }
   let noopRuns = 0;
   let noopCostUsd = 0;
-  let costUsd = 0;
-  for (const r of input.runs) {
-    costUsd += r.costUsd ?? 0;
-    if (isNoopRun(r, re)) {
+  for (const r of input.outcomes.completed) {
+    if (re && isNoopRun({ status: "completed", resultText: r.resultText }, re)) {
       noopRuns += 1;
       noopCostUsd += r.costUsd ?? 0;
     }
@@ -102,10 +128,11 @@ export function computeIdleStats(input: {
     days: input.days,
     ticks: input.ticks,
     fires: input.fires,
-    runs: input.runs.length,
+    runs: input.outcomes.runs,
     noopRuns,
     noopCostUsd: round(noopCostUsd),
-    costUsd: round(costUsd),
+    costUsd: round(input.outcomes.costUsd),
     noopPattern: input.pattern,
+    noopPatternError,
   };
 }

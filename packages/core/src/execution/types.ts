@@ -41,7 +41,14 @@ export interface ExecutionRequest {
  * otherwise (see SubagentRecord).
  */
 export type ExecutionEvent =
-  | { type: "init"; sessionId: string; model: string | null; tools: string[]; mcpServers: McpServerInfo[]; cliVersion: string | null }
+  | {
+      type: "init";
+      sessionId: string;
+      model: string | null;
+      tools: string[];
+      mcpServers: McpServerInfo[];
+      cliVersion: string | null;
+    }
   | { type: "tool_use"; name: string; id: string | null; input?: unknown; agentId: string | null }
   | { type: "assistant_text"; text: string; agentId: string | null }
   | { type: "subagent_start"; subagent: SubagentRecord }

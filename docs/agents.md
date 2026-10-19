@@ -41,6 +41,8 @@ permission_mode: acceptEdits      # acceptEdits | dontAsk | auto | manual  (plan
 # inherit_mcp: true               # see "MCP servers inside runs"
 # add_dirs: ["~/Documents/Projects/other-repo"]        # --add-dir; runs are confined to the project otherwise
 # effort: high
+# max_concurrent: 3               # runs of this agent at once (whole number >= 1); default max_concurrent_per_agent (1)
+# isolated: true                  # never edits the project checkout: ignores max_concurrent_per_project
 timeout_minutes: 30
 max_budget_usd: 5
 # wrap_up_reserve_usd: 0.5     # part of max_budget_usd kept for the wrap-up pass; default 10%, min $0.50, 0 = off
@@ -70,6 +72,8 @@ next eleven hourly ticks. To make a budget stop leave a trace, DuskFleet splits 
 
 The reserve is `wrap_up_reserve_usd` when set, otherwise 10% of `max_budget_usd` with a
 $0.50 floor; it is never more than half of the budget, and `0` disables the wrap-up pass.
+`create_agent` / `update_agent` refuse an explicit reserve above half of the budget
+(`max_budget_usd`, or `claude.default_max_budget_usd` when the agent sets none).
 `list_agents` and the Agents page show the effective value.
 
 The wrap-up pass is **not a separate run**. The run keeps one id and one session; its
@@ -79,12 +83,35 @@ timeline carries `phase` events around the wrap-up's own tool calls; the run's `
 is the wrap-up's final message (where it stopped), and the log file holds both passes with
 a `#resume` marker between them. The run's **status is still `failed`** with
 `terminationReason: budget_exhausted`: the task was not done. Only a wrap-up cancelled by
-`cancel_run` turns the run `cancelled`. A wrap-up pass that exhausts the reserve too ends
+`cancel_run` turns the run `cancelled`; a `cancel_run` (or a shutdown) that arrives while the
+main pass is already ending on its budget prevents the wrap-up pass. A wrap-up pass that exhausts the reserve too ends
 there: there is never a third pass, and the run never spends more than `max_budget_usd`.
-The wrap-up pass has at most ten minutes (less when the agent's `timeout_minutes` is shorter)
-and runs with the same permissions, tools and MCP servers as the main pass, so a ticket
+The wrap-up pass has at most ten minutes, and never more than what is left of the agent's
+`timeout_minutes` (none left: no wrap-up pass), so the whole run never outlasts its timeout. If the
+wrap-up process cannot be spawned, the run closes on the main pass with a note. It runs with the same permissions, tools and MCP servers as the main pass, so a ticket
 comment it needs to write must already be allow-listed.
 
+## Running an agent in parallel
+
+By default an agent has one run at a time and a project directory has one run at a time
+(`max_concurrent_per_agent`, `max_concurrent_per_project`, see
+[Concurrency](configuration.md#concurrency)). That is right for agents that edit the checkout in
+place, but wrong for a read-only reviewer or for an agent that works in its own git worktree.
+Two frontmatter fields lift the limits per agent:
+
+- `max_concurrent: <n>`: up to `n` runs of this agent may be active at once. The `n + 1`-th
+  `run_agent` is refused with `agent busy: agent <id> already has n of n runs (...)`; a schedule
+  of the agent fires while fewer than `n` runs are active and records `skipped_busy` otherwise.
+- `isolated: true`: the agent never edits the project checkout. Its runs do not count against
+  `max_concurrent_per_project` and are not blocked by it, so an isolated reviewer and a normal
+  coder can work on the same project at the same time (two normal agents still cannot). This
+  is a promise the agent's prompt keeps (read-only tools, or a worktree of its own); DuskFleet
+  does not check it.
+
+`max_concurrent_runs` stays the hard cap over everything. A non-integer or a value below 1
+for `max_concurrent` is a config error naming the file. `list_agents` reports both fields
+(`maxConcurrent` is the effective limit) and the dashboard shows them in the limits row when
+they differ from the defaults.
 ## Resume once on failure
 
 The wrap-up pass leaves a trace; it does not finish the job. `on_failure: resume_once` lets a
@@ -138,8 +165,8 @@ model). Instead of copying that prompt into DuskFleet, link to it:
 
 ```markdown
 ---
-id: app-coordinator
-claude_agent: app-coordinator     # <project>/.claude/agents/app-coordinator.md
+id: my-agent
+claude_agent: my-agent     # <project>/.claude/agents/my-agent.md
 project: my-app
 permission_mode: acceptEdits
 inherit_mcp: true
@@ -148,12 +175,26 @@ allowed_tools: ["mcp__claude_ai_Atlassian_Rovo", "Bash(yarn:*)", "Bash(git:*)", 
 Optional extra instructions, appended after the project agent's own prompt.
 ```
 
-The run starts as `claude --agent app-coordinator`: the project agent decides who the
+The run starts as `claude --agent my-agent`: the project agent decides who the
 model is and what it does; the DuskFleet agent decides what it may do unattended
 (permissions, allow-list, budget, MCP). `list_project_agents` shows what a project offers;
 a link to a name the project does not define fails before anything is spawned. Note that a
 project agent's `tools:` list does not grant permissions in unattended runs: those tools
 still need to be in `allowed_tools` here.
+
+Two things to get right with a link:
+
+- **Prompt it as the agent, not as its caller.** The run *is* the project agent. If the
+  project also ships a command that invokes that agent (a gate such as
+  `/pickup-task` that checks an issue tracker and then calls `my-agent`), do not tell the
+  link to run that command: the agent would invoke itself as a subagent, paying two Opus
+  hops for one unit of work. Prompt it with "find your own work and run your loop". Keep
+  the command for an `own` agent on a cheap model if you want the gate before the hop.
+- **MCP tool names in the project agent's `tools:` must be the ones unattended runs see**
+  (`mcp__claude_ai_Atlassian_Rovo__*`, `mcp__claude_ai_Figma__*`), not the `mcp__plugin_*`
+  names interactive sessions show. The list is an allow-list: with the wrong prefix the
+  agent is denied the tools that exist. Listing both prefixes keeps the file usable from
+  both.
 
 ## MCP servers inside runs
 
@@ -189,15 +230,29 @@ that did part of the work:
 - `definitionHash`: a short hash of the project agent file at start time, so evals can tell
   which version of a persona produced a result.
 
-`get_run` returns them as `subagents`, each with `type`, `brief` and `report` as plain-language
-aliases of `subagentType`, `prompt` and `resultText`; `run-info` on the CLI does the same. The
+`get_run` and the CLI `run-info` both return them as `subagents`, each with `type`, `brief` and
+`report` (stored as `subagentType`, `prompt` and `resultText`; only the plain-language names are
+sent, on both surfaces). The
 report is stored as the subagent wrote it: Claude Code's hand-back frame (provenance preamble,
-two-space indent, `agentId` / `<usage>` footer) is stripped. When a stream lacks the
+two-space indent, `agentId` / `<usage>` footer) is stripped; without the preamble, a trailing
+`<usage>` block is stripped only after an `agentId:` line, so a report that ends with one of its
+own stays whole. A hand-back closes the subagent only with a final status: a failed one wins
+over an earlier completed, and a background `Agent` call (`async_launched`) stays open until
+its `task_notification`. When a stream lacks the
 `task_started` or nested lines, the hand-back's `tool_use_result` (`agentType`, `prompt`,
 `resolvedModel`, `totalDurationMs`, `totalTokens`, `totalToolUseCount`) and the parent's
-`Agent` call input still fill the row; the harness totals win over counted figures. Rows of a
-finished run that miss any of these, or still hold a raw frame, are repaired once from the
-run's `data/logs/<run_id>.jsonl` when read and written back. Tool-use
+`Agent` call input still fill the row; the harness totals win over counted figures, and a
+subagent seen only through its hand-back starts at `endedAt - totalDurationMs` (or at the
+`Agent` call's stream time). Rows recorded by an older parser (missing any of these, still
+holding a raw frame, or left `running` by a process that died) are backfilled with
+`duskfleet repair-subagents`: it replays each finished run's `data/logs/<run_id>.jsonl` with
+the current parser, takes status and end time from the log when the log closed an open
+subagent (a failed outcome also replaces a stored completed; a stored failed or interrupted is
+never downgraded), takes a duration only when the log measured it (harness total or two stream
+timestamps, never the replay's clock), marks rows the log left open `interrupted` (rows of a
+run with no readable log are left alone), and writes a row only when that changes it and
+nobody wrote it since it was read. Reads never write.
+Tool-use
 events in the timeline carry the `agentId` they belong to (null for the main session).
 Nothing is spawned differently: the data comes from the `task_started` /
 `task_notification` lines and the `agent_id` field of nested messages in Claude Code's

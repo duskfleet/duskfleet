@@ -83,7 +83,14 @@ tick instead **resumes the session** of the run it last started, once:
   `max_budget_usd`) and a prompt that says to check what was already done, finish, and
   record the outcome;
 - **once**: a retry that fails again is final, the tick after starts fresh; a retry that
-  completes is followed by fresh runs as usual;
+  completes is followed by fresh runs as usual. `resumeRun` refuses a run that is itself a
+  resume, and the retry row is the claim (`resumed_from_run_id` is unique), so two processes
+  firing the same schedule at once cannot both resume it. A retry that fails to spawn gives
+  the claim back;
+- editing the schedule's agent, project, prompt or model after the failure cancels the
+  resume: the next fire starts fresh with the new values. A resume refused for any other
+  reason than busy (the agent was deleted, the project unregistered) also starts fresh, with
+  a note on the new run, so it cannot block the schedule;
 - `list_schedules` shows the policy in force (`effectiveOnFailure`) and, when the next fire
   will be a resume, the run it resumes (`willResumeRunId`); the dashboard row shows "resume
   once on failure" and a "next: resume" badge; `run_schedule_now` and the dashboard's **Run
@@ -93,50 +100,6 @@ Set it with `create_schedule` / `update_schedule` (`on_failure: resume_once | no
 `resume_budget_usd`; `clear_on_failure: true` goes back to the agent's policy). It pairs with
 the [wrap-up pass](agents.md#budget-reserve-and-wrap-up-pass): the wrap-up records where the
 run stopped, the resume picks it up from there.
-
-## Gates: skip cheaply when there is no work
-
-A gate is a cheap check that runs before the real run on every tick, so a schedule that finds
-no work skips for (almost) nothing instead of paying a full agent session to say so. One per
-schedule, set with `gate` on `create_schedule` / `update_schedule` (`clear_gate: true` removes
-it). Two kinds:
-
-**Command gate**: a shell command run with `sh -c` in the project directory.
-
-```
-create_schedule { …, "gate": { "command": "./scripts/has-ready-work.sh", "timeout_seconds": 60 } }
-```
-
-Exit 0 means there is work and the real run starts. A non-zero exit skips the tick: the
-firing is `skipped_gate` and the command's stdout (else stderr) is kept as the reason
-(`lastError`, the firing log, the dashboard row). A timeout (default 60 s, max 600) or a
-command that cannot start is an `error`, not a skip. It costs nothing. Whatever "work" means is
-up to the command: a ticket query through a CLI, a `git log` since the last tag, a file in an
-inbox folder.
-
-**Agent gate**: a cheap agent run with its own prompt and budget.
-
-```
-create_schedule { …, "gate": { "agent": { "agent_id": "work-checker", "prompt": "Is there a Ready ticket for you? If not, answer NO_WORK.", "budget_usd": 0.3, "model": "haiku", "marker": "NO_WORK" } } }
-```
-
-It is recorded as a run of kind `gate` (same schedule, same project, no wrap-up reserve). When
-its final message contains `marker` (default `NO_WORK`) the tick is `skipped_gate`, with the
-message as the reason. Otherwise the real run starts. A gate run that fails or times out is an
-`error` and the real run does not start. The gate agent must be allowed to run on the
-schedule's project; give it `allowed_tools` for what it checks, and a cheap `model`.
-
-Rules:
-
-- The busy check comes first: a tick whose agent or project is busy is `skipped_busy` without
-  running the gate.
-- A tick that [resumes](#resume-once-on-failure) a failed run skips the gate: the work exists.
-- `run_schedule_now` and the dashboard's **Run now** go through the gate (an agent gate is
-  waited for); `run_schedule_now { "skip_gate": true }` starts the real run directly.
-- Gate cost is counted apart from run cost. Each firing records `gateRunId` / `gateCostUsd`,
-  `idle7d` adds `gateChecks`, `gateSkips` and `gateCostUsd` (not included in `costUsd`),
-  `list_runs { "kind": "gate" }` lists the gate runs, and the dashboard shows "on runs / on
-  gates" under Spent and the gate spend per schedule.
 
 ## Idle cost
 
@@ -151,17 +114,25 @@ Every schedule therefore reports, over the last 7 days (`idle7d` in `list_schedu
 | `fires` | ticks that started a run (`started` + `resumed`) |
 | `runs`, `costUsd` | runs of the schedule and what they cost |
 | `noopRuns`, `noopCostUsd` | completed runs whose final message matched the no-op marker, and their cost |
+| `noopPattern`, `noopPatternError` | the marker used, and why it could not be parsed (else `null`; then the no-op counts are 0 for that schedule only) |
 
 The marker is `scheduler.noop_pattern` in `duskfleet.yaml` (default
-`/nothing to do|no .* in ready/i`), overridable per schedule with `noop_pattern` on
-`create_schedule` / `update_schedule` (`clear_noop_pattern: true` goes back to the default).
-Write it as a regex literal `/…/flags` or a plain string, matched case-insensitively. Make
-the agent end with a recognisable sentence when it finds no work. Failed runs never count as
-no-op: they [need review](dashboard.md#needs-review) instead.
+`/^\s*(nothing to do|no .* in ready)/i`, anchored at the start of the message so a run that
+did work and mentions "nothing to do" further down is not counted), overridable per schedule
+with `noop_pattern` on `create_schedule` / `update_schedule` (`clear_noop_pattern: true` goes
+back to the default). Write it as a regex literal `/…/flags` or a plain string, matched
+case-insensitively; surrounding whitespace is ignored and an empty pattern is refused. It is
+tested against the first 2000 characters of the final message only. An invalid
+`scheduler.noop_pattern` does not break the config: it is ignored with a warning and the
+default applies. `noop_pattern` and `clear_noop_pattern` in one `update_schedule` call are
+refused. Make the agent start its final message with a recognisable sentence when it finds no
+work. Failed runs, and completed runs that [need review](dashboard.md#needs-review) (a
+permission denial, a budget or context limit, an MCP mismatch), never count as no-op, even
+when they end with "nothing to do": they were blocked, not idle.
 
 ## Policies
 
-- A tick whose agent or project is still busy is recorded as `skipped_busy`, never queued (checked before any [gate](#gates-skip-cheaply-when-there-is-no-work)).
+- A tick whose agent or project is still busy is recorded as `skipped_busy`, never queued.
 - Missed ticks (nobody running) are not caught up.
 - `scheduler.enabled: false` in `duskfleet.yaml` is the kill switch, re-read every tick.
 - Every run started by a schedule carries its `scheduleId`, and the schedule carries the

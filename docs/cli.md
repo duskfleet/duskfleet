@@ -6,10 +6,11 @@ The CLI uses the same orchestration code as the MCP server and is the quickest w
 ```bash
 npm run cli -- doctor                                     # Claude binary, version, config and data paths
 npm run cli -- run --project ~/Documents/Projects/my-app -- "Add a README section describing the build"
-npm run cli -- run --project-id my-app --agent my-reviewer --model sonnet -- "Review src/ for obvious bugs"
+npm run cli -- run --project my-app --agent my-reviewer --model sonnet -- "Review src/ for obvious bugs"   # registered id or path (--project-id is the explicit form)
 npm run cli -- run --no-wait --project /path -- "..."     # return immediately
 npm run cli -- runs --status completed --limit 10
 npm run cli -- run-info <run_id> --events   # includes subagents; --events adds the timeline
+npm run cli -- repair-subagents             # backfill subagent rows of finished runs from their logs
 npm run cli -- agents
 npm run cli -- projects
 npm run cli -- schedules

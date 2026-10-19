@@ -30,7 +30,10 @@ export function summarizeToolInput(name: string, input: unknown, max = 120): str
       text = pick("description", "prompt");
       break;
     default:
-      text = pick("description", "query", "url", "pattern", "command", "prompt") ?? Object.values(p).find((v): v is string => typeof v === "string") ?? null;
+      text =
+        pick("description", "query", "url", "pattern", "command", "prompt") ??
+        Object.values(p).find((v): v is string => typeof v === "string") ??
+        null;
   }
   if (!text) return null;
   text = text.replace(/\s+/g, " ");

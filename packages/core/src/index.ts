@@ -2,48 +2,108 @@
  * @duskfleet/core public surface. Everything the MCP server, the CLI and the
  * web dashboard need is exported from here.
  */
-export * from "./config/types.js";
-export { loadConfig, loadAgents, resolveConfigDir, findRepoRoot, expandHome, isDirectory, splitFrontmatter } from "./config/loader.js";
-export { upsertUserProject, readUserProjects, projectIdFromPath, PROJECT_ID_PATTERN, type UserProjectEntry } from "./config/project-files.js";
+
 export {
   AGENT_ID_PATTERN,
-  agentSpecSchema,
-  agentFilePath,
-  renderAgentMarkdown,
-  writeAgentFile,
-  deleteAgentFile,
-  agentToSpec,
-  listProjectAgents,
-  projectAgentDefinitionHash,
-  agentKind,
-  assertAgentKind,
   type AgentKind,
   type AgentSpec,
+  agentFilePath,
+  agentKind,
+  agentSpecSchema,
+  agentToSpec,
+  assertAgentKind,
+  assertWrapUpReserve,
+  deleteAgentFile,
+  listProjectAgents,
   type ProjectAgentInfo,
+  projectAgentDefinitionHash,
+  renderAgentMarkdown,
+  writeAgentFile,
 } from "./config/agent-files.js";
-
-export * from "./observability/run.js";
-
-export { openDatabase } from "./storage/db.js";
-export { RunRepository, NEEDS_REVIEW_SQL, type ListRunsFilter, type RunPatch } from "./storage/runs.js";
-
-export * from "./execution/types.js";
-export { ClaudeCodeExecutor, resolveClaudeBinary, type ClaudeCodeExecutorOptions } from "./execution/claude-code.js";
-export { ingestLine, createStreamState, looksLikeContextExhaustion, cleanHandBack, type ParsedResult, type StreamState } from "./execution/stream-json.js";
-export { subagentsFromLog, needsRepair, mergeSubagent } from "./execution/log-replay.js";
-
-export { RunManager, mcpToolPrefix, budgetPlan, mergeResults, resumePrompt, WRAP_UP_PROMPT, type StartRunInput, type ResumeRunInput } from "./orchestration/run-manager.js";
-export { summarizeToolInput } from "./orchestration/tool-summary.js";
-export { validateProjectPath, ProjectValidationError } from "./orchestration/project-validation.js";
-export { assertTransition, IllegalTransitionError } from "./orchestration/run-state.js";
-
+export {
+  expandHome,
+  findRepoRoot,
+  isDirectory,
+  loadAgents,
+  loadConfig,
+  resolveConfigDir,
+  splitFrontmatter,
+} from "./config/loader.js";
+export {
+  PROJECT_ID_PATTERN,
+  projectIdFromPath,
+  readUserProjects,
+  type UserProjectEntry,
+  upsertUserProject,
+} from "./config/project-files.js";
+export * from "./config/types.js";
 export * from "./evals/types.js";
-export * from "./scheduler/types.js";
-export { parseCron, nextFire, describeCron, localParts, assertTimeZone, CronError, type CronSpec } from "./scheduler/cron.js";
-export { Scheduler, type FireResult, type SchedulerOptions, type SchedulerStatus } from "./scheduler/scheduler.js";
-export { evaluateGate, runCommandGate, validateGate, type GateVerdict } from "./scheduler/gate.js";
-export { createSchedule, updateSchedule, validateScheduleInput, nextRunAtFor, formatHolder, parseHolder, effectiveOnFailure, willResume, DEFAULT_TIME_ZONE, type SchedulerRole } from "./scheduler/crud.js";
-export { ScheduleRepository } from "./storage/schedules.js";
-export { DEFAULT_NOOP_PATTERN, parseNoopPattern, isNoopRun, computeIdleStats, scheduleIdleStats, type IdleStats } from "./scheduler/idle.js";
+export { ClaudeCodeExecutor, type ClaudeCodeExecutorOptions, resolveClaudeBinary } from "./execution/claude-code.js";
+export { mergeSubagent, needsRepair, sameSubagent, subagentsFromLog } from "./execution/log-replay.js";
+export {
+  cleanHandBack,
+  createStreamState,
+  ingestLine,
+  isRawHandBack,
+  looksLikeContextExhaustion,
+  type ParsedResult,
+  type StreamState,
+} from "./execution/stream-json.js";
+export * from "./execution/types.js";
+export * from "./observability/run.js";
+export { ProjectValidationError, validateProjectPath } from "./orchestration/project-validation.js";
 
-export { logger, type LogLevel } from "./util/log.js";
+export {
+  budgetPlan,
+  mcpToolPrefix,
+  mergeResults,
+  type ResumeRunInput,
+  RunManager,
+  type RunManagerOptions,
+  resumePrompt,
+  type StartRunInput,
+  WRAP_UP_PROMPT,
+} from "./orchestration/run-manager.js";
+export { assertTransition, IllegalTransitionError } from "./orchestration/run-state.js";
+export { summarizeToolInput } from "./orchestration/tool-summary.js";
+export {
+  assertTimeZone,
+  CronError,
+  type CronSpec,
+  describeCron,
+  localParts,
+  nextFire,
+  parseCron,
+} from "./scheduler/cron.js";
+export {
+  createSchedule,
+  DEFAULT_TIME_ZONE,
+  effectiveOnFailure,
+  formatHolder,
+  nextRunAtFor,
+  parseHolder,
+  processIdentity,
+  type ScheduleRunState,
+  type SchedulerRole,
+  scheduleRunState,
+  updateSchedule,
+  validateScheduleInput,
+  willResume,
+} from "./scheduler/crud.js";
+export {
+  computeIdleStats,
+  DEFAULT_NOOP_PATTERN,
+  type IdleStats,
+  isNoopRun,
+  NOOP_TEXT_LIMIT,
+  parseNoopPattern,
+  scheduleIdleStats,
+} from "./scheduler/idle.js";
+export { attachLastRun, type RunSummarySource, type ScheduleWithLastRun } from "./scheduler/last-run.js";
+export { Scheduler, type SchedulerOptions, type SchedulerStatus } from "./scheduler/scheduler.js";
+export * from "./scheduler/types.js";
+export { migrationDigests, openDatabase } from "./storage/db.js";
+export { type ListRunsFilter, NEEDS_REVIEW_SQL, type RunPatch, RunRepository } from "./storage/runs.js";
+export { ScheduleRepository } from "./storage/schedules.js";
+
+export { type LogLevel, logger } from "./util/log.js";

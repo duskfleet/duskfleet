@@ -25,12 +25,20 @@ function renderBlocks(text: string): ReactNode[] {
       i++;
       while (i < lines.length && !lines[i]!.trim().startsWith("```")) buf.push(lines[i++]!);
       i++;
-      out.push(<pre className="block" key={key++}>{buf.join("\n")}</pre>);
+      out.push(
+        <pre className="block" key={key++}>
+          {buf.join("\n")}
+        </pre>,
+      );
       continue;
     }
     const heading = /^(#{1,6})\s+(.*)$/.exec(line);
     if (heading) {
-      out.push(<p key={key++} style={{ margin: "0 0 6px", fontWeight: 650 }}>{renderInline(heading[2]!)}</p>);
+      out.push(
+        <p key={key++} style={{ margin: "0 0 6px", fontWeight: 650 }}>
+          {renderInline(heading[2]!)}
+        </p>,
+      );
       i++;
       continue;
     }
@@ -47,18 +55,32 @@ function renderBlocks(text: string): ReactNode[] {
       }
       out.push(
         <ul key={key++} style={{ margin: "0 0 10px", paddingLeft: 22 }}>
-          {items.map((it, n) => <li key={n} style={{ margin: "2px 0" }}>{renderInline(it)}</li>)}
+          {items.map((it, n) => (
+            <li key={n} style={{ margin: "2px 0" }}>
+              {renderInline(it)}
+            </li>
+          ))}
         </ul>,
       );
       continue;
     }
     const para: string[] = [line];
     i++;
-    while (i < lines.length && lines[i]!.trim() !== "" && !/^\s*([-*•]|\d+[.)])\s+/.test(lines[i]!) && !lines[i]!.trim().startsWith("```") && !/^#{1,6}\s/.test(lines[i]!)) {
+    while (
+      i < lines.length &&
+      lines[i]!.trim() !== "" &&
+      !/^\s*([-*•]|\d+[.)])\s+/.test(lines[i]!) &&
+      !lines[i]!.trim().startsWith("```") &&
+      !/^#{1,6}\s/.test(lines[i]!)
+    ) {
       para.push(lines[i]!);
       i++;
     }
-    out.push(<p key={key++} style={{ margin: "0 0 10px" }}>{renderInline(para.join("\n"))}</p>);
+    out.push(
+      <p key={key++} style={{ margin: "0 0 10px" }}>
+        {renderInline(para.join("\n"))}
+      </p>,
+    );
   }
   return out;
 }

@@ -6,11 +6,31 @@
  * schedule rows (app/schedules/actions.ts), both on the core API.
  */
 import "server-only";
-import { budgetPlan, describeCron, effectiveOnFailure, findRepoRoot, lastRunSummary, listProjectAgents, loadConfig, NEEDS_REVIEW_SQL, nextFire, openDatabase, parseCron, resolveClaudeBinary, resolveConfigDir, RunRepository, scheduleIdleStats, ScheduleRepository, willResume, type DuskFleetConfig, type ProjectAgentInfo, type Run, type RunStatus } from "@duskfleet/core";
-import { homedir } from "node:os";
 import { existsSync, readFileSync } from "node:fs";
+import { homedir } from "node:os";
 import path from "node:path";
 import type { DatabaseSync } from "node:sqlite";
+import {
+  budgetPlan,
+  type DuskFleetConfig,
+  describeCron,
+  findRepoRoot,
+  listProjectAgents,
+  loadConfig,
+  NEEDS_REVIEW_SQL,
+  nextFire,
+  openDatabase,
+  type ProjectAgentInfo,
+  parseCron,
+  type Run,
+  RunRepository,
+  type RunStatus,
+  resolveClaudeBinary,
+  resolveConfigDir,
+  ScheduleRepository,
+  scheduleIdleStats,
+  scheduleRunState,
+} from "@duskfleet/core";
 
 interface Services {
   configDir: string;
@@ -47,30 +67,56 @@ export interface LinkedAgentInfo {
   found: boolean;
   model: string | null;
   path: string | null;
+  /** The project agent's own frontmatter description (what `claude --agent` actually runs as). */
+  description: string | null;
+}
+
+function resolveLink(
+  cfg: DuskFleetConfig,
+  cache: Map<string, ProjectAgentInfo[]>,
+  projectId: string | undefined,
+  name: string,
+): LinkedAgentInfo {
+  const project = projectId ? cfg.projects.get(projectId) : undefined;
+  if (!project) return { name, found: false, model: null, path: null, description: null };
+  let list = cache.get(project.id);
+  if (!list) {
+    try {
+      list = listProjectAgents(project.path);
+    } catch {
+      list = [];
+    }
+    cache.set(project.id, list);
+  }
+  const hit = list.find((p) => p.name === name);
+  return hit
+    ? { name, found: true, model: hit.model, path: hit.path, description: hit.description || null }
+    : { name, found: false, model: null, path: null, description: null };
+}
+
+/**
+ * One agent as defined now, for the run page. Resolves only its own link, so a
+ * live run refreshing every 3 s does not read every linked project's agents.
+ * `description` joins the agent's and the linked agent's, without repeating one.
+ */
+export function agentSummary(
+  id: string,
+): { id: string; name: string; claudeAgent: string | null; description: string } | null {
+  const cfg = config();
+  const a = cfg.agents.get(id);
+  if (!a) return null;
+  const linked = a.claudeAgent ? resolveLink(cfg, new Map(), a.project, a.claudeAgent) : null;
+  const parts = [a.description, linked?.description].filter((d): d is string => Boolean(d));
+  return { id: a.id, name: a.name, claudeAgent: a.claudeAgent ?? null, description: [...new Set(parts)].join(" · ") };
 }
 
 export function listAgents() {
   const cfg = config();
   // .claude/agents is read once per project per request, not once per agent.
   const projectAgents = new Map<string, ProjectAgentInfo[]>();
-  const resolveLink = (projectId: string | undefined, name: string): LinkedAgentInfo => {
-    const project = projectId ? cfg.projects.get(projectId) : undefined;
-    if (!project) return { name, found: false, model: null, path: null };
-    let list = projectAgents.get(project.id);
-    if (!list) {
-      try {
-        list = listProjectAgents(project.path);
-      } catch {
-        list = [];
-      }
-      projectAgents.set(project.id, list);
-    }
-    const hit = list.find((p) => p.name === name);
-    return hit ? { name, found: true, model: hit.model, path: hit.path } : { name, found: false, model: null, path: null };
-  };
 
   return [...cfg.agents.values()].map(({ systemPrompt, ...a }) => {
-    const linked = a.claudeAgent ? resolveLink(a.project, a.claudeAgent) : null;
+    const linked = a.claudeAgent ? resolveLink(cfg, projectAgents, a.project, a.claudeAgent) : null;
     // What a run actually starts with: this file's model overrides, otherwise
     // the project agent's own model, otherwise the Claude Code default.
     const effectiveModel = a.model ?? linked?.model ?? null;
@@ -83,6 +129,8 @@ export function listAgents() {
       maxBudgetUsd: a.maxBudgetUsd ?? cfg.claude.defaultMaxBudgetUsd,
       /** Dollars of the budget held back for the wrap-up pass after a budget exhaustion (0 = disabled). */
       wrapUpReserveUsd: budgetPlan(a, cfg).reserve,
+      maxConcurrent: a.maxConcurrent ?? cfg.maxConcurrentPerAgent,
+      maxConcurrentIsDefault: (a.maxConcurrent ?? cfg.maxConcurrentPerAgent) === cfg.maxConcurrentPerAgent,
       isDefault: a.id === cfg.defaultAgent,
       linked,
       effectiveModel,
@@ -112,14 +160,20 @@ export type RunWithProject = Run & { projectLabel: string; resumedByRunId: strin
 function projectLabeller(): (run: Run) => string {
   const byPath = new Map<string, string>();
   for (const p of config().projects.values()) byPath.set(p.path.replace(/\/+$/, ""), p.id);
-  return (run) => run.projectId ?? byPath.get(run.projectPath.replace(/\/+$/, "")) ?? (run.projectPath.split("/").filter(Boolean).pop() ?? run.projectPath);
+  return (run) =>
+    run.projectId ??
+    byPath.get(run.projectPath.replace(/\/+$/, "")) ??
+    run.projectPath.split("/").filter(Boolean).pop() ??
+    run.projectPath;
 }
 
 export function listRuns(filter: RunsFilter = {}): RunWithProject[] {
   const { runs } = services();
   const inMemory = Boolean(filter.scheduleId || filter.q);
   const limit = filter.limit ?? 50;
-  const f: { status?: RunStatus; agentId?: string; projectPath?: string; limit: number } = { limit: inMemory ? 200 : limit };
+  const f: { status?: RunStatus; agentId?: string; projectPath?: string; limit: number } = {
+    limit: inMemory ? 200 : limit,
+  };
   if (filter.status) f.status = filter.status;
   if (filter.agentId) f.agentId = filter.agentId;
   if (filter.projectPath) f.projectPath = filter.projectPath;
@@ -146,15 +200,24 @@ export function homeDir(): string {
 }
 
 /** Neighbours of a run among the same agent's runs, for Previous / Next navigation. */
-export function adjacentRuns(run: Run): { prev: Pick<Run, "id" | "prompt" | "createdAt"> | null; next: Pick<Run, "id" | "prompt" | "createdAt"> | null } {
+export function adjacentRuns(run: Run): {
+  prev: Pick<Run, "id" | "prompt" | "createdAt"> | null;
+  next: Pick<Run, "id" | "prompt" | "createdAt"> | null;
+} {
   const { db } = services();
   const pick = (sql: string) => {
-    const r = db.prepare(sql).get(run.agentId, run.createdAt) as { id: string; prompt: string; created_at: string } | undefined;
+    const r = db.prepare(sql).get(run.agentId, run.createdAt) as
+      | { id: string; prompt: string; created_at: string }
+      | undefined;
     return r ? { id: r.id, prompt: r.prompt, createdAt: r.created_at } : null;
   };
   return {
-    prev: pick("SELECT id, prompt, created_at FROM runs WHERE agent_id = ? AND created_at < ? ORDER BY created_at DESC LIMIT 1"),
-    next: pick("SELECT id, prompt, created_at FROM runs WHERE agent_id = ? AND created_at > ? ORDER BY created_at ASC LIMIT 1"),
+    prev: pick(
+      "SELECT id, prompt, created_at FROM runs WHERE agent_id = ? AND created_at < ? ORDER BY created_at DESC LIMIT 1",
+    ),
+    next: pick(
+      "SELECT id, prompt, created_at FROM runs WHERE agent_id = ? AND created_at > ? ORDER BY created_at ASC LIMIT 1",
+    ),
   };
 }
 
@@ -204,8 +267,16 @@ export function agentStats(): AgentStats[] {
        FROM runs GROUP BY agent_id ORDER BY total DESC`,
     )
     .all() as Array<{
-    agent_id: string; total: number; running: number; completed: number; failed: number;
-    needs_review: number; cost_usd: number; avg_duration_ms: number | null; last_run_at: string | null; last_model_used: string | null;
+    agent_id: string;
+    total: number;
+    running: number;
+    completed: number;
+    failed: number;
+    needs_review: number;
+    cost_usd: number;
+    avg_duration_ms: number | null;
+    last_run_at: string | null;
+    last_model_used: string | null;
   }>;
   return rows.map((r) => ({
     agentId: r.agent_id,
@@ -243,8 +314,20 @@ export function modelStats(): ModelStats[] {
        WHERE status IN ('completed','failed','timed_out','cancelled')
        GROUP BY 1 ORDER BY cost_usd DESC`,
     )
-    .all() as Array<{ model: string; runs: number; avg_duration_ms: number | null; avg_cost_usd: number | null; cost_usd: number }>;
-  return rows.map((r) => ({ model: r.model, runs: r.runs, avgDurationMs: r.avg_duration_ms, avgCostUsd: r.avg_cost_usd, costUsd: r.cost_usd }));
+    .all() as Array<{
+    model: string;
+    runs: number;
+    avg_duration_ms: number | null;
+    avg_cost_usd: number | null;
+    cost_usd: number;
+  }>;
+  return rows.map((r) => ({
+    model: r.model,
+    runs: r.runs,
+    avgDurationMs: r.avg_duration_ms,
+    avgCostUsd: r.avg_cost_usd,
+    costUsd: r.cost_usd,
+  }));
 }
 
 export interface Overview {
@@ -252,14 +335,14 @@ export interface Overview {
   running: number;
   finished: number;
   completed: number;
-  /** Completed without any denial or context exhaustion: the number that deserves to be green. */
+  /** Completed without a review reason: the number that deserves to be green. */
   clean: number;
+  /** failed, timed out or cancelled. */
   failed: number;
+  /** Every run with a review reason, completed or not (a failed run is counted here too). */
   needsReview: number;
   costUsd: number;
   costLast24hUsd: number;
-  /** Part of costUsd spent by schedule gate agents (runs of kind 'gate'). */
-  costGatesUsd: number;
 }
 
 /** KPIs for the cards. With a filter, computed on the same subset the list shows. */
@@ -286,11 +369,20 @@ export function overview(filter: Pick<RunsFilter, "agentId" | "projectPath"> = {
               SUM(status IN ('failed','timed_out','cancelled'))         AS failed,
               SUM(${NEEDS_REVIEW_SQL})                                  AS needs_review,
               COALESCE(SUM(cost_usd), 0)                                AS cost_usd,
-              COALESCE(SUM(CASE WHEN created_at >= ? THEN cost_usd END), 0) AS cost_24h,
-              COALESCE(SUM(CASE WHEN kind = 'gate' THEN cost_usd END), 0) AS cost_gates
+              COALESCE(SUM(CASE WHEN created_at >= ? THEN cost_usd END), 0) AS cost_24h
        FROM runs ${where.length ? "WHERE " + where.join(" AND ") : ""}`,
     )
-    .get(...values) as { total: number; running: number | null; finished: number | null; completed: number | null; clean: number | null; failed: number | null; needs_review: number | null; cost_usd: number; cost_24h: number; cost_gates: number };
+    .get(...values) as {
+    total: number;
+    running: number | null;
+    finished: number | null;
+    completed: number | null;
+    clean: number | null;
+    failed: number | null;
+    needs_review: number | null;
+    cost_usd: number;
+    cost_24h: number;
+  };
   return {
     total: r.total,
     running: r.running ?? 0,
@@ -301,7 +393,6 @@ export function overview(filter: Pick<RunsFilter, "agentId" | "projectPath"> = {
     needsReview: r.needs_review ?? 0,
     costUsd: r.cost_usd,
     costLast24hUsd: r.cost_24h,
-    costGatesUsd: r.cost_gates,
   };
 }
 
@@ -319,14 +410,24 @@ export function listSchedules() {
     } catch {
       // keep raw
     }
-    // How the run it last started ended: the tick outcome alone ("started") hides a failed run.
-    const last = s.lastRunId ? runs.get(s.lastRunId) : null;
-    const lastRun = lastRunSummary(last);
-    const agent = cfg.agents.get(s.agentId);
-    const onFailure = effectiveOnFailure(s, agent);
-    const willResumeRunId = last && willResume(s, agent, last, runs.resumedBy(last.id) !== null) ? last.id : null;
+    // How the run it last started ended (the tick outcome alone hides a failed run) and what the
+    // next fire does: the same core composition as list_schedules and the CLI.
+    const { lastRun, effectiveOnFailure, onFailureSource, willResumeRunId } = scheduleRunState(
+      s,
+      cfg.agents.get(s.agentId),
+      runs,
+    );
     const idle7d = scheduleIdleStats(schedules, s, cfg.scheduler.noopPattern, now);
-    return { ...s, cronHuman, theoreticalNextAt, lastRun, idle7d, effectiveOnFailure: onFailure, onFailureSource: s.onFailure ? "schedule" : agent?.onFailure ? "agent" : "default", willResumeRunId };
+    return {
+      ...s,
+      cronHuman,
+      theoreticalNextAt,
+      lastRun,
+      effectiveOnFailure,
+      onFailureSource,
+      willResumeRunId,
+      idle7d,
+    };
   });
 }
 

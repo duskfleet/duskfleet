@@ -1,13 +1,16 @@
 #!/usr/bin/env node
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 /**
  * Small local CLI. Same orchestration layer as the MCP server, useful for
  * testing without an MCP client.
  *
  *   duskfleet agents
  *   duskfleet projects
- *   duskfleet run --project <path> [--agent <id>] [--model <m>] [--no-wait] -- "<prompt>"
+ *   duskfleet run --project <id or path> [--agent <id>] [--model <m>] [--no-wait] -- "<prompt>"
  *   duskfleet runs [--status <s>] [--limit <n>]
  *   duskfleet run-info <run_id> [--events]
+ *   duskfleet repair-subagents # backfill subagent rows of finished runs from their logs
  *   duskfleet schedules
  *   duskfleet tools            # MCP tool catalogue (names, descriptions, input schemas)
  *   duskfleet serve            # long-running scheduler process (what the service runs)
@@ -16,13 +19,10 @@
  *   duskfleet doctor           # also reports the service and who holds the scheduler lease
  */
 import { parseArgs } from "node:util";
-import { fileURLToPath } from "node:url";
-import path from "node:path";
+import { findRepoRoot, parseHolder, RUN_STATUSES, type RunStatus, subagentView, summarizeRun } from "@duskfleet/core";
 import { bootstrap } from "./bootstrap.js";
+import { installService, renderService, type ServiceTarget, serviceStatus, uninstallService } from "./service.js";
 import { buildToolCatalog } from "./tools-catalog.js";
-import { installService, renderService, serviceStatus, uninstallService, type ServiceTarget } from "./service.js";
-import { findRepoRoot, parseHolder, summarizeRun } from "@duskfleet/core";
-import { RUN_STATUSES, type RunStatus } from "@duskfleet/core";
 
 function print(value: unknown): void {
   process.stdout.write(JSON.stringify(value, null, 2) + "\n");
@@ -34,9 +34,10 @@ function usage(): never {
       "Usage:",
       "  duskfleet agents",
       "  duskfleet projects",
-      '  duskfleet run --project <path> [--agent <id>] [--model <m>] [--no-wait] -- "<prompt>"',
+      '  duskfleet run --project <id or path> [--agent <id>] [--model <m>] [--no-wait] -- "<prompt>"',
       "  duskfleet runs [--status <status>] [--limit <n>]",
       "  duskfleet run-info <run_id> [--events]",
+      "  duskfleet repair-subagents",
       "  duskfleet schedules",
       "  duskfleet tools",
       "  duskfleet serve",
@@ -90,7 +91,16 @@ async function main(): Promise<void> {
       }
       const { unit, ran } = installService(target);
       const status = serviceStatus(process.platform);
-      print({ installed: true, platform: unit.platform, label: unit.label, unitPath: unit.unitPath, logPath: target.logPath, ran, status, notes: unit.notes });
+      print({
+        installed: true,
+        platform: unit.platform,
+        label: unit.label,
+        unitPath: unit.unitPath,
+        logPath: target.logPath,
+        ran,
+        status,
+        notes: unit.notes,
+      });
       return done(status.running === false ? 1 : 0);
     }
     case "uninstall-service": {
@@ -159,6 +169,7 @@ async function main(): Promise<void> {
       if (!prompt || (!values.project && !values["project-id"])) usage();
 
       const input: Parameters<typeof app.runs.startRun>[0] = { prompt };
+      // --project takes a registered id or an absolute path (core decides which); --project-id is the explicit form.
       if (values.project) input.projectPath = values.project;
       if (values["project-id"]) input.projectId = values["project-id"];
       if (values.agent) input.agentId = values.agent;
@@ -195,7 +206,9 @@ async function main(): Promise<void> {
       // Keeps the scheduler ticking without any MCP host. Safe next to the MCP server:
       // only the lease holder fires. Stop with SIGINT/SIGTERM.
       app.scheduler.start();
-      process.stderr.write(`duskfleet serve: scheduler ticking every ${app.config.scheduler.tickSeconds}s (holder ${app.scheduler.status().holder}); Ctrl-C to stop\n`);
+      process.stderr.write(
+        `duskfleet serve: scheduler ticking every ${app.config.scheduler.tickSeconds}s (holder ${app.scheduler.status().holder}); Ctrl-C to stop\n`,
+      );
       // The scheduler's own interval is unref'd (it must not keep the MCP server alive) and a
       // pending promise does not hold the event loop either, so without a ref'd handle this
       // process exited with 0 right after its first tick and launchd restarted it every 10 s
@@ -225,8 +238,13 @@ async function main(): Promise<void> {
         process.stderr.write(`run not found: ${id}\n`);
         return done(1);
       }
-      const subagents = app.runs.agents(id);
+      const subagents = app.runs.agents(id).map((s) => subagentView(s)); // same names as get_run
       print(values.events ? { ...run, subagents, events: app.runs.events(id) } : { ...run, subagents });
+      return done();
+    }
+    case "repair-subagents": {
+      // One-shot backfill of subagent rows recorded by an older parser, from each finished run's log.
+      print(await app.runs.repairSubagents());
       return done();
     }
     default:

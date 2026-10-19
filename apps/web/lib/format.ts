@@ -40,10 +40,16 @@ export function fmtRelative(iso: string | null | undefined, now = Date.now()): s
   const h = Math.round(min / 60);
   const clock = t.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" });
   const today = new Date(now);
-  const sameDay = t.getFullYear() === today.getFullYear() && t.getMonth() === today.getMonth() && t.getDate() === today.getDate();
+  const sameDay =
+    t.getFullYear() === today.getFullYear() && t.getMonth() === today.getMonth() && t.getDate() === today.getDate();
   if (sameDay) return h < 6 ? `${h} h ago` : `today ${clock}`;
   const yesterday = new Date(today.getFullYear(), today.getMonth(), today.getDate() - 1);
-  if (t.getFullYear() === yesterday.getFullYear() && t.getMonth() === yesterday.getMonth() && t.getDate() === yesterday.getDate()) return `yesterday ${clock}`;
+  if (
+    t.getFullYear() === yesterday.getFullYear() &&
+    t.getMonth() === yesterday.getMonth() &&
+    t.getDate() === yesterday.getDate()
+  )
+    return `yesterday ${clock}`;
   const d = Math.round(h / 24);
   if (d < 7) return `${d} days ago`;
   return t.toLocaleDateString(undefined, { day: "numeric", month: "short" });
@@ -87,7 +93,10 @@ export function runTitle(prompt: string, max = 80): string {
     .map((l) => l.trim())
     .find((l) => l.length > 0);
   if (!line) return "(empty prompt)";
-  const clean = line.replace(/^#+\s*/, "").replace(/\*\*/g, "").replace(/^[-*]\s+/, "");
+  const clean = line
+    .replace(/^#+\s*/, "")
+    .replace(/\*\*/g, "")
+    .replace(/^[-*]\s+/, "");
   if (clean.length <= max) return clean;
   const cut = clean.slice(0, max);
   const sp = cut.lastIndexOf(" ");
@@ -104,7 +113,11 @@ export function tildePath(p: string | null | undefined, home: string): string {
 /** Same as tildePath but for every occurrence inside free text (commands, log lines). */
 export function tildeText(text: string, home: string): string {
   if (!home) return text;
-  return text.split(home + "/").join("~/").split(home).join("~");
+  return text
+    .split(home + "/")
+    .join("~/")
+    .split(home)
+    .join("~");
 }
 
 /** "1.2k", "840" */

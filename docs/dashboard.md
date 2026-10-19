@@ -35,11 +35,7 @@ in the nav); the other pages are static.
   last outcome and firing history, the state of the run it last started, the on-failure policy
   in force and a "next: resume" badge when the next fire will resume that run, and the
   **Idle · 7 d** column: no-op runs out of all runs and the dollars they cost (amber when at
-  least half the runs were no-ops; see [idle cost](schedules.md#idle-cost)), plus the
-  schedule's [gate](schedules.md#gates-skip-cheaply-when-there-is-no-work) and what it skipped and
-  cost. A `skipped gate` tick is grey; its reason is the tick's error text.
-- **Spent** (Runs page) splits into "on runs" and "on gates" once a gate agent has run; gate
-  runs carry a `gate` flag in the run list. Each row can be run now, paused / resumed, have its cron and
+  least half the runs were no-ops; see [idle cost](schedules.md#idle-cost)). Each row can be run now, paused / resumed, have its cron and
   time zone edited, or be deleted (inline confirmation); the changes go through the same
   validation as `update_schedule`. **Run now** does not start Claude from the dashboard: it marks
   the row and the process that holds the scheduler lease fires it on its next tick (within
@@ -52,10 +48,13 @@ in the nav); the other pages are static.
 
 ## Needs review
 
-One rule decides what needs a human, shared by `list_runs` (`needsReview`, `reviewReasons`),
-the status badges, the KPI cards, the agent stats and the schedule rows
-(`reviewReasons()` in core, `NEEDS_REVIEW_SQL` for the aggregates). A run needs review when it
-ended before the agent chose to stop, or when something silently narrowed what it could do:
+One rule decides what needs a human: `reviewReasons()` in core. `RunManager` applies it once,
+when a run reaches its terminal status, and stores the result on the row
+(`review_reasons_json`, migration 9; older rows are backfilled when the database is opened).
+`list_runs` (`needsReview`, `reviewReasons`), the status badges, the KPI cards, the agent stats
+(`NEEDS_REVIEW_SQL`, a test on that column) and the schedule rows all read that stored value, so
+there is no second copy of the rule to keep in step. A run needs review when it ended before
+the agent chose to stop, or when something silently narrowed what it could do:
 
 | Reason | When |
 |---|---|
@@ -70,7 +69,9 @@ ended before the agent chose to stop, or when something silently narrowed what i
 
 A completed run with a reason is **needs review** (amber), never plain green; a failed or
 timed-out run is red and its badge title names the reasons. `cancelled` is not a reason: a
-person did it. The run detail opens with a "Needs review" callout listing the reasons and
+person did it, whatever the main pass had left behind (a cancel during the wrap-up pass keeps
+`budget_exhausted` on the row but yields no reason). Running runs have none yet. The Clean
+runs card splits finished runs three ways: clean, completed but to review, failed. The run detail opens with a "Needs review" callout listing the reasons and
 what they imply (a timeout or a budget stop without wrap-up may have left half-done,
 unrecorded work). The Schedules page shows, next to the outcome of the last tick, how the
 run it started **ended**: `started` alone looked fine on 2026-10-14 while the run behind it

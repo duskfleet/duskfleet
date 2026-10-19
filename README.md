@@ -68,6 +68,7 @@ Real runs cost money. An agent without an explicit `model` uses the Claude Code 
 
 | Page | Contents |
 |---|---|
+| [How it works](docs/how-it-works.md) | A run end to end, with diagrams: entry points, RunManager, the Claude Code child, what gets recorded, run lifecycle |
 | [Configuration](docs/configuration.md) | `duskfleet.yaml`, projects registry, concurrency limits, environment variables |
 | [Agents](docs/agents.md) | The two agent kinds (own, link), frontmatter, permission modes in unattended runs, project binding, MCP servers inside runs |
 | [Schedules](docs/schedules.md) | Cron schedules, who ticks, running unattended as a service, busy and kill-switch policies |
@@ -76,12 +77,11 @@ Real runs cost money. An agent without an explicit `model` uses the Claude Code 
 | [Dashboard](docs/dashboard.md) | The five views and what "needs review" means |
 | [Development](docs/development.md) | Repository layout, code map, build and tests, security model, extending |
 | [Troubleshooting](docs/troubleshooting.md) | Stuck runs, denials, orphaned runs, `doctor` failures |
-| [PLAN.md](PLAN.md) | Design document and roadmap |
 
 ## Status
 
 Working today: agents, runs, scheduler, dashboard, 15 MCP tools. On the roadmap: deterministic
-and LLM evals as post-run hooks, metrics, Git integration (see `PLAN.md` §7).
+and LLM evals as post-run hooks, metrics, Git integration.
 
 ## License
 

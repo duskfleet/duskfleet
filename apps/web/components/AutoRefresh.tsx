@@ -36,7 +36,11 @@ export function AutoRefresh({ intervalMs }: { intervalMs: number }) {
       className={`live-btn ${paused ? "paused" : ""}`}
       onClick={() => setPaused((p) => !p)}
       aria-pressed={paused}
-      title={paused ? "Auto-refresh paused. Click to resume." : `This page reloads its data every ${seconds}s. Click to pause while reading.`}
+      title={
+        paused
+          ? "Auto-refresh paused. Click to resume."
+          : `This page reloads its data every ${seconds}s. Click to pause while reading.`
+      }
     >
       <span className="pulse" />
       {paused ? "refresh paused" : `auto-refresh ${seconds}s`}

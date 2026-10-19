@@ -1,9 +1,9 @@
+import { wrapUpPhase } from "@duskfleet/core";
 import Link from "next/link";
-import { isBudgetExhausted, wrapUpPhase } from "@duskfleet/core";
 import type { RunWithProject } from "@/lib/data";
+import { elapsedSince, fmtCost, fmtDuration, fmtRelative, fmtTime, runTitle, shortModel } from "@/lib/format";
 import { RunRow } from "./RunRow";
 import { StatusBadge } from "./StatusBadge";
-import { elapsedSince, fmtCost, fmtDuration, fmtRelative, fmtTime, runTitle, shortModel } from "@/lib/format";
 
 /**
  * One row per run, the whole row a link. The short title (first line of the
@@ -31,6 +31,11 @@ export function RunTable({ runs, emptyText }: { runs: RunWithProject[]; emptyTex
           const started = r.startedAt ?? r.createdAt;
           const href = `/runs/${r.id}`;
           const issues = `${href}#issues`;
+          // The flags are the stored review reasons; the rule itself lives in core.
+          const reasons = r.reviewReasons;
+          const budget = reasons.includes("budget_exhausted");
+          const orphaned = reasons.includes("orphaned");
+          const wrapUp = budget ? wrapUpPhase(r) : null;
           return (
             <RunRow key={r.id} href={href}>
               <td className="status">
@@ -46,51 +51,86 @@ export function RunTable({ runs, emptyText }: { runs: RunWithProject[]; emptyTex
                   <span title={r.projectPath}>{r.projectLabel}</span>
                   {(r.permissionDenials ?? 0) > 0 && (
                     <span className="flags">
-                      <Link href={issues} className="flag warn badge-link" title={(r.deniedTools ?? []).map((d) => `${d.tool}${d.summary ? `: ${d.summary}` : ""}`).join("\n") || "A tool call was denied"}>
+                      <Link
+                        href={issues}
+                        className="flag warn badge-link"
+                        title={
+                          (r.deniedTools ?? [])
+                            .map((d) => `${d.tool}${d.summary ? `: ${d.summary}` : ""}`)
+                            .join("\n") || "A tool call was denied"
+                        }
+                      >
                         {r.permissionDenials} denied
                       </Link>
                     </span>
                   )}
                   {(r.mcp?.allowListedMissing ?? []).length > 0 && (
                     <span className="flags">
-                      <Link href={issues} className="flag warn badge-link" title={`Allow-listed but never mounted: ${r.mcp.allowListedMissing.join(", ")}`}>mcp mismatch</Link>
+                      <Link
+                        href={issues}
+                        className="flag warn badge-link"
+                        title={`Allow-listed but never mounted: ${r.mcp.allowListedMissing.join(", ")}`}
+                      >
+                        mcp mismatch
+                      </Link>
                     </span>
                   )}
                   {r.contextExhausted && (
                     <span className="flags">
-                      <Link href={issues} className="flag bad badge-link">context exhausted</Link>
-                    </span>
-                  )}
-                  {isBudgetExhausted(r.terminationReason) && (
-                    <span className="flags">
-                      <Link href={issues} className="flag bad badge-link" title={wrapUpPhase(r) ? "The main pass ran out of budget; a wrap-up pass recorded where it stopped" : "The run ran out of budget mid-action and left no wrap-up trace"}>
-                        budget exhausted{wrapUpPhase(r) ? " · wrapped up" : ""}
+                      <Link href={issues} className="flag bad badge-link">
+                        context exhausted
                       </Link>
                     </span>
                   )}
-                  {r.kind === "gate" && (
+                  {budget && (
                     <span className="flags">
-                      <span className="flag warn" title="A schedule's gate agent: it only decides whether the tick has work. Its cost counts as gate spend.">gate</span>
+                      <Link
+                        href={issues}
+                        className="flag bad badge-link"
+                        title={
+                          wrapUp
+                            ? "The main pass ran out of budget; a wrap-up pass recorded where it stopped"
+                            : "The run ran out of budget mid-action and left no wrap-up trace"
+                        }
+                      >
+                        budget exhausted{wrapUp ? " · wrapped up" : ""}
+                      </Link>
                     </span>
                   )}
                   {r.resumedFromRunId && (
                     <span className="flags">
-                      <Link href={`/runs/${r.resumedFromRunId}`} className="flag warn badge-link" title={`Retry: this run resumed the session of run ${r.resumedFromRunId} (on_failure: resume_once)`}>resumes ↗</Link>
+                      <Link
+                        href={`/runs/${r.resumedFromRunId}`}
+                        className="flag warn badge-link"
+                        title={`Retry: this run resumed the session of run ${r.resumedFromRunId} (on_failure: resume_once)`}
+                      >
+                        resumes ↗
+                      </Link>
                     </span>
                   )}
                   {r.resumedByRunId && (
                     <span className="flags">
-                      <Link href={`/runs/${r.resumedByRunId}`} className="flag warn badge-link" title={`This run's session was resumed by run ${r.resumedByRunId} (on_failure: resume_once)`}>retried ↗</Link>
+                      <Link
+                        href={`/runs/${r.resumedByRunId}`}
+                        className="flag warn badge-link"
+                        title={`This run's session was resumed by run ${r.resumedByRunId} (on_failure: resume_once)`}
+                      >
+                        retried ↗
+                      </Link>
                     </span>
                   )}
-                  {r.error?.startsWith("orphaned") && (
+                  {orphaned && (
                     <span className="flags">
-                      <Link href={issues} className="flag bad badge-link" title={r.error}>orphaned</Link>
+                      <Link href={issues} className="flag bad badge-link" title={r.error ?? undefined}>
+                        orphaned
+                      </Link>
                     </span>
                   )}
-                  {r.error && r.status !== "completed" && !isBudgetExhausted(r.terminationReason) && !r.error.startsWith("orphaned") && (
+                  {r.error && r.status !== "completed" && !budget && !orphaned && (
                     <span className="flags">
-                      <Link href={issues} className="flag bad badge-link" title={r.error}>error</Link>
+                      <Link href={issues} className="flag bad badge-link" title={r.error}>
+                        error
+                      </Link>
                     </span>
                   )}
                 </div>
@@ -102,7 +142,9 @@ export function RunTable({ runs, emptyText }: { runs: RunWithProject[]; emptyTex
               </td>
               <td className="num col-duration">{fmtDuration(duration)}</td>
               <td className="num">{fmtCost(r.costUsd)}</td>
-              <td className="when col-started" title={fmtTime(started)}>{fmtRelative(started)}</td>
+              <td className="when col-started" title={fmtTime(started)}>
+                {fmtRelative(started)}
+              </td>
             </RunRow>
           );
         })}
