@@ -83,8 +83,8 @@ sync check (every MCP tool in `docs/mcp-server.md`, every `docs/` page linked fr
 
 ## Issue and review flow by agents
 
-The owner runs a development loop over this repository's own issues and PRs with two local
-Claude Code agents and three local skills (`.claude/` is git-ignored: agents, skills and
+The owner runs a development loop over this repository's own issues and PRs with three local
+Claude Code agents and four local skills (`.claude/` is git-ignored: agents, skills and
 settings stay on the machine). A DuskFleet run loads the project's skills (verified with Claude
 Code 2.1.302: `--permission-prompts none` with `--setting-sources project,local` still mounts
 `.claude/skills` and the built-in skills), so an agent only needs `Skill` in its
@@ -95,13 +95,27 @@ Issues carry the development state, PRs carry the review state, and each agent f
 work from a label query when its schedule wakes it:
 
 ```
-issue:  flow: ready ──(developer picks, swaps the label first)──► flow: in-progress ──► closed by the merge
+issue:  priority: * ──(planner, when unblocked)──► flow: ready ──(developer picks, swaps the label first)──► flow: in-progress ──► closed by the merge
 PR:     flow: needs-review ──► flow: in-review ──► flow: changes-requested ──► flow: needs-review … ──► flow: ready-to-merge
 ```
 
-- A human labels at most a handful of issues `flow: ready` (and sets `priority:` labels; the
-  developer takes `priority: high` first, then oldest). `flow: needs-human` parks anything the
-  loop cannot decide; `flow: ready-to-merge` means a human merges — agents never do.
+- A human writes issues and sets their `priority:` labels; a priority is the consent for an
+  issue to be developed. The planner fills the `flow: ready` queue from them (below), and a
+  human can still label an issue `flow: ready` by hand. The developer takes `priority: high`
+  first, then oldest. `flow: needs-human` parks anything the loop cannot decide;
+  `flow: ready-to-merge` means a human merges — agents never do.
+- The planner runs twice a day, read-only on files. `node scripts/issue-plan.mjs` prints a JSON
+  snapshot of the flow (labels, declared blockers and whether they are still open, the open PRs
+  closing each issue, a ranked candidate list); the agent then declares missing dependencies,
+  parks issues that need a decision with `flow: needs-human`, and promotes candidates to
+  `flow: ready` up to six, at most two units of work in flight per area, and none while eight
+  PRs wait for a merge. It never promotes an issue without a `priority:` label, a `roadmap`
+  issue or one that already has an open PR.
+- Dependencies are lines in an issue's body or comments: `Blocked by #65` (or
+  `Depends on #62, #61`). While one of them is open the issue carries the `blocked` label and
+  stays out of the queue; the planner removes the label once all of them are closed. A
+  `blocked` label without such a line is a human's and is left alone. To drop a dependency,
+  delete the line (the planner's are comments starting with `[df-planner]`).
 - The developer does one unit of work per run, rework before new work: a PR labelled
   `flow: changes-requested` (or, as a fallback, an unlabelled PR with unresolved review
   threads) is fixed in a worktree on the PR branch (`scripts/pr-worktree.sh <name> <branch>
@@ -118,10 +132,11 @@ PR:     flow: needs-review ──► flow: in-review ──► flow: changes-req
   is the hand-off. Read-only agent; after three `VERDICT: changes` rounds it parks the PR with
   `flow: needs-human`.
 
-The DuskFleet side is a pair of user agents in `data/agents/` that link the local Claude Code
-agents (`claude_agent`) and add only the unattended envelope: permission mode, `gh` / `git` /
-`npm` allow-list, budget and timeout — plus one cron schedule per agent, staggered so a PR
-opened by the developer meets the reviewer within the hour. A busy agent makes a tick skip
+The DuskFleet side is three user agents in `data/agents/` (developer, reviewer, planner) that
+link the local Claude Code agents (`claude_agent`) and add only the unattended envelope:
+permission mode, `gh` / `git` / `npm` allow-list, budget and timeout — plus one cron schedule
+per agent, staggered so a PR opened by the developer meets the reviewer within the hour and a
+planner run lands just before a developer tick. A busy agent makes a tick skip
 (`skipped_busy`), never queue. See `docs/agents.md` and `docs/schedules.md`.
 
 ## Security model
