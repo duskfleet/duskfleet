@@ -72,7 +72,10 @@ export interface RunOutcomes {
   /** All runs of the schedule created in the window, and their total cost. */
   runs: number;
   costUsd: number;
-  /** Completed runs only (the only ones that can be no-ops), with the head of their final message. */
+  /**
+   * Completed runs that do not need review (the only ones that can be no-ops), with the head
+   * of their final message.
+   */
   completed: Array<{ resultText: string; costUsd: number | null }>;
 }
 

@@ -14,6 +14,7 @@ import type {
   ScheduleOutcome,
   SchedulePatch,
 } from "../scheduler/types.js";
+import { NEEDS_REVIEW_SQL } from "./runs.js";
 
 interface ScheduleRow {
   id: string;
@@ -228,7 +229,8 @@ export class ScheduleRepository {
   /**
    * What the idle stats read about the runs a schedule started since `sinceIso`: count and cost
    * of all of them from SQL, and the head (`textLimit` chars) of the final message of the
-   * completed ones only, since only those can be no-ops.
+   * completed ones that do not need review (stored `review_reasons_json`), since only those
+   * can be no-ops: a run that hit a denial and then says "nothing to do" was blocked, not idle.
    */
   runOutcomesSince(scheduleId: string, sinceIso: string, textLimit: number): RunOutcomes {
     const totals = this.db
@@ -239,7 +241,7 @@ export class ScheduleRepository {
     const completed = (
       this.db
         .prepare(
-          "SELECT substr(result_text, 1, ?) AS text, cost_usd FROM runs WHERE schedule_id = ? AND created_at >= ? AND status = 'completed' AND result_text IS NOT NULL",
+          `SELECT substr(result_text, 1, ?) AS text, cost_usd FROM runs WHERE schedule_id = ? AND created_at >= ? AND status = 'completed' AND result_text IS NOT NULL AND NOT ${NEEDS_REVIEW_SQL}`,
         )
         .all(textLimit, scheduleId, sinceIso) as Array<{ text: string; cost_usd: number | null }>
     ).map((r) => ({ resultText: r.text, costUsd: r.cost_usd }));

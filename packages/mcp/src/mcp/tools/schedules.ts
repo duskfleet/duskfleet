@@ -145,11 +145,14 @@ export function registerScheduleTools(server: McpServer, ctx: ToolContext): void
     },
     async (args) => {
       try {
+        if (args.noop_pattern !== undefined && args.clear_noop_pattern) {
+          throw new Error("noop_pattern and clear_noop_pattern cannot be used together");
+        }
         const patch: Parameters<typeof ctx.scheduler.update>[1] = {};
         if (args.on_failure !== undefined) patch.onFailure = args.on_failure;
         if (args.resume_budget_usd !== undefined) patch.resumeBudgetUsd = args.resume_budget_usd;
         if (args.noop_pattern !== undefined) patch.noopPattern = args.noop_pattern;
-        if (args.clear_noop_pattern) patch.noopPattern = null;
+        else if (args.clear_noop_pattern) patch.noopPattern = null;
         if (args.clear_on_failure) {
           patch.onFailure = null;
           patch.resumeBudgetUsd = null;

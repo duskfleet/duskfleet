@@ -327,7 +327,7 @@ export default function SchedulesPage() {
                   </td>
                   <td
                     className="num"
-                    title={`Last ${s.idle7d.days} days: ${s.idle7d.ticks} ticks, ${s.idle7d.fires} fires, ${s.idle7d.runs} runs (${fmtCost(s.idle7d.costUsd)}). ${s.idle7d.noopRuns} reported no work (${fmtCost(s.idle7d.noopCostUsd)}), matched by ${s.idle7d.noopPattern}${s.noopPattern ? " (this schedule's noop_pattern)" : " (scheduler.noop_pattern)"}.`}
+                    title={`Last ${s.idle7d.days} days: ${s.idle7d.ticks} ticks, ${s.idle7d.fires} fires, ${s.idle7d.runs} runs (${fmtCost(s.idle7d.costUsd)}). ${s.idle7d.noopRuns} reported no work (${fmtCost(s.idle7d.noopCostUsd)}), matched by ${s.idle7d.noopPattern}${s.noopPattern ? " (this schedule's noop_pattern)" : " (scheduler.noop_pattern)"}.${s.idle7d.noopPatternError ? ` Not counted: ${s.idle7d.noopPatternError}.` : ""}`}
                   >
                     {s.idle7d.runs === 0 ? (
                       <span className="faint">–</span>

@@ -38,7 +38,11 @@ export function parseNoopPattern(pattern: string): RegExp {
   }
 }
 
-/** A finished run whose final message matches the marker. Failed runs are never no-ops: they need review instead. */
+/**
+ * A finished run whose final message matches the marker. Failed runs are never no-ops: they
+ * need review instead (so do completed runs with review reasons, filtered out by
+ * `runOutcomesSince`).
+ */
 export function isNoopRun(run: Pick<Run, "status" | "resultText">, pattern: RegExp): boolean {
   return (
     run.status === "completed" && run.resultText !== null && pattern.test(run.resultText.slice(0, NOOP_TEXT_LIMIT))
@@ -62,6 +66,12 @@ export interface IdleStats {
   costUsd: number;
   /** The marker used, as written. */
   noopPattern: string;
+  /**
+   * Why the stored marker could not be parsed (a manual DB edit, or stricter parse rules than
+   * when it was saved), else null. Then noopRuns and noopCostUsd are 0: only this schedule's
+   * stats degrade, never list_schedules, the CLI or the dashboard as a whole.
+   */
+  noopPatternError: string | null;
 }
 
 /** Idle stats of one schedule over the last `days` (default 7), read from its firings and runs. */
@@ -97,11 +107,17 @@ export function computeIdleStats(input: {
   since: string;
   days: number;
 }): IdleStats {
-  const re = parseNoopPattern(input.pattern);
+  let re: RegExp | null = null;
+  let noopPatternError: string | null = null;
+  try {
+    re = parseNoopPattern(input.pattern);
+  } catch (err) {
+    noopPatternError = err instanceof Error ? err.message : String(err);
+  }
   let noopRuns = 0;
   let noopCostUsd = 0;
   for (const r of input.outcomes.completed) {
-    if (isNoopRun({ status: "completed", resultText: r.resultText }, re)) {
+    if (re && isNoopRun({ status: "completed", resultText: r.resultText }, re)) {
       noopRuns += 1;
       noopCostUsd += r.costUsd ?? 0;
     }
@@ -117,5 +133,6 @@ export function computeIdleStats(input: {
     noopCostUsd: round(noopCostUsd),
     costUsd: round(input.outcomes.costUsd),
     noopPattern: input.pattern,
+    noopPatternError,
   };
 }

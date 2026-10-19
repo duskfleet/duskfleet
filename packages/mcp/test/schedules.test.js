@@ -251,6 +251,13 @@ test("schedules over MCP: create, list, update, run now, delete; validation erro
     assert.equal(cleared.schedule.onFailure, null);
     assert.equal(cleared.schedule.effectiveOnFailure, "none", "back to the agent's policy");
     assert.equal(cleared.schedule.willResumeRunId, null);
+    fails(
+      await client.callTool({
+        name: "update_schedule",
+        arguments: { id: created.schedule.id, noop_pattern: "idle", clear_noop_pattern: true },
+      }),
+      /cannot be used together/,
+    );
 
     const deleted = ok(await client.callTool({ name: "delete_schedule", arguments: { id: created.schedule.id } }));
     assert.equal(deleted.deleted, true);
@@ -725,6 +732,7 @@ test("idle cost: 7-day ticks, fires, no-op runs by marker and what they cost, pe
     );
     assert.equal(idle.noopCostUsd, 0.0246);
     assert.equal(idle.noopPattern, DEFAULT_NOOP_PATTERN);
+    assert.equal(idle.noopPatternError, null);
     assert.equal(row.willResumeRunId, null, "list rows carry willResumeRunId");
     assert.equal(row.effectiveOnFailure, "none");
     assert.ok(idle.costUsd >= 0.0369);
@@ -733,6 +741,18 @@ test("idle cost: 7-day ticks, fires, no-op runs by marker and what they cost, pe
     t.scheduler.update(s.id, { noopPattern: "created hello" });
     assert.equal(t.scheduler.idleStats(t.repo.get(s.id)).noopRuns, 1);
     assert.throws(() => t.scheduler.update(s.id, { noopPattern: "/(unclosed/" }), /invalid noop_pattern/);
+    // A completed run that needs review is blocked, not idle, even when it says "Nothing to do".
+    t.scheduler.update(s.id, { noopPattern: null });
+    const noop = t.runs.listRuns({ status: "completed" }).find((r) => r.resultText?.startsWith("Nothing to do"));
+    t.db.prepare("UPDATE runs SET review_reasons_json = ? WHERE id = ?").run('["permission_denial"]', noop.id);
+    assert.equal(t.scheduler.idleStats(t.repo.get(s.id)).noopRuns, 1, "the run that needs review is not a no-op");
+    // A stored pattern that no longer parses degrades that row only, never the whole list.
+    t.db.prepare("UPDATE schedules SET noop_pattern = ? WHERE id = ?").run("/(unclosed/", s.id);
+    const [broken] = t.scheduler.listWithLastRun();
+    assert.equal(broken.idle7d.noopRuns, 0);
+    assert.equal(broken.idle7d.noopCostUsd, 0);
+    assert.equal(broken.idle7d.runs, 5);
+    assert.match(broken.idle7d.noopPatternError, /invalid noop_pattern/);
     // Outside the window nothing counts.
     assert.equal(t.scheduler.idleStats(t.repo.get(s.id), 0).runs, 0);
     const hung = t.runs.listRuns({ status: "running" })[0];
