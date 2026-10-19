@@ -16,8 +16,21 @@
 import { execFileSync } from "node:child_process";
 
 const PRIORITY_ORDER = { high: 0, medium: 1, low: 2 };
-const BLOCKER_LINE = /^[\s>*-]*(?:\[[\w-]+\]\s*)?(?:blocked by|depends on)\b[:\s]*((?:#\d+[\s,;]*(?:and\s+)?)+)/gim;
-const CLOSES = /\b(?:closes|fixes|resolves)\s+#(\d+)/gi;
+// A list of refs stays on one line ([ \t], never \s): a #N on a later line is not a blocker.
+const REF_LIST = String.raw`((?:#\d+[ \t,;]*(?:and[ \t]+)?)+)`;
+const BLOCKER_LINE = new RegExp(
+  String.raw`^[ \t>*-]*(?:\[[\w-]+\][ \t]*)?(?:blocked by|depends on)\b[ \t:]*` + REF_LIST,
+  "gim",
+);
+const CLOSES = new RegExp(String.raw`\b(?:closes|fixes|resolves)[ \t:]+` + REF_LIST, "gi");
+
+function refsIn(text, pattern) {
+  const found = new Set();
+  for (const match of (text ?? "").matchAll(pattern)) {
+    for (const ref of match[1].matchAll(/#(\d+)/g)) found.add(Number(ref[1]));
+  }
+  return found;
+}
 
 function gh(args) {
   return execFileSync("gh", args, { encoding: "utf8", maxBuffer: 64 * 1024 * 1024 });
@@ -26,9 +39,7 @@ function gh(args) {
 function blockersOf(texts) {
   const found = new Set();
   for (const text of texts) {
-    for (const match of (text ?? "").matchAll(BLOCKER_LINE)) {
-      for (const ref of match[1].matchAll(/#(\d+)/g)) found.add(Number(ref[1]));
-    }
+    for (const number of refsIn(text, BLOCKER_LINE)) found.add(number);
   }
   return [...found].sort((a, b) => a - b);
 }
@@ -73,7 +84,7 @@ const states = new Map(
 
 const prs = openPrs.map((pr) => {
   const labels = pr.labels.map((label) => label.name);
-  const closes = new Set([...(pr.body ?? "").matchAll(CLOSES)].map((match) => Number(match[1])));
+  const closes = refsIn(pr.body, CLOSES);
   const branchIssue = /^issue\/(\d+)-/.exec(pr.headRefName);
   if (branchIssue) closes.add(Number(branchIssue[1]));
   return {
@@ -102,7 +113,8 @@ const issues = openIssues.map((issue) => {
     blockedLabel: labels.includes("blocked"),
     roadmap: labels.includes("roadmap"),
     blockers,
-    openBlockers: blockers.filter((number) => states.get(number) !== "closed"),
+    // Only a known open issue or PR blocks: a typo or another repo's number never does.
+    openBlockers: blockers.filter((number) => states.get(number) === "open"),
     openPrs: prs.filter((pr) => pr.closes.includes(issue.number)).map((pr) => pr.number),
   };
 });
