@@ -4,12 +4,13 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { parse as parseYaml } from "yaml";
 import { z } from "zod";
-import { AGENT_ID_PATTERN } from "./agent-files.js";
+import { AGENT_ID_PATTERN, maxConcurrentSchema } from "./agent-files.js";
 import {
   type AgentDefinition,
   type AgentSource,
   type DuskFleetConfig,
   EFFORT_LEVELS,
+  ON_FAILURE_POLICIES,
   PERMISSION_MODES,
   type ProjectDefinition,
 } from "./types.js";
@@ -92,10 +93,15 @@ const agentFrontmatterSchema = z.object({
   effort: z.enum(EFFORT_LEVELS).optional(),
   timeout_minutes: z.number().positive().optional(),
   max_budget_usd: z.number().positive().optional(),
+  wrap_up_reserve_usd: z.number().nonnegative().optional(),
+  on_failure: z.enum(ON_FAILURE_POLICIES).optional(),
+  resume_budget_usd: z.number().positive().optional(),
   inherit_mcp: z.boolean().optional(),
   add_dirs: z.array(z.string()).optional(),
   claude_agent: z.string().min(1).optional(),
   project: z.string().min(1).optional(),
+  max_concurrent: maxConcurrentSchema.optional(),
+  isolated: z.boolean().optional(),
 });
 
 const projectsSchema = z.object({
@@ -198,7 +204,12 @@ export function loadAgents(agentsDir: string, source: AgentSource = "builtin"): 
     .sort()) {
     const sourcePath = path.join(agentsDir, file);
     const { frontmatter, body } = splitFrontmatter(readFileSync(sourcePath, "utf8"));
-    const fm = agentFrontmatterSchema.parse(frontmatter);
+    const parsed = agentFrontmatterSchema.safeParse(frontmatter);
+    if (!parsed.success) {
+      const issues = parsed.error.issues.map((i) => `${i.path.join(".") || "(frontmatter)"}: ${i.message}`);
+      throw new Error(`invalid agent file ${sourcePath}: ${issues.join("; ")}`);
+    }
+    const fm = parsed.data;
     const id = fm.id ?? file.replace(/\.md$/, "");
     if (agents.has(id)) throw new Error(`Duplicate agent id "${id}" in ${sourcePath}`);
 
@@ -217,10 +228,15 @@ export function loadAgents(agentsDir: string, source: AgentSource = "builtin"): 
     if (fm.effort !== undefined) agent.effort = fm.effort;
     if (fm.timeout_minutes !== undefined) agent.timeoutMinutes = fm.timeout_minutes;
     if (fm.max_budget_usd !== undefined) agent.maxBudgetUsd = fm.max_budget_usd;
+    if (fm.wrap_up_reserve_usd !== undefined) agent.wrapUpReserveUsd = fm.wrap_up_reserve_usd;
+    if (fm.on_failure !== undefined) agent.onFailure = fm.on_failure;
+    if (fm.resume_budget_usd !== undefined) agent.resumeBudgetUsd = fm.resume_budget_usd;
     if (fm.inherit_mcp !== undefined) agent.inheritMcp = fm.inherit_mcp;
     if (fm.add_dirs !== undefined) agent.addDirs = fm.add_dirs.map(expandHome);
     if (fm.claude_agent !== undefined) agent.claudeAgent = fm.claude_agent;
     if (fm.project !== undefined) agent.project = fm.project;
+    if (fm.max_concurrent !== undefined) agent.maxConcurrent = fm.max_concurrent;
+    if (fm.isolated !== undefined) agent.isolated = fm.isolated;
     agents.set(id, agent);
   }
   return agents;

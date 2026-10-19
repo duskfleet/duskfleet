@@ -54,8 +54,9 @@ export class ClaudeCodeExecutor implements Executor {
       "--output-format",
       "stream-json",
       "--verbose", // required by --output-format stream-json in print mode (verified)
-      "--session-id",
-      req.sessionId,
+      // A fresh session gets the id we chose; a wrap-up pass continues the one that ran out
+      // of budget (`-r, --resume <session-id>`, verified against claude --help 2.1.299).
+      ...(req.resumeSessionId ? ["--resume", req.resumeSessionId] : ["--session-id", req.sessionId]),
       "--permission-mode",
       req.permissionMode,
       "--permission-prompts",
@@ -115,6 +116,8 @@ export class ClaudeCodeExecutor implements Executor {
       mkdirSync(path.dirname(req.logPath), { recursive: true });
       logStream = createWriteStream(req.logPath, { flags: "a" });
       logStream.on("error", (err) => log.warn("log file write failed", { path: req.logPath, err: err.message }));
+      // Lines starting with # are not stream-json (see #stderr below); this one marks where a resumed pass begins.
+      if (req.resumeSessionId) logStream.write(`#resume ${req.resumeSessionId} ${startedAt.toISOString()}\n`);
     }
 
     let child: ChildProcess;
@@ -199,7 +202,8 @@ export class ClaudeCodeExecutor implements Executor {
           error = `no result message received (exit ${code ?? "null"}, signal ${signal ?? "none"})` + tail(stderrTail);
         } else if (state.result.isError || (code !== null && code !== 0)) {
           finalOutcome = "failed";
-          error = state.result.resultText ?? `exit code ${code}` + tail(stderrTail);
+          // A budget stop has no `result` text, only `errors: ["Reached maximum budget ($5)"]`.
+          error = state.result.resultText ?? state.result.errorText ?? `exit code ${code}` + tail(stderrTail);
         } else {
           finalOutcome = "completed";
         }
@@ -278,6 +282,8 @@ function childEnv(): NodeJS.ProcessEnv {
   for (const key of Object.keys(env)) {
     if (key === "CLAUDECODE" || key === "CLAUDE_CODE_ENTRYPOINT" || key.startsWith("CLAUDE_CODE_SSE_")) delete env[key];
   }
+  // DuskFleet's own variable: an agent running `npm test` here would launch the real claude.
+  delete env["CLAUDE_BIN"];
   return env;
 }
 

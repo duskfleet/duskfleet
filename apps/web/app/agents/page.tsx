@@ -160,6 +160,11 @@ export default function AgentsPage() {
                   </header>
 
                   <p className="ac-desc">{a.description || "No description."}</p>
+                  {a.linked?.description && a.linked.description !== a.description && (
+                    <p className="ac-desc ac-linked-desc" title={a.linked.path ?? undefined}>
+                      <span className="l">{a.claudeAgent} says</span> {a.linked.description}
+                    </p>
+                  )}
 
                   {s && s.total > 0 ? (
                     <div className="ac-stats">
@@ -228,6 +233,21 @@ export default function AgentsPage() {
                     <dt>limits</dt>
                     <dd className="muted">
                       {a.timeoutMinutes} min · {fmtCost(a.maxBudgetUsd)} per run
+                      {a.wrapUpReserveUsd > 0 ? (
+                        <span
+                          title={`${fmtCost(a.wrapUpReserveUsd)} of the budget is kept for a wrap-up pass: when the main pass runs out, the session is resumed with it and told to record where it stopped (wrap_up_reserve_usd)`}
+                        >
+                          {" "}
+                          · {fmtCost(a.wrapUpReserveUsd)} wrap-up reserve
+                        </span>
+                      ) : (
+                        <span title="wrap_up_reserve_usd: 0 — a budget-exhausted run leaves no trace of where it stopped">
+                          {" "}
+                          · no wrap-up reserve
+                        </span>
+                      )}
+                      {!a.maxConcurrentIsDefault && <> · up to {a.maxConcurrent} runs at once</>}
+                      {a.isolated && <> · isolated (never edits the checkout)</>}
                       {a.addDirs && a.addDirs.length > 0 && <> · also reads {a.addDirs.map(shortPath).join(", ")}</>}
                     </dd>
                   </dl>

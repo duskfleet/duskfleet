@@ -12,6 +12,7 @@ export {
   agentSpecSchema,
   agentToSpec,
   assertAgentKind,
+  assertWrapUpReserve,
   deleteAgentFile,
   listProjectAgents,
   type ProjectAgentInfo,
@@ -38,19 +39,31 @@ export {
 export * from "./config/types.js";
 export * from "./evals/types.js";
 export { ClaudeCodeExecutor, type ClaudeCodeExecutorOptions, resolveClaudeBinary } from "./execution/claude-code.js";
+export { mergeSubagent, needsRepair, sameSubagent, subagentsFromLog } from "./execution/log-replay.js";
 export {
+  cleanHandBack,
   createStreamState,
   ingestLine,
+  isRawHandBack,
   looksLikeContextExhaustion,
   type ParsedResult,
   type StreamState,
 } from "./execution/stream-json.js";
-
 export * from "./execution/types.js";
 export * from "./observability/run.js";
 export { ProjectValidationError, validateProjectPath } from "./orchestration/project-validation.js";
 
-export { mcpToolPrefix, RunManager, type StartRunInput } from "./orchestration/run-manager.js";
+export {
+  budgetPlan,
+  mcpToolPrefix,
+  mergeResults,
+  type ResumeRunInput,
+  RunManager,
+  type RunManagerOptions,
+  resumePrompt,
+  type StartRunInput,
+  WRAP_UP_PROMPT,
+} from "./orchestration/run-manager.js";
 export { assertTransition, IllegalTransitionError } from "./orchestration/run-state.js";
 export { summarizeToolInput } from "./orchestration/tool-summary.js";
 export {
@@ -65,17 +78,23 @@ export {
 export {
   createSchedule,
   DEFAULT_TIME_ZONE,
+  effectiveOnFailure,
   formatHolder,
   nextRunAtFor,
   parseHolder,
+  processIdentity,
+  type ScheduleRunState,
   type SchedulerRole,
+  scheduleRunState,
   updateSchedule,
   validateScheduleInput,
+  willResume,
 } from "./scheduler/crud.js";
+export { attachLastRun, type RunSummarySource, type ScheduleWithLastRun } from "./scheduler/last-run.js";
 export { Scheduler, type SchedulerOptions, type SchedulerStatus } from "./scheduler/scheduler.js";
 export * from "./scheduler/types.js";
 export { migrationDigests, openDatabase } from "./storage/db.js";
-export { type ListRunsFilter, type RunPatch, RunRepository } from "./storage/runs.js";
+export { type ListRunsFilter, NEEDS_REVIEW_SQL, type RunPatch, RunRepository } from "./storage/runs.js";
 export { ScheduleRepository } from "./storage/schedules.js";
 
 export { type LogLevel, logger } from "./util/log.js";

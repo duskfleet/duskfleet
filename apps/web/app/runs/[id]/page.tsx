@@ -1,4 +1,4 @@
-import type { RunEvent } from "@duskfleet/core";
+import { REVIEW_REASON_LABELS, type RunEvent, wrapUpPhase } from "@duskfleet/core";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { AutoRefresh } from "@/components/AutoRefresh";
@@ -6,7 +6,7 @@ import { CopyButton } from "@/components/CopyButton";
 import { Expandable } from "@/components/Expandable";
 import { Prose } from "@/components/Prose";
 import { StatusBadge } from "@/components/StatusBadge";
-import { adjacentRuns, getRun, homeDir, projectLabel } from "@/lib/data";
+import { adjacentRuns, agentSummary, getRun, homeDir, projectLabel } from "@/lib/data";
 import {
   elapsedSince,
   fmtCompact,
@@ -34,17 +34,17 @@ export default async function RunPage({ params }: { params: Promise<{ id: string
   const { id } = await params;
   const data = getRun(id);
   if (!data) notFound();
-  const { run, events } = data;
+  const { run, events, resumedFrom, resumedBy } = data;
   const home = homeDir();
   const live = run.status === "running" || run.status === "pending";
   const duration = live ? elapsedSince(run.startedAt) : run.durationMs;
   const denials = run.permissionDenials ?? 0;
   const mcpMissing = run.mcp?.allowListedMissing ?? [];
-  const hasIssues = denials > 0 || mcpMissing.length > 0 || run.contextExhausted || Boolean(run.error);
-  const needsAttention =
-    run.status === "failed" ||
-    run.status === "timed_out" ||
-    (run.status === "completed" && (run.humanIntervention || run.contextExhausted));
+  const wrapUp = wrapUpPhase(run);
+  const mainPhase = run.phases.find((p) => p.phase === "main") ?? null;
+  const reasons = run.reviewReasons; // stored by RunManager when the run ended
+  const needsAttention = reasons.length > 0;
+  const hasIssues = needsAttention || Boolean(run.error) || wrapUp !== null;
   const resume = run.claudeSessionId
     ? `cd ${shellQuote(run.projectPath)} && claude --resume ${run.claudeSessionId}`
     : null;
@@ -61,6 +61,9 @@ export default async function RunPage({ params }: { params: Promise<{ id: string
     .join(" ");
   const { prev, next } = adjacentRuns(run);
   const project = projectLabel(run);
+  // The agent as defined now; null when it was deleted or renamed since the run.
+  const agent = agentSummary(run.agentId);
+  const agentDescription = agent?.description ?? "";
   const started = run.startedAt ?? run.createdAt;
   const tokensIn = run.inputTokens ?? null;
   const tokensOut = run.outputTokens ?? null;
@@ -104,7 +107,16 @@ export default async function RunPage({ params }: { params: Promise<{ id: string
         <div className="meta-row">
           <StatusBadge run={run} />
           <span className="sep">·</span>
-          <Link href={`/?agent=${encodeURIComponent(run.agentId)}`}>{run.agentId}</Link>
+          <Link
+            href={`/agents#${encodeURIComponent(run.agentId)}`}
+            title={
+              agent
+                ? `${agent.id}${agent.claudeAgent ? ` → ${agent.claudeAgent}` : ""}`
+                : `${run.agentId} is no longer defined`
+            }
+          >
+            {agent?.name ?? run.agentId}
+          </Link>
           <span className="sep">·</span>
           <span title={run.projectPath}>{project}</span>
           <span className="sep">·</span>
@@ -130,6 +142,7 @@ export default async function RunPage({ params }: { params: Promise<{ id: string
             </>
           )}
         </div>
+        {agentDescription && <p className="agent-desc">{agentDescription}</p>}
       </div>
 
       <div className="facts">
@@ -154,6 +167,54 @@ export default async function RunPage({ params }: { params: Promise<{ id: string
       </div>
 
       <div id="issues">
+        {resumedFrom && (
+          <div className="callout warn">
+            <span className="icon">↺</span>
+            <div>
+              <strong>Retry.</strong> This run resumed the session of{" "}
+              <Link href={`/runs/${resumedFrom.id}`}>{runTitle(resumedFrom.prompt, 60)}</Link> (
+              {resumedFrom.status.replace("_", " ")}
+              {resumedFrom.terminationReason ? `, ${resumedFrom.terminationReason}` : ""}), once: a second failure is
+              final (<code>on_failure: resume_once</code>).
+            </div>
+          </div>
+        )}
+        {resumedBy && (
+          <div className="callout warn">
+            <span className="icon">↺</span>
+            <div>
+              <strong>Retried.</strong> The next tick resumed this session as{" "}
+              <Link href={`/runs/${resumedBy.id}`}>run {resumedBy.id.slice(0, 8)}</Link> (
+              <StatusBadge run={resumedBy} />
+              ). Check that run for the outcome.
+            </div>
+          </div>
+        )}
+        {needsAttention && (
+          <div className="callout warn" style={{ marginBottom: 8 }}>
+            <span className="icon">!</span>
+            <div>
+              <strong>Needs review:</strong> {reasons.map((r) => REVIEW_REASON_LABELS[r]).join(" · ")}.
+              {run.status === "timed_out" && (
+                <>
+                  {" "}
+                  The agent&apos;s <code>timeout_minutes</code> elapsed and the process was killed mid-action; nothing
+                  may have been recorded.
+                </>
+              )}
+              {reasons.includes("orphaned") && (
+                <> DuskFleet restarted while the run was in progress; its process was lost.</>
+              )}
+              {reasons.includes("budget_exhausted") && !wrapUp && (
+                <>
+                  {" "}
+                  The run hit <code>max_budget_usd</code> mid-action and no wrap-up pass ran (see{" "}
+                  <code>wrap_up_reserve_usd</code>): whatever it was doing may be half-done and unrecorded.
+                </>
+              )}
+            </div>
+          </div>
+        )}
         {denials > 0 && (
           <div className="callout warn">
             <span className="icon">!</span>
@@ -209,6 +270,26 @@ export default async function RunPage({ params }: { params: Promise<{ id: string
             <span className="icon">×</span>
             <div>
               <strong>Error.</strong> {tildeText(run.error, home)}
+            </div>
+          </div>
+        )}
+        {wrapUp && (
+          <div className={`callout ${wrapUp.outcome === "completed" ? "warn" : "bad"}`}>
+            <span className="icon">!</span>
+            <div>
+              <strong>
+                Budget exhausted
+                {mainPhase ? ` after ${fmtCost(mainPhase.costUsd)} of ${fmtCost(mainPhase.budgetUsd)}` : ""}.
+              </strong>{" "}
+              A wrap-up pass resumed the session with the {fmtCost(wrapUp.budgetUsd)} reserve and{" "}
+              {wrapUp.outcome === "completed"
+                ? "recorded where it stopped"
+                : `ended ${wrapUp.outcome.replace("_", " ")}${wrapUp.terminationReason ? ` (${wrapUp.terminationReason})` : ""}`}
+              : {fmtCost(wrapUp.costUsd)}, {fmtDuration(wrapUp.durationMs)}, {fmtInt(wrapUp.numTurns)} turn
+              {wrapUp.numTurns === 1 ? "" : "s"}.
+              {wrapUp.outcome === "completed"
+                ? " Its final message is the result below; the task itself was not finished."
+                : " The task was not finished and nothing may have been recorded: check the result and the place the agent reports to."}
             </div>
           </div>
         )}
@@ -589,6 +670,26 @@ function toRow(t0: number, cwd: string, home: string) {
           detail: tildeText(String(p["message"] ?? JSON.stringify(p)), home),
           mono: false,
         };
+      case "phase": {
+        const started = p["status"] === "started";
+        const name = `${String(p["phase"] ?? "phase").replace("_", "-")} ${started ? "started" : "ended"}`;
+        const detail = started
+          ? [
+              p["budgetUsd"] !== undefined ? `budget ${fmtCost(Number(p["budgetUsd"]))}` : null,
+              p["mainCostUsd"] !== undefined ? `main pass spent ${fmtCost(Number(p["mainCostUsd"]))}` : null,
+              p["reason"] ? String(p["reason"]) : null,
+            ]
+              .filter(Boolean)
+              .join(" · ")
+          : [
+              p["outcome"] ? String(p["outcome"]) : null,
+              p["costUsd"] !== undefined ? fmtCost(Number(p["costUsd"])) : null,
+              p["durationMs"] !== undefined ? fmtDuration(Number(p["durationMs"])) : null,
+            ]
+              .filter(Boolean)
+              .join(" · ");
+        return { ...base, icon: "◆", iconCls: "status", name, detail, mono: false, isStatus: true };
+      }
       default:
         return { ...base, icon: "·", iconCls: "", name: String(e.type), detail: JSON.stringify(p) };
     }

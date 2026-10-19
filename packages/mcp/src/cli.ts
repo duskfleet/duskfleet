@@ -10,6 +10,7 @@ import { fileURLToPath } from "node:url";
  *   duskfleet run --project <id or path> [--agent <id>] [--model <m>] [--no-wait] -- "<prompt>"
  *   duskfleet runs [--status <s>] [--limit <n>]
  *   duskfleet run-info <run_id> [--events]
+ *   duskfleet repair-subagents # backfill subagent rows of finished runs from their logs
  *   duskfleet schedules
  *   duskfleet tools            # MCP tool catalogue (names, descriptions, input schemas)
  *   duskfleet serve            # long-running scheduler process (what the service runs)
@@ -18,7 +19,7 @@ import { fileURLToPath } from "node:url";
  *   duskfleet doctor           # also reports the service and who holds the scheduler lease
  */
 import { parseArgs } from "node:util";
-import { findRepoRoot, parseHolder, RUN_STATUSES, type RunStatus, summarizeRun } from "@duskfleet/core";
+import { findRepoRoot, parseHolder, RUN_STATUSES, type RunStatus, subagentView, summarizeRun } from "@duskfleet/core";
 import { bootstrap } from "./bootstrap.js";
 import { installService, renderService, type ServiceTarget, serviceStatus, uninstallService } from "./service.js";
 import { buildToolCatalog } from "./tools-catalog.js";
@@ -36,6 +37,7 @@ function usage(): never {
       '  duskfleet run --project <id or path> [--agent <id>] [--model <m>] [--no-wait] -- "<prompt>"',
       "  duskfleet runs [--status <status>] [--limit <n>]",
       "  duskfleet run-info <run_id> [--events]",
+      "  duskfleet repair-subagents",
       "  duskfleet schedules",
       "  duskfleet tools",
       "  duskfleet serve",
@@ -197,7 +199,7 @@ async function main(): Promise<void> {
       return done();
     }
     case "schedules": {
-      print({ scheduler: app.scheduler.status(), schedules: app.scheduler.list() });
+      print({ scheduler: app.scheduler.status(), schedules: app.scheduler.listWithLastRun() });
       return done();
     }
     case "serve": {
@@ -236,8 +238,13 @@ async function main(): Promise<void> {
         process.stderr.write(`run not found: ${id}\n`);
         return done(1);
       }
-      const subagents = app.runs.agents(id);
+      const subagents = app.runs.agents(id).map((s) => subagentView(s)); // same names as get_run
       print(values.events ? { ...run, subagents, events: app.runs.events(id) } : { ...run, subagents });
+      return done();
+    }
+    case "repair-subagents": {
+      // One-shot backfill of subagent rows recorded by an older parser, from each finished run's log.
+      print(await app.runs.repairSubagents());
       return done();
     }
     default:

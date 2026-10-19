@@ -71,9 +71,10 @@ if (invokedDirectly) {
     .then((catalog) => {
       const i = process.argv.indexOf("--write");
       const json = JSON.stringify(catalog, null, 2);
-      if (i >= 0 && process.argv[i + 1]) {
-        writeFileSync(process.argv[i + 1]!, json + "\n");
-        process.stderr.write(`wrote ${catalog.tools.length} tools to ${process.argv[i + 1]}\n`);
+      const out = i >= 0 ? process.argv[i + 1] : undefined;
+      if (out) {
+        writeFileSync(out, json + "\n");
+        process.stderr.write(`wrote ${catalog.tools.length} tools to ${out}\n`);
       } else {
         process.stdout.write(json + "\n");
       }

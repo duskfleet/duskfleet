@@ -1,7 +1,8 @@
-import { parseHolder } from "@duskfleet/core";
+import { parseHolder, REVIEW_REASON_LABELS } from "@duskfleet/core";
 import Link from "next/link";
 import { CopyButton } from "@/components/CopyButton";
 import { ScheduleActions } from "@/components/ScheduleActions";
+import { StatusBadge } from "@/components/StatusBadge";
 import { listSchedules, scheduleFirings, schedulerEnabled, schedulerLease } from "@/lib/data";
 import { fmtRelative, fmtTime, runTitle } from "@/lib/format";
 
@@ -18,6 +19,7 @@ export const metadata = { title: "Schedules · DuskFleet" };
 
 const OUTCOME_CLASS: Record<string, string> = {
   started: "completed",
+  resumed: "completed",
   skipped_busy: "attention",
   skipped_disabled: "cancelled",
   error: "failed",
@@ -152,6 +154,17 @@ export default function SchedulesPage() {
                         </span>
                       </div>
                     )}
+                    {s.willResumeRunId && (
+                      <div style={{ marginTop: 4 }}>
+                        <Link
+                          href={`/runs/${s.willResumeRunId}`}
+                          className="badge attention"
+                          title={`on_failure: resume_once (${s.onFailureSource}): the next fire resumes the session of run ${s.willResumeRunId} instead of starting fresh. Once; a second failure is final.`}
+                        >
+                          next: resume
+                        </Link>
+                      </div>
+                    )}
                   </td>
                   <td className="what">
                     <div className="prompt" title={s.prompt}>
@@ -175,6 +188,17 @@ export default function SchedulesPage() {
                       <Link href={`/?schedule=${encodeURIComponent(s.id)}`} title="Runs started by this schedule">
                         runs →
                       </Link>
+                      {s.effectiveOnFailure === "resume_once" && (
+                        <>
+                          <span className="sep">·</span>
+                          <span
+                            className="muted"
+                            title={`on_failure: resume_once from the ${s.onFailureSource}${s.resumeBudgetUsd !== null ? ` · resume budget $${s.resumeBudgetUsd}` : ""}: after a budget or timeout failure the next tick resumes the session once`}
+                          >
+                            resume once on failure
+                          </span>
+                        </>
+                      )}
                     </div>
                     <div className="muted" style={{ fontSize: "0.8rem", marginTop: 4, maxWidth: 520 }} title={s.prompt}>
                       {runTitle(s.prompt, 90)}
@@ -230,10 +254,37 @@ export default function SchedulesPage() {
                             {fmtRelative(s.lastFiredAt)}
                           </span>
                         </span>
-                        {s.lastRunId && (
-                          <Link href={`/runs/${s.lastRunId}`} style={{ fontSize: "0.8rem" }}>
-                            last run →
-                          </Link>
+                        {s.lastRun ? (
+                          <span
+                            style={{
+                              fontSize: "0.8rem",
+                              display: "flex",
+                              gap: 6,
+                              alignItems: "center",
+                              flexWrap: "wrap",
+                            }}
+                          >
+                            <Link href={`/runs/${s.lastRun.id}`}>last run →</Link>
+                            <StatusBadge status={s.lastRun.status} reasons={s.lastRun.reviewReasons} />
+                            {s.lastRun.needsReview && (
+                              <Link
+                                href={`/runs/${s.lastRun.id}#issues`}
+                                className="muted"
+                                title={`The run this schedule last started needs review: ${s.lastRun.reviewReasons.map((r) => REVIEW_REASON_LABELS[r]).join(", ")}`}
+                              >
+                                {s.lastRun.reviewReasons
+                                  .map((r) => REVIEW_REASON_LABELS[r])
+                                  .slice(0, 2)
+                                  .join(" · ")}
+                              </Link>
+                            )}
+                          </span>
+                        ) : (
+                          s.lastRunId && (
+                            <Link href={`/runs/${s.lastRunId}`} style={{ fontSize: "0.8rem" }}>
+                              last run →
+                            </Link>
+                          )
                         )}
                         {s.lastError && (
                           <span className="muted" style={{ fontSize: "0.8rem" }} title={s.lastError}>

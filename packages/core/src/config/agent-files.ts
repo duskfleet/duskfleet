@@ -16,9 +16,15 @@ import { existsSync, mkdirSync, readdirSync, readFileSync, unlinkSync, writeFile
 import path from "node:path";
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 import { z } from "zod";
-import { type AgentDefinition, EFFORT_LEVELS, PERMISSION_MODES } from "./types.js";
+import { type AgentDefinition, EFFORT_LEVELS, ON_FAILURE_POLICIES, PERMISSION_MODES } from "./types.js";
 
 export const AGENT_ID_PATTERN = /^[a-z0-9][a-z0-9-_]*$/;
+
+/** Per-agent concurrency limit: a whole number of runs, at least 1. */
+export const maxConcurrentSchema = z
+  .number({ error: "max_concurrent must be a whole number >= 1" })
+  .int("max_concurrent must be a whole number >= 1")
+  .min(1, "max_concurrent must be a whole number >= 1");
 
 /** Everything an agent file can contain, flattened (frontmatter + body). */
 export const agentSpecSchema = z.object({
@@ -32,10 +38,15 @@ export const agentSpecSchema = z.object({
   effort: z.enum(EFFORT_LEVELS).optional(),
   timeout_minutes: z.number().positive().optional(),
   max_budget_usd: z.number().positive().optional(),
+  wrap_up_reserve_usd: z.number().nonnegative().optional(),
+  on_failure: z.enum(ON_FAILURE_POLICIES).optional(),
+  resume_budget_usd: z.number().positive().optional(),
   inherit_mcp: z.boolean().optional(),
   add_dirs: z.array(z.string().min(1)).optional(),
   claude_agent: z.string().min(1).optional(),
   project: z.string().min(1).optional(),
+  max_concurrent: maxConcurrentSchema.optional(),
+  isolated: z.boolean().optional(),
   system_prompt: z.string().default(""),
 });
 export type AgentSpec = z.infer<typeof agentSpecSchema>;
@@ -83,10 +94,15 @@ export function agentToSpec(a: AgentDefinition): AgentSpec {
   if (a.effort !== undefined) spec.effort = a.effort;
   if (a.timeoutMinutes !== undefined) spec.timeout_minutes = a.timeoutMinutes;
   if (a.maxBudgetUsd !== undefined) spec.max_budget_usd = a.maxBudgetUsd;
+  if (a.wrapUpReserveUsd !== undefined) spec.wrap_up_reserve_usd = a.wrapUpReserveUsd;
+  if (a.onFailure !== undefined) spec.on_failure = a.onFailure;
+  if (a.resumeBudgetUsd !== undefined) spec.resume_budget_usd = a.resumeBudgetUsd;
   if (a.inheritMcp !== undefined) spec.inherit_mcp = a.inheritMcp;
   if (a.addDirs !== undefined) spec.add_dirs = a.addDirs;
   if (a.claudeAgent !== undefined) spec.claude_agent = a.claudeAgent;
   if (a.project !== undefined) spec.project = a.project;
+  if (a.maxConcurrent !== undefined) spec.max_concurrent = a.maxConcurrent;
+  if (a.isolated !== undefined) spec.isolated = a.isolated;
   return spec;
 }
 
@@ -170,6 +186,24 @@ export type AgentKind = "own" | "link";
 export function agentKind(a: { claudeAgent?: string | undefined } | { claude_agent?: string | undefined }): AgentKind {
   const linked = "claudeAgent" in a ? a.claudeAgent : (a as { claude_agent?: string }).claude_agent;
   return linked ? "link" : "own";
+}
+
+/**
+ * `wrap_up_reserve_usd` may take at most half of the budget (`max_budget_usd`, or the
+ * config default when the agent sets none). The run would silently cap a larger value
+ * (budgetPlan), so create/update reject it instead of reporting a different number.
+ */
+export function assertWrapUpReserve(
+  spec: Pick<AgentSpec, "max_budget_usd" | "wrap_up_reserve_usd">,
+  defaultMaxBudgetUsd: number,
+): void {
+  if (spec.wrap_up_reserve_usd === undefined) return;
+  const total = spec.max_budget_usd ?? defaultMaxBudgetUsd;
+  if (spec.wrap_up_reserve_usd > total / 2) {
+    throw new Error(
+      `wrap_up_reserve_usd (${spec.wrap_up_reserve_usd}) cannot exceed half of the budget (${spec.max_budget_usd !== undefined ? "max_budget_usd" : "default max budget"} ${total}, so at most ${Math.round((total / 2) * 100) / 100}). Lower it, raise max_budget_usd, or use 0 to disable the wrap-up pass.`,
+    );
+  }
 }
 
 /**

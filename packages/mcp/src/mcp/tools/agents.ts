@@ -7,11 +7,14 @@ import {
   agentSpecSchema,
   agentToSpec,
   assertAgentKind,
+  assertWrapUpReserve,
+  budgetPlan,
   type DuskFleetConfig,
   deleteAgentFile,
   EFFORT_LEVELS,
   listProjectAgents,
   loadAgents,
+  ON_FAILURE_POLICIES,
   PERMISSION_MODES,
   projectIdFromPath,
   upsertUserProject,
@@ -36,6 +39,7 @@ function assertSpecLoadable(spec: AgentSpec, config: DuskFleetConfig): void {
 
 function assertKind(kind: "own" | "link", spec: AgentSpec, config: DuskFleetConfig): void {
   assertAgentKind(kind, spec, (id) => config.projects.get(id)?.path ?? null);
+  assertWrapUpReserve(spec, config.claude.defaultMaxBudgetUsd);
 }
 
 /**
@@ -114,10 +118,17 @@ function presentAgent(a: AgentDefinition, config: DuskFleetConfig) {
     effort: a.effort ?? null,
     timeoutMinutes: a.timeoutMinutes ?? config.claude.defaultTimeoutMinutes,
     maxBudgetUsd: a.maxBudgetUsd ?? config.claude.defaultMaxBudgetUsd,
+    /** Dollars of maxBudgetUsd kept for the wrap-up pass after a budget exhaustion (0 = no wrap-up). */
+    wrapUpReserveUsd: budgetPlan(a, config).reserve,
+    onFailure: a.onFailure ?? "none",
+    resumeBudgetUsd: a.resumeBudgetUsd ?? null,
     inheritMcp: a.inheritMcp ?? false,
     addDirs: a.addDirs ?? [],
     claudeAgent: a.claudeAgent ?? null,
     project: a.project ?? null,
+    /** Runs of this agent allowed at once: its own max_concurrent, else the global max_concurrent_per_agent. */
+    maxConcurrent: a.maxConcurrent ?? config.maxConcurrentPerAgent,
+    isolated: a.isolated ?? false,
     systemPrompt: a.systemPrompt,
     path: a.sourcePath,
   };
@@ -155,6 +166,24 @@ const agentFields = {
     .positive()
     .optional()
     .describe("Stop the run when its cost reaches this amount; defaults to claude.default_max_budget_usd"),
+  wrap_up_reserve_usd: z
+    .number()
+    .nonnegative()
+    .optional()
+    .describe(
+      "Part of max_budget_usd held back for a wrap-up pass: when the main pass runs out of budget the session is resumed with this amount and told to record where it stopped. Default 10% of the budget, at least $0.50, at most half of it; 0 disables",
+    ),
+  on_failure: z
+    .enum(ON_FAILURE_POLICIES)
+    .optional()
+    .describe(
+      "resume_once: a schedule's next tick resumes a run of this agent that ended budget_exhausted or timed_out, once (a second failure is final). Default none. A schedule can override it",
+    ),
+  resume_budget_usd: z
+    .number()
+    .positive()
+    .optional()
+    .describe("Budget of the resumed run (on_failure: resume_once); defaults to max_budget_usd"),
   inherit_mcp: z
     .boolean()
     .optional()
@@ -185,6 +214,20 @@ const agentFields = {
     .optional()
     .describe(
       "Reuse an agent the target project already defines in .claude/agents/<name>.md (see list_project_agents): the run adopts its prompt, tools and model via `claude --agent`. This DuskFleet agent then only supplies the unattended envelope: permissions, allow-list, budget, MCP",
+    ),
+  max_concurrent: z
+    .number()
+    .int()
+    .min(1)
+    .optional()
+    .describe(
+      "Runs of this agent allowed at the same time (whole number >= 1). Omit for the global max_concurrent_per_agent (default 1). max_concurrent_runs stays the hard cap",
+    ),
+  isolated: z
+    .boolean()
+    .optional()
+    .describe(
+      "true = the agent never edits the project checkout (read-only, or works in its own git worktree): its runs neither count against nor wait for max_concurrent_per_project. A promise the prompt must keep; DuskFleet does not check it. Default false",
     ),
   system_prompt: z.string().optional().describe("Appended to Claude Code's system prompt for every run of this agent"),
 };
@@ -300,6 +343,9 @@ export function registerAgentTools(server: McpServer, ctx: ToolContext): void {
               "effort",
               "timeout_minutes",
               "max_budget_usd",
+              "wrap_up_reserve_usd",
+              "on_failure",
+              "resume_budget_usd",
               "inherit_mcp",
               "add_dirs",
               "claude_agent",

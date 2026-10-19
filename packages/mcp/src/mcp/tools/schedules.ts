@@ -1,9 +1,14 @@
-import { describeCron, parseCron, type Schedule } from "@duskfleet/core";
+import { describeCron, ON_FAILURE_POLICIES, parseCron, type Schedule, type ScheduleRunState } from "@duskfleet/core";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { errorResult, jsonResult, type ToolContext } from "../server.js";
 
-function present(s: Schedule) {
+/**
+ * A schedule as the tools return it. The run state (lastRun: how the run it last started *ended*,
+ * effectiveOnFailure, willResumeRunId) comes from Scheduler.withLastRun / listWithLastRun; this
+ * only adds the cron in words.
+ */
+function present(s: Schedule & ScheduleRunState) {
   let human = s.cron;
   try {
     human = describeCron(parseCron(s.cron));
@@ -19,7 +24,7 @@ const scheduleFields = {
     .string()
     .min(1)
     .describe(
-      "Prompt for every run. For project commands, reference the command file, e.g. 'Follow .claude/commands/pickup-app-task.md'",
+      "Prompt for every run. For an own agent that drives a project command, reference the command file, e.g. 'Follow .claude/commands/pickup-task.md'. For a link agent, tell it to run its own loop: it already IS the project agent, and a command that invokes that agent would make it invoke itself",
     ),
   cron: z
     .string()
@@ -31,6 +36,17 @@ const scheduleFields = {
   project_id: z.string().min(1).optional().describe("Required unless the agent is bound to a project"),
   model: z.string().min(1).optional().describe("Model alias/id override for scheduled runs"),
   enabled: z.boolean().optional().describe("Default true"),
+  on_failure: z
+    .enum(ON_FAILURE_POLICIES)
+    .optional()
+    .describe(
+      "What the next tick does after a run ended budget_exhausted or timed_out: resume_once resumes that session (claude --resume, once; a second failure is final), none starts fresh. Omit to inherit the agent's on_failure",
+    ),
+  resume_budget_usd: z
+    .number()
+    .positive()
+    .optional()
+    .describe("Budget of the resumed run; defaults to the agent's resume_budget_usd, else its max_budget_usd"),
 };
 
 export function registerScheduleTools(server: McpServer, ctx: ToolContext): void {
@@ -39,11 +55,13 @@ export function registerScheduleTools(server: McpServer, ctx: ToolContext): void
     {
       title: "List schedules",
       description:
-        "List cron schedules with next/last firing, outcome of the last tick (started | skipped_busy | error) and scheduler status " +
+        "List cron schedules with next/last firing, outcome of the last tick (started | resumed | skipped_busy | skipped_disabled | error), lastRun (status, needsReview and reviewReasons of the run it last started: a schedule whose run failed or ran out of budget shows it here), " +
+        "effectiveOnFailure (none | resume_once: the schedule's own on_failure, else the agent's) with onFailureSource, willResumeRunId (the budget_exhausted / timed_out run the next fire resumes instead of starting fresh, or null) and scheduler status " +
         "(kill switch, which process holds the lease). A busy agent or project makes a tick skip, never queue.",
       inputSchema: {},
     },
-    async () => jsonResult({ scheduler: ctx.scheduler.status(), schedules: ctx.scheduler.list().map(present) }),
+    async () =>
+      jsonResult({ scheduler: ctx.scheduler.status(), schedules: ctx.scheduler.listWithLastRun().map(present) }),
   );
 
   server.registerTool(
@@ -71,7 +89,9 @@ export function registerScheduleTools(server: McpServer, ctx: ToolContext): void
         if (args.project_id !== undefined) input.projectId = args.project_id;
         if (args.model !== undefined) input.model = args.model;
         if (args.enabled !== undefined) input.enabled = args.enabled;
-        return jsonResult({ created: true, schedule: present(ctx.scheduler.create(input)) });
+        if (args.on_failure !== undefined) input.onFailure = args.on_failure;
+        if (args.resume_budget_usd !== undefined) input.resumeBudgetUsd = args.resume_budget_usd;
+        return jsonResult({ created: true, schedule: present(ctx.scheduler.withLastRun(ctx.scheduler.create(input))) });
       } catch (err) {
         return errorResult(err);
       }
@@ -94,12 +114,24 @@ export function registerScheduleTools(server: McpServer, ctx: ToolContext): void
         project_id: scheduleFields.project_id,
         model: scheduleFields.model,
         enabled: scheduleFields.enabled,
+        on_failure: scheduleFields.on_failure,
+        resume_budget_usd: scheduleFields.resume_budget_usd,
         clear_model: z.boolean().optional().describe("Remove the model override"),
+        clear_on_failure: z
+          .boolean()
+          .optional()
+          .describe("Remove the schedule's on_failure and resume_budget_usd: the agent's apply again"),
       },
     },
     async (args) => {
       try {
         const patch: Parameters<typeof ctx.scheduler.update>[1] = {};
+        if (args.on_failure !== undefined) patch.onFailure = args.on_failure;
+        if (args.resume_budget_usd !== undefined) patch.resumeBudgetUsd = args.resume_budget_usd;
+        if (args.clear_on_failure) {
+          patch.onFailure = null;
+          patch.resumeBudgetUsd = null;
+        }
         if (args.name !== undefined) patch.name = args.name;
         if (args.agent_id !== undefined) patch.agentId = args.agent_id;
         if (args.prompt !== undefined) patch.prompt = args.prompt;
@@ -109,7 +141,10 @@ export function registerScheduleTools(server: McpServer, ctx: ToolContext): void
         if (args.model !== undefined) patch.model = args.model;
         if (args.clear_model) patch.model = null;
         if (args.enabled !== undefined) patch.enabled = args.enabled;
-        return jsonResult({ updated: true, schedule: present(ctx.scheduler.update(args.id, patch)) });
+        return jsonResult({
+          updated: true,
+          schedule: present(ctx.scheduler.withLastRun(ctx.scheduler.update(args.id, patch))),
+        });
       } catch (err) {
         return errorResult(err);
       }
@@ -147,7 +182,7 @@ export function registerScheduleTools(server: McpServer, ctx: ToolContext): void
     async (args) => {
       try {
         const result = await ctx.scheduler.fireNow(args.id);
-        return jsonResult({ ...result, schedule: present(ctx.scheduler.get(args.id)!) });
+        return jsonResult({ ...result, schedule: present(ctx.scheduler.withLastRun(ctx.scheduler.get(args.id)!)) });
       } catch (err) {
         return errorResult(err);
       }
