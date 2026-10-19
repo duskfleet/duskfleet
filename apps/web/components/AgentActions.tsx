@@ -13,27 +13,20 @@ export function AgentActions({
   id,
   source,
   linked,
+  overridesBuiltin = false,
 }: {
   id: string;
   source: "builtin" | "user";
   linked: string | null;
+  overridesBuiltin?: boolean;
 }) {
   const router = useRouter();
   const [pending, start] = useTransition();
   const [confirm, setConfirm] = useState<"delete" | "unlink" | null>(null);
   const [result, setResult] = useState<ActionResult | null>(null);
 
-  if (source !== "user") {
-    return (
-      <span
-        className="faint"
-        style={{ fontSize: "0.78rem" }}
-        title={`Builtin agents live in config/agents and are versioned with the repo. To edit, unlink or delete it from here or via update_agent, move the file: mv config/agents/${id}.md data/agents/`}
-      >
-        builtin · read-only · move to data/agents to edit
-      </span>
-    );
-  }
+  // Builtins are edited in the repo; the card's source tag explains it.
+  if (source !== "user") return null;
 
   const run = (kind: "delete" | "unlink") =>
     start(async () => {
@@ -74,11 +67,16 @@ export function AgentActions({
           )}
           <button
             type="button"
-            className="copy-btn danger"
+            // Deleting an override only reactivates the builtin: not destructive, so not red.
+            className={`copy-btn ${overridesBuiltin ? "" : "danger"}`}
             onClick={() => setConfirm("delete")}
-            title="Remove the agent file from data/agents"
+            title={
+              overridesBuiltin
+                ? "Remove the user file from data/agents: the builtin becomes active again"
+                : "Remove the agent file from data/agents"
+            }
           >
-            Delete
+            {overridesBuiltin ? "Delete user file" : "Delete"}
           </button>
         </>
       )}

@@ -16,6 +16,7 @@ import {
   describeCron,
   findRepoRoot,
   listProjectAgents,
+  loadAgents,
   loadConfig,
   NEEDS_REVIEW_SQL,
   nextFire,
@@ -115,6 +116,22 @@ export function listAgents() {
   // .claude/agents is read once per project per request, not once per agent.
   const projectAgents = new Map<string, ProjectAgentInfo[]>();
 
+  // A user file with a builtin's id overrides it: the card says so.
+  let builtinIds = new Set<string>();
+  try {
+    builtinIds = new Set(loadAgents(path.join(cfg.configDir, "agents"), "builtin").keys());
+  } catch {
+    // a broken builtin would have failed loadConfig already
+  }
+  const root = findRepoRoot(process.cwd());
+  const home = homedir();
+  const fileLabel = (p: string) =>
+    root && p.startsWith(root + path.sep)
+      ? path.relative(root, p)
+      : home && p.startsWith(home + path.sep)
+        ? "~" + p.slice(home.length)
+        : p;
+
   return [...cfg.agents.values()].map(({ systemPrompt, ...a }) => {
     const linked = a.claudeAgent ? resolveLink(cfg, projectAgents, a.project, a.claudeAgent) : null;
     // What a run actually starts with: this file's model overrides, otherwise
@@ -131,6 +148,13 @@ export function listAgents() {
       wrapUpReserveUsd: budgetPlan(a, cfg).reserve,
       maxConcurrent: a.maxConcurrent ?? cfg.maxConcurrentPerAgent,
       maxConcurrentIsDefault: (a.maxConcurrent ?? cfg.maxConcurrentPerAgent) === cfg.maxConcurrentPerAgent,
+      /** Budget set by the agent file itself (null = the global default applies). */
+      ownBudgetUsd: a.maxBudgetUsd ?? null,
+      /** Timeout set by the agent file itself (null = the global default applies). */
+      ownTimeoutMinutes: a.timeoutMinutes ?? null,
+      overridesBuiltin: a.source === "user" && builtinIds.has(a.id),
+      /** Repo-relative (or ~) path of the agent file, for display. */
+      fileLabel: fileLabel(a.sourcePath),
       isDefault: a.id === cfg.defaultAgent,
       linked,
       effectiveModel,
@@ -250,6 +274,12 @@ export interface AgentStats {
   completed: number;
   failed: number;
   needsReview: number;
+  /** Runs that reached a terminal status. */
+  finished: number;
+  /** Completed with nothing to review (the stored review verdict; same rule as the runs overview). */
+  clean: number;
+  /** The most recent finished run needs review (its stored review verdict). */
+  lastNeedsReview: boolean;
   costUsd: number;
   avgDurationMs: number | null;
   lastRunAt: string | null;
@@ -267,11 +297,16 @@ export function agentStats(): AgentStats[] {
               SUM(status = 'completed')                         AS completed,
               SUM(status IN ('failed','timed_out','cancelled')) AS failed,
               SUM(${NEEDS_REVIEW_SQL})                          AS needs_review,
+              SUM(status IN ('completed','failed','timed_out','cancelled')) AS finished,
+              SUM(status = 'completed' AND NOT ${NEEDS_REVIEW_SQL}) AS clean,
               COALESCE(SUM(cost_usd), 0)                        AS cost_usd,
               AVG(duration_ms)                                  AS avg_duration_ms,
               MAX(created_at)                                   AS last_run_at,
               (SELECT model_used FROM runs r2 WHERE r2.agent_id = runs.agent_id AND r2.model_used IS NOT NULL
-                 ORDER BY r2.created_at DESC LIMIT 1)          AS last_model_used
+                 ORDER BY r2.created_at DESC LIMIT 1)          AS last_model_used,
+              (SELECT ${NEEDS_REVIEW_SQL} FROM runs r3
+                 WHERE r3.agent_id = runs.agent_id AND r3.status IN ('completed','failed','timed_out','cancelled')
+                 ORDER BY r3.created_at DESC LIMIT 1)          AS last_needs_review
        FROM runs GROUP BY agent_id ORDER BY total DESC`,
     )
     .all() as Array<{
@@ -281,10 +316,13 @@ export function agentStats(): AgentStats[] {
     completed: number;
     failed: number;
     needs_review: number;
+    finished: number;
+    clean: number;
     cost_usd: number;
     avg_duration_ms: number | null;
     last_run_at: string | null;
     last_model_used: string | null;
+    last_needs_review: number | null;
   }>;
   return rows.map((r) => ({
     agentId: r.agent_id,
@@ -293,11 +331,88 @@ export function agentStats(): AgentStats[] {
     completed: r.completed,
     failed: r.failed,
     needsReview: r.needs_review,
+    finished: r.finished,
+    clean: r.clean,
+    lastNeedsReview: r.last_needs_review === 1,
     costUsd: r.cost_usd,
     avgDurationMs: r.avg_duration_ms,
     lastRunAt: r.last_run_at,
     lastModelUsed: r.last_model_used,
   }));
+}
+
+/**
+ * Bash allow-list entries worth suggesting per agent: the commands its last
+ * `perAgent` runs were denied (stored denied_tools_json), reduced to a
+ * `Bash(<cmd>:*)` prefix. One window query, no events scan.
+ */
+export function deniedBashSuggestions(perAgent = 10): Map<string, string[]> {
+  const { db } = services();
+  const rows = db
+    .prepare(
+      `SELECT agent_id, denied_tools_json FROM (
+         SELECT agent_id, denied_tools_json, ROW_NUMBER() OVER (PARTITION BY agent_id ORDER BY created_at DESC) AS rn FROM runs
+       ) WHERE rn <= ? AND denied_tools_json IS NOT NULL AND denied_tools_json != '[]'`,
+    )
+    .all(perAgent) as Array<{ agent_id: string; denied_tools_json: string }>;
+  const out = new Map<string, string[]>();
+  for (const r of rows) {
+    let denied: Array<{ tool?: unknown; summary?: unknown }>;
+    try {
+      denied = JSON.parse(r.denied_tools_json) as typeof denied;
+    } catch {
+      continue;
+    }
+    if (!Array.isArray(denied)) continue;
+    for (const d of denied) {
+      if (d.tool !== "Bash" || typeof d.summary !== "string") continue;
+      const prefix = bashPrefix(d.summary);
+      if (!prefix) continue;
+      const list = out.get(r.agent_id) ?? [];
+      const entry = `Bash(${prefix}:*)`;
+      if (!list.includes(entry)) list.push(entry);
+      out.set(r.agent_id, list);
+    }
+  }
+  return out;
+}
+
+/**
+ * Whether `allowedTools` already lets `Bash(<cmd>:*)` through: bare `Bash`, the
+ * same entry, or a shorter prefix (`Bash(git:*)` covers `Bash(git push:*)`).
+ * The suggestion window is the last N runs, so a denial fixed since then is
+ * suppressed here rather than by age.
+ */
+export function bashAllowed(allowedTools: readonly string[], suggestion: string): boolean {
+  const cmd = /^Bash\((.+):\*\)$/.exec(suggestion)?.[1];
+  if (!cmd) return allowedTools.includes(suggestion);
+  return allowedTools.some((t) => {
+    if (t === "Bash") return true;
+    // Only wildcard entries are prefixes; an exact Bash(ls) covers nothing broader.
+    const p = /^Bash\((.+?)(?::\*|\s\*)\)$/.exec(t)?.[1]?.trim();
+    return !!p && (cmd === p || cmd.startsWith(p + " "));
+  });
+}
+
+// Tools whose first argument is a subcommand: "git push", "npm run", "gh pr".
+const SUBCOMMAND_TOOLS = new Set("git npm npx pnpm yarn gh docker cargo go kubectl brew uv pip poetry".split(" "));
+
+/** "cd x && git push origin main" → "git push"; "ls -la" → "ls". */
+function bashPrefix(command: string): string | null {
+  for (const segment of command.split(/&&|\|\||;|\|/)) {
+    const words = segment
+      .trim()
+      .split(/\s+/)
+      .filter((w) => w && !/^[A-Z_][A-Z0-9_]*=/.test(w));
+    const [first, second] = words;
+    if (!first || first === "cd") continue;
+    const cmd = first.replace(/^.*\//, "");
+    if (!/^[\w.-]+$/.test(cmd)) return null;
+    return SUBCOMMAND_TOOLS.has(cmd) && second && /^[\w.:-]+$/.test(second) && !second.startsWith("-")
+      ? `${cmd} ${second}`
+      : cmd;
+  }
+  return null;
 }
 
 export interface ModelStats {
