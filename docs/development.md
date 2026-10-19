@@ -81,26 +81,48 @@ and GitHub Actions. Not built yet: a periodic `claude --help` flag-drift check (
 local schedule rather than Actions), a manual-dispatch smoke run with `--model haiku`, and a docs
 sync check (every MCP tool in `docs/mcp-server.md`, every `docs/` page linked from `README.md`).
 
-## Pull request review by agents
+## Issue and review flow by agents
 
-The owner runs a review loop over this repository's own PRs with two local Claude Code agents
-and two local skills (`.claude/` is git-ignored: agents, skills and settings stay on the
-machine). A DuskFleet run loads the project's skills (verified with Claude Code 2.1.302:
-`--permission-prompts none` with `--setting-sources project,local` still mounts `.claude/skills`
-and the built-in skills), so an agent only needs `Skill` in its `allowed_tools`.
+The owner runs a development loop over this repository's own issues and PRs with two local
+Claude Code agents and three local skills (`.claude/` is git-ignored: agents, skills and
+settings stay on the machine). A DuskFleet run loads the project's skills (verified with Claude
+Code 2.1.302: `--permission-prompts none` with `--setting-sources project,local` still mounts
+`.claude/skills` and the built-in skills), so an agent only needs `Skill` in its
+`allowed_tools`.
 
-- The reviewer picks the oldest open PR without a `VERDICT:` comment newer than its last commit,
+The state machine is a set of `flow:` labels on GitHub; there is no coordinator process.
+Issues carry the development state, PRs carry the review state, and each agent finds its own
+work from a label query when its schedule wakes it:
+
+```
+issue:  flow: ready ──(developer picks, swaps the label first)──► flow: in-progress ──► closed by the merge
+PR:     flow: needs-review ──► flow: in-review ──► flow: changes-requested ──► flow: needs-review … ──► flow: ready-to-merge
+```
+
+- A human labels at most a handful of issues `flow: ready` (and sets `priority:` labels; the
+  developer takes `priority: high` first, then oldest). `flow: needs-human` parks anything the
+  loop cannot decide; `flow: ready-to-merge` means a human merges — agents never do.
+- The developer does one unit of work per run, rework before new work: a PR labelled
+  `flow: changes-requested` (or, as a fallback, an unlabelled PR with unresolved review
+  threads) is fixed in a worktree on the PR branch (`scripts/pr-worktree.sh <name> <branch>
+  <base>`), one commit pushed, every thread answered with a fixed prefix and resolved;
+  otherwise the top `flow: ready` issue is implemented on a new `issue/<n>-<slug>` branch and
+  opened as a PR whose body says `Closes #<n>`. Either way the PR is handed to the reviewer
+  with `flow: needs-review`. Each pickup swaps the label first, as a lock against a second run.
+- The reviewer picks the oldest PR labelled `flow: needs-review` (fallback: the oldest open PR
+  without a `VERDICT:` comment naming its current head SHA), swaps it to `flow: in-review`,
   runs the built-in `code-review` skill with `--comment` (inline correctness findings), then
-  checks the rules of CLAUDE.md and posts one summary comment ending with `VERDICT: approve` or
-  `VERDICT: changes`. Read-only agent.
-- The developer picks the oldest PR with unresolved review threads, works in a worktree on the
-  PR branch (`scripts/pr-worktree.sh <name> <branch> <base>`), pushes one fix commit, replies to
-  every thread with a fixed prefix and resolves the ones it fixed. Declined threads stay open
-  for a human. The new commit makes the reviewer look again.
+  checks the rules of CLAUDE.md — and, for a PR that closes an issue, the issue's own
+  acceptance criteria — and posts one summary comment ending with `VERDICT: approve` or
+  `VERDICT: changes`. The verdict's label (`flow: ready-to-merge` or `flow: changes-requested`)
+  is the hand-off. Read-only agent; after three `VERDICT: changes` rounds it parks the PR with
+  `flow: needs-human`.
 
 The DuskFleet side is a pair of user agents in `data/agents/` that link the local Claude Code
 agents (`claude_agent`) and add only the unattended envelope: permission mode, `gh` / `git` /
-`npm` allow-list, budget and timeout. See `docs/agents.md`.
+`npm` allow-list, budget and timeout — plus one cron schedule per agent, staggered so a PR
+opened by the developer meets the reviewer within the hour. A busy agent makes a tick skip
+(`skipped_busy`), never queue. See `docs/agents.md` and `docs/schedules.md`.
 
 ## Security model
 

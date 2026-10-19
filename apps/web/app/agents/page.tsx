@@ -160,6 +160,11 @@ export default function AgentsPage() {
                   </header>
 
                   <p className="ac-desc">{a.description || "No description."}</p>
+                  {a.linked?.description && a.linked.description !== a.description && (
+                    <p className="ac-desc ac-linked-desc" title={a.linked.path ?? undefined}>
+                      <span className="l">{a.claudeAgent} says</span> {a.linked.description}
+                    </p>
+                  )}
 
                   {s && s.total > 0 ? (
                     <div className="ac-stats">

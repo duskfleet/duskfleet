@@ -1,9 +1,10 @@
-import { parseHolder } from "@duskfleet/core";
+import { DEFAULT_GATE_BUDGET_USD, DEFAULT_GATE_MARKER, parseHolder, REVIEW_REASON_LABELS } from "@duskfleet/core";
 import Link from "next/link";
 import { CopyButton } from "@/components/CopyButton";
 import { ScheduleActions } from "@/components/ScheduleActions";
+import { StatusBadge } from "@/components/StatusBadge";
 import { listSchedules, scheduleFirings, schedulerEnabled, schedulerLease } from "@/lib/data";
-import { fmtRelative, fmtTime, runTitle } from "@/lib/format";
+import { fmtCost, fmtRelative, fmtTime, runTitle } from "@/lib/format";
 
 const HOLDER_LABEL: Record<string, string> = {
   serve: "service",
@@ -18,7 +19,9 @@ export const metadata = { title: "Schedules · DuskFleet" };
 
 const OUTCOME_CLASS: Record<string, string> = {
   started: "completed",
+  resumed: "completed",
   skipped_busy: "attention",
+  skipped_gate: "cancelled",
   skipped_disabled: "cancelled",
   error: "failed",
 };
@@ -119,6 +122,9 @@ export default function SchedulesPage() {
               <th>Last tick</th>
               <th className="num">Fired</th>
               <th className="num">Skipped</th>
+              <th className="num" title="Last 7 days: runs that found nothing to do, and what they cost">
+                Idle · 7 d
+              </th>
             </tr>
           </thead>
           <tbody>
@@ -152,6 +158,17 @@ export default function SchedulesPage() {
                         </span>
                       </div>
                     )}
+                    {s.willResumeRunId && (
+                      <div style={{ marginTop: 4 }}>
+                        <Link
+                          href={`/runs/${s.willResumeRunId}`}
+                          className="badge attention"
+                          title={`on_failure: resume_once (${s.onFailureSource}): the next fire resumes the session of run ${s.willResumeRunId} instead of starting fresh. Once; a second failure is final.`}
+                        >
+                          next: resume
+                        </Link>
+                      </div>
+                    )}
                   </td>
                   <td className="what">
                     <div className="prompt" title={s.prompt}>
@@ -175,6 +192,41 @@ export default function SchedulesPage() {
                       <Link href={`/?schedule=${encodeURIComponent(s.id)}`} title="Runs started by this schedule">
                         runs →
                       </Link>
+                      {s.gate && (
+                        <>
+                          <span className="sep">·</span>
+                          {s.gate.invalid !== undefined ? (
+                            <span
+                              className="flag warn"
+                              title={`Stored gate is unusable: ${s.gate.invalid}. Every fire is an error until the gate is set again or cleared.`}
+                            >
+                              gate: invalid
+                            </span>
+                          ) : (
+                            <span
+                              className="muted"
+                              title={
+                                s.gate.command !== undefined
+                                  ? `Gate: \`${s.gate.command}\` runs in the project first; exit 0 runs, exit 1-125 skips, anything else is an error`
+                                  : `Gate: agent ${s.gate.agent?.agentId} checks first ($${s.gate.agent?.budgetUsd ?? DEFAULT_GATE_BUDGET_USD} budget); "${s.gate.agent?.marker ?? DEFAULT_GATE_MARKER}" as the last line of its answer skips`
+                              }
+                            >
+                              gate: {s.gate.command !== undefined ? "command" : `agent ${s.gate.agent?.agentId}`}
+                            </span>
+                          )}
+                        </>
+                      )}
+                      {s.effectiveOnFailure === "resume_once" && (
+                        <>
+                          <span className="sep">·</span>
+                          <span
+                            className="muted"
+                            title={`on_failure: resume_once from the ${s.onFailureSource}${s.resumeBudgetUsd !== null ? ` · resume budget $${s.resumeBudgetUsd}` : ""}: after a budget or timeout failure the next tick resumes the session once`}
+                          >
+                            resume once on failure
+                          </span>
+                        </>
+                      )}
                     </div>
                     <div className="muted" style={{ fontSize: "0.8rem", marginTop: 4, maxWidth: 520 }} title={s.prompt}>
                       {runTitle(s.prompt, 90)}
@@ -230,10 +282,37 @@ export default function SchedulesPage() {
                             {fmtRelative(s.lastFiredAt)}
                           </span>
                         </span>
-                        {s.lastRunId && (
-                          <Link href={`/runs/${s.lastRunId}`} style={{ fontSize: "0.8rem" }}>
-                            last run →
-                          </Link>
+                        {s.lastRun ? (
+                          <span
+                            style={{
+                              fontSize: "0.8rem",
+                              display: "flex",
+                              gap: 6,
+                              alignItems: "center",
+                              flexWrap: "wrap",
+                            }}
+                          >
+                            <Link href={`/runs/${s.lastRun.id}`}>last run →</Link>
+                            <StatusBadge status={s.lastRun.status} reasons={s.lastRun.reviewReasons} />
+                            {s.lastRun.needsReview && (
+                              <Link
+                                href={`/runs/${s.lastRun.id}#issues`}
+                                className="muted"
+                                title={`The run this schedule last started needs review: ${s.lastRun.reviewReasons.map((r) => REVIEW_REASON_LABELS[r]).join(", ")}`}
+                              >
+                                {s.lastRun.reviewReasons
+                                  .map((r) => REVIEW_REASON_LABELS[r])
+                                  .slice(0, 2)
+                                  .join(" · ")}
+                              </Link>
+                            )}
+                          </span>
+                        ) : (
+                          s.lastRunId && (
+                            <Link href={`/runs/${s.lastRunId}`} style={{ fontSize: "0.8rem" }}>
+                              last run →
+                            </Link>
+                          )
                         )}
                         {s.lastError && (
                           <span className="muted" style={{ fontSize: "0.8rem" }} title={s.lastError}>
@@ -270,6 +349,38 @@ export default function SchedulesPage() {
                     }
                   >
                     {s.skips}
+                  </td>
+                  <td
+                    className="num"
+                    title={`Last ${s.idle7d.days} days: ${s.idle7d.ticks} ticks, ${s.idle7d.fires} fires, ${s.idle7d.runs} runs (${fmtCost(s.idle7d.costUsd)}). ${s.idle7d.noopRuns} reported no work (${fmtCost(s.idle7d.noopCostUsd)}), matched by ${s.idle7d.noopPattern}${s.noopPattern ? " (this schedule's noop_pattern)" : " (scheduler.noop_pattern)"}.${s.idle7d.noopPatternError ? ` Not counted: ${s.idle7d.noopPatternError}.` : ""}`}
+                  >
+                    {s.idle7d.gateChecks > 0 && (
+                      <div
+                        className="muted"
+                        style={{ fontSize: "0.8rem" }}
+                        title={`Gate checked ${s.idle7d.gateChecks} ticks, skipped ${s.idle7d.gateSkips}; spent on gates ${fmtCost(s.idle7d.gateCostUsd)} (not in the run cost)`}
+                      >
+                        gate {s.idle7d.gateSkips}/{s.idle7d.gateChecks} skipped · {fmtCost(s.idle7d.gateCostUsd)}
+                      </div>
+                    )}
+                    {s.idle7d.runs === 0 ? (
+                      <span className="faint">–</span>
+                    ) : (
+                      <div style={{ display: "grid", gap: 2 }}>
+                        <span
+                          style={
+                            s.idle7d.noopRuns > 0 && s.idle7d.noopRuns * 2 >= s.idle7d.runs
+                              ? { color: "var(--warn)" }
+                              : undefined
+                          }
+                        >
+                          {s.idle7d.noopRuns} / {s.idle7d.runs} no-op
+                        </span>
+                        <span className="muted" style={{ fontSize: "0.8rem" }}>
+                          {fmtCost(s.idle7d.noopCostUsd)} of {fmtCost(s.idle7d.costUsd)}
+                        </span>
+                      </div>
+                    )}
                   </td>
                 </tr>
               );

@@ -4,15 +4,20 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { parse as parseYaml } from "yaml";
 import { z } from "zod";
+import { DEFAULT_NOOP_PATTERN, parseNoopPattern } from "../scheduler/idle.js";
+import { logger } from "../util/log.js";
 import { AGENT_ID_PATTERN, maxConcurrentSchema } from "./agent-files.js";
 import {
   type AgentDefinition,
   type AgentSource,
   type DuskFleetConfig,
   EFFORT_LEVELS,
+  ON_FAILURE_POLICIES,
   PERMISSION_MODES,
   type ProjectDefinition,
 } from "./types.js";
+
+const log = logger("config");
 
 /**
  * Locates the config directory.
@@ -77,6 +82,23 @@ const globalSchema = z.object({
       enabled: z.boolean().default(true),
       tick_seconds: z.number().int().min(5).max(300).default(30),
       default_time_zone: z.string().default("Europe/London"),
+      // A bad marker only feeds the idle-cost stats: warn and use the default rather than
+      // failing every config reload (every run, list_* call and scheduler tick).
+      noop_pattern: z
+        .string()
+        .default(DEFAULT_NOOP_PATTERN)
+        .transform((p) => {
+          try {
+            parseNoopPattern(p);
+            return p;
+          } catch (err) {
+            log.warn("scheduler.noop_pattern ignored, using the default", {
+              err: err instanceof Error ? err.message : String(err),
+              default: DEFAULT_NOOP_PATTERN,
+            });
+            return DEFAULT_NOOP_PATTERN;
+          }
+        }),
     })
     .prefault({}),
 });
@@ -93,6 +115,8 @@ const agentFrontmatterSchema = z.object({
   timeout_minutes: z.number().positive().optional(),
   max_budget_usd: z.number().positive().optional(),
   wrap_up_reserve_usd: z.number().nonnegative().optional(),
+  on_failure: z.enum(ON_FAILURE_POLICIES).optional(),
+  resume_budget_usd: z.number().positive().optional(),
   inherit_mcp: z.boolean().optional(),
   add_dirs: z.array(z.string()).optional(),
   claude_agent: z.string().min(1).optional(),
@@ -177,6 +201,7 @@ export function loadConfig(configDir: string): DuskFleetConfig {
       enabled: g.scheduler.enabled,
       tickSeconds: g.scheduler.tick_seconds,
       defaultTimeZone: g.scheduler.default_time_zone,
+      noopPattern: g.scheduler.noop_pattern,
     },
     agents,
     projects,
@@ -226,6 +251,8 @@ export function loadAgents(agentsDir: string, source: AgentSource = "builtin"): 
     if (fm.timeout_minutes !== undefined) agent.timeoutMinutes = fm.timeout_minutes;
     if (fm.max_budget_usd !== undefined) agent.maxBudgetUsd = fm.max_budget_usd;
     if (fm.wrap_up_reserve_usd !== undefined) agent.wrapUpReserveUsd = fm.wrap_up_reserve_usd;
+    if (fm.on_failure !== undefined) agent.onFailure = fm.on_failure;
+    if (fm.resume_budget_usd !== undefined) agent.resumeBudgetUsd = fm.resume_budget_usd;
     if (fm.inherit_mcp !== undefined) agent.inheritMcp = fm.inherit_mcp;
     if (fm.add_dirs !== undefined) agent.addDirs = fm.add_dirs.map(expandHome);
     if (fm.claude_agent !== undefined) agent.claudeAgent = fm.claude_agent;

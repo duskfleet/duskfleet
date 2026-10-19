@@ -1,6 +1,7 @@
 /**
  * Orphan recovery with several DuskFleet processes on one database: a run is failed
- * only when its owning process is gone (dead pid on this host, or no owner recorded),
+ * only when its owning process is gone (dead pid on this host, or no owner recorded and
+ * older than the longest timeout),
  * at startup and by the scheduler lease holder's periodic sweep.
  */
 import assert from "node:assert/strict";
@@ -71,6 +72,12 @@ async function runningRow(app, owner) {
   return started.id;
 }
 
+/** Move a run's start `ms` into the past. */
+function backdate(app, id, ms) {
+  const at = new Date(Date.now() - ms).toISOString();
+  app.db.prepare("UPDATE runs SET created_at = ?, started_at = ? WHERE id = ?").run(at, at, id);
+}
+
 test("a second process's startup recovery leaves a live owner's run alone; the owner completes it", async () => {
   const app = makeApp();
   try {
@@ -97,6 +104,7 @@ test("startup recovery fails runs of a dead owner and legacy rows, not runs of a
     const dead = formatHolder("serve", hostname(), deadPid());
     const deadRun = await runningRow(app, dead);
     const legacyRun = await runningRow(app, null);
+    backdate(app, legacyRun, 2 * 60_000); // timeout 0.05 min + the one-minute margin
     const remoteRun = await runningRow(app, formatHolder("serve", "some-other-host", 1));
 
     const b = app.manager(formatHolder("cli", hostname(), deadPid()));
@@ -107,6 +115,22 @@ test("startup recovery fails runs of a dead owner and legacy rows, not runs of a
     assert.ok(failed.endedAt);
     assert.equal(b.getRun(legacyRun).status, "failed", "owner NULL is recovered as before");
     assert.equal(b.getRun(remoteRun).status, "running", "another host's pids cannot be checked from here");
+  } finally {
+    await app.cleanup();
+  }
+});
+
+test("a recent row without owner may belong to a process on an older build: left alone", async () => {
+  const app = makeApp();
+  try {
+    const stale = await runningRow(app, null);
+    const b = app.manager(formatHolder("mcp", hostname(), deadPid()));
+    assert.equal(b.recoverOrphans(), 0, "younger than the longest timeout");
+    assert.equal(b.getRun(stale).status, "running");
+    assert.throws(() => b.cancelRun(stale), /owned by \(unrecorded/);
+    backdate(app, stale, 2 * 60_000);
+    assert.equal(b.recoverOrphans(), 1, "older than any run may live");
+    assert.equal(b.getRun(stale).error, "orphaned: owning process (unrecorded) is gone");
   } finally {
     await app.cleanup();
   }

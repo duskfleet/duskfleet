@@ -151,24 +151,32 @@ export default async function RunsPage({ searchParams }: { searchParams: Promise
         </div>
         <div
           className="stat"
-          title="Completed without permission denials or context exhaustion, over all finished runs"
+          title="Completed with nothing to review (no denial, context exhaustion or MCP mismatch), over all finished runs. clean + completed to review + failed = finished"
         >
           <div className="label">Clean runs</div>
           <div className="value">{fmtPct(o.clean, o.finished)}</div>
           <div className="sub">
-            {fmtInt(o.clean)} clean · {fmtInt(o.needsReview)} to review · {fmtInt(o.failed)} failed
+            {fmtInt(o.clean)} clean · {fmtInt(o.completed - o.clean)} completed to review · {fmtInt(o.failed)} failed
           </div>
         </div>
         <div className="stat">
           <div className="label">Needs review</div>
           <div className={`value ${o.needsReview ? "warn" : ""}`}>{o.needsReview}</div>
-          <div className="sub">hit a permission denial or ran out of context</div>
+          <div className="sub">failed, timed out, out of budget or context, orphaned, or denied a tool</div>
         </div>
         <div className="stat">
           <div className="label">Spent</div>
           <div className="value">{fmtCost(o.costUsd)}</div>
           <div className="sub">
             {fmtCost(o.costLast24hUsd)} in the last 24 h{filtered ? " · in this filter" : ""}
+            {o.costGatesUsd > 0 && (
+              <>
+                <br />
+                <span title="Schedule gate agents decide whether a tick has work; their runs are not in the counts, only here">
+                  {fmtCost(o.costUsd - o.costGatesUsd)} on runs · {fmtCost(o.costGatesUsd)} on gates
+                </span>
+              </>
+            )}
           </div>
         </div>
       </section>

@@ -10,6 +10,7 @@ npm run cli -- run --project my-app --agent my-reviewer --model sonnet -- "Revie
 npm run cli -- run --no-wait --project /path -- "..."     # return immediately
 npm run cli -- runs --status completed --limit 10
 npm run cli -- run-info <run_id> --events   # includes subagents; --events adds the timeline
+npm run cli -- repair-subagents             # backfill subagent rows of finished runs from their logs
 npm run cli -- agents
 npm run cli -- projects
 npm run cli -- schedules
@@ -36,7 +37,10 @@ explicit model uses the Claude Code default.
 `terminationReason`, `error`, `resultText`, `numTurns`, `toolCalls`, input/output/cache tokens,
 `costUsd`, `permissionDenials`, `deniedTools`, `mcp` (mounted, used, allow-listed but missing),
 `humanIntervention`, `contextExhausted`, `scheduleId`, `logPath`, `phases` (the main pass and,
-after a budget exhaustion, the [wrap-up pass](agents.md#budget-reserve-and-wrap-up-pass)).
+after a budget exhaustion, the [wrap-up pass](agents.md#budget-reserve-and-wrap-up-pass)), `resumedFromRunId` (the run whose session it resumed, see [resume once](schedules.md#resume-once-on-failure)).
 
 `contextExhausted` comes only from structured signals (termination reason, result subtype,
 stop reason, or the error text of a failed run), never from scanning the result's prose.
+
+`duskfleet runs` adds `needsReview` and `reviewReasons` per run (see
+[dashboard](dashboard.md#needs-review)); `duskfleet schedules` adds `lastRun` per schedule.

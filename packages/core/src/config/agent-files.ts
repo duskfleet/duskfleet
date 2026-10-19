@@ -16,7 +16,7 @@ import { existsSync, mkdirSync, readdirSync, readFileSync, unlinkSync, writeFile
 import path from "node:path";
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 import { z } from "zod";
-import { type AgentDefinition, EFFORT_LEVELS, PERMISSION_MODES } from "./types.js";
+import { type AgentDefinition, EFFORT_LEVELS, ON_FAILURE_POLICIES, PERMISSION_MODES } from "./types.js";
 
 export const AGENT_ID_PATTERN = /^[a-z0-9][a-z0-9-_]*$/;
 
@@ -39,6 +39,8 @@ export const agentSpecSchema = z.object({
   timeout_minutes: z.number().positive().optional(),
   max_budget_usd: z.number().positive().optional(),
   wrap_up_reserve_usd: z.number().nonnegative().optional(),
+  on_failure: z.enum(ON_FAILURE_POLICIES).optional(),
+  resume_budget_usd: z.number().positive().optional(),
   inherit_mcp: z.boolean().optional(),
   add_dirs: z.array(z.string().min(1)).optional(),
   claude_agent: z.string().min(1).optional(),
@@ -93,6 +95,8 @@ export function agentToSpec(a: AgentDefinition): AgentSpec {
   if (a.timeoutMinutes !== undefined) spec.timeout_minutes = a.timeoutMinutes;
   if (a.maxBudgetUsd !== undefined) spec.max_budget_usd = a.maxBudgetUsd;
   if (a.wrapUpReserveUsd !== undefined) spec.wrap_up_reserve_usd = a.wrapUpReserveUsd;
+  if (a.onFailure !== undefined) spec.on_failure = a.onFailure;
+  if (a.resumeBudgetUsd !== undefined) spec.resume_budget_usd = a.resumeBudgetUsd;
   if (a.inheritMcp !== undefined) spec.inherit_mcp = a.inheritMcp;
   if (a.addDirs !== undefined) spec.add_dirs = a.addDirs;
   if (a.claudeAgent !== undefined) spec.claude_agent = a.claudeAgent;

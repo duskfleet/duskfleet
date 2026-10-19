@@ -60,6 +60,28 @@ export interface StreamState {
   countedMessages: Set<string>;
   /** Subagents whose startedAt was taken from a stream timestamp. */
   stamped: Set<string>;
+  /** Agent tool calls seen in any session, by tool_use id: what was delegated, from the call's input. */
+  agentCalls: Map<string, AgentCallInput>;
+  /** Agent call tool_use id → agent id of the subagent it spawned (O(1) lookup on every tool_result). */
+  subagentByParent: Map<string, string>;
+  /**
+   * Subagents whose durationMs is a measurement: a harness total (`totalDurationMs`,
+   * `task_notification.usage.duration_ms`) or the gap between two stream timestamps. Any other
+   * duration was derived from wall-clock time, which is meaningless during a log replay.
+   */
+  measured: Set<string>;
+  /** Subagents whose hand-back was a background launch (`async_launched`): their task_notification closes them. */
+  background: Set<string>;
+  /** Subagents whose endedAt is the wall clock at parse time (the closing line had no timestamp). */
+  wallClockEnd: Set<string>;
+}
+
+interface AgentCallInput {
+  subagentType: string | null;
+  description: string | null;
+  prompt: string | null;
+  /** Stream timestamp of the line that issued the call: the subagent's start when no nested line is seen. */
+  at: string | null;
 }
 
 export function createStreamState(): StreamState {
@@ -74,6 +96,11 @@ export function createStreamState(): StreamState {
     toolUseOwner: new Map(),
     countedMessages: new Set(),
     stamped: new Set(),
+    agentCalls: new Map(),
+    subagentByParent: new Map(),
+    measured: new Set(),
+    background: new Set(),
+    wallClockEnd: new Set(),
   };
 }
 
@@ -164,12 +191,25 @@ export function ingestLine(state: StreamState, line: string): ExecutionEvent[] {
           const record = state.subagents.get(str(msg["task_id"]) ?? "");
           if (!record) break;
           const status = str(msg["status"]);
-          if (status === "failed" || status === "error") record.status = "failed";
-          else if (status) record.status = "completed";
+          const outcome = status === null ? null : terminalStatus(status);
+          // A failed outcome wins over an earlier completed; nothing downgrades failed.
+          if (outcome === "failed" || (outcome === "completed" && record.status === "running")) record.status = outcome;
           const usage = isObject(msg["usage"]) ? msg["usage"] : {};
-          record.durationMs = num(usage["duration_ms"]) ?? record.durationMs;
+          const duration = num(usage["duration_ms"]);
+          if (duration !== null) {
+            record.durationMs = duration;
+            state.measured.add(record.agentId);
+          }
           record.totalTokens = num(usage["total_tokens"]) ?? record.totalTokens;
-          if (record.resultText === null) record.resultText = str(msg["summary"]);
+          if (record.resultText === null) {
+            const summary = str(msg["summary"]);
+            record.resultText = summary === null ? null : cleanHandBack(summary);
+          }
+          // A background subagent's hand-back was only the launch notice: this line is its end.
+          if (outcome !== null && state.background.has(record.agentId) && record.endedAt === null) {
+            closeSubagent(state, record, str(msg["timestamp"]), null, null);
+            events.push({ type: "subagent_end", subagent: record });
+          }
           break;
         }
         default:
@@ -201,6 +241,19 @@ export function ingestLine(state: StreamState, line: string): ExecutionEvent[] {
           const name = str(block["name"]) ?? "unknown";
           const id = str(block["id"]);
           if (id) state.toolUseOwner.set(id, agentId);
+          // The Agent call's input is the authoritative brief: subagent_type, description, prompt.
+          if (id && (name === "Agent" || name === "Task") && isObject(block["input"])) {
+            const input = block["input"];
+            const call = {
+              subagentType: str(input["subagent_type"]),
+              description: str(input["description"]),
+              prompt: str(input["prompt"]),
+              at: str(msg["timestamp"]),
+            };
+            state.agentCalls.set(id, call);
+            const existing = subagentByParent(state, id);
+            if (existing) fillFromAgentCall(existing, call);
+          }
           if (record) {
             record.toolCalls += 1;
             if (!record.tools.includes(name)) record.tools.push(name);
@@ -231,16 +284,36 @@ export function ingestLine(state: StreamState, line: string): ExecutionEvent[] {
         } else if (block["type"] === "tool_result") {
           // The hand-back: a tool_result for the Agent call that spawned a subagent closes it.
           const toolUseId = str(block["tool_use_id"]);
-          const record = toolUseId
-            ? [...state.subagents.values()].find((s) => s.parentToolUseId === toolUseId)
-            : undefined;
+          if (!toolUseId) continue;
+          const handBack = isObject(msg["tool_use_result"]) ? msg["tool_use_result"] : null;
+          let record = subagentByParent(state, toolUseId);
+          // No task_started and no nested lines (older CLI, or a stream without them): the
+          // hand-back alone still identifies the subagent through tool_use_result.agentId.
+          const handBackAgentId = handBack ? str(handBack["agentId"]) : null;
+          if (
+            !record &&
+            handBackAgentId &&
+            (state.agentCalls.has(toolUseId) || handBack?.["agentType"] !== undefined)
+          ) {
+            record = subagentFor(state, handBackAgentId, toolUseId, handBack?.["agentType"], null, events);
+          }
           if (!record || record.endedAt !== null) continue;
+          fillFromAgentCall(record, state.agentCalls.get(toolUseId));
+          if (handBack) fillFromHandBack(state, record, handBack);
+          // No tool_use_result (older CLIs): the tool_result itself is the end, as before.
+          const outcome = handBack ? terminalStatus(str(handBack["status"])) : "completed";
+          if (outcome === null) {
+            // Background launch (async_launched): the text is the launch notice, not the report,
+            // and the subagent is still working. Its task_notification closes it.
+            state.background.add(record.agentId);
+            continue;
+          }
           const text = toolResultText(block["content"]);
-          if (text) record.resultText = text;
-          if (record.status === "running") record.status = "completed";
-          record.endedAt = str(msg["timestamp"]) ?? new Date().toISOString();
-          if (record.durationMs === null)
-            record.durationMs = Math.max(0, Date.parse(record.endedAt) - Date.parse(record.startedAt));
+          if (text) record.resultText = cleanHandBack(text);
+          // A failed hand-back wins even over a completed task_notification; nothing downgrades failed.
+          if (outcome === "failed" || record.status === "running") record.status = outcome;
+          const total = handBack ? num(handBack["totalDurationMs"]) : null;
+          closeSubagent(state, record, str(msg["timestamp"]), total, state.agentCalls.get(toolUseId)?.at ?? null);
           events.push({ type: "subagent_end", subagent: record });
         }
       }
@@ -310,9 +383,117 @@ function subagentFor(
     usage: emptyUsage(),
     totalTokens: null,
   };
+  if (parent) {
+    fillFromAgentCall(record, state.agentCalls.get(parent));
+    if (!state.subagentByParent.has(parent)) state.subagentByParent.set(parent, agentId);
+  }
   state.subagents.set(agentId, record);
   events.push({ type: "subagent_start", subagent: record });
   return record;
+}
+
+function subagentByParent(state: StreamState, parentToolUseId: string): SubagentRecord | undefined {
+  const agentId = state.subagentByParent.get(parentToolUseId);
+  return agentId === undefined ? undefined : state.subagents.get(agentId);
+}
+
+function fillFromAgentCall(record: SubagentRecord, call: AgentCallInput | undefined): void {
+  if (!call) return;
+  if (record.subagentType === "unknown" && call.subagentType) record.subagentType = call.subagentType;
+  if (record.description === null) record.description = call.description;
+  if (record.prompt === null) record.prompt = call.prompt;
+}
+
+/**
+ * The hand-back line's `tool_use_result` (verified 2026-10-14, CLI 2.1.299): agentType,
+ * prompt, resolvedModel, totalDurationMs, totalTokens, totalToolUseCount, status. Exact
+ * figures from the harness; they win over what was counted from forwarded lines, which
+ * misses lines the CLI does not forward.
+ */
+function fillFromHandBack(state: StreamState, record: SubagentRecord, r: Json): void {
+  const type = str(r["agentType"]);
+  if (type && record.subagentType === "unknown") record.subagentType = type;
+  if (record.prompt === null) record.prompt = str(r["prompt"]);
+  if (record.model === null) record.model = str(r["resolvedModel"]);
+  const total = num(r["totalDurationMs"]);
+  if (total !== null) {
+    record.durationMs = total;
+    state.measured.add(record.agentId);
+  }
+  record.totalTokens = num(r["totalTokens"]) ?? record.totalTokens;
+  const toolUses = num(r["totalToolUseCount"]);
+  if (toolUses !== null) record.toolCalls = Math.max(record.toolCalls, toolUses);
+}
+
+/**
+ * The outcome a hand-back or task_notification status reports, or null when the subagent is
+ * still working (`async_launched` for a background Agent call, or any status not known to be
+ * final). A hand-back without a status (older CLIs) is final: callers pass "completed" for it.
+ */
+function terminalStatus(status: string | null): "completed" | "failed" | null {
+  if (status === null || status === "completed" || status === "success") return "completed";
+  if (status === "failed" || status === "error" || status === "killed") return "failed";
+  return null;
+}
+
+/**
+ * Sets endedAt (stream time, else wall clock) and, when nothing measured it, the duration. A
+ * subagent no nested line stamped (hand-back alone) still has the parse time as startedAt, i.e.
+ * its end or the time of a replay: it is derived from the harness total or the Agent call time.
+ */
+function closeSubagent(
+  state: StreamState,
+  record: SubagentRecord,
+  endTs: string | null,
+  totalDurationMs: number | null,
+  callAt: string | null,
+): void {
+  record.endedAt = endTs ?? new Date().toISOString();
+  if (endTs === null) state.wallClockEnd.add(record.agentId);
+  if (!state.stamped.has(record.agentId)) {
+    const endMs = Date.parse(record.endedAt);
+    if (totalDurationMs !== null && Number.isFinite(endMs)) {
+      record.startedAt = new Date(endMs - totalDurationMs).toISOString();
+      state.stamped.add(record.agentId);
+    } else if (callAt) {
+      record.startedAt = callAt;
+      state.stamped.add(record.agentId);
+    }
+  }
+  if (record.durationMs !== null) return;
+  record.durationMs = Math.max(0, Date.parse(record.endedAt) - Date.parse(record.startedAt));
+  // Two stream timestamps make a measurement; wall-clock time (a replay's clock) does not.
+  if (endTs !== null && state.stamped.has(record.agentId)) state.measured.add(record.agentId);
+}
+
+const HAND_BACK_PREAMBLE = /^\[Subagent hand-back\][\s\S]*?The report follows:\s*\n/;
+/** Footer after a preamble: an optional `agentId:` line, then the `<usage>` block. */
+const HAND_BACK_FOOTER = /\n(?:agentId: [^\n]*\n)?<usage>[\s\S]*?<\/usage>\s*$/;
+/**
+ * Footer without a preamble: only with its `agentId:` line, so a report that itself ends with a
+ * literal `<usage>` block is left whole.
+ */
+const HAND_BACK_FOOTER_WITH_ID = /\nagentId: [^\n]*\n<usage>[\s\S]*?<\/usage>\s*$/;
+
+/** The text still carries Claude Code's hand-back frame (preamble, or the agentId footer). Two regex tests, no rewrite. */
+export function isRawHandBack(text: string): boolean {
+  return HAND_BACK_PREAMBLE.test(text) || HAND_BACK_FOOTER_WITH_ID.test(text);
+}
+
+/**
+ * The report as the subagent wrote it. Claude Code wraps it in a hand-back frame (a
+ * provenance preamble, every line indented by two spaces, an `agentId:` / `<usage>`
+ * footer); stored raw, the first 300 characters were all frame and no report.
+ */
+export function cleanHandBack(text: string): string {
+  const m = HAND_BACK_PREAMBLE.exec(text);
+  if (!m) return HAND_BACK_FOOTER_WITH_ID.test(text) ? text.replace(HAND_BACK_FOOTER_WITH_ID, "").trimEnd() : text;
+  const body = text.slice(m[0].length).replace(HAND_BACK_FOOTER, "");
+  return body
+    .split("\n")
+    .map((l) => (l.startsWith("  ") ? l.slice(2) : l))
+    .join("\n")
+    .trim();
 }
 
 /** Text of a tool_result: a plain string or an array of text blocks. */
@@ -368,15 +549,6 @@ function parseResult(msg: Json): ParsedResult {
     modelUsed,
     raw: msg,
   };
-}
-
-/**
- * The run stopped because `--max-budget-usd` was reached. Claude Code reports it as
- * `terminal_reason: "budget_exhausted"` with `subtype: "error_max_budget_usd"` (verified
- * 2026-10-14 on CLI 2.1.299); either is enough.
- */
-export function isBudgetExhausted(terminationReason: string | null | undefined): boolean {
-  return typeof terminationReason === "string" && /budget/i.test(terminationReason);
 }
 
 /**
