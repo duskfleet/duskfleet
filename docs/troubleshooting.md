@@ -15,6 +15,12 @@
 - **The agent cannot run tests or use Bash**: `permission_mode: acceptEdits` does not allow
   Bash. Add entries such as `Bash(npm test:*)` to `allowed_tools`. The target project's own
   `.claude/settings` allow-lists are ignored in unattended runs.
+- **An allow-listed command is still denied**: a prefix rule matches at a word boundary, and
+  a colon is not one, so `Bash(npm run lint:*)` does not allow `npm run lint:fix`: list such
+  scripts one by one (`Bash(npm run lint:fix)`). A variable in front (`FOO=1 npm test`) is a
+  different command. Some shapes are refused whatever the rules say: an unquoted
+  `@{upstream}`, a GraphQL fragment in `gh api graphql`, and a quoted argument with a line
+  starting with `#` (pass a long PR body with `--body-file`). Verified with Claude Code 2.1.303.
 - **A `plan` agent does nothing**: `plan` blocks Bash, MCP and writes regardless of allow-lists.
   Use `dontAsk` with `disallowed_tools: [Edit, Write, NotebookEdit]` for read-only agents.
 - **`bypassPermissions` rejected**: enable `claude.allow_bypass_permissions` deliberately; it maps
