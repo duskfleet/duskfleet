@@ -11,6 +11,12 @@ export interface ExecutionRequest {
   prompt: string;
   /** Session id chosen by the caller so it is known before the process starts. */
   sessionId: string;
+  /**
+   * Continue an existing session (`claude --resume <id>`) instead of starting one with
+   * `--session-id`. Used by the wrap-up pass after a budget exhaustion. The log file is
+   * appended, not replaced.
+   */
+  resumeSessionId?: string;
   permissionMode: PermissionMode;
   model?: string;
   allowedTools?: string[];
@@ -35,7 +41,14 @@ export interface ExecutionRequest {
  * otherwise (see SubagentRecord).
  */
 export type ExecutionEvent =
-  | { type: "init"; sessionId: string; model: string | null; tools: string[]; mcpServers: McpServerInfo[]; cliVersion: string | null }
+  | {
+      type: "init";
+      sessionId: string;
+      model: string | null;
+      tools: string[];
+      mcpServers: McpServerInfo[];
+      cliVersion: string | null;
+    }
   | { type: "tool_use"; name: string; id: string | null; input?: unknown; agentId: string | null }
   | { type: "assistant_text"; text: string; agentId: string | null }
   | { type: "subagent_start"; subagent: SubagentRecord }

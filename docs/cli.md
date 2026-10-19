@@ -35,7 +35,8 @@ explicit model uses the Claude Code default.
 `claudeSessionId`, `permissionMode`, the exact `command` (binary, argv, cwd), `exitCode`,
 `terminationReason`, `error`, `resultText`, `numTurns`, `toolCalls`, input/output/cache tokens,
 `costUsd`, `permissionDenials`, `deniedTools`, `mcp` (mounted, used, allow-listed but missing),
-`humanIntervention`, `contextExhausted`, `scheduleId`, `logPath`.
+`humanIntervention`, `contextExhausted`, `scheduleId`, `logPath`, `phases` (the main pass and,
+after a budget exhaustion, the [wrap-up pass](agents.md#budget-reserve-and-wrap-up-pass)).
 
 `contextExhausted` comes only from structured signals (termination reason, result subtype,
 stop reason, or the error text of a failed run), never from scanning the result's prose.

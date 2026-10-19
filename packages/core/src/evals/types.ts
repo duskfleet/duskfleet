@@ -7,8 +7,9 @@
  *    defined in config/evals/*.yaml and run after a run reaches a terminal state
  *  - LLM evaluators implemented as a second, read-only Claude Code run
  */
-import type { DatabaseSync } from "node:sqlite";
+
 import { randomUUID } from "node:crypto";
+import type { DatabaseSync } from "node:sqlite";
 
 export type EvalKind = "deterministic" | "llm";
 export type EvalStatus = "pass" | "fail" | "error" | "skipped";
@@ -37,7 +38,9 @@ export class EvalRepository {
   record(input: Omit<EvalResult, "id" | "createdAt">): EvalResult {
     const result: EvalResult = { ...input, id: randomUUID(), createdAt: new Date().toISOString() };
     this.db
-      .prepare("INSERT INTO evals (id, run_id, name, kind, status, score, details, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)")
+      .prepare(
+        "INSERT INTO evals (id, run_id, name, kind, status, score, details, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+      )
       .run(
         result.id,
         result.runId,

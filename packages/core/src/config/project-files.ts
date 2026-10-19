@@ -20,7 +20,11 @@ export const PROJECT_ID_PATTERN = /^[a-z0-9][a-z0-9-_]*$/;
 
 /** "My App Repo" → "my-app-repo"; falls back to "project" when nothing usable is left. */
 export function projectIdFromPath(dir: string): string {
-  const base = path.basename(dir).toLowerCase().replace(/[^a-z0-9-_]+/g, "-").replace(/^-+|-+$/g, "");
+  const base = path
+    .basename(dir)
+    .toLowerCase()
+    .replace(/[^a-z0-9-_]+/g, "-")
+    .replace(/^-+|-+$/g, "");
   return base || "project";
 }
 

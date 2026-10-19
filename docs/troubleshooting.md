@@ -19,8 +19,22 @@
   Use `dontAsk` with `disallowed_tools: [Edit, Write, NotebookEdit]` for read-only agents.
 - **`bypassPermissions` rejected**: enable `claude.allow_bypass_permissions` deliberately; it maps
   to `--dangerously-skip-permissions`.
-- **Runs failed with "orphaned"**: DuskFleet was restarted while they were running. Resume the
-  Claude session with the `resumeCommand` from `get_run` if you want to continue the work.
+- **Runs failed with "orphaned: owning process ... is gone"**: the DuskFleet process that
+  started them (named in the error) exited or crashed while they were running. Runs of a live
+  process (another MCP server, `serve`) are never touched. Resume the Claude session with the
+  `resumeCommand` from `get_run` if you want to continue the work.
+- **A run stays `running` although nothing is running**: recovery only fails a run when its
+  owner (`role@host:pid`) is provably gone. Two cases it cannot see: the owner's pid was
+  reused by an unrelated live process, or the machine's hostname changed since the run
+  started (macOS renames `Mac.local` to `Mac-2.local` on a name clash), so the owner looks like
+  another host. Without `scheduler.enabled` (or with no process holding the lease) the
+  periodic sweep does not run either; only the next start of a DuskFleet process recovers.
+  Clean up by hand: stop the owning process if it is still alive, then mark the row failed in
+  `data/duskfleet.db`, e.g.
+  `sqlite3 data/duskfleet.db "UPDATE runs SET status='failed', error='manual cleanup' WHERE id='<run id>' AND status='running'"`.
+- **`cancel_run` says the run is owned by another live DuskFleet process**: the claude child
+  belongs to that process (another MCP server, or `serve`); cancel it there, or stop that process
+  and the run is recovered as orphaned.
 - **Two DuskFleet processes, schedules fire once**: that is the SQLite lease at work. The
   dashboard's Schedules page and `doctor` show the holder and its kind (`serve`, `mcp`).
 - **"Ticking from an unknown process", Run now never fires, the service is running**: a

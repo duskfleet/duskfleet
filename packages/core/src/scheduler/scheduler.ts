@@ -14,15 +14,25 @@
  *    may not, and it must never hold the lease for days.
  *  - A process without a RunManager (the dashboard) triggers a schedule by setting
  *    `run_requested_at`; the lease holder fires it on its next tick, paused or not.
+ *  - The lease holder also sweeps orphaned runs (owner process gone) at most once a
+ *    minute, so a crashed process's runs close without waiting for the next start.
  */
-import { hostname } from "node:os";
 import type { RunManager } from "../orchestration/run-manager.js";
 import type { ScheduleRepository } from "../storage/schedules.js";
 import { logger } from "../util/log.js";
-import { createSchedule, formatHolder, nextRunAtFor, parseHolder, updateSchedule, type SchedulerRole } from "./crud.js";
+import {
+  createSchedule,
+  nextRunAtFor,
+  parseHolder,
+  processIdentity,
+  type SchedulerRole,
+  updateSchedule,
+} from "./crud.js";
 import type { Schedule, ScheduleInput, ScheduleOutcome, SchedulePatch } from "./types.js";
 
 const log = logger("scheduler");
+
+const ORPHAN_SWEEP_MS = 60_000;
 
 export interface SchedulerOptions {
   tickMs?: number;
@@ -51,6 +61,7 @@ export class Scheduler {
   private lastTickAt: string | null = null;
   private leaseHeld = false;
   private ticking = false;
+  private lastSweepMs = -Infinity;
   /** `serve` takes the lease from `mcp` / `cli` / role-less holders instead of waiting for it to expire. */
   private readonly preempts: boolean;
 
@@ -60,7 +71,7 @@ export class Scheduler {
     options: SchedulerOptions = {},
   ) {
     this.tickMs = options.tickMs ?? 30_000;
-    this.holder = options.holder ?? formatHolder(options.role ?? "unknown", hostname(), process.pid);
+    this.holder = options.holder ?? processIdentity(options.role ?? "unknown");
     this.preempts = parseHolder(this.holder).role === "serve";
     this.now = options.now ?? (() => new Date());
   }
@@ -69,7 +80,13 @@ export class Scheduler {
 
   create(input: ScheduleInput): Schedule {
     const created = createSchedule(this.repo, this.runs.config, input, this.now());
-    log.info("schedule created", { id: created.id, name: created.name, cron: created.cron, tz: created.timeZone, next: created.nextRunAt });
+    log.info("schedule created", {
+      id: created.id,
+      name: created.name,
+      cron: created.cron,
+      tz: created.timeZone,
+      next: created.nextRunAt,
+    });
     return created;
   }
 
@@ -151,6 +168,18 @@ export class Scheduler {
       }
       if (!hadLease) log.info("lease acquired", { holder: this.holder });
 
+      const nowMs = this.now().getTime();
+      if (nowMs - this.lastSweepMs >= ORPHAN_SWEEP_MS) {
+        // Own try: a failed sweep (e.g. SQLITE_BUSY) must not skip run-now requests and due
+        // schedules, and is retried on the next tick instead of a minute later.
+        try {
+          this.runs.recoverOrphans();
+          this.lastSweepMs = nowMs;
+        } catch (err) {
+          log.error("orphan sweep failed", { err: err instanceof Error ? err.message : String(err) });
+        }
+      }
+
       // Manual "run now" requests (dashboard) first: they fire even when paused, like fireNow.
       for (const s of this.repo.takeRunRequests()) {
         log.info("run requested", { schedule: s.name, requestedAt: s.runRequestedAt });
@@ -168,7 +197,10 @@ export class Scheduler {
 
   // ---- internals -----------------------------------------------------------
 
-  private async fire(s: Schedule, manual: boolean): Promise<{ outcome: ScheduleOutcome; runId: string | null; error: string | null }> {
+  private async fire(
+    s: Schedule,
+    manual: boolean,
+  ): Promise<{ outcome: ScheduleOutcome; runId: string | null; error: string | null }> {
     const nextRunAt = s.enabled ? this.computeNext(s.cron, s.timeZone) : null;
     if (!s.enabled && !manual) {
       this.repo.recordFiring(s.id, "skipped_disabled", null, null, nextRunAt);

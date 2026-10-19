@@ -37,7 +37,10 @@ test("launchd plist: node, cli, serve, cwd, log, PATH and CLAUDE_BIN; xml-escape
   assert.equal(u.platform, "darwin");
   assert.equal(u.unitPath, "/home/me/Library/LaunchAgents/com.duskfleet.scheduler.plist");
   assert.match(u.content, /<key>Label<\/key><string>com\.duskfleet\.scheduler<\/string>/);
-  assert.match(u.content, /<string>\/opt\/node\/bin\/node<\/string>\s*<string>\/opt\/a&amp;b\/cli\.js<\/string>\s*<string>serve<\/string>/);
+  assert.match(
+    u.content,
+    /<string>\/opt\/node\/bin\/node<\/string>\s*<string>\/opt\/a&amp;b\/cli\.js<\/string>\s*<string>serve<\/string>/,
+  );
   assert.match(u.content, /<key>WorkingDirectory<\/key><string>\/opt\/a&amp;b<\/string>/);
   assert.match(u.content, /<key>KeepAlive<\/key><true\/>/);
   assert.match(u.content, /<key>RunAtLoad<\/key><true\/>/);
@@ -50,7 +53,10 @@ test("launchd plist: node, cli, serve, cwd, log, PATH and CLAUDE_BIN; xml-escape
 test("systemd user unit: quoted ExecStart, Restart=always, log append, no CLAUDE_BIN when unknown", () => {
   const u = renderService({ ...base, platform: "linux", claudeBin: null });
   assert.equal(u.unitPath, "/home/me/.config/systemd/user/duskfleet.service");
-  assert.match(u.content, /^ExecStart="\/opt\/node\/bin\/node" "\/opt\/dusk fleet\/packages\/mcp\/dist\/cli\.js" serve$/m);
+  assert.match(
+    u.content,
+    /^ExecStart="\/opt\/node\/bin\/node" "\/opt\/dusk fleet\/packages\/mcp\/dist\/cli\.js" serve$/m,
+  );
   assert.match(u.content, /^WorkingDirectory=\/opt\/dusk fleet$/m);
   assert.match(u.content, /^Restart=always$/m);
   assert.match(u.content, /^StandardError=append:\/opt\/dusk fleet\/data\/logs\/serve\.log$/m);
@@ -60,14 +66,25 @@ test("systemd user unit: quoted ExecStart, Restart=always, log append, no CLAUDE
 });
 
 test("Task Scheduler XML: logon trigger, no time limit, restart on failure, cmd wrapper appends the log", () => {
-  const u = renderService({ ...base, platform: "win32", nodeBin: "C:\\node\\node.exe", cliEntry: "C:\\dusk\\cli.js", logPath: "C:\\dusk\\data\\logs\\serve.log", repoRoot: "C:\\dusk", user: "PC\\me" });
+  const u = renderService({
+    ...base,
+    platform: "win32",
+    nodeBin: "C:\\node\\node.exe",
+    cliEntry: "C:\\dusk\\cli.js",
+    logPath: "C:\\dusk\\data\\logs\\serve.log",
+    repoRoot: "C:\\dusk",
+    user: "PC\\me",
+  });
   assert.equal(u.label, "DuskFleet Scheduler");
   assert.match(u.content, /<LogonTrigger>/);
   assert.match(u.content, /<UserId>PC\\me<\/UserId>/);
   assert.match(u.content, /<ExecutionTimeLimit>PT0S<\/ExecutionTimeLimit>/);
   assert.match(u.content, /<RestartOnFailure>/);
   assert.match(u.content, /<Command>cmd\.exe<\/Command>/);
-  assert.match(u.content, /<Arguments>\/c &quot;&quot;C:\\node\\node\.exe&quot; &quot;C:\\dusk\\cli\.js&quot; serve &gt;&gt; &quot;C:\\dusk\\data\\logs\\serve\.log&quot; 2&gt;&amp;1&quot;<\/Arguments>/);
+  assert.match(
+    u.content,
+    /<Arguments>\/c &quot;&quot;C:\\node\\node\.exe&quot; &quot;C:\\dusk\\cli\.js&quot; serve &gt;&gt; &quot;C:\\dusk\\data\\logs\\serve\.log&quot; 2&gt;&amp;1&quot;<\/Arguments>/,
+  );
   assert.match(u.content, /<WorkingDirectory>C:\\dusk<\/WorkingDirectory>/);
   assert.ok(u.installCommands[0].includes("schtasks /Create /F /TN"));
 });
@@ -83,7 +100,9 @@ test("install writes the unit and drives the service manager; uninstall removes 
   const logDir = path.join(home, "data", "logs");
   try {
     // macOS: bootout (ignored), bootstrap; the unit lands in ~/Library/LaunchAgents
-    const mac = fakeExec({ "launchctl bootout": { status: 3, stdout: "", stderr: "Boot-out failed: 3: No such process" } });
+    const mac = fakeExec({
+      "launchctl bootout": { status: 3, stdout: "", stderr: "Boot-out failed: 3: No such process" },
+    });
     const r = installService({ ...base, platform: "darwin", home, logPath: path.join(logDir, "serve.log") }, mac.exec);
     assert.ok(existsSync(r.unit.unitPath));
     assert.ok(existsSync(logDir));
@@ -92,11 +111,25 @@ test("install writes the unit and drives the service manager; uninstall removes 
     assert.equal(mac.calls[1][3], r.unit.unitPath);
 
     // a failing bootstrap surfaces its stderr
-    const bad = fakeExec({ "launchctl bootstrap": { status: 5, stdout: "", stderr: "Bootstrap failed: 5: Input/output error" } });
-    assert.throws(() => installService({ ...base, platform: "darwin", home, logPath: path.join(logDir, "serve.log") }, bad.exec), /Input\/output error/);
+    const bad = fakeExec({
+      "launchctl bootstrap": { status: 5, stdout: "", stderr: "Bootstrap failed: 5: Input/output error" },
+    });
+    assert.throws(
+      () => installService({ ...base, platform: "darwin", home, logPath: path.join(logDir, "serve.log") }, bad.exec),
+      /Input\/output error/,
+    );
 
     // status parses launchctl print
-    const st = serviceStatus("darwin", () => ({ status: 0, stdout: "com.duskfleet.scheduler = {\n\tactive count = 1\n\tpath = x\n\tstate = running\n\n\tprogram = node\n\tpid = 4242\n}", stderr: "" }), home);
+    const st = serviceStatus(
+      "darwin",
+      () => ({
+        status: 0,
+        stdout:
+          "com.duskfleet.scheduler = {\n\tactive count = 1\n\tpath = x\n\tstate = running\n\n\tprogram = node\n\tpid = 4242\n}",
+        stderr: "",
+      }),
+      home,
+    );
     assert.deepEqual([st.installed, st.running, st.pid], [true, true, 4242]);
     const off = serviceStatus("darwin", () => ({ status: 113, stdout: "", stderr: "Could not find service" }), home);
     assert.deepEqual([off.installed, off.running], [true, false]);
@@ -113,14 +146,21 @@ test("install writes the unit and drives the service manager; uninstall removes 
       lin.calls.map((c) => c.slice(1).join(" ")),
       ["--user daemon-reload", "--user enable duskfleet.service", "--user restart duskfleet.service"],
     );
-    const ls = serviceStatus("linux", () => ({ status: 0, stdout: "LoadState=loaded\nActiveState=active\nSubState=running\nMainPID=77\n", stderr: "" }), home);
+    const ls = serviceStatus(
+      "linux",
+      () => ({ status: 0, stdout: "LoadState=loaded\nActiveState=active\nSubState=running\nMainPID=77\n", stderr: "" }),
+      home,
+    );
     assert.deepEqual([ls.installed, ls.running, ls.pid], [true, true, 77]);
     uninstallService("linux", lin.exec, home);
     assert.ok(!existsSync(rl.unit.unitPath));
 
     // Windows: the XML is UTF-16LE with a BOM, then /Create and /Run
     const win = fakeExec();
-    const rw = installService({ ...base, platform: "win32", home, logPath: path.join(logDir, "serve.log"), user: "PC\\me" }, win.exec);
+    const rw = installService(
+      { ...base, platform: "win32", home, logPath: path.join(logDir, "serve.log"), user: "PC\\me" },
+      win.exec,
+    );
     const bytes = readFileSync(rw.unit.unitPath);
     assert.deepEqual([bytes[0], bytes[1]], [0xff, 0xfe]);
     assert.match(bytes.subarray(2).toString("utf16le"), /<Task version="1.4"/);
@@ -128,7 +168,15 @@ test("install writes the unit and drives the service manager; uninstall removes 
       win.calls.map((c) => c[1]),
       ["/End", "/Create", "/Run"],
     );
-    const ws = serviceStatus("win32", () => ({ status: 0, stdout: "HostName: PC\r\nTaskName: \\DuskFleet Scheduler\r\nStatus: Running\r\n", stderr: "" }), home);
+    const ws = serviceStatus(
+      "win32",
+      () => ({
+        status: 0,
+        stdout: "HostName: PC\r\nTaskName: \\DuskFleet Scheduler\r\nStatus: Running\r\n",
+        stderr: "",
+      }),
+      home,
+    );
     assert.deepEqual([ws.installed, ws.running], [true, true]);
   } finally {
     rmSync(home, { recursive: true, force: true });

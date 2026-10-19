@@ -1,6 +1,7 @@
-import { DatabaseSync } from "node:sqlite";
+import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, renameSync } from "node:fs";
 import path from "node:path";
+import { DatabaseSync } from "node:sqlite";
 import { logger } from "../util/log.js";
 
 const log = logger("storage");
@@ -162,7 +163,32 @@ const MIGRATIONS: ReadonlyArray<{ version: number; sql: string }> = [
     version: 6,
     sql: `ALTER TABLE schedules ADD COLUMN run_requested_at TEXT;`,
   },
+  {
+    // The process supervising a run (`role@host:pid`, see formatHolder). Orphan recovery only
+    // fails `running` rows whose owner is gone; NULL = written before this column (always recovered).
+    version: 7,
+    sql: `ALTER TABLE runs ADD COLUMN owner TEXT;`,
+  },
+  {
+    // The processes behind a run (see RunPhase): the main pass and, after a budget
+    // exhaustion, the wrap-up pass that resumed the session with the reserve budget.
+    version: 8,
+    sql: `ALTER TABLE runs ADD COLUMN phases_json TEXT NOT NULL DEFAULT '[]';`,
+  },
 ];
+
+/**
+ * SHA-256 of every migration's SQL (whitespace-normalised), in order. A test pins the
+ * digests of the applied migrations so that an edit to an existing entry, instead of a
+ * new one, fails the build: an edited migration never reaches databases that already
+ * recorded that version.
+ */
+export function migrationDigests(): ReadonlyArray<{ version: number; sha256: string }> {
+  return MIGRATIONS.map((m) => ({
+    version: m.version,
+    sha256: createHash("sha256").update(m.sql.replace(/\s+/g, " ").trim()).digest("hex"),
+  }));
+}
 
 export function openDatabase(dataDir: string): DatabaseSync {
   mkdirSync(dataDir, { recursive: true });
@@ -181,7 +207,10 @@ export function openDatabase(dataDir: string): DatabaseSync {
     db.exec("BEGIN");
     try {
       db.exec(m.sql);
-      db.prepare("INSERT INTO schema_migrations (version, applied_at) VALUES (?, ?)").run(m.version, new Date().toISOString());
+      db.prepare("INSERT INTO schema_migrations (version, applied_at) VALUES (?, ?)").run(
+        m.version,
+        new Date().toISOString(),
+      );
       db.exec("COMMIT");
       log.info(`applied migration ${m.version}`);
     } catch (err) {

@@ -1,6 +1,6 @@
 import type { DatabaseSync } from "node:sqlite";
 import type { DeniedTool, RunMcpInfo, SubagentRecord, SubagentStatus } from "../execution/types.js";
-import type { Run, RunAgent, RunEvent, RunStatus } from "../observability/run.js";
+import type { Run, RunAgent, RunEvent, RunPhase, RunStatus } from "../observability/run.js";
 
 /** Row shape as SQLite returns it. */
 interface RunRow {
@@ -39,6 +39,8 @@ interface RunRow {
   log_path: string | null;
   raw_result_json: string | null;
   schedule_id: string | null;
+  owner: string | null;
+  phases_json: string | null;
 }
 
 function rowToRun(r: RunRow): Run {
@@ -78,7 +80,19 @@ function rowToRun(r: RunRow): Run {
     logPath: r.log_path,
     rawResultJson: r.raw_result_json,
     scheduleId: r.schedule_id ?? null,
+    owner: r.owner ?? null,
+    phases: parsePhases(r.phases_json),
   };
+}
+
+function parsePhases(json: string | null | undefined): RunPhase[] {
+  if (!json) return [];
+  try {
+    const v = JSON.parse(json);
+    return Array.isArray(v) ? (v as RunPhase[]) : [];
+  } catch {
+    return [];
+  }
 }
 
 export interface ListRunsFilter {
@@ -118,6 +132,7 @@ export type RunPatch = Partial<
     | "logPath"
     | "rawResultJson"
     | "command"
+    | "phases"
   >
 >;
 
@@ -148,6 +163,7 @@ const PATCH_COLUMNS: Record<keyof RunPatch, string> = {
   logPath: "log_path",
   rawResultJson: "raw_result_json",
   command: "command_json",
+  phases: "phases_json",
 };
 
 export class RunRepository {
@@ -160,8 +176,8 @@ export class RunRepository {
            created_at, started_at, ended_at, duration_ms, claude_session_id, permission_mode, command_json,
            exit_code, termination_reason, error, result_text, num_turns, tool_calls, input_tokens, output_tokens,
            cache_read_tokens, cache_creation_tokens, cost_usd, permission_denials, denied_tools_json, mcp_json, human_intervention,
-           context_exhausted, retries, log_path, raw_result_json, schedule_id)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+           context_exhausted, retries, log_path, raw_result_json, schedule_id, owner, phases_json)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         run.id,
@@ -199,10 +215,24 @@ export class RunRepository {
         run.logPath,
         run.rawResultJson,
         run.scheduleId,
+        run.owner,
+        JSON.stringify(run.phases ?? []),
       );
   }
 
   update(id: string, patch: RunPatch): void {
+    this.updateWhere(id, patch, null);
+  }
+
+  /**
+   * Apply the patch only while the row still has status `expected` (compare-and-set
+   * between processes sharing the database). Returns false when another writer got there first.
+   */
+  updateIfStatus(id: string, expected: RunStatus, patch: RunPatch): boolean {
+    return this.updateWhere(id, patch, expected);
+  }
+
+  private updateWhere(id: string, patch: RunPatch, expected: RunStatus | null): boolean {
     const sets: string[] = [];
     const values: Array<string | number | null> = [];
     for (const [key, value] of Object.entries(patch) as Array<[keyof RunPatch, unknown]>) {
@@ -212,9 +242,15 @@ export class RunRepository {
       else if (typeof value === "object" && value !== null) values.push(JSON.stringify(value));
       else values.push(value as string | number | null);
     }
-    if (sets.length === 0) return;
+    if (sets.length === 0) return false;
     values.push(id);
-    this.db.prepare(`UPDATE runs SET ${sets.join(", ")} WHERE id = ?`).run(...values);
+    let where = "id = ?";
+    if (expected !== null) {
+      where += " AND status = ?";
+      values.push(expected);
+    }
+    const r = this.db.prepare(`UPDATE runs SET ${sets.join(", ")} WHERE ${where}`).run(...values);
+    return Number(r.changes) > 0;
   }
 
   get(id: string): Run | null {
@@ -255,8 +291,17 @@ export class RunRepository {
 
   events(runId: string, limit = 200): RunEvent[] {
     const rows = this.db
-      .prepare("SELECT id, run_id, ts, type, payload, agent_id FROM run_events WHERE run_id = ? ORDER BY id ASC LIMIT ?")
-      .all(runId, limit) as Array<{ id: number; run_id: string; ts: string; type: RunEvent["type"]; payload: string | null; agent_id: string | null }>;
+      .prepare(
+        "SELECT id, run_id, ts, type, payload, agent_id FROM run_events WHERE run_id = ? ORDER BY id ASC LIMIT ?",
+      )
+      .all(runId, limit) as Array<{
+      id: number;
+      run_id: string;
+      ts: string;
+      type: RunEvent["type"];
+      payload: string | null;
+      agent_id: string | null;
+    }>;
     return rows.map((r) => ({
       id: r.id,
       runId: r.run_id,
@@ -313,7 +358,11 @@ export class RunRepository {
 
   /** Subagent invocations of a run, in start order. */
   agents(runId: string): RunAgent[] {
-    return (this.db.prepare("SELECT * FROM run_agents WHERE run_id = ? ORDER BY id ASC").all(runId) as unknown as RunAgentRow[]).map(rowToRunAgent);
+    return (
+      this.db
+        .prepare("SELECT * FROM run_agents WHERE run_id = ? ORDER BY id ASC")
+        .all(runId) as unknown as RunAgentRow[]
+    ).map(rowToRunAgent);
   }
 }
 

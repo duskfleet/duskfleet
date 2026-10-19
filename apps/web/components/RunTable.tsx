@@ -1,8 +1,8 @@
 import Link from "next/link";
 import type { RunWithProject } from "@/lib/data";
+import { elapsedSince, fmtCost, fmtDuration, fmtRelative, fmtTime, runTitle, shortModel } from "@/lib/format";
 import { RunRow } from "./RunRow";
 import { StatusBadge } from "./StatusBadge";
-import { elapsedSince, fmtCost, fmtDuration, fmtRelative, fmtTime, runTitle, shortModel } from "@/lib/format";
 
 /**
  * One row per run, the whole row a link. The short title (first line of the
@@ -45,29 +45,49 @@ export function RunTable({ runs, emptyText }: { runs: RunWithProject[]; emptyTex
                   <span title={r.projectPath}>{r.projectLabel}</span>
                   {r.scheduleId && (
                     <span className="flags">
-                      <Link href={`/schedules#${r.scheduleId}`} className="flag quiet badge-link" title={r.scheduleId}>scheduled</Link>
+                      <Link href={`/schedules#${r.scheduleId}`} className="flag quiet badge-link" title={r.scheduleId}>
+                        scheduled
+                      </Link>
                     </span>
                   )}
                   {(r.permissionDenials ?? 0) > 0 && (
                     <span className="flags">
-                      <Link href={issues} className="flag warn badge-link" title={(r.deniedTools ?? []).map((d) => `${d.tool}${d.summary ? `: ${d.summary}` : ""}`).join("\n") || "A tool call was denied"}>
+                      <Link
+                        href={issues}
+                        className="flag warn badge-link"
+                        title={
+                          (r.deniedTools ?? [])
+                            .map((d) => `${d.tool}${d.summary ? `: ${d.summary}` : ""}`)
+                            .join("\n") || "A tool call was denied"
+                        }
+                      >
                         {r.permissionDenials} {r.permissionDenials === 1 ? "denial" : "denials"}
                       </Link>
                     </span>
                   )}
                   {(r.mcp?.allowListedMissing ?? []).length > 0 && (
                     <span className="flags">
-                      <Link href={issues} className="flag warn badge-link" title={`Allow-listed but never mounted: ${r.mcp.allowListedMissing.join(", ")}`}>mcp mismatch</Link>
+                      <Link
+                        href={issues}
+                        className="flag warn badge-link"
+                        title={`Allow-listed but never mounted: ${r.mcp.allowListedMissing.join(", ")}`}
+                      >
+                        mcp mismatch
+                      </Link>
                     </span>
                   )}
                   {r.contextExhausted && (
                     <span className="flags">
-                      <Link href={issues} className="flag bad badge-link">context exhausted</Link>
+                      <Link href={issues} className="flag bad badge-link">
+                        context exhausted
+                      </Link>
                     </span>
                   )}
                   {r.error && r.status !== "completed" && (
                     <span className="flags">
-                      <Link href={issues} className="flag bad badge-link" title={r.error}>error</Link>
+                      <Link href={issues} className="flag bad badge-link" title={r.error}>
+                        error
+                      </Link>
                     </span>
                   )}
                 </div>
@@ -79,7 +99,9 @@ export function RunTable({ runs, emptyText }: { runs: RunWithProject[]; emptyTex
               </td>
               <td className="num col-duration">{fmtDuration(duration)}</td>
               <td className="num">{fmtCost(r.costUsd)}</td>
-              <td className="when col-started" title={fmtTime(started)}>{fmtRelative(started)}</td>
+              <td className="when col-started" title={fmtTime(started)}>
+                {fmtRelative(started)}
+              </td>
             </RunRow>
           );
         })}

@@ -28,6 +28,12 @@ export interface AgentDefinition {
   timeoutMinutes?: number;
   maxBudgetUsd?: number;
   /**
+   * Dollars held back from `maxBudgetUsd` for a wrap-up pass: when the main pass ends
+   * `budget_exhausted`, the session is resumed with this budget and told to record where it
+   * stopped. Default 10% of the budget, at least $0.50, never more than half of it. 0 disables.
+   */
+  wrapUpReserveUsd?: number;
+  /**
    * Let runs see the MCP servers of the user running DuskFleet (claude.ai
    * connectors such as Atlassian or Figma, user/project .mcp.json). Default
    * false: runs start with --strict-mcp-config and no MCP at all.
@@ -48,6 +54,17 @@ export interface AgentDefinition {
    * Unset = general-purpose agent, runs anywhere.
    */
   project?: string;
+  /**
+   * Runs of this agent allowed at the same time (integer >= 1). Unset = the global
+   * max_concurrent_per_agent (default 1). max_concurrent_runs stays the hard cap.
+   */
+  maxConcurrent?: number;
+  /**
+   * The agent never edits the project checkout (read-only, or works in its own git worktree).
+   * Its runs neither count against nor wait for max_concurrent_per_project. A promise the
+   * agent's prompt keeps; DuskFleet does not check it. Default false.
+   */
+  isolated?: boolean;
   /** Markdown body of the agent file. Sent via --append-system-prompt when non-empty. */
   systemPrompt: string;
   /** Absolute path of the file this agent was loaded from. */
