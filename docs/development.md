@@ -61,7 +61,9 @@ MCP server driven over stdio. Add a case to the fake binary when the parser lear
 ## Quality gates
 
 Every pull request runs the `checks` job in `.github/workflows/ci.yml`; a ruleset on `main` refuses
-the merge while it is red, and refuses pushes that bypass a pull request. The job needs no Claude
+the merge while it is red, refuses pushes that bypass a pull request, and requires a review from a
+code owner (`.github/CODEOWNERS`: the maintainer owns every file, so a community pull request merges only
+once they approve it; repository admins may bypass that requirement for their own pull requests). The job needs no Claude
 login and spends nothing: the tests use the fake binary. In order:
 
 | Step | Command | Fails when |
