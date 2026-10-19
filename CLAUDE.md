@@ -133,8 +133,9 @@ npm workspaces, one `config/` and one SQLite database shared by three deliverabl
   one per agent by default (`max_concurrent_per_project`, `max_concurrent_per_agent`).
   Per agent, `max_concurrent: n` overrides the agent limit and `isolated: true` (a promise
   never to edit the checkout, not checked) skips the project guard; `max_concurrent_runs`
-  stays the hard cap. Refuse, never queue; keep "agent busy" / "project busy" in the error
-  text, the scheduler matches it for `skipped_busy`; a scheduler must treat "busy" as "skip this tick".
+  stays the hard cap. Refuse, never queue: the guards throw `BusyError` (`orchestration/busy.ts`,
+  message still says "agent busy" / "project busy" for humans) and the scheduler records
+  `skipped_busy` on `instanceof BusyError`, never by matching text; busy means "skip this tick".
 - **Subagents are rows, not prose** (`run_agents`, migration 5): the parser folds Claude Code's
   `task_started` / `task_notification` lines and the `agent_id` of nested messages into one
   `SubagentRecord` per Agent call; `RunManager` writes them on `subagent_start` / `subagent_end`

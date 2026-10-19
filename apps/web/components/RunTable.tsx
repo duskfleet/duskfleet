@@ -97,6 +97,16 @@ export function RunTable({ runs, emptyText }: { runs: RunWithProject[]; emptyTex
                       </Link>
                     </span>
                   )}
+                  {r.kind === "gate" && (
+                    <span className="flags">
+                      <span
+                        className="flag warn"
+                        title="A schedule's gate agent: it only decides whether the tick has work. Its cost counts as gate spend."
+                      >
+                        gate
+                      </span>
+                    </span>
+                  )}
                   {r.resumedFromRunId && (
                     <span className="flags">
                       <Link

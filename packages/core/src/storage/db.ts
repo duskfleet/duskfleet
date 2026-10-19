@@ -208,6 +208,17 @@ const MIGRATIONS: ReadonlyArray<{ version: number; sql: string; backfill?: (db: 
       CREATE INDEX IF NOT EXISTS idx_schedule_firings_time ON schedule_firings(schedule_id, fired_at);
     `,
   },
+  {
+    // Schedule gates: a cheap check (shell command or gate agent) before the real run. Gate
+    // agent runs are runs of kind 'gate', so their cost is counted apart from the real runs.
+    version: 12,
+    sql: `
+      ALTER TABLE schedules ADD COLUMN gate_json TEXT;
+      ALTER TABLE runs ADD COLUMN kind TEXT NOT NULL DEFAULT 'run';
+      ALTER TABLE schedule_firings ADD COLUMN gate_run_id TEXT;
+      ALTER TABLE schedule_firings ADD COLUMN gate_cost_usd REAL;
+    `,
+  },
 ];
 
 /**

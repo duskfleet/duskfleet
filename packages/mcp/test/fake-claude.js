@@ -13,6 +13,9 @@
  *                 hand-back tool_result), shapes from a real run of 2026-10-12
  *   "subagent-hang" -> same, but the process is killed before the hand-back
  *   "env"      -> like "ok", result text says whether CLAUDE_BIN reached the child
+ *   "gate-nowork" / "gate-work" / "gate-mention" -> like "ok"; a schedule gate agent's answer:
+ *                 the marker alone on the last line (as **no_work**), work found, and the
+ *                 marker only mentioned mid-sentence (must not skip)
  *   "budget"  -> spends the whole --max-budget-usd and stops with the real budget shape
  *                 (subtype error_max_budget_usd, terminal_reason budget_exhausted, no `result`,
  *                 errors: [...], is_error true, exit 1; from run a2d99954 of 2026-10-14)
@@ -374,7 +377,13 @@ if (resumeIdx >= 0) {
       ? `CLAUDE_BIN ${process.env.CLAUDE_BIN === undefined ? "unset" : "set"}`
       : prompt === "noop"
         ? "Nothing to do: no tickets in Ready."
-        : "Done: created hello.txt";
+        : prompt === "gate-nowork"
+          ? "Checked the board: nothing in Ready.\n\n**no_work**"
+          : prompt === "gate-work"
+            ? "Ready ticket found: SL-9."
+            : prompt === "gate-mention"
+              ? "Found SL-9 in Ready, so this is not NO_WORK"
+              : "Done: created hello.txt";
   out({
     type: "result",
     subtype: isError ? "error_during_execution" : "success",

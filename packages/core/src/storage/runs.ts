@@ -1,6 +1,15 @@
 import type { DatabaseSync } from "node:sqlite";
 import type { DeniedTool, RunMcpInfo, SubagentRecord, SubagentStatus } from "../execution/types.js";
-import type { ReviewReason, Run, RunAgent, RunEvent, RunPhase, RunStatus, RunSummary } from "../observability/run.js";
+import type {
+  ReviewReason,
+  Run,
+  RunAgent,
+  RunEvent,
+  RunKind,
+  RunPhase,
+  RunStatus,
+  RunSummary,
+} from "../observability/run.js";
 
 /** Row shape as SQLite returns it. */
 interface RunRow {
@@ -43,6 +52,7 @@ interface RunRow {
   phases_json: string | null;
   review_reasons_json: string | null;
   resumed_from_run_id: string | null;
+  kind: string | null;
 }
 
 function rowToRun(r: RunRow): Run {
@@ -86,6 +96,7 @@ function rowToRun(r: RunRow): Run {
     phases: parsePhases(r.phases_json),
     reviewReasons: parseReasons(r.review_reasons_json),
     resumedFromRunId: r.resumed_from_run_id ?? null,
+    kind: r.kind === "gate" ? "gate" : "run",
   };
 }
 
@@ -112,6 +123,8 @@ function parsePhases(json: string | null | undefined): RunPhase[] {
 
 export interface ListRunsFilter {
   status?: RunStatus;
+  /** Only real runs or only gate runs; both when omitted. */
+  kind?: RunKind;
   agentId?: string;
   projectPath?: string;
   limit?: number;
@@ -217,8 +230,8 @@ export class RunRepository {
            created_at, started_at, ended_at, duration_ms, claude_session_id, permission_mode, command_json,
            exit_code, termination_reason, error, result_text, num_turns, tool_calls, input_tokens, output_tokens,
            cache_read_tokens, cache_creation_tokens, cost_usd, permission_denials, denied_tools_json, mcp_json, human_intervention,
-           context_exhausted, retries, log_path, raw_result_json, schedule_id, owner, phases_json, review_reasons_json, resumed_from_run_id)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+           context_exhausted, retries, log_path, raw_result_json, schedule_id, owner, phases_json, review_reasons_json, resumed_from_run_id, kind)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         run.id,
@@ -260,6 +273,7 @@ export class RunRepository {
         JSON.stringify(run.phases ?? []),
         run.reviewReasons?.length ? JSON.stringify(run.reviewReasons) : null,
         run.resumedFromRunId ?? null,
+        run.kind ?? "run",
       );
   }
 
@@ -337,6 +351,10 @@ export class RunRepository {
     if (filter.agentId) {
       where.push("agent_id = ?");
       values.push(filter.agentId);
+    }
+    if (filter.kind) {
+      where.push("kind = ?");
+      values.push(filter.kind);
     }
     if (filter.projectPath) {
       where.push("project_path = ?");

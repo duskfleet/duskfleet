@@ -330,6 +330,7 @@ export function modelStats(): ModelStats[] {
   }));
 }
 
+/** Every count is real runs (kind 'run'); gate runs only show in the cost (costGatesUsd). */
 export interface Overview {
   total: number;
   running: number;
@@ -343,6 +344,8 @@ export interface Overview {
   needsReview: number;
   costUsd: number;
   costLast24hUsd: number;
+  /** Part of costUsd spent by schedule gate agents (runs of kind 'gate'). */
+  costGatesUsd: number;
 }
 
 /** KPIs for the cards. With a filter, computed on the same subset the list shows. */
@@ -361,15 +364,19 @@ export function overview(filter: Pick<RunsFilter, "agentId" | "projectPath"> = {
   }
   const r = db
     .prepare(
-      `SELECT COUNT(*)                                                 AS total,
-              SUM(status = 'running')                                   AS running,
-              SUM(status IN ('completed','failed','timed_out','cancelled')) AS finished,
-              SUM(status = 'completed')                                 AS completed,
-              SUM(status = 'completed' AND NOT ${NEEDS_REVIEW_SQL})     AS clean,
-              SUM(status IN ('failed','timed_out','cancelled'))         AS failed,
-              SUM(${NEEDS_REVIEW_SQL})                                  AS needs_review,
-              COALESCE(SUM(cost_usd), 0)                                AS cost_usd,
-              COALESCE(SUM(CASE WHEN created_at >= ? THEN cost_usd END), 0) AS cost_24h
+      // Counts are real runs only: a gate run is a schedule's yes/no check, and one that ends
+      // budget_exhausted or with a denial must not raise the failed / needs-review KPIs. Its
+      // cost is part of the spend, shown apart (cost_gates).
+      `SELECT COALESCE(SUM(kind = 'run'), 0)                                     AS total,
+              SUM(kind = 'run' AND status = 'running')                            AS running,
+              SUM(kind = 'run' AND status IN ('completed','failed','timed_out','cancelled')) AS finished,
+              SUM(kind = 'run' AND status = 'completed')                          AS completed,
+              SUM(kind = 'run' AND status = 'completed' AND NOT ${NEEDS_REVIEW_SQL}) AS clean,
+              SUM(kind = 'run' AND status IN ('failed','timed_out','cancelled'))  AS failed,
+              SUM(kind = 'run' AND ${NEEDS_REVIEW_SQL})                           AS needs_review,
+              COALESCE(SUM(cost_usd), 0)                                          AS cost_usd,
+              COALESCE(SUM(CASE WHEN created_at >= ? THEN cost_usd END), 0)       AS cost_24h,
+              COALESCE(SUM(CASE WHEN kind = 'gate' THEN cost_usd END), 0)         AS cost_gates
        FROM runs ${where.length ? "WHERE " + where.join(" AND ") : ""}`,
     )
     .get(...values) as {
@@ -382,6 +389,7 @@ export function overview(filter: Pick<RunsFilter, "agentId" | "projectPath"> = {
     needs_review: number | null;
     cost_usd: number;
     cost_24h: number;
+    cost_gates: number;
   };
   return {
     total: r.total,
@@ -393,6 +401,7 @@ export function overview(filter: Pick<RunsFilter, "agentId" | "projectPath"> = {
     needsReview: r.needs_review ?? 0,
     costUsd: r.cost_usd,
     costLast24hUsd: r.cost_24h,
+    costGatesUsd: r.cost_gates,
   };
 }
 

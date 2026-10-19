@@ -7,8 +7,43 @@
 
 import type { OnFailurePolicy } from "../config/types.js";
 
-/** `resumed` = started as a resume of the previous run (on_failure: resume_once); counts as a fire. */
-export type ScheduleOutcome = "started" | "resumed" | "skipped_busy" | "skipped_disabled" | "error";
+/**
+ * `resumed` = started as a resume of the previous run (on_failure: resume_once); counts as a fire.
+ * `skipped_gate` = the schedule's gate said there is no work; the reason is kept as the firing's error text.
+ */
+export type ScheduleOutcome = "started" | "resumed" | "skipped_busy" | "skipped_gate" | "skipped_disabled" | "error";
+
+/**
+ * A cheap check before the real run. Exactly one of `command` / `agent`.
+ *  - command: a shell command run in the project directory; exit 0 runs, exit 1-125 skips
+ *    (its stdout is the reason); 126, 127, a signal or a timeout is an error. Costs nothing.
+ *  - agent: a cheap agent run (its own prompt and budget, recorded as a run of kind "gate");
+ *    when the last line of its final message is `marker` (default NO_WORK) the real run is skipped.
+ */
+export interface ScheduleGate {
+  command?: string;
+  /**
+   * Set only when reading a stored gate that cannot be used (gate_json not valid JSON, or
+   * neither command nor agent). The schedule then records `error` on every fire instead of
+   * silently running ungated; validation refuses it.
+   */
+  invalid?: string;
+  /** Command gate timeout. Default 60 s. A timeout is an `error`, not a skip. */
+  timeoutSeconds?: number;
+  agent?: {
+    agentId: string;
+    prompt: string;
+    /** --max-budget-usd of the gate run. Default 0.5. */
+    budgetUsd?: number;
+    model?: string;
+    /** The last line of the gate's final message that means "no work" (case-insensitive). Default NO_WORK. */
+    marker?: string;
+  };
+}
+
+export const DEFAULT_GATE_MARKER = "NO_WORK";
+export const DEFAULT_GATE_BUDGET_USD = 0.5;
+export const DEFAULT_GATE_TIMEOUT_SECONDS = 60;
 
 export interface Schedule {
   id: string;
@@ -49,6 +84,8 @@ export interface Schedule {
   resumeBudgetUsd: number | null;
   /** Marker in a run's final message that means "nothing to do" (idle-cost stats); null = `scheduler.noop_pattern`. */
   noopPattern: string | null;
+  /** Checked before every fresh run; null = no gate. */
+  gate: ScheduleGate | null;
 }
 
 export interface ScheduleInput {
@@ -63,6 +100,7 @@ export interface ScheduleInput {
   onFailure?: OnFailurePolicy | null;
   resumeBudgetUsd?: number | null;
   noopPattern?: string | null;
+  gate?: ScheduleGate | null;
 }
 
 export type SchedulePatch = Partial<ScheduleInput>;
@@ -86,5 +124,10 @@ export interface ScheduleFiring {
   firedAt: string;
   outcome: ScheduleOutcome;
   runId: string | null;
+  /** Why it did not start: the error, the busy message, or the gate's reason. */
   error: string | null;
+  /** The gate agent's run, when an agent gate ran for this tick. */
+  gateRunId: string | null;
+  /** What the gate cost on this tick (0 for a command gate, null when no gate ran). */
+  gateCostUsd: number | null;
 }

@@ -123,6 +123,10 @@ export function registerRunTools(server: McpServer, ctx: ToolContext): void {
       description: "List recent runs, newest first, with optional filters.",
       inputSchema: {
         status: z.enum(RUN_STATUSES).optional().describe("Only runs in this status"),
+        kind: z
+          .enum(["run", "gate"])
+          .optional()
+          .describe("Only real runs, or only schedule gate-agent runs; both by default"),
         agent_id: z.string().optional().describe("Only runs of this agent (id from list_agents)"),
         project_path: z.string().optional().describe("Exact resolved project path"),
         limit: z.number().int().min(1).max(200).optional().describe("Default 20"),
@@ -131,6 +135,7 @@ export function registerRunTools(server: McpServer, ctx: ToolContext): void {
     async (args) => {
       const filter: Parameters<typeof ctx.runs.listRuns>[0] = {};
       if (args.status !== undefined) filter.status = args.status;
+      if (args.kind !== undefined) filter.kind = args.kind;
       if (args.agent_id !== undefined) filter.agentId = args.agent_id;
       if (args.project_path !== undefined) filter.projectPath = args.project_path;
       if (args.limit !== undefined) filter.limit = args.limit;

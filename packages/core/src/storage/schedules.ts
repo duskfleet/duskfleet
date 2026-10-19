@@ -10,11 +10,15 @@ import type {
   RunOutcomes,
   Schedule,
   ScheduleFiring,
+  ScheduleGate,
   ScheduleInput,
   ScheduleOutcome,
   SchedulePatch,
 } from "../scheduler/types.js";
+import { logger } from "../util/log.js";
 import { NEEDS_REVIEW_SQL } from "./runs.js";
+
+const log = logger("storage");
 
 interface ScheduleRow {
   id: string;
@@ -39,6 +43,34 @@ interface ScheduleRow {
   on_failure: string | null;
   resume_budget_usd: number | null;
   noop_pattern: string | null;
+  gate_json: string | null;
+}
+
+/**
+ * A stored gate. One that cannot be read is returned as an `invalid` gate, never as null: null
+ * means "no gate", and silently dropping a broken one would fire the full run on every tick,
+ * the exact cost the gate is there to avoid. The scheduler records such a fire as an error.
+ */
+export function parseGate(json: string | null | undefined, scheduleName = "?"): ScheduleGate | null {
+  if (!json) return null;
+  let invalid: string;
+  try {
+    const v: unknown = JSON.parse(json);
+    const g = v as ScheduleGate | null;
+    if (
+      g &&
+      typeof g === "object" &&
+      !Array.isArray(g) &&
+      (typeof g.command === "string" || (g.agent && typeof g.agent === "object"))
+    ) {
+      return g;
+    }
+    invalid = "gate_json has neither command nor agent";
+  } catch (err) {
+    invalid = `gate_json is not valid JSON (${err instanceof Error ? err.message : String(err)})`;
+  }
+  log.warn("unusable stored gate", { schedule: scheduleName, invalid });
+  return { invalid };
 }
 
 function rowToSchedule(r: ScheduleRow): Schedule {
@@ -65,6 +97,7 @@ function rowToSchedule(r: ScheduleRow): Schedule {
     onFailure: (r.on_failure as Schedule["onFailure"]) ?? null,
     resumeBudgetUsd: r.resume_budget_usd ?? null,
     noopPattern: r.noop_pattern ?? null,
+    gate: parseGate(r.gate_json, r.name),
   };
 }
 
@@ -108,8 +141,8 @@ export class ScheduleRepository {
     this.db
       .prepare(
         `INSERT INTO schedules (id, name, agent_id, project_id, prompt, model, cron, time_zone, enabled, created_at, updated_at, next_run_at,
-           last_fired_at, last_outcome, last_error, last_run_id, fires, skips, on_failure, resume_budget_usd, noop_pattern)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, NULL, NULL, 0, 0, ?, ?, ?)`,
+           last_fired_at, last_outcome, last_error, last_run_id, fires, skips, on_failure, resume_budget_usd, noop_pattern, gate_json)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, NULL, NULL, 0, 0, ?, ?, ?, ?)`,
       )
       .run(
         id,
@@ -127,6 +160,7 @@ export class ScheduleRepository {
         input.onFailure ?? null,
         input.resumeBudgetUsd ?? null,
         input.noopPattern ?? null,
+        input.gate ? JSON.stringify(input.gate) : null,
       );
     return this.get(id)!;
   }
@@ -147,11 +181,14 @@ export class ScheduleRepository {
       onFailure: "on_failure",
       resumeBudgetUsd: "resume_budget_usd",
       noopPattern: "noop_pattern",
+      gate: "gate_json",
     };
     for (const [k, v] of Object.entries(patch)) {
       if (v === undefined || !(k in map)) continue;
       sets.push(`${map[k]} = ?`);
-      values.push(typeof v === "boolean" ? (v ? 1 : 0) : (v as string | number | null));
+      if (typeof v === "boolean") values.push(v ? 1 : 0);
+      else if (typeof v === "object" && v !== null) values.push(JSON.stringify(v));
+      else values.push(v as string | number | null);
     }
     values.push(id);
     this.db.prepare(`UPDATE schedules SET ${sets.join(", ")} WHERE id = ?`).run(...values);
@@ -186,18 +223,31 @@ export class ScheduleRepository {
     return Number(r.changes) > 0;
   }
 
-  /** Record a firing attempt and advance the schedule. */
+  /**
+   * Claim a tick before a slow step (a gate): advance next_run_at now, so the schedule is no
+   * longer due for anyone while the step runs. recordFiring writes the same value when it ends.
+   */
+  claimTick(id: string, nextRunAt: string | null): void {
+    this.db
+      .prepare("UPDATE schedules SET next_run_at = ?, updated_at = ? WHERE id = ?")
+      .run(nextRunAt, new Date().toISOString(), id);
+  }
+
+  /** Record a firing attempt and advance the schedule. `gate` is set when a gate ran on this tick. */
   recordFiring(
     id: string,
     outcome: ScheduleOutcome,
     runId: string | null,
     error: string | null,
     nextRunAt: string | null,
+    gate: { runId: string | null; costUsd: number | null } | null = null,
   ): void {
     const now = new Date().toISOString();
     this.db
-      .prepare("INSERT INTO schedule_firings (schedule_id, fired_at, outcome, run_id, error) VALUES (?, ?, ?, ?, ?)")
-      .run(id, now, outcome, runId, error);
+      .prepare(
+        "INSERT INTO schedule_firings (schedule_id, fired_at, outcome, run_id, error, gate_run_id, gate_cost_usd) VALUES (?, ?, ?, ?, ?, ?, ?)",
+      )
+      .run(id, now, outcome, runId, error, gate?.runId ?? null, gate ? (gate.costUsd ?? 0) : null);
     this.db
       .prepare(
         `UPDATE schedules SET last_fired_at = ?, last_outcome = ?, last_error = ?, last_run_id = COALESCE(?, last_run_id),
@@ -227,32 +277,43 @@ export class ScheduleRepository {
   }
 
   /**
-   * What the idle stats read about the runs a schedule started since `sinceIso`: count and cost
-   * of all of them from SQL, and the head (`textLimit` chars) of the final message of the
-   * completed ones that do not need review (stored `review_reasons_json`), since only those
-   * can be no-ops: a run that hit a denial and then says "nothing to do" was blocked, not idle.
+   * What the idle stats read about the real runs (kind 'run'; gate runs are counted apart) a
+   * schedule started since `sinceIso`: count and cost of all of them from SQL, and the head
+   * (`textLimit` chars) of the final message of the completed ones that do not need review
+   * (stored `review_reasons_json`), since only those can be no-ops: a run that hit a denial and
+   * then says "nothing to do" was blocked, not idle.
    */
   runOutcomesSince(scheduleId: string, sinceIso: string, textLimit: number): RunOutcomes {
     const totals = this.db
       .prepare(
-        "SELECT COUNT(*) AS n, COALESCE(SUM(cost_usd), 0) AS cost FROM runs WHERE schedule_id = ? AND created_at >= ?",
+        "SELECT COUNT(*) AS n, COALESCE(SUM(cost_usd), 0) AS cost FROM runs WHERE schedule_id = ? AND created_at >= ? AND kind = 'run'",
       )
       .get(scheduleId, sinceIso) as { n: number; cost: number };
     const completed = (
       this.db
         .prepare(
-          `SELECT substr(result_text, 1, ?) AS text, cost_usd FROM runs WHERE schedule_id = ? AND created_at >= ? AND status = 'completed' AND result_text IS NOT NULL AND NOT ${NEEDS_REVIEW_SQL}`,
+          `SELECT substr(result_text, 1, ?) AS text, cost_usd FROM runs WHERE schedule_id = ? AND created_at >= ? AND kind = 'run' AND status = 'completed' AND result_text IS NOT NULL AND NOT ${NEEDS_REVIEW_SQL}`,
         )
         .all(textLimit, scheduleId, sinceIso) as Array<{ text: string; cost_usd: number | null }>
     ).map((r) => ({ resultText: r.text, costUsd: r.cost_usd }));
     return { runs: totals.n, costUsd: totals.cost, completed };
   }
 
+  /** Gate checks since `sinceIso`: how many ran and what the gate agent runs cost. */
+  gateSpendSince(scheduleId: string, sinceIso: string): { gateChecks: number; gateCostUsd: number } {
+    const r = this.db
+      .prepare(
+        "SELECT COUNT(gate_cost_usd) AS n, COALESCE(SUM(gate_cost_usd), 0) AS cost FROM schedule_firings WHERE schedule_id = ? AND fired_at >= ?",
+      )
+      .get(scheduleId, sinceIso) as { n: number; cost: number };
+    return { gateChecks: r.n, gateCostUsd: r.cost };
+  }
+
   firings(scheduleId: string, limit = 20): ScheduleFiring[] {
     return (
       this.db
         .prepare(
-          "SELECT id, schedule_id, fired_at, outcome, run_id, error FROM schedule_firings WHERE schedule_id = ? ORDER BY id DESC LIMIT ?",
+          "SELECT id, schedule_id, fired_at, outcome, run_id, error, gate_run_id, gate_cost_usd FROM schedule_firings WHERE schedule_id = ? ORDER BY id DESC LIMIT ?",
         )
         .all(scheduleId, limit) as Array<{
         id: number;
@@ -261,6 +322,8 @@ export class ScheduleRepository {
         outcome: string;
         run_id: string | null;
         error: string | null;
+        gate_run_id: string | null;
+        gate_cost_usd: number | null;
       }>
     ).map((r) => ({
       id: r.id,
@@ -269,6 +332,8 @@ export class ScheduleRepository {
       outcome: r.outcome as ScheduleOutcome,
       runId: r.run_id,
       error: r.error,
+      gateRunId: r.gate_run_id ?? null,
+      gateCostUsd: r.gate_cost_usd ?? null,
     }));
   }
 

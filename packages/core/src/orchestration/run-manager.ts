@@ -27,6 +27,7 @@ import {
   orphanedError,
   type Run,
   type RunAgent,
+  type RunKind,
   type RunPhase,
   type RunStatus,
   type RunSummary,
@@ -35,6 +36,7 @@ import {
 import { parseHolder, processIdentity } from "../scheduler/crud.js";
 import type { ListRunsFilter, RunRepository } from "../storage/runs.js";
 import { logger } from "../util/log.js";
+import { BusyError } from "./busy.js";
 import { validateProjectPath } from "./project-validation.js";
 import { assertTransition } from "./run-state.js";
 import { summarizeToolInput } from "./tool-summary.js";
@@ -51,6 +53,10 @@ export interface StartRunInput {
   scheduleId?: string;
   /** Internal: continue the session of an earlier run instead of starting a new one (see resumeRun). */
   resume?: { fromRun: Run; budgetUsd: number };
+  /** `gate` for a schedule's gate agent (no wrap-up reserve, cost counted apart). Default `run`. */
+  kind?: RunKind;
+  /** Overrides the agent's max_budget_usd (gate runs). */
+  maxBudgetUsd?: number;
 }
 
 export interface ResumeRunInput {
@@ -348,54 +354,12 @@ export class RunManager {
    */
   async startRun(input: StartRunInput): Promise<Run> {
     this.reloadConfig();
-    const agent = this.resolveAgent(input.agentId);
-    // An agent bound to a project runs there by default and nowhere else.
-    const effectiveInput: StartRunInput =
-      agent.project && !input.projectId && !input.projectPath ? { ...input, projectId: agent.project } : input;
-    const { projectPath, projectId, project } = this.resolveProject(effectiveInput);
-    if (agent.project && projectId !== agent.project) {
-      throw new Error(
-        `agent "${agent.id}" belongs to project "${agent.project}" and cannot run on ${projectId ? `"${projectId}"` : projectPath}. ` +
-          `Omit the project to use the agent's own, or pick an agent without a project binding.`,
-      );
-    }
+    const { agent, projectPath, projectId, project } = this.resolveTarget(input);
     const prompt = input.prompt?.trim();
     if (!prompt) throw new Error("prompt is empty");
 
-    if (this.active.size >= this.config.maxConcurrentRuns) {
-      throw new Error(`max_concurrent_runs (${this.config.maxConcurrentRuns}) reached; wait for a run to finish`);
-    }
-    // Count this process's runs plus the live runs of other DuskFleet processes on the same database.
-    const busy: Array<[string, { projectPath: string; agentId: string; isolated: boolean }]> = [
-      ...this.active.entries(),
-    ];
-    for (const r of this.runs.listByStatus("running")) {
-      if (!this.active.has(r.id) && !this.ownerIsGone(r)) {
-        busy.push([r.id, { ...r, isolated: this.config.agents.get(r.agentId)?.isolated === true }]);
-      }
-    }
-    // Isolated agents never edit the checkout: they neither count against nor wait for the
-    // per-project limit. Only non-isolated runs compete for a working copy.
-    if (!agent.isolated) {
-      const sameProject = busy.filter(([, a]) => a.projectPath === projectPath && !a.isolated);
-      if (sameProject.length >= this.config.maxConcurrentPerProject) {
-        const [id, a] = sameProject[0]!;
-        throw new Error(
-          `project busy: run ${id} (agent ${a.agentId}) is still running in ${projectPath}. ` +
-            `max_concurrent_per_project is ${this.config.maxConcurrentPerProject}; wait, cancel_run, or raise it ` +
-            `(an agent that never edits the checkout can set isolated: true).`,
-        );
-      }
-    }
-    const agentLimit = agent.maxConcurrent ?? this.config.maxConcurrentPerAgent;
-    const sameAgent = busy.filter(([, a]) => a.agentId === agent.id).map(([id]) => id);
-    if (sameAgent.length >= agentLimit) {
-      const limitSource = agent.maxConcurrent !== undefined ? "its max_concurrent" : "max_concurrent_per_agent";
-      throw new Error(
-        `agent busy: agent ${agent.id} already has ${sameAgent.length} of ${agentLimit} runs (${sameAgent.join(", ")}). ` +
-          `${limitSource} is ${agentLimit}; wait, cancel_run, or raise it.`,
-      );
-    }
+    const busy = this.capacityError(agent, projectPath);
+    if (busy) throw new BusyError(busy);
 
     const runId = randomUUID();
     const resume = input.resume ?? null;
@@ -403,7 +367,14 @@ export class RunManager {
     const sessionId = resume?.fromRun.claudeSessionId ?? randomUUID();
     const model = input.model ?? agent.model;
     const timeoutMinutes = agent.timeoutMinutes ?? this.config.claude.defaultTimeoutMinutes;
-    const budget = budgetPlan(resume ? { ...agent, maxBudgetUsd: resume.budgetUsd } : agent, this.config);
+    const kind: RunKind = input.kind ?? "run";
+    const budgetAgent = resume
+      ? { ...agent, maxBudgetUsd: resume.budgetUsd }
+      : input.maxBudgetUsd !== undefined
+        ? { ...agent, maxBudgetUsd: input.maxBudgetUsd }
+        : agent;
+    // A gate is a quick yes/no: no reserve, no wrap-up pass.
+    const budget = budgetPlan(kind === "gate" ? { ...budgetAgent, wrapUpReserveUsd: 0 } : budgetAgent, this.config);
     const logPath = path.join(this.config.dataDir, "logs", `${runId}.jsonl`);
 
     const request: ExecutionRequest = {
@@ -476,6 +447,7 @@ export class RunManager {
       phases: [],
       reviewReasons: [],
       resumedFromRunId: resume?.fromRun.id ?? null,
+      kind,
     };
 
     // Insert first so that events emitted by the executor always find the row. For a resume the
@@ -654,7 +626,90 @@ export class RunManager {
     }
   }
 
+  /**
+   * Why a run of this agent on this project would be refused right now (the WIP guards), or
+   * null. Lets the scheduler skip a busy tick before it spends anything on a gate.
+   */
+  busyReason(input: { agentId: string; projectId?: string | null }): string | null {
+    this.reloadConfig();
+    const target: StartRunInput = { prompt: "", agentId: input.agentId };
+    if (input.projectId) target.projectId = input.projectId;
+    // Same resolution as startRun; an invalid target throws here rather than passing silently.
+    const { agent, projectPath } = this.resolveTarget(target);
+    return this.capacityError(agent, projectPath);
+  }
+
+  /**
+   * The project directory a run of this agent would use, resolved exactly as startRun does
+   * (schedule gates run their command there).
+   */
+  projectPathFor(input: { agentId: string; projectId?: string | null }): string {
+    this.reloadConfig();
+    const target: StartRunInput = { prompt: "", agentId: input.agentId };
+    if (input.projectId) target.projectId = input.projectId;
+    return this.resolveTarget(target).projectPath;
+  }
+
   // ---- internals -----------------------------------------------------------
+
+  /** Agent and project of a run: an agent bound to a project runs there by default and nowhere else. */
+  private resolveTarget(input: StartRunInput): {
+    agent: AgentDefinition;
+    projectPath: string;
+    projectId: string | null;
+    project: ProjectDefinition | null;
+  } {
+    const agent = this.resolveAgent(input.agentId);
+    const effectiveInput: StartRunInput =
+      agent.project && !input.projectId && !input.projectPath ? { ...input, projectId: agent.project } : input;
+    const { projectPath, projectId, project } = this.resolveProject(effectiveInput);
+    if (agent.project && projectId !== agent.project) {
+      throw new Error(
+        `agent "${agent.id}" belongs to project "${agent.project}" and cannot run on ${projectId ? `"${projectId}"` : projectPath}. ` +
+          `Omit the project to use the agent's own, or pick an agent without a project binding.`,
+      );
+    }
+    return { agent, projectPath, projectId, project };
+  }
+
+  /** The WIP guards: why a run of `agent` in `projectPath` is refused right now, or null. */
+  private capacityError(agent: AgentDefinition, projectPath: string): string | null {
+    if (this.active.size >= this.config.maxConcurrentRuns) {
+      return `max_concurrent_runs (${this.config.maxConcurrentRuns}) reached; wait for a run to finish`;
+    }
+    // Count this process's runs plus the live runs of other DuskFleet processes on the same database.
+    const busy: Array<[string, { projectPath: string; agentId: string; isolated: boolean }]> = [
+      ...this.active.entries(),
+    ];
+    for (const r of this.runs.listByStatus("running")) {
+      if (!this.active.has(r.id) && !this.ownerIsGone(r)) {
+        busy.push([r.id, { ...r, isolated: this.config.agents.get(r.agentId)?.isolated === true }]);
+      }
+    }
+    // Isolated agents never edit the checkout: they neither count against nor wait for the
+    // per-project limit. Only non-isolated runs compete for a working copy.
+    if (!agent.isolated) {
+      const sameProject = busy.filter(([, a]) => a.projectPath === projectPath && !a.isolated);
+      if (sameProject.length >= this.config.maxConcurrentPerProject) {
+        const [id, a] = sameProject[0]!;
+        return (
+          `project busy: run ${id} (agent ${a.agentId}) is still running in ${projectPath}. ` +
+          `max_concurrent_per_project is ${this.config.maxConcurrentPerProject}; wait, cancel_run, or raise it ` +
+          `(an agent that never edits the checkout can set isolated: true).`
+        );
+      }
+    }
+    const agentLimit = agent.maxConcurrent ?? this.config.maxConcurrentPerAgent;
+    const sameAgent = busy.filter(([, a]) => a.agentId === agent.id).map(([id]) => id);
+    if (sameAgent.length >= agentLimit) {
+      const limitSource = agent.maxConcurrent !== undefined ? "its max_concurrent" : "max_concurrent_per_agent";
+      return (
+        `agent busy: agent ${agent.id} already has ${sameAgent.length} of ${agentLimit} runs (${sameAgent.join(", ")}). ` +
+        `${limitSource} is ${agentLimit}; wait, cancel_run, or raise it.`
+      );
+    }
+    return null;
+  }
 
   /**
    * A process of the run ended. The main pass that ran out of budget is followed by one

@@ -51,6 +51,7 @@ export {
 } from "./execution/stream-json.js";
 export * from "./execution/types.js";
 export * from "./observability/run.js";
+export { BusyError } from "./orchestration/busy.js";
 export { ProjectValidationError, validateProjectPath } from "./orchestration/project-validation.js";
 
 export {
@@ -91,6 +92,13 @@ export {
   willResume,
 } from "./scheduler/crud.js";
 export {
+  evaluateGate,
+  type GateVerdict,
+  gateSaysNoWork,
+  runCommandGate,
+  validateGate,
+} from "./scheduler/gate.js";
+export {
   computeIdleStats,
   DEFAULT_NOOP_PATTERN,
   type IdleStats,
@@ -100,10 +108,10 @@ export {
   scheduleIdleStats,
 } from "./scheduler/idle.js";
 export { attachLastRun, type RunSummarySource, type ScheduleWithLastRun } from "./scheduler/last-run.js";
-export { Scheduler, type SchedulerOptions, type SchedulerStatus } from "./scheduler/scheduler.js";
+export { type FireResult, Scheduler, type SchedulerOptions, type SchedulerStatus } from "./scheduler/scheduler.js";
 export * from "./scheduler/types.js";
 export { migrationDigests, openDatabase } from "./storage/db.js";
 export { type ListRunsFilter, NEEDS_REVIEW_SQL, type RunPatch, RunRepository } from "./storage/runs.js";
-export { ScheduleRepository } from "./storage/schedules.js";
+export { parseGate, ScheduleRepository } from "./storage/schedules.js";
 
 export { type LogLevel, logger } from "./util/log.js";
