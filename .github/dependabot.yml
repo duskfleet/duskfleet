@@ -18,6 +18,13 @@ updates:
       # Next.js majors change the App Router contract; take them on purpose, not from a bot.
       - dependency-name: next
         update-types: ["version-update:semver-major"]
+      # Types must match the minimum runtime (engines.node >=24): newer majors type APIs Node 24 lacks.
+      - dependency-name: "@types/node"
+        update-types: ["version-update:semver-major"]
+      # apps/web stays on TypeScript 5: Next.js 15 needs the compiler API that the TypeScript 7 entry
+      # point no longer exports. Move it on purpose, with a green next build.
+      - dependency-name: typescript
+        update-types: ["version-update:semver-major"]
 
   - package-ecosystem: github-actions
     directory: /
