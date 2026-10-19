@@ -90,7 +90,13 @@ npm workspaces, one `config/` and one SQLite database shared by three deliverabl
 - Dashboard: no component library, design tokens live in `apps/web/app/globals.css`
   (dark only, brand palette: night ground, sunset accent; fonts via `next/font` in
   `app/layout.tsx`). A completed run that hit a permission denial is "needs review"
-  (amber), never plain green.
+  (amber), never plain green. One rule decides needs-review (`reviewReasons` in
+  `core/src/observability/run.ts`: budget exhausted, timed out, orphaned, non-zero exit,
+  failed, denial, context, MCP mismatch; never for cancelled or running). `RunManager.transition`
+  is its only caller: it stores the result in `review_reasons_json` (migration 9) and every
+  reader (`summarizeRun`, badges, `NEEDS_REVIEW_SQL`, `attachLastRun` for schedule rows) uses
+  the stored `run.reviewReasons`, never the rule. Orphans are detected with `isOrphaned`, not by
+  matching the error text. Schedule rows show how the last run *ended*, not only that the tick started it.
 
 ## Things that bite
 
@@ -104,7 +110,9 @@ npm workspaces, one `config/` and one SQLite database shared by three deliverabl
 - **Runs have an owner** (`runs.owner`, `role@host:pid` from `processIdentity`, migration 7):
   several DuskFleet processes share the DB, so `recoverOrphans` (startup and the lease holder's
   once-a-minute sweep) fails a `running` row only when its owner is gone (dead pid on this host,
-  NULL owner, or this pid without the run in memory), never a live process's or another host's.
+  NULL owner older than the longest timeout + 1 min, or this pid without the run in memory),
+  never a live process's or another host's. A fresh NULL owner is a process on an old build
+  (a `serve` not reinstalled after a build): it is live, not an orphan.
 - **`CLAUDE_BIN` beats `claude.binary`**, so an inherited one would make the tests launch the
   real claude instead of fake-claude.js. Test files import `test/helpers.js` (drops it) before
   `@duskfleet/core` and spawn processes with `testEnv()`; `childEnv()` never passes it to runs.
@@ -118,12 +126,17 @@ npm workspaces, one `config/` and one SQLite database shared by three deliverabl
   `.claude/agents/<name>.md`; DuskFleet owns only the unattended envelope). A folder that is
   not a project yet is registered in the private registry by `create_agent`. `create_agent` requires `kind` and `assertAgentKind` in core validates the
   combination before any file is written. Prefer link when the project already has the agent.
+  **A link is prompted as the agent, never as its caller**: "run your loop", not "run
+  /some-command" when that command invokes the same agent (it would invoke itself as a
+  subagent, verified 2026-10-13). And the project agent's `tools:` must use the
+  `mcp__claude_ai_*` names, or it is denied the MCP tools it needs.
 - **Concurrency guards live in `RunManager.startRun`**: one run per project directory and
   one per agent by default (`max_concurrent_per_project`, `max_concurrent_per_agent`).
   Per agent, `max_concurrent: n` overrides the agent limit and `isolated: true` (a promise
   never to edit the checkout, not checked) skips the project guard; `max_concurrent_runs`
-  stays the hard cap. Refuse, never queue; keep "agent busy" / "project busy" in the error
-  text, the scheduler matches it for `skipped_busy`; a scheduler must treat "busy" as "skip this tick".
+  stays the hard cap. Refuse, never queue: the guards throw `BusyError` (`orchestration/busy.ts`,
+  message still says "agent busy" / "project busy" for humans) and the scheduler records
+  `skipped_busy` on `instanceof BusyError`, never by matching text; busy means "skip this tick".
 - **Subagents are rows, not prose** (`run_agents`, migration 5): the parser folds Claude Code's
   `task_started` / `task_notification` lines and the `agent_id` of nested messages into one
   `SubagentRecord` per Agent call; `RunManager` writes them on `subagent_start` / `subagent_end`

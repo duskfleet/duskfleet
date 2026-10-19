@@ -9,7 +9,7 @@ import path from "node:path";
 import { listProjectAgents, projectAgentDefinitionHash } from "../config/agent-files.js";
 import { loadConfig } from "../config/loader.js";
 import type { AgentDefinition, DuskFleetConfig, ProjectDefinition } from "../config/types.js";
-import { isBudgetExhausted } from "../execution/stream-json.js";
+import { mergeSubagent, needsRepair, sameSubagent, subagentsFromLog } from "../execution/log-replay.js";
 import type {
   ExecutionEvent,
   ExecutionHandle,
@@ -20,10 +20,23 @@ import type {
   SubagentRecord,
   TokenUsage,
 } from "../execution/types.js";
-import { isTerminal, type Run, type RunAgent, type RunPhase, type RunStatus } from "../observability/run.js";
+import {
+  isBudgetExhausted,
+  isResumable,
+  isTerminal,
+  orphanedError,
+  type Run,
+  type RunAgent,
+  type RunKind,
+  type RunPhase,
+  type RunStatus,
+  type RunSummary,
+  reviewReasons,
+} from "../observability/run.js";
 import { parseHolder, processIdentity } from "../scheduler/crud.js";
 import type { ListRunsFilter, RunRepository } from "../storage/runs.js";
 import { logger } from "../util/log.js";
+import { BusyError } from "./busy.js";
 import { validateProjectPath } from "./project-validation.js";
 import { assertTransition } from "./run-state.js";
 import { summarizeToolInput } from "./tool-summary.js";
@@ -38,6 +51,29 @@ export interface StartRunInput {
   model?: string;
   /** Set by the scheduler. */
   scheduleId?: string;
+  /** Internal: continue the session of an earlier run instead of starting a new one (see resumeRun). */
+  resume?: { fromRun: Run; budgetUsd: number };
+  /** `gate` for a schedule's gate agent (no wrap-up reserve, cost counted apart). Default `run`. */
+  kind?: RunKind;
+  /** Overrides the agent's max_budget_usd (gate runs). */
+  maxBudgetUsd?: number;
+}
+
+export interface ResumeRunInput {
+  /** The run whose session to continue; it must have ended budget_exhausted or timed_out and not been resumed before. */
+  runId: string;
+  scheduleId?: string;
+  /** Budget of the resumed run; defaults to the agent's resume_budget_usd, else its max_budget_usd. */
+  budgetUsd?: number;
+}
+
+/** What a resumed run is told. The session already holds the task and everything done so far. */
+export function resumePrompt(reason: string): string {
+  return (
+    `Your previous session ended early (${reason}) before the task was finished. Continue from where you stopped: ` +
+    "first check what was already done so you do not redo or undo it, then finish the task and record the outcome " +
+    "where your instructions say. If it cannot be finished, record exactly where you stopped and why, then stop."
+  );
 }
 
 export interface RunManagerOptions {
@@ -164,6 +200,11 @@ export class RunManager {
     return this._config;
   }
 
+  /** How the given runs ended (status, review reasons, cost), in one query: what a schedule row shows. */
+  summaries(ids: string[]): RunSummary[] {
+    return this.runs.summaries(ids);
+  }
+
   /**
    * Mark `running` runs whose owning process is gone as failed. Called at startup and
    * by the scheduler lease holder. Several DuskFleet processes share the database
@@ -176,10 +217,15 @@ export class RunManager {
     for (const run of orphans) {
       assertTransition(run.status, "failed");
       // Compare-and-set: a starting process and the lease holder may sweep the same row.
-      const won = this.runs.updateIfStatus(run.id, "running", {
-        status: "failed",
+      const patch = {
+        status: "failed" as const,
         endedAt: new Date().toISOString(),
-        error: `orphaned: owning process ${run.owner ?? "(unrecorded)"} is gone`,
+        error: orphanedError(run.owner),
+      };
+      // Not through transition(): the write must stay a compare-and-set, so the reasons are computed here.
+      const won = this.runs.updateIfStatus(run.id, "running", {
+        ...patch,
+        reviewReasons: reviewReasons({ ...run, ...patch }),
       });
       if (!won) continue;
       this.runs.addEvent(run.id, "status_change", { from: run.status, to: "failed" });
@@ -190,12 +236,12 @@ export class RunManager {
   }
 
   /**
-   * Gone = no owner recorded (legacy row), an owner on this host without a usable pid
-   * or whose pid is not alive, or this very process without the run in memory (only
-   * after pid reuse).
+   * Gone = no owner recorded and older than any run may live (see `legacyRunIsOver`), an
+   * owner on this host without a usable pid or whose pid is not alive, or this very
+   * process without the run in memory (only after pid reuse).
    */
   private ownerIsGone(run: Run): boolean {
-    if (run.owner === null) return true;
+    if (run.owner === null) return this.legacyRunIsOver(run);
     const owner = parseHolder(run.owner);
     const self = parseHolder(this.owner);
     if (owner.host !== self.host) return false;
@@ -209,6 +255,21 @@ export class RunManager {
       // EPERM: alive, owned by another user. Only ESRCH proves it is gone.
       return (err as NodeJS.ErrnoException).code === "ESRCH";
     }
+  }
+
+  /**
+   * A row without owner comes from a build before run ownership, either from before the
+   * upgrade or from a process still running that old build (a `serve` not restarted after
+   * `npm run build`), whose run may be alive. It is over only once it started longer ago
+   * than the longest configured timeout plus a minute: the executor kills a run at its
+   * timeout, so nothing that old can still be running.
+   */
+  private legacyRunIsOver(run: Run): boolean {
+    const started = Date.parse(run.startedAt ?? run.createdAt);
+    if (Number.isNaN(started)) return true;
+    let longest = this.config.claude.defaultTimeoutMinutes;
+    for (const agent of this.config.agents.values()) longest = Math.max(longest, agent.timeoutMinutes ?? 0);
+    return Date.now() - started > (longest + 1) * 60_000;
   }
 
   activeCount(): number {
@@ -227,9 +288,64 @@ export class RunManager {
     return this.runs.events(runId);
   }
 
-  /** Subagent invocations recorded for a run (see RunAgent). */
+  /** Subagent invocations recorded for a run (see RunAgent). A pure read. */
   agents(runId: string): RunAgent[] {
     return this.runs.agents(runId);
+  }
+
+  /**
+   * One-shot backfill (CLI `repair-subagents`): subagent rows of finished runs that miss type,
+   * brief, report or duration, still hold the raw hand-back frame, or were never closed, are
+   * completed from the run's jsonl log with the current parser. Only terminal runs (status read
+   * from the DB, so a run another process is still writing is never touched); a row is written
+   * only when the merge changes it and the stored row is unchanged since it was read, so
+   * re-running settles. A row still open after reading the log belongs to a run that ended
+   * without closing it (orphan, crash) and becomes `interrupted`; with no log, it is left alone.
+   */
+  async repairSubagents(): Promise<{ runsChecked: number; rowsRepaired: number }> {
+    let runsChecked = 0;
+    let rowsRepaired = 0;
+    for (const runId of this.runs.finishedRunIdsWithAgents()) {
+      const run = this.runs.get(runId);
+      if (!run || !isTerminal(run.status)) continue;
+      const rows = this.runs.agents(runId).filter(needsRepair);
+      if (!rows.length) continue;
+      runsChecked += 1;
+      const records = await subagentsFromLog(run.logPath);
+      const fromLog = new Map((records ?? []).map((s) => [s.agentId, s]));
+      // The replay awaited: re-read, and update only rows nobody wrote in the meantime.
+      const current = new Map(this.runs.agents(runId).map((r) => [r.agentId, r]));
+      for (const row of rows) {
+        const now = current.get(row.agentId);
+        if (!now || !sameSubagent(now, row)) continue;
+        const { runId: _r, definitionHash, ...stored } = row;
+        const merged = mergeSubagent(stored, fromLog.get(row.agentId));
+        // Still open after reading the log: the run ended without closing it. With no log read
+        // (missing or empty) nothing says so, and the row is left as it is.
+        if (merged.status === "running" && records !== null) merged.status = "interrupted";
+        // Closed, but the log gave no end time (no timestamp on the closing line): the run's end bounds it.
+        if (merged.status !== "running") merged.endedAt ??= run.endedAt ?? new Date().toISOString();
+        if (sameSubagent(stored, merged)) continue;
+        this.runs.upsertAgent(runId, merged, definitionHash);
+        rowsRepaired += 1;
+      }
+    }
+    return { runsChecked, rowsRepaired };
+  }
+
+  /** The run that resumed `runId` (on_failure: resume_once), if any. */
+  resumedBy(runId: string): Run | null {
+    return this.runs.resumedBy(runId);
+  }
+
+  /** id → id of the resuming run, for the ids that have one (list views). */
+  resumedByMany(ids: string[]): Map<string, string> {
+    return this.runs.resumedByMany(ids);
+  }
+
+  /** Add a note to a run's timeline (the scheduler explains a fresh start after a refused resume). */
+  note(runId: string, message: string): void {
+    this.runs.addEvent(runId, "note", { message });
   }
 
   /**
@@ -238,60 +354,27 @@ export class RunManager {
    */
   async startRun(input: StartRunInput): Promise<Run> {
     this.reloadConfig();
-    const agent = this.resolveAgent(input.agentId);
-    // An agent bound to a project runs there by default and nowhere else.
-    const effectiveInput: StartRunInput =
-      agent.project && !input.projectId && !input.projectPath ? { ...input, projectId: agent.project } : input;
-    const { projectPath, projectId, project } = this.resolveProject(effectiveInput);
-    if (agent.project && projectId !== agent.project) {
-      throw new Error(
-        `agent "${agent.id}" belongs to project "${agent.project}" and cannot run on ${projectId ? `"${projectId}"` : projectPath}. ` +
-          `Omit the project to use the agent's own, or pick an agent without a project binding.`,
-      );
-    }
+    const { agent, projectPath, projectId, project } = this.resolveTarget(input);
     const prompt = input.prompt?.trim();
     if (!prompt) throw new Error("prompt is empty");
 
-    if (this.active.size >= this.config.maxConcurrentRuns) {
-      throw new Error(`max_concurrent_runs (${this.config.maxConcurrentRuns}) reached; wait for a run to finish`);
-    }
-    // Count this process's runs plus the live runs of other DuskFleet processes on the same database.
-    const busy: Array<[string, { projectPath: string; agentId: string; isolated: boolean }]> = [
-      ...this.active.entries(),
-    ];
-    for (const r of this.runs.listByStatus("running")) {
-      if (!this.active.has(r.id) && !this.ownerIsGone(r)) {
-        busy.push([r.id, { ...r, isolated: this.config.agents.get(r.agentId)?.isolated === true }]);
-      }
-    }
-    // Isolated agents never edit the checkout: they neither count against nor wait for the
-    // per-project limit. Only non-isolated runs compete for a working copy.
-    if (!agent.isolated) {
-      const sameProject = busy.filter(([, a]) => a.projectPath === projectPath && !a.isolated);
-      if (sameProject.length >= this.config.maxConcurrentPerProject) {
-        const [id, a] = sameProject[0]!;
-        throw new Error(
-          `project busy: run ${id} (agent ${a.agentId}) is still running in ${projectPath}. ` +
-            `max_concurrent_per_project is ${this.config.maxConcurrentPerProject}; wait, cancel_run, or raise it ` +
-            `(an agent that never edits the checkout can set isolated: true).`,
-        );
-      }
-    }
-    const agentLimit = agent.maxConcurrent ?? this.config.maxConcurrentPerAgent;
-    const sameAgent = busy.filter(([, a]) => a.agentId === agent.id).map(([id]) => id);
-    if (sameAgent.length >= agentLimit) {
-      const limitSource = agent.maxConcurrent !== undefined ? "its max_concurrent" : "max_concurrent_per_agent";
-      throw new Error(
-        `agent busy: agent ${agent.id} already has ${sameAgent.length} of ${agentLimit} runs (${sameAgent.join(", ")}). ` +
-          `${limitSource} is ${agentLimit}; wait, cancel_run, or raise it.`,
-      );
-    }
+    const busy = this.capacityError(agent, projectPath);
+    if (busy) throw new BusyError(busy);
 
     const runId = randomUUID();
-    const sessionId = randomUUID();
+    const resume = input.resume ?? null;
+    // A resumed run continues the earlier run's session under its own run id and log.
+    const sessionId = resume?.fromRun.claudeSessionId ?? randomUUID();
     const model = input.model ?? agent.model;
     const timeoutMinutes = agent.timeoutMinutes ?? this.config.claude.defaultTimeoutMinutes;
-    const budget = budgetPlan(agent, this.config);
+    const kind: RunKind = input.kind ?? "run";
+    const budgetAgent = resume
+      ? { ...agent, maxBudgetUsd: resume.budgetUsd }
+      : input.maxBudgetUsd !== undefined
+        ? { ...agent, maxBudgetUsd: input.maxBudgetUsd }
+        : agent;
+    // A gate is a quick yes/no: no reserve, no wrap-up pass.
+    const budget = budgetPlan(kind === "gate" ? { ...budgetAgent, wrapUpReserveUsd: 0 } : budgetAgent, this.config);
     const logPath = path.join(this.config.dataDir, "logs", `${runId}.jsonl`);
 
     const request: ExecutionRequest = {
@@ -303,6 +386,7 @@ export class RunManager {
       maxBudgetUsd: budget.main,
       logPath,
     };
+    if (resume) request.resumeSessionId = sessionId;
     if (model) request.model = model;
     if (agent.allowedTools) request.allowedTools = agent.allowedTools;
     if (agent.disallowedTools) request.disallowedTools = agent.disallowedTools;
@@ -355,17 +439,38 @@ export class RunManager {
       mcp: { mounted: [], used: [], allowListedMissing: [] },
       humanIntervention: false,
       contextExhausted: false,
-      retries: 0,
+      retries: resume ? resume.fromRun.retries + 1 : 0,
       logPath,
       rawResultJson: null,
       scheduleId: input.scheduleId ?? null,
       owner: this.owner,
       phases: [],
+      reviewReasons: [],
+      resumedFromRunId: resume?.fromRun.id ?? null,
+      kind,
     };
 
-    // Insert first so that events emitted by the executor always find the row.
-    this.runs.insert(run);
+    // Insert first so that events emitted by the executor always find the row. For a resume the
+    // insert is also the claim: resumed_from_run_id is unique (migration 8), so when two processes
+    // race to resume the same run (a tick and run_schedule_now), the second insert fails here.
+    try {
+      this.runs.insert(run);
+    } catch (err) {
+      if (resume && /UNIQUE constraint failed/i.test(err instanceof Error ? err.message : String(err))) {
+        const other = this.runs.resumedBy(resume.fromRun.id);
+        throw new Error(
+          `run ${resume.fromRun.id} was already resumed once by run ${other?.id ?? "(unknown)"}; a second failure is final`,
+        );
+      }
+      throw err;
+    }
     this.runs.addEvent(runId, "status_change", { from: null, to: "pending" });
+    if (resume) {
+      this.runs.addEvent(runId, "note", {
+        message: `resumes run ${resume.fromRun.id} (${resume.fromRun.status}, ${resume.fromRun.terminationReason ?? "no termination reason"}) with a ${budget.total} USD budget`,
+        resumedFromRunId: resume.fromRun.id,
+      });
+    }
 
     let handle: ExecutionHandle;
     try {
@@ -374,8 +479,17 @@ export class RunManager {
       // e.g. bypassPermissions requested while disabled, or binary missing
       const message = err instanceof Error ? err.message : String(err);
       this.transition(run, "failed", { endedAt: new Date().toISOString(), error: message });
+      if (resume) {
+        // Nothing ran: give the claim back so the one retry is not used up by a spawn failure.
+        this.runs.releaseResumeClaim(runId);
+        this.runs.addEvent(runId, "note", {
+          message: `resume of run ${resume.fromRun.id} did not start; the retry is still available`,
+        });
+      }
       throw err;
     }
+    if (resume)
+      this.runs.addEvent(resume.fromRun.id, "note", { message: `resumed by run ${runId}`, resumedByRunId: runId });
 
     this.active.set(runId, {
       handle,
@@ -409,6 +523,54 @@ export class RunManager {
     return this.runs.get(runId)!;
   }
 
+  /**
+   * Start a run that continues the session of a run that ended `budget_exhausted` or
+   * `timed_out` (`on_failure: resume_once`). Same agent, project and envelope; the prompt
+   * says to pick up where it stopped. Refused when the run cannot be resumed or already was:
+   * a resume is tried once, a second failure is final.
+   */
+  async resumeRun(input: ResumeRunInput): Promise<Run> {
+    const fromRun = this.runs.get(input.runId);
+    if (!fromRun) throw new Error(`run not found: ${input.runId}`);
+    if (!isResumable(fromRun)) {
+      throw new Error(
+        `run ${fromRun.id} cannot be resumed: it is ${fromRun.status}${fromRun.terminationReason ? ` (${fromRun.terminationReason})` : ""}; only budget_exhausted and timed_out runs with a session are`,
+      );
+    }
+    if (fromRun.resumedFromRunId) {
+      throw new Error(
+        `run ${fromRun.id} is itself a resume of run ${fromRun.resumedFromRunId}; a resume is tried once, a second failure is final`,
+      );
+    }
+    const already = this.runs.resumedBy(fromRun.id);
+    if (already)
+      throw new Error(
+        `run ${fromRun.id} was already resumed once by run ${already.id} (${already.status}); a second failure is final`,
+      );
+    this.reloadConfig();
+    const agent = this.resolveAgent(fromRun.agentId);
+    const budgetUsd =
+      input.budgetUsd ?? agent.resumeBudgetUsd ?? agent.maxBudgetUsd ?? this.config.claude.defaultMaxBudgetUsd;
+    const reason = fromRun.status === "timed_out" ? "timed out" : "budget exhausted";
+    // The original run's project: by id when it had one (the registry path may be a symlink of the resolved one).
+    const startInput: StartRunInput = fromRun.projectId
+      ? {
+          prompt: resumePrompt(reason),
+          agentId: fromRun.agentId,
+          projectId: fromRun.projectId,
+          resume: { fromRun, budgetUsd },
+        }
+      : {
+          prompt: resumePrompt(reason),
+          agentId: fromRun.agentId,
+          projectPath: fromRun.projectPath,
+          resume: { fromRun, budgetUsd },
+        };
+    if (fromRun.modelRequested) startInput.model = fromRun.modelRequested;
+    if (input.scheduleId) startInput.scheduleId = input.scheduleId;
+    return this.startRun(startInput);
+  }
+
   cancelRun(id: string): Run {
     const run = this.runs.get(id);
     if (!run) throw new Error(`run not found: ${id}`);
@@ -424,7 +586,7 @@ export class RunManager {
     // leave it running. It has to be cancelled through that process.
     if (!this.ownerIsGone(run)) {
       throw new Error(
-        `run ${id} is owned by ${run.owner}, another live DuskFleet process; cancel it from there (or stop that process).`,
+        `run ${id} is owned by ${run.owner ?? "(unrecorded: an older DuskFleet build)"}, another live DuskFleet process; cancel it from there (or stop that process).`,
       );
     }
     // Not active and its owner is gone (orphan) – close it out directly
@@ -464,7 +626,90 @@ export class RunManager {
     }
   }
 
+  /**
+   * Why a run of this agent on this project would be refused right now (the WIP guards), or
+   * null. Lets the scheduler skip a busy tick before it spends anything on a gate.
+   */
+  busyReason(input: { agentId: string; projectId?: string | null }): string | null {
+    this.reloadConfig();
+    const target: StartRunInput = { prompt: "", agentId: input.agentId };
+    if (input.projectId) target.projectId = input.projectId;
+    // Same resolution as startRun; an invalid target throws here rather than passing silently.
+    const { agent, projectPath } = this.resolveTarget(target);
+    return this.capacityError(agent, projectPath);
+  }
+
+  /**
+   * The project directory a run of this agent would use, resolved exactly as startRun does
+   * (schedule gates run their command there).
+   */
+  projectPathFor(input: { agentId: string; projectId?: string | null }): string {
+    this.reloadConfig();
+    const target: StartRunInput = { prompt: "", agentId: input.agentId };
+    if (input.projectId) target.projectId = input.projectId;
+    return this.resolveTarget(target).projectPath;
+  }
+
   // ---- internals -----------------------------------------------------------
+
+  /** Agent and project of a run: an agent bound to a project runs there by default and nowhere else. */
+  private resolveTarget(input: StartRunInput): {
+    agent: AgentDefinition;
+    projectPath: string;
+    projectId: string | null;
+    project: ProjectDefinition | null;
+  } {
+    const agent = this.resolveAgent(input.agentId);
+    const effectiveInput: StartRunInput =
+      agent.project && !input.projectId && !input.projectPath ? { ...input, projectId: agent.project } : input;
+    const { projectPath, projectId, project } = this.resolveProject(effectiveInput);
+    if (agent.project && projectId !== agent.project) {
+      throw new Error(
+        `agent "${agent.id}" belongs to project "${agent.project}" and cannot run on ${projectId ? `"${projectId}"` : projectPath}. ` +
+          `Omit the project to use the agent's own, or pick an agent without a project binding.`,
+      );
+    }
+    return { agent, projectPath, projectId, project };
+  }
+
+  /** The WIP guards: why a run of `agent` in `projectPath` is refused right now, or null. */
+  private capacityError(agent: AgentDefinition, projectPath: string): string | null {
+    if (this.active.size >= this.config.maxConcurrentRuns) {
+      return `max_concurrent_runs (${this.config.maxConcurrentRuns}) reached; wait for a run to finish`;
+    }
+    // Count this process's runs plus the live runs of other DuskFleet processes on the same database.
+    const busy: Array<[string, { projectPath: string; agentId: string; isolated: boolean }]> = [
+      ...this.active.entries(),
+    ];
+    for (const r of this.runs.listByStatus("running")) {
+      if (!this.active.has(r.id) && !this.ownerIsGone(r)) {
+        busy.push([r.id, { ...r, isolated: this.config.agents.get(r.agentId)?.isolated === true }]);
+      }
+    }
+    // Isolated agents never edit the checkout: they neither count against nor wait for the
+    // per-project limit. Only non-isolated runs compete for a working copy.
+    if (!agent.isolated) {
+      const sameProject = busy.filter(([, a]) => a.projectPath === projectPath && !a.isolated);
+      if (sameProject.length >= this.config.maxConcurrentPerProject) {
+        const [id, a] = sameProject[0]!;
+        return (
+          `project busy: run ${id} (agent ${a.agentId}) is still running in ${projectPath}. ` +
+          `max_concurrent_per_project is ${this.config.maxConcurrentPerProject}; wait, cancel_run, or raise it ` +
+          `(an agent that never edits the checkout can set isolated: true).`
+        );
+      }
+    }
+    const agentLimit = agent.maxConcurrent ?? this.config.maxConcurrentPerAgent;
+    const sameAgent = busy.filter(([, a]) => a.agentId === agent.id).map(([id]) => id);
+    if (sameAgent.length >= agentLimit) {
+      const limitSource = agent.maxConcurrent !== undefined ? "its max_concurrent" : "max_concurrent_per_agent";
+      return (
+        `agent busy: agent ${agent.id} already has ${sameAgent.length} of ${agentLimit} runs (${sameAgent.join(", ")}). ` +
+        `${limitSource} is ${agentLimit}; wait, cancel_run, or raise it.`
+      );
+    }
+    return null;
+  }
 
   /**
    * A process of the run ended. The main pass that ran out of budget is followed by one
@@ -697,7 +942,10 @@ export class RunManager {
 
   private transition(run: Run, to: RunStatus, patch: Parameters<RunRepository["update"]>[1] = {}): void {
     assertTransition(run.status, to);
-    this.runs.update(run.id, { ...patch, status: to });
+    const next = { ...patch, status: to };
+    // The one place the needs-review rule runs: on the run as it will be stored, once terminal.
+    if (isTerminal(to)) next.reviewReasons = reviewReasons({ ...run, ...defined(patch), status: to });
+    this.runs.update(run.id, next);
     this.runs.addEvent(run.id, "status_change", { from: run.status, to });
     run.status = to;
   }
@@ -778,6 +1026,11 @@ function addNullable(a: number | null, b: number | null): number | null {
  * cost, turns, tool calls, tokens and denials are summed; the final text is the wrap-up's
  * (that is where the agent said where it stopped), falling back to the main pass's.
  */
+/** A patch without its `undefined` entries, so spreading it over a run never erases a stored value. */
+function defined<T extends object>(patch: T): Partial<T> {
+  return Object.fromEntries(Object.entries(patch).filter(([, v]) => v !== undefined)) as Partial<T>;
+}
+
 export function mergeResults(main: ExecutionResult, wrapUp: ExecutionResult): ExecutionResult {
   const usage: TokenUsage = {
     inputTokens: addNullable(main.usage.inputTokens, wrapUp.usage.inputTokens),

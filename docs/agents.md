@@ -46,6 +46,8 @@ permission_mode: acceptEdits      # acceptEdits | dontAsk | auto | manual  (plan
 timeout_minutes: 30
 max_budget_usd: 5
 # wrap_up_reserve_usd: 0.5     # part of max_budget_usd kept for the wrap-up pass; default 10%, min $0.50, 0 = off
+# on_failure: resume_once      # a schedule's next tick resumes a budget-exhausted / timed-out run, once (default none)
+# resume_budget_usd: 3         # budget of that resumed run (default max_budget_usd)
 ---
 You are running unattended. Finish the task end to end and summarise what you changed.
 ```
@@ -110,6 +112,20 @@ Two frontmatter fields lift the limits per agent:
 for `max_concurrent` is a config error naming the file. `list_agents` reports both fields
 (`maxConcurrent` is the effective limit) and the dashboard shows them in the limits row when
 they differ from the defaults.
+## Resume once on failure
+
+The wrap-up pass leaves a trace; it does not finish the job. `on_failure: resume_once` lets a
+**schedule** retry: on its next tick after a run of this agent ended `budget_exhausted` or
+`timed_out`, it resumes that session (`claude --resume <session>`) instead of starting fresh,
+with `resume_budget_usd` (default `max_budget_usd`; the wrap-up reserve applies to it too)
+and a prompt that says the previous session ended early, to check what was already done
+before redoing anything, and to finish and record the outcome. The retry is its own run,
+linked both ways (`resumedFromRunId` on the retry, `resumedByRunId` in `get_run`, `list_runs`
+and on the dashboard; `retries` counts the hop). It happens **once**: a retry that fails is
+final and the tick after starts fresh; a retry that completes is followed by a fresh run as
+usual. The default is `none`. A schedule can override the agent (`on_failure` on the
+schedule, `none` to switch it off for that schedule); see [schedules](schedules.md#resume-once-on-failure).
+`run_agent` is never retried: the policy belongs to the scheduler.
 
 ## Permissions in unattended runs
 
@@ -149,8 +165,8 @@ model). Instead of copying that prompt into DuskFleet, link to it:
 
 ```markdown
 ---
-id: app-coordinator
-claude_agent: app-coordinator     # <project>/.claude/agents/app-coordinator.md
+id: my-agent
+claude_agent: my-agent     # <project>/.claude/agents/my-agent.md
 project: my-app
 permission_mode: acceptEdits
 inherit_mcp: true
@@ -159,12 +175,26 @@ allowed_tools: ["mcp__claude_ai_Atlassian_Rovo", "Bash(yarn:*)", "Bash(git:*)", 
 Optional extra instructions, appended after the project agent's own prompt.
 ```
 
-The run starts as `claude --agent app-coordinator`: the project agent decides who the
+The run starts as `claude --agent my-agent`: the project agent decides who the
 model is and what it does; the DuskFleet agent decides what it may do unattended
 (permissions, allow-list, budget, MCP). `list_project_agents` shows what a project offers;
 a link to a name the project does not define fails before anything is spawned. Note that a
 project agent's `tools:` list does not grant permissions in unattended runs: those tools
 still need to be in `allowed_tools` here.
+
+Two things to get right with a link:
+
+- **Prompt it as the agent, not as its caller.** The run *is* the project agent. If the
+  project also ships a command that invokes that agent (a gate such as
+  `/pickup-task` that checks an issue tracker and then calls `my-agent`), do not tell the
+  link to run that command: the agent would invoke itself as a subagent, paying two Opus
+  hops for one unit of work. Prompt it with "find your own work and run your loop". Keep
+  the command for an `own` agent on a cheap model if you want the gate before the hop.
+- **MCP tool names in the project agent's `tools:` must be the ones unattended runs see**
+  (`mcp__claude_ai_Atlassian_Rovo__*`, `mcp__claude_ai_Figma__*`), not the `mcp__plugin_*`
+  names interactive sessions show. The list is an allow-list: with the wrong prefix the
+  agent is denied the tools that exist. Listing both prefixes keeps the file usable from
+  both.
 
 ## MCP servers inside runs
 
@@ -200,7 +230,29 @@ that did part of the work:
 - `definitionHash`: a short hash of the project agent file at start time, so evals can tell
   which version of a persona produced a result.
 
-`get_run` returns them as `subagents`; `run-info` on the CLI does the same. Tool-use
+`get_run` and the CLI `run-info` both return them as `subagents`, each with `type`, `brief` and
+`report` (stored as `subagentType`, `prompt` and `resultText`; only the plain-language names are
+sent, on both surfaces). The
+report is stored as the subagent wrote it: Claude Code's hand-back frame (provenance preamble,
+two-space indent, `agentId` / `<usage>` footer) is stripped; without the preamble, a trailing
+`<usage>` block is stripped only after an `agentId:` line, so a report that ends with one of its
+own stays whole. A hand-back closes the subagent only with a final status: a failed one wins
+over an earlier completed, and a background `Agent` call (`async_launched`) stays open until
+its `task_notification`. When a stream lacks the
+`task_started` or nested lines, the hand-back's `tool_use_result` (`agentType`, `prompt`,
+`resolvedModel`, `totalDurationMs`, `totalTokens`, `totalToolUseCount`) and the parent's
+`Agent` call input still fill the row; the harness totals win over counted figures, and a
+subagent seen only through its hand-back starts at `endedAt - totalDurationMs` (or at the
+`Agent` call's stream time). Rows recorded by an older parser (missing any of these, still
+holding a raw frame, or left `running` by a process that died) are backfilled with
+`duskfleet repair-subagents`: it replays each finished run's `data/logs/<run_id>.jsonl` with
+the current parser, takes status and end time from the log when the log closed an open
+subagent (a failed outcome also replaces a stored completed; a stored failed or interrupted is
+never downgraded), takes a duration only when the log measured it (harness total or two stream
+timestamps, never the replay's clock), marks rows the log left open `interrupted` (rows of a
+run with no readable log are left alone), and writes a row only when that changes it and
+nobody wrote it since it was read. Reads never write.
+Tool-use
 events in the timeline carry the `agentId` they belong to (null for the main session).
 Nothing is spawned differently: the data comes from the `task_started` /
 `task_notification` lines and the `agent_id` field of nested messages in Claude Code's

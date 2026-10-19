@@ -65,18 +65,17 @@ export default async function RunsPage({ searchParams }: { searchParams: Promise
           Runs
           {filtered && <span className="count"> · {activeLabel}</span>}
         </h1>
-        {filtered ? (
-          <span className="active-filter">
-            <span className="muted">
+        <span className="head-side">
+          {filtered && (
+            <span className="active-filter">
               showing {fmtInt(recent.length + running.length)} of {fmtInt(total)}
+              <Link href="/" className="clear">
+                × clear filters
+              </Link>
             </span>
-            <Link href="/" className="clear">
-              × clear filters
-            </Link>
-          </span>
-        ) : (
+          )}
           <span className="note">{fmtDayClock(new Date())}</span>
-        )}
+        </span>
       </div>
 
       <div className="toolbar">
@@ -96,45 +95,47 @@ export default async function RunsPage({ searchParams }: { searchParams: Promise
             </Link>
           ))}
         </div>
-        <div className="filters">
-          <span className="filter-label">Agent</span>
-          <Link href={qs({ agent: undefined })} className={`chip ${agent ? "" : "on"}`}>
-            all
-          </Link>
-          {agents
-            .filter((a) => !project || !a.project || a.project === project)
-            .map((a) => (
-              <Link
-                key={a.id}
-                href={qs({ agent: a.id })}
-                className={`chip ${agent === a.id ? "on" : ""}`}
-                title={a.name}
-              >
-                {a.id}
-              </Link>
-            ))}
-        </div>
-        {/* biome-ignore lint/a11y/useSemanticElements: the <search> element is not styled here; role="search" on the form is the established pattern */}
-        <form className="search" action="/" method="get" role="search">
-          {agent && <input type="hidden" name="agent" value={agent} />}
-          {project && <input type="hidden" name="project" value={project} />}
-          {schedule && <input type="hidden" name="schedule" value={schedule} />}
-          <input
-            type="search"
-            name="q"
-            defaultValue={q ?? ""}
-            placeholder="Search prompts or paste a run id…"
-            aria-label="Search runs"
-          />
-          <button type="submit" className="search-btn">
-            Search
-          </button>
-          {q && (
-            <Link href={qs({ q: undefined })} className="clear">
-              × clear search
+        <div className="toolbar-row">
+          <div className="filters">
+            <span className="filter-label">Agent</span>
+            <Link href={qs({ agent: undefined })} className={`chip ${agent ? "" : "on"}`}>
+              all
             </Link>
-          )}
-        </form>
+            {agents
+              .filter((a) => !project || !a.project || a.project === project)
+              .map((a) => (
+                <Link
+                  key={a.id}
+                  href={qs({ agent: a.id })}
+                  className={`chip ${agent === a.id ? "on" : ""}`}
+                  title={a.name}
+                >
+                  {a.id}
+                </Link>
+              ))}
+          </div>
+          {/* biome-ignore lint/a11y/useSemanticElements: the <search> element is not styled here; role="search" on the form is the established pattern */}
+          <form className="search" action="/" method="get" role="search">
+            {agent && <input type="hidden" name="agent" value={agent} />}
+            {project && <input type="hidden" name="project" value={project} />}
+            {schedule && <input type="hidden" name="schedule" value={schedule} />}
+            <input
+              type="search"
+              name="q"
+              defaultValue={q ?? ""}
+              placeholder="Search prompts or paste a run id…"
+              aria-label="Search runs"
+            />
+            <button type="submit" className="search-btn">
+              Search
+            </button>
+            {q && (
+              <Link href={qs({ q: undefined })} className="clear">
+                × clear search
+              </Link>
+            )}
+          </form>
+        </div>
       </div>
 
       <section
@@ -151,24 +152,32 @@ export default async function RunsPage({ searchParams }: { searchParams: Promise
         </div>
         <div
           className="stat"
-          title="Completed without permission denials or context exhaustion, over all finished runs"
+          title="Completed with nothing to review (no denial, context exhaustion or MCP mismatch), over all finished runs. clean + completed to review + failed = finished"
         >
           <div className="label">Clean runs</div>
           <div className="value">{fmtPct(o.clean, o.finished)}</div>
           <div className="sub">
-            {fmtInt(o.clean)} clean · {fmtInt(o.needsReview)} to review · {fmtInt(o.failed)} failed
+            {fmtInt(o.clean)} clean · {fmtInt(o.completed - o.clean)} completed to review · {fmtInt(o.failed)} failed
           </div>
         </div>
         <div className="stat">
           <div className="label">Needs review</div>
           <div className={`value ${o.needsReview ? "warn" : ""}`}>{o.needsReview}</div>
-          <div className="sub">hit a permission denial or ran out of context</div>
+          <div className="sub">failed, timed out, out of budget or context, orphaned, or denied a tool</div>
         </div>
         <div className="stat">
           <div className="label">Spent</div>
           <div className="value">{fmtCost(o.costUsd)}</div>
           <div className="sub">
             {fmtCost(o.costLast24hUsd)} in the last 24 h{filtered ? " · in this filter" : ""}
+            {o.costGatesUsd > 0 && (
+              <>
+                <br />
+                <span title="Schedule gate agents decide whether a tick has work; their runs are not in the counts, only here">
+                  {fmtCost(o.costUsd - o.costGatesUsd)} on runs · {fmtCost(o.costGatesUsd)} on gates
+                </span>
+              </>
+            )}
           </div>
         </div>
       </section>
@@ -191,6 +200,7 @@ export default async function RunsPage({ searchParams }: { searchParams: Promise
         {filtered && <span className="count">· filtered by {activeLabel}</span>}
       </h2>
       <RunTable
+        ended
         runs={recent}
         emptyText={
           filtered
@@ -219,7 +229,7 @@ export default async function RunsPage({ searchParams }: { searchParams: Promise
           <h2>
             By model <span className="count">all runs</span>
           </h2>
-          <div className="card" style={{ padding: "4px 6px" }}>
+          <div className="card model-card">
             <table className="table">
               <thead>
                 <tr>

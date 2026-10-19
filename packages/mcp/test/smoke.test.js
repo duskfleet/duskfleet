@@ -18,9 +18,11 @@ import {
   ClaudeCodeExecutor,
   loadConfig,
   looksLikeContextExhaustion,
+  needsReview,
   openDatabase,
   RunManager,
   RunRepository,
+  reviewReasons,
   summarizeRun,
   WRAP_UP_PROMPT,
 } from "@duskfleet/core";
@@ -191,7 +193,11 @@ test("subagent invocations are recorded as run_agents rows with the persona hash
     assert.equal(s.subagentType, "reviewer");
     assert.equal(s.description, "Review the diff");
     assert.equal(s.prompt, "Review the diff and report problems. Do not edit files.");
-    assert.equal(s.resultText, "[Subagent hand-back] Two findings: x is unused; y lacks a test.");
+    assert.equal(
+      s.resultText,
+      "Two findings:\n- x is unused\n- y lacks a test.",
+      "hand-back frame, indent and footer stripped",
+    );
     assert.equal(s.status, "completed");
     assert.equal(s.model, "claude-haiku-5-5");
     assert.equal(s.parentAgentId, null);
@@ -221,6 +227,80 @@ test("subagent invocations are recorded as run_agents rows with the persona hash
       ],
     );
     assert.equal(events[7].payload.status, "completed");
+  } finally {
+    await app.cleanup();
+  }
+});
+
+test("subagent rows recorded by an older parser are repaired from the jsonl log by the backfill, never on read", async () => {
+  const app = makeApp();
+  try {
+    const started = await app.runs.startRun({ prompt: "subagent", projectPath: app.project });
+    const run = await app.runs.waitForRun(started.id, 10_000);
+    // What the 2026-10-14 run looked like to its reader: no type, no brief, raw report, no duration,
+    // and left open (the process died before closing it) although the log has its hand-back.
+    app.db
+      .prepare(
+        "UPDATE run_agents SET subagent_type = 'unknown', description = NULL, prompt = NULL, result_text = ?, duration_ms = NULL, total_tokens = NULL, tool_calls = 0, status = 'running', ended_at = NULL WHERE run_id = ?",
+      )
+      .run(
+        "[Subagent hand-back] frame. The report follows:\n  raw report\nagentId: x\n<usage>tool_uses: 2</usage>",
+        run.id,
+      );
+    // A row the log knows nothing about, never closed: interrupted by the backfill.
+    const [orig] = app.runs.agents(run.id);
+    const { runId: _r, definitionHash: _h, ...ghost } = orig;
+    new RunRepository(app.db).upsertAgent(
+      run.id,
+      { ...ghost, agentId: "ghost", parentToolUseId: null, resultText: null, status: "running", endedAt: null },
+      null,
+    );
+
+    assert.equal(app.runs.agents(run.id)[0].subagentType, "unknown", "a read does not write");
+    assert.deepEqual(await app.runs.repairSubagents(), { runsChecked: 1, rowsRepaired: 2 });
+    assert.deepEqual(
+      await app.runs.repairSubagents(),
+      { runsChecked: 1, rowsRepaired: 0 },
+      "re-running settles: nothing left to write",
+    );
+    const [s, g] = app.runs.agents(run.id);
+    assert.equal(s.status, "completed", "closed from the log's hand-back");
+    assert.ok(s.endedAt);
+    assert.equal(g.status, "interrupted");
+    assert.equal(g.endedAt, run.endedAt);
+    assert.equal(s.subagentType, "reviewer");
+    assert.equal(s.description, "Review the diff");
+    assert.equal(s.prompt, "Review the diff and report problems. Do not edit files.");
+    assert.equal(
+      s.resultText,
+      "Two findings:\n- x is unused\n- y lacks a test.",
+      "the log's report replaces the raw one",
+    );
+    assert.equal(s.durationMs, 4500);
+    assert.equal(s.totalTokens, 865);
+    assert.equal(s.toolCalls, 2);
+    // Written back: a plain read of the table now has it too.
+    const row = app.db
+      .prepare("SELECT subagent_type, prompt, duration_ms FROM run_agents WHERE run_id = ?")
+      .get(run.id);
+    assert.equal(row.subagent_type, "reviewer");
+    assert.equal(row.duration_ms, 4500);
+  } finally {
+    await app.cleanup();
+  }
+});
+
+test("the backfill leaves open rows alone when the run's log is gone", async () => {
+  const app = makeApp();
+  try {
+    const started = await app.runs.startRun({ prompt: "subagent", projectPath: app.project });
+    const run = await app.runs.waitForRun(started.id, 10_000);
+    app.db.prepare("UPDATE run_agents SET status = 'running', ended_at = NULL WHERE run_id = ?").run(run.id);
+    rmSync(run.logPath, { force: true });
+    assert.deepEqual(await app.runs.repairSubagents(), { runsChecked: 1, rowsRepaired: 0 });
+    const [s] = app.runs.agents(run.id);
+    assert.equal(s.status, "running", "no log read: nothing says the run left it open");
+    assert.equal(s.endedAt, null);
   } finally {
     await app.cleanup();
   }
@@ -687,6 +767,10 @@ test("cancelling during the wrap-up pass records the run as cancelled", async ()
         ["wrap_up", "cancelled"],
       ],
     );
+    // The main pass left budget_exhausted and an exit code behind; a person cancelled, so nothing to review.
+    assert.equal(run.terminationReason, "budget_exhausted");
+    assert.deepEqual(run.reviewReasons, []);
+    assert.equal(summarizeRun(run).needsReview, false);
   } finally {
     delete process.env.FAKE_CLAUDE_RESUME;
     await app.cleanup();
@@ -752,6 +836,141 @@ test("a wrap-up process that cannot spawn closes the run on the main pass, not a
     assert.equal(events.filter((e) => e.type === "phase").length, 0, "no phase started event");
     assert.ok(events.some((e) => e.type === "note" && /wrap-up pass could not start/.test(JSON.stringify(e))));
     assert.equal(app.runs.activeCount(), 0);
+  } finally {
+    await app.cleanup();
+  }
+});
+
+test("needs review: every run that ended before the agent chose to stop, from one shared rule", () => {
+  const base = {
+    status: "completed",
+    terminationReason: "completed",
+    error: null,
+    exitCode: 0,
+    humanIntervention: false,
+    permissionDenials: 0,
+    contextExhausted: false,
+    mcp: { allowListedMissing: [] },
+  };
+  assert.deepEqual(reviewReasons(base), []);
+  assert.equal(needsReview(base), false);
+  assert.deepEqual(reviewReasons({ ...base, status: "failed", exitCode: 1, terminationReason: "budget_exhausted" }), [
+    "budget_exhausted",
+    "nonzero_exit",
+  ]);
+  assert.deepEqual(
+    reviewReasons({ ...base, status: "failed", exitCode: null, terminationReason: "error_max_budget_usd" }),
+    ["budget_exhausted"],
+    "the subtype alone is enough",
+  );
+  assert.deepEqual(reviewReasons({ ...base, status: "timed_out", terminationReason: null, exitCode: null }), [
+    "timed_out",
+  ]);
+  assert.deepEqual(
+    reviewReasons({
+      ...base,
+      status: "failed",
+      terminationReason: null,
+      exitCode: null,
+      error: "orphaned: DuskFleet restarted while this run was in progress",
+    }),
+    ["orphaned"],
+  );
+  assert.deepEqual(
+    reviewReasons({
+      ...base,
+      status: "failed",
+      terminationReason: null,
+      exitCode: 3,
+      error: "no result message received (exit 3)",
+    }),
+    ["nonzero_exit"],
+  );
+  assert.deepEqual(
+    reviewReasons({
+      ...base,
+      status: "failed",
+      terminationReason: null,
+      exitCode: null,
+      error: "spawn failed: ENOENT",
+    }),
+    ["failed"],
+    "a failure with no finer reason is still a reason",
+  );
+  assert.deepEqual(
+    reviewReasons({ ...base, status: "completed", exitCode: 2 }),
+    ["nonzero_exit"],
+    "a completed run with a non-zero exit code is suspicious",
+  );
+  assert.deepEqual(reviewReasons({ ...base, permissionDenials: 2, humanIntervention: true }), ["permission_denied"]);
+  assert.deepEqual(reviewReasons({ ...base, contextExhausted: true }), ["context_exhausted"]);
+  assert.deepEqual(reviewReasons({ ...base, mcp: { allowListedMissing: ["mcp__x"] } }), ["mcp_missing"]);
+  assert.deepEqual(
+    reviewReasons({ ...base, status: "cancelled", terminationReason: null, exitCode: null }),
+    [],
+    "a person cancelled it: nothing to review",
+  );
+  assert.deepEqual(reviewReasons({ ...base, status: "running", terminationReason: null, exitCode: null }), []);
+  assert.deepEqual(
+    reviewReasons({ ...base, status: "failed", exitCode: 1, terminationReason: "api_error", error: "API Error" }),
+    ["nonzero_exit"],
+  );
+});
+
+test("needs review is true for budget, timeout, crash and orphan runs, and false for a cancelled one", async () => {
+  const app = makeApp();
+  try {
+    const budget = await app.runs.waitForRun(
+      (await app.runs.startRun({ prompt: "budget", projectPath: app.project, agentId: "no-reserve" })).id,
+      15_000,
+    );
+    assert.equal(summarizeRun(budget).needsReview, true);
+    assert.deepEqual(summarizeRun(budget).reviewReasons, ["budget_exhausted", "nonzero_exit"]);
+    assert.deepEqual(
+      budget.reviewReasons,
+      ["budget_exhausted", "nonzero_exit"],
+      "stored on the row at the terminal transition",
+    );
+    assert.equal(
+      app.db.prepare("SELECT review_reasons_json FROM runs WHERE id = ?").get(budget.id).review_reasons_json,
+      '["budget_exhausted","nonzero_exit"]',
+    );
+    assert.equal(
+      app.db.prepare("SELECT COUNT(*) AS n FROM runs WHERE (COALESCE(review_reasons_json, '[]') <> '[]')").get().n,
+      1,
+      "the aggregate expression reads the same stored value",
+    );
+
+    const crash = await app.runs.waitForRun(
+      (await app.runs.startRun({ prompt: "crash", projectPath: app.project })).id,
+      15_000,
+    );
+    assert.equal(summarizeRun(crash).needsReview, true);
+    assert.deepEqual(summarizeRun(crash).reviewReasons, ["nonzero_exit"]);
+
+    const hung = await app.runs.startRun({ prompt: "hang", projectPath: app.project });
+    const timedOut = await app.runs.waitForRun(hung.id, 15_000);
+    assert.equal(timedOut.status, "timed_out");
+    assert.deepEqual(summarizeRun(timedOut).reviewReasons, ["timed_out"]);
+
+    const cancelledRun = await app.runs.startRun({ prompt: "hang", projectPath: app.project });
+    await new Promise((r) => setTimeout(r, 200));
+    app.runs.cancelRun(cancelledRun.id);
+    const cancelled = await app.runs.waitForRun(cancelledRun.id, 15_000);
+    assert.equal(cancelled.status, "cancelled");
+    assert.equal(summarizeRun(cancelled).needsReview, false);
+
+    const orphanRun = await app.runs.startRun({ prompt: "hang", projectPath: app.project });
+    const fresh = new RunManager(
+      app.config,
+      new RunRepository(app.db),
+      new ClaudeCodeExecutor({ binary: fakeBinary, strictMcpConfig: true, allowBypassPermissions: false }),
+    );
+    fresh.recoverOrphans();
+    const orphan = fresh.getRun(orphanRun.id);
+    assert.deepEqual(summarizeRun(orphan).reviewReasons, ["orphaned"]);
+    app.runs.cancelRun(orphanRun.id);
+    await app.runs.waitForRun(orphanRun.id, 15_000);
   } finally {
     await app.cleanup();
   }

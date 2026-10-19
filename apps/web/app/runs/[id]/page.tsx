@@ -1,12 +1,12 @@
-import { type Run, type RunEvent, wrapUpPhase } from "@duskfleet/core";
+import { REVIEW_REASON_LABELS, type Run, type RunEvent, wrapUpPhase } from "@duskfleet/core";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { AutoRefresh } from "@/components/AutoRefresh";
 import { CopyButton } from "@/components/CopyButton";
 import { Expandable } from "@/components/Expandable";
 import { Prose } from "@/components/Prose";
-import { needsReview, StatusBadge } from "@/components/StatusBadge";
-import { adjacentRuns, getRun, homeDir, projectLabel } from "@/lib/data";
+import { StatusBadge } from "@/components/StatusBadge";
+import { adjacentRuns, agentSummary, getRun, homeDir, projectLabel } from "@/lib/data";
 import {
   elapsedSince,
   fmtCompact,
@@ -44,7 +44,7 @@ export default async function RunPage({
   const showAll = (await searchParams).events === "all";
   const data = getRun(id);
   if (!data) notFound();
-  const { run, events } = data;
+  const { run, events, resumedFrom, resumedBy } = data;
   const home = homeDir();
   const live = run.status === "running" || run.status === "pending";
   const duration = live ? elapsedSince(run.startedAt) : run.durationMs;
@@ -52,12 +52,9 @@ export default async function RunPage({
   const mcpMissing = run.mcp?.allowListedMissing ?? [];
   const wrapUp = wrapUpPhase(run);
   const mainPhase = run.phases.find((p) => p.phase === "main") ?? null;
-  const hasIssues =
-    denials > 0 || mcpMissing.length > 0 || run.contextExhausted || Boolean(run.error) || wrapUp !== null;
-  const needsAttention =
-    run.status === "failed" ||
-    run.status === "timed_out" ||
-    (run.status === "completed" && (run.humanIntervention || run.contextExhausted));
+  const reasons = run.reviewReasons; // stored by RunManager when the run ended
+  const needsAttention = reasons.length > 0;
+  const hasIssues = needsAttention || Boolean(run.error) || wrapUp !== null;
   const resume = run.claudeSessionId
     ? `cd ${shellQuote(run.projectPath)} && claude --resume ${run.claudeSessionId}`
     : null;
@@ -74,6 +71,9 @@ export default async function RunPage({
     .join(" ");
   const { prev, next } = adjacentRuns(run);
   const project = projectLabel(run);
+  // The agent as defined now; null when it was deleted or renamed since the run.
+  const agent = agentSummary(run.agentId);
+  const agentDescription = agent?.description ?? "";
   const started = run.startedAt ?? run.createdAt;
   const tokensIn = run.inputTokens ?? null;
   const tokensOut = run.outputTokens ?? null;
@@ -121,7 +121,16 @@ export default async function RunPage({
         <div className="meta-row">
           <StatusBadge run={run} />
           <span className="sep">·</span>
-          <Link href={`/?agent=${encodeURIComponent(run.agentId)}`}>{run.agentId}</Link>
+          <Link
+            href={`/agents#${encodeURIComponent(run.agentId)}`}
+            title={
+              agent
+                ? `${agent.id}${agent.claudeAgent ? ` → ${agent.claudeAgent}` : ""}`
+                : `${run.agentId} is no longer defined`
+            }
+          >
+            {agent?.name ?? run.agentId}
+          </Link>
           <span className="sep">·</span>
           <span title={run.projectPath}>{project}</span>
           <span className="sep">·</span>
@@ -147,6 +156,7 @@ export default async function RunPage({
             </>
           )}
         </div>
+        {agentDescription && <p className="agent-desc">{agentDescription}</p>}
       </div>
 
       <div className="facts">
@@ -171,6 +181,54 @@ export default async function RunPage({
       </div>
 
       <div id="issues">
+        {resumedFrom && (
+          <div className="callout warn">
+            <span className="icon">↺</span>
+            <div>
+              <strong>Retry.</strong> This run resumed the session of{" "}
+              <Link href={`/runs/${resumedFrom.id}`}>{runTitle(resumedFrom.prompt, 60)}</Link> (
+              {resumedFrom.status.replace("_", " ")}
+              {resumedFrom.terminationReason ? `, ${resumedFrom.terminationReason}` : ""}), once: a second failure is
+              final (<code>on_failure: resume_once</code>).
+            </div>
+          </div>
+        )}
+        {resumedBy && (
+          <div className="callout warn">
+            <span className="icon">↺</span>
+            <div>
+              <strong>Retried.</strong> The next tick resumed this session as{" "}
+              <Link href={`/runs/${resumedBy.id}`}>run {resumedBy.id.slice(0, 8)}</Link> (
+              <StatusBadge run={resumedBy} />
+              ). Check that run for the outcome.
+            </div>
+          </div>
+        )}
+        {needsAttention && (
+          <div className="callout warn" style={{ marginBottom: 8 }}>
+            <span className="icon">!</span>
+            <div>
+              <strong>Needs review:</strong> {reasons.map((r) => REVIEW_REASON_LABELS[r]).join(" · ")}.
+              {run.status === "timed_out" && (
+                <>
+                  {" "}
+                  The agent&apos;s <code>timeout_minutes</code> elapsed and the process was killed mid-action; nothing
+                  may have been recorded.
+                </>
+              )}
+              {reasons.includes("orphaned") && (
+                <> DuskFleet restarted while the run was in progress; its process was lost.</>
+              )}
+              {reasons.includes("budget_exhausted") && !wrapUp && (
+                <>
+                  {" "}
+                  The run hit <code>max_budget_usd</code> mid-action and no wrap-up pass ran (see{" "}
+                  <code>wrap_up_reserve_usd</code>): whatever it was doing may be half-done and unrecorded.
+                </>
+              )}
+            </div>
+          </div>
+        )}
         {denials > 0 && (
           <div className="callout warn">
             <span className="icon">!</span>
@@ -514,10 +572,12 @@ function capEntries(entries: Entry[], limit: number | null): Shown[] {
 /** The run's outcome as a closing row, once it has ended. Same verdict as the status badge. */
 function resultRow(run: Run, t0: number): Row | null {
   if (!run.endedAt) return null;
+  // the stored verdict, never the rule (see reviewReasons in core)
+  const review = run.status === "completed" && run.reviewReasons.length > 0;
   const kind: Kind =
-    run.status === "completed" ? (needsReview(run) ? "warn" : "ok") : run.status === "cancelled" ? "muted" : "bad";
+    run.status === "completed" ? (review ? "warn" : "ok") : run.status === "cancelled" ? "muted" : "bad";
   const detail = [
-    needsReview(run) ? "needs review" : null,
+    review ? "needs review" : null,
     run.terminationReason ?? run.status,
     run.exitCode !== null && run.exitCode !== undefined ? `exit ${run.exitCode}` : null,
     run.costUsd !== null && run.costUsd !== undefined ? fmtCost(run.costUsd) : null,

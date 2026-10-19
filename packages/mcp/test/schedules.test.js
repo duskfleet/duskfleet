@@ -11,8 +11,12 @@ import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 import {
   ClaudeCodeExecutor,
+  DEFAULT_NOOP_PATTERN,
+  isNoopRun,
   loadConfig,
+  NOOP_TEXT_LIMIT,
   openDatabase,
+  parseNoopPattern,
   RunManager,
   RunRepository,
   ScheduleRepository,
@@ -39,7 +43,47 @@ function makeRoot() {
   writeFileSync(path.join(configDir, "projects.yaml"), `projects:\n  demo:\n    path: ${project}\n`);
   writeFileSync(path.join(configDir, "agents", "coder.md"), `---\nproject: demo\n---\nBe brief.\n`);
   writeFileSync(path.join(configDir, "agents", "free.md"), `---\n---\nUnbound.\n`);
+  writeFileSync(
+    path.join(configDir, "agents", "resumer.md"),
+    `---\nproject: demo\nmax_budget_usd: 2\nwrap_up_reserve_usd: 0\non_failure: resume_once\nresume_budget_usd: 3\n---\nRetry once.\n`,
+  );
+  writeFileSync(
+    path.join(configDir, "agents", "gatekeeper.md"),
+    `---\nproject: demo\nmodel: haiku\n---\nCheck for work.\n`,
+  );
   return { root, configDir, project: realpathSync(project) };
+}
+
+function makeScheduler(configDir) {
+  const config = loadConfig(configDir);
+  const db = openDatabase(config.dataDir);
+  const runs = new RunManager(
+    config,
+    new RunRepository(db),
+    new ClaudeCodeExecutor({ binary: config.claude.binary, strictMcpConfig: true, allowBypassPermissions: false }),
+  );
+  const repo = new ScheduleRepository(db);
+  const scheduler = new Scheduler(repo, runs, { tickMs: 1000, holder: "A" });
+  const due = (id) => repo.update(id, { nextRunAt: new Date(Date.now() - 1000).toISOString() });
+  /** A tick plus the gated fires it started in the background. */
+  const tickAll = async () => {
+    await scheduler.tick();
+    await scheduler.settled();
+  };
+  const fireAndWait = async (id) => {
+    due(id);
+    await tickAll();
+    const s = repo.get(id);
+    return runs.waitForRun(s.lastRunId, 15_000);
+  };
+  const close = async (root) => {
+    scheduler.stop();
+    runs.shutdown();
+    await new Promise((r) => setTimeout(r, 300));
+    db.close();
+    rmSync(root, { recursive: true, force: true });
+  };
+  return { config, db, runs, repo, scheduler, due, tickAll, fireAndWait, close };
 }
 
 function ok(result) {
@@ -148,6 +192,81 @@ test("schedules over MCP: create, list, update, run now, delete; validation erro
     assert.equal(skipped.outcome, "skipped_busy");
     assert.match(skipped.error, /agent busy|project busy/);
     assert.equal(skipped.schedule.skips, 1);
+
+    // The row says how the last run ended, not only that it started: a budget-exhausted
+    // run is "needs review" right on the schedule (on 2026-10-14 one stayed green for 11 hours).
+    ok(await client.callTool({ name: "update_schedule", arguments: { id: created.schedule.id, prompt: "budget" } }));
+    for (let i = 0; i < 50; i++) {
+      const r = ok(await client.callTool({ name: "get_run", arguments: { run_id: fired.runId } }));
+      if (r.status !== "running") break;
+      await new Promise((res) => setTimeout(res, 100));
+    }
+    const budgetFire = ok(await client.callTool({ name: "run_schedule_now", arguments: { id: created.schedule.id } }));
+    assert.equal(budgetFire.outcome, "started");
+    assert.equal(budgetFire.schedule.lastRun.id, budgetFire.runId);
+    assert.equal(budgetFire.schedule.lastRun.status, "running");
+    assert.equal(budgetFire.schedule.lastRun.needsReview, false, "nothing to review while it runs");
+    let after;
+    for (let i = 0; i < 100; i++) {
+      after = ok(await client.callTool({ name: "list_schedules", arguments: {} })).schedules[0];
+      if (after.lastRun.status !== "running") break;
+      await new Promise((res) => setTimeout(res, 100));
+    }
+    assert.equal(after.lastOutcome, "started", "the tick outcome alone looks fine");
+    assert.equal(after.lastRun.status, "failed");
+    assert.equal(after.lastRun.needsReview, true);
+    assert.deepEqual(after.lastRun.reviewReasons, ["budget_exhausted", "nonzero_exit"]);
+    assert.equal(after.lastRun.terminationReason, "budget_exhausted");
+    assert.equal(after.lastRun.costUsd, 4.52, "main pass plus wrap-up pass");
+    const listed2 = ok(await client.callTool({ name: "list_runs", arguments: { limit: 1 } }));
+    assert.equal(listed2.runs[0].needsReview, true);
+
+    // on_failure: resume_once on the schedule: the next fire resumes that run, and both runs link to each other
+    const withPolicy = ok(
+      await client.callTool({
+        name: "update_schedule",
+        arguments: { id: created.schedule.id, on_failure: "resume_once", resume_budget_usd: 2 },
+      }),
+    );
+    assert.equal(withPolicy.schedule.onFailure, "resume_once");
+    assert.equal(withPolicy.schedule.effectiveOnFailure, "resume_once");
+    assert.equal(
+      withPolicy.schedule.willResumeRunId,
+      budgetFire.runId,
+      "list_schedules says what the next tick will do",
+    );
+    const resumedFire = ok(await client.callTool({ name: "run_schedule_now", arguments: { id: created.schedule.id } }));
+    assert.equal(resumedFire.outcome, "resumed");
+    let retry;
+    for (let i = 0; i < 100; i++) {
+      retry = ok(await client.callTool({ name: "get_run", arguments: { run_id: resumedFire.runId } }));
+      if (retry.status !== "running") break;
+      await new Promise((res) => setTimeout(res, 100));
+    }
+    assert.equal(retry.resumedFromRunId, budgetFire.runId);
+    assert.equal(retry.status, "completed");
+    const original = ok(await client.callTool({ name: "get_run", arguments: { run_id: budgetFire.runId } }));
+    assert.equal(original.resumedByRunId, retry.id, "get_run links the original to its retry");
+    const both = ok(await client.callTool({ name: "list_runs", arguments: { limit: 2 } })).runs;
+    assert.equal(both[0].id, retry.id);
+    assert.equal(both[0].resumedFromRunId, budgetFire.runId);
+    assert.equal(both[1].resumedByRunId, retry.id, "list_runs links both ways");
+    const cleared = ok(
+      await client.callTool({
+        name: "update_schedule",
+        arguments: { id: created.schedule.id, clear_on_failure: true },
+      }),
+    );
+    assert.equal(cleared.schedule.onFailure, null);
+    assert.equal(cleared.schedule.effectiveOnFailure, "none", "back to the agent's policy");
+    assert.equal(cleared.schedule.willResumeRunId, null);
+    fails(
+      await client.callTool({
+        name: "update_schedule",
+        arguments: { id: created.schedule.id, noop_pattern: "idle", clear_noop_pattern: true },
+      }),
+      /cannot be used together/,
+    );
 
     const deleted = ok(await client.callTool({ name: "delete_schedule", arguments: { id: created.schedule.id } }));
     assert.equal(deleted.deleted, true);
@@ -419,5 +538,525 @@ test("`duskfleet serve` stays alive past its first tick and holds the lease unti
     child.kill("SIGTERM");
     await new Promise((r) => child.on("exit", r));
     rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("on_failure: resume_once resumes a budget-exhausted run on the next tick, once; a second failure is final", async () => {
+  const { root, configDir } = makeRoot();
+  const t = makeScheduler(configDir);
+  try {
+    const s = t.scheduler.create({ name: "resume me", agentId: "resumer", prompt: "budget", cron: "* * * * *" });
+    assert.equal(t.scheduler.resumeCandidate(t.repo.get(s.id)), null, "nothing to resume before the first run");
+
+    const first = await t.fireAndWait(s.id);
+    assert.equal(first.status, "failed");
+    assert.equal(first.terminationReason, "budget_exhausted");
+    assert.equal(first.resumedFromRunId, null);
+    assert.equal(t.repo.get(s.id).lastOutcome, "started");
+    assert.equal(t.scheduler.resumeCandidate(t.repo.get(s.id)).id, first.id, "the next fire will resume it");
+
+    const second = await t.fireAndWait(s.id);
+    assert.notEqual(second.id, first.id);
+    assert.equal(second.resumedFromRunId, first.id, "linked to the run it resumed");
+    assert.equal(second.retries, 1);
+    assert.equal(second.claudeSessionId, first.claudeSessionId, "same session");
+    assert.equal(second.scheduleId, s.id);
+    assert.equal(second.agentId, "resumer");
+    const argv = second.command.argv;
+    assert.equal(argv[argv.indexOf("--resume") + 1], first.claudeSessionId);
+    assert.ok(!argv.includes("--session-id"));
+    assert.equal(
+      argv[argv.indexOf("--max-budget-usd") + 1],
+      "3",
+      "resume_budget_usd, with the agent's wrap-up reserve of 0",
+    );
+    assert.match(second.prompt, /^Your previous session ended early \(budget exhausted\)/);
+    assert.equal(second.status, "completed", "the fake's --resume branch finishes the job");
+    assert.equal(t.runs.resumedBy(first.id).id, second.id);
+    const sched = t.repo.get(s.id);
+    assert.equal(sched.lastOutcome, "resumed");
+    assert.equal(sched.fires, 2, "a resume is a fire");
+    assert.deepEqual(
+      t.repo.firings(s.id).map((f) => f.outcome),
+      ["resumed", "started"],
+    );
+    const notes = t.runs
+      .events(first.id)
+      .filter((e) => e.type === "note")
+      .map((e) => e.payload.message);
+    assert.ok(
+      notes.some((m) => m === `resumed by run ${second.id}`),
+      "the original run's timeline links to the retry",
+    );
+    assert.ok(t.runs.events(second.id).some((e) => e.type === "note" && e.payload.resumedFromRunId === first.id));
+
+    // the resumed run completed: the next tick starts fresh
+    const third = await t.fireAndWait(s.id);
+    assert.equal(third.resumedFromRunId, null);
+    assert.ok(third.command.argv.includes("--session-id"));
+    assert.equal(third.prompt, "budget", "the schedule's own prompt again");
+
+    // ...and when the resume fails too, that is final: the tick after starts fresh, no third attempt on that session
+    process.env.FAKE_CLAUDE_RESUME = "budget";
+    const fourth = await t.fireAndWait(s.id);
+    assert.equal(fourth.resumedFromRunId, third.id);
+    assert.equal(fourth.status, "failed");
+    assert.equal(fourth.terminationReason, "budget_exhausted");
+    assert.equal(t.scheduler.resumeCandidate(t.repo.get(s.id)), null, "a failed resume is not resumed again");
+    const fifth = await t.fireAndWait(s.id);
+    assert.equal(fifth.resumedFromRunId, null, "fresh start after the final failure");
+    assert.equal(t.runs.resumedBy(fourth.id), null);
+    await assert.rejects(() => t.runs.resumeRun({ runId: third.id }), /already resumed once/);
+    await assert.rejects(() => t.runs.resumeRun({ runId: second.id }), /cannot be resumed: it is completed/);
+    await assert.rejects(
+      () => t.runs.resumeRun({ runId: fourth.id }),
+      /is itself a resume of run/,
+      "resumeRun enforces once for every caller",
+    );
+    // the retry row is the claim: a second insert resuming the same run fails in the database
+    await assert.rejects(
+      () =>
+        t.runs.startRun({
+          prompt: "again",
+          agentId: "resumer",
+          projectId: "demo",
+          resume: { fromRun: third, budgetUsd: 1 },
+        }),
+      /already resumed once by run/,
+    );
+    assert.equal(t.runs.resumedBy(third.id).id, fourth.id);
+  } finally {
+    delete process.env.FAKE_CLAUDE_RESUME;
+    await t.close(root);
+  }
+});
+
+test("a schedule edit after the failure cancels the resume; a resume refused for a non-busy reason starts fresh", async () => {
+  const { root, configDir } = makeRoot();
+  const t = makeScheduler(configDir);
+  try {
+    const s = t.scheduler.create({ name: "edited", agentId: "resumer", prompt: "budget", cron: "* * * * *" });
+    const first = await t.fireAndWait(s.id);
+    assert.equal(first.terminationReason, "budget_exhausted");
+    assert.equal(t.scheduler.resumeCandidate(t.repo.get(s.id)).id, first.id);
+    const listed = t.scheduler.listWithLastRun().find((x) => x.id === s.id);
+    assert.equal(listed.willResumeRunId, first.id);
+    assert.equal(listed.effectiveOnFailure, "resume_once");
+    assert.equal(listed.onFailureSource, "agent");
+    assert.equal(listed.lastRun.status, "failed");
+
+    t.scheduler.update(s.id, { prompt: "budget, but differently" });
+    assert.equal(t.scheduler.resumeCandidate(t.repo.get(s.id)), null, "a new prompt means a fresh start");
+    t.scheduler.update(s.id, { prompt: "budget" });
+    assert.equal(t.scheduler.resumeCandidate(t.repo.get(s.id)).id, first.id);
+    t.scheduler.update(s.id, { model: "haiku" });
+    assert.equal(t.scheduler.resumeCandidate(t.repo.get(s.id)), null, "a new model means a fresh start");
+    t.scheduler.update(s.id, { model: null });
+
+    // the resume is refused (e.g. the old run's agent is gone): this fire starts fresh, last_run_id moves on
+    const original = t.runs.resumeRun.bind(t.runs);
+    t.runs.resumeRun = async () => {
+      throw new Error('unknown agent "gone"');
+    };
+    const fresh = await t.fireAndWait(s.id);
+    t.runs.resumeRun = original;
+    assert.notEqual(fresh.id, first.id);
+    assert.equal(fresh.resumedFromRunId, null);
+    assert.equal(t.repo.get(s.id).lastOutcome, "started");
+    assert.equal(t.repo.get(s.id).lastRunId, fresh.id);
+    assert.ok(
+      t.runs
+        .events(fresh.id)
+        .some(
+          (e) => e.type === "note" && /resume of run .* was refused \(unknown agent "gone"\)/.test(e.payload.message),
+        ),
+    );
+  } finally {
+    await t.close(root);
+  }
+});
+
+test("no-op marker: anchored default, trimmed, bounded, bad config pattern falls back", () => {
+  const re = parseNoopPattern(DEFAULT_NOOP_PATTERN);
+  const done = (text) => isNoopRun({ status: "completed", resultText: text }, re);
+  assert.equal(done("Nothing to do: no tickets in Ready."), true);
+  assert.equal(done("  No open PRs in ready state."), true);
+  assert.equal(
+    done("Fixed the build. There is nothing to do for the docs."),
+    false,
+    "a busy run mentioning it later is not idle",
+  );
+  assert.equal(done("Fixed it.\nNo flaky tests in ready state after the fix"), false);
+  assert.equal(isNoopRun({ status: "failed", resultText: "Nothing to do" }, re), false);
+  // trimmed once: the plain path ignores surrounding spaces too; blank is refused
+  assert.equal(parseNoopPattern("  nothing here  ").test("Nothing here today"), true);
+  assert.throws(() => parseNoopPattern("   "), /invalid noop_pattern/);
+  // only the head of the message is tested
+  assert.equal(isNoopRun({ status: "completed", resultText: `${"x".repeat(NOOP_TEXT_LIMIT)}idle` }, /idle/), false);
+
+  const { root, configDir } = makeRoot();
+  try {
+    writeFileSync(
+      path.join(configDir, "duskfleet.yaml"),
+      `data_dir: ../data\ndefault_agent: coder\nscheduler:\n  noop_pattern: "/(unclosed/i"\nclaude:\n  binary: "${fakeBinary}"\n`,
+    );
+    assert.equal(
+      loadConfig(configDir).scheduler.noopPattern,
+      DEFAULT_NOOP_PATTERN,
+      "an invalid scheduler.noop_pattern does not break the config",
+    );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("idle cost: 7-day ticks, fires, no-op runs by marker and what they cost, per schedule", async () => {
+  const { root, configDir } = makeRoot();
+  const t = makeScheduler(configDir);
+  try {
+    const s = t.scheduler.create({ name: "idle", agentId: "coder", prompt: "noop", cron: "* * * * *" });
+    await t.fireAndWait(s.id);
+    await t.fireAndWait(s.id);
+    t.scheduler.update(s.id, { prompt: "ok" });
+    await t.fireAndWait(s.id);
+    t.scheduler.update(s.id, { prompt: "error" });
+    await t.fireAndWait(s.id);
+    // a skipped tick counts as a tick, not a fire
+    t.scheduler.update(s.id, { prompt: "hang" });
+    t.due(s.id);
+    await t.scheduler.tick();
+    t.due(s.id);
+    await t.scheduler.tick();
+
+    const [row] = t.scheduler.listWithLastRun();
+    const idle = row.idle7d;
+    assert.equal(idle.days, 7);
+    assert.equal(idle.ticks, 6);
+    assert.equal(idle.fires, 5);
+    assert.equal(idle.runs, 5);
+    assert.equal(
+      idle.noopRuns,
+      2,
+      "'Nothing to do: no tickets in Ready.' matches the default marker; 'Done' and the failed run do not",
+    );
+    assert.equal(idle.noopCostUsd, 0.0246);
+    assert.equal(idle.noopPattern, DEFAULT_NOOP_PATTERN);
+    assert.equal(idle.noopPatternError, null);
+    assert.equal(row.willResumeRunId, null, "list rows carry willResumeRunId");
+    assert.equal(row.effectiveOnFailure, "none");
+    assert.ok(idle.costUsd >= 0.0369);
+
+    // A schedule-specific marker replaces the default; an invalid one is refused.
+    t.scheduler.update(s.id, { noopPattern: "created hello" });
+    assert.equal(t.scheduler.idleStats(t.repo.get(s.id)).noopRuns, 1);
+    assert.throws(() => t.scheduler.update(s.id, { noopPattern: "/(unclosed/" }), /invalid noop_pattern/);
+    // A completed run that needs review is blocked, not idle, even when it says "Nothing to do".
+    t.scheduler.update(s.id, { noopPattern: null });
+    const noop = t.runs.listRuns({ status: "completed" }).find((r) => r.resultText?.startsWith("Nothing to do"));
+    t.db.prepare("UPDATE runs SET review_reasons_json = ? WHERE id = ?").run('["permission_denial"]', noop.id);
+    assert.equal(t.scheduler.idleStats(t.repo.get(s.id)).noopRuns, 1, "the run that needs review is not a no-op");
+    // A stored pattern that no longer parses degrades that row only, never the whole list.
+    t.db.prepare("UPDATE schedules SET noop_pattern = ? WHERE id = ?").run("/(unclosed/", s.id);
+    const [broken] = t.scheduler.listWithLastRun();
+    assert.equal(broken.idle7d.noopRuns, 0);
+    assert.equal(broken.idle7d.noopCostUsd, 0);
+    assert.equal(broken.idle7d.runs, 5);
+    assert.match(broken.idle7d.noopPatternError, /invalid noop_pattern/);
+    // Outside the window nothing counts.
+    assert.equal(t.scheduler.idleStats(t.repo.get(s.id), 0).runs, 0);
+    const hung = t.runs.listRuns({ status: "running" })[0];
+    if (hung) t.runs.cancelRun(hung.id);
+  } finally {
+    await t.close(root);
+  }
+});
+
+test("command gate: exit 0 runs, non-zero skips with stdout as the reason, a timeout is an error; gates cost nothing", async () => {
+  const { root, configDir } = makeRoot();
+  const t = makeScheduler(configDir);
+  try {
+    const s = t.scheduler.create({
+      name: "gated",
+      agentId: "coder",
+      prompt: "ok",
+      cron: "* * * * *",
+      gate: { command: "echo 'no Ready tickets'; exit 1" },
+    });
+    t.due(s.id);
+    await t.tickAll();
+    let row = t.repo.get(s.id);
+    assert.equal(row.lastOutcome, "skipped_gate");
+    assert.equal(row.lastError, "no Ready tickets", "stdout kept as the reason");
+    assert.equal(row.lastRunId, null, "no run started");
+    assert.equal(row.fires, 0);
+    assert.equal(row.skips, 1);
+    const [f] = t.repo.firings(s.id);
+    assert.equal(f.gateCostUsd, 0);
+    assert.equal(f.gateRunId, null);
+
+    // the command runs in the project directory
+    t.scheduler.update(s.id, { gate: { command: 'test "$(basename "$PWD")" = project' } });
+    const run = await t.fireAndWait(s.id);
+    assert.equal(run.status, "completed");
+    assert.equal(t.repo.get(s.id).lastOutcome, "started");
+
+    // A pipeline that hangs: the timeout kills the whole process group, not only sh, and does
+    // not wait for the grandchildren to close the pipes.
+    t.scheduler.update(s.id, { gate: { command: "sleep 30 | cat", timeoutSeconds: 1 } });
+    t.due(s.id);
+    const t0 = Date.now();
+    await t.tickAll();
+    assert.ok(Date.now() - t0 < 5_000, "the gate ended at its timeout");
+    row = t.repo.get(s.id);
+    assert.equal(row.lastOutcome, "error");
+    assert.match(row.lastError, /gate: gate command timed out after 1s/);
+
+    // skip_gate bypasses it
+    t.scheduler.update(s.id, { gate: { command: "exit 1" } });
+    const forced = await t.scheduler.fireNow(s.id, { skipGate: true });
+    assert.equal(forced.outcome, "started");
+    await t.runs.waitForRun(forced.runId, 10_000);
+
+    const idle = t.scheduler.idleStats(t.repo.get(s.id));
+    assert.equal(idle.gateChecks, 3, "three ticks asked the gate; the forced fire did not");
+    assert.equal(idle.gateSkips, 1);
+    assert.equal(idle.gateCostUsd, 0);
+
+    // A broken gate is an error, never "no work": command not found, not executable, killed by a
+    // signal. A gate whose stderr says "project busy" is still an error: busy is structured.
+    for (const [command, pattern] of [
+      ["echo 'project busy' >&2; no-such-gate-tool", /exited 127 \(command not found/],
+      ["exit 126", /exited 126 \(not executable\)/],
+      ["kill -9 $$", /killed by SIGKILL/],
+    ]) {
+      t.scheduler.update(s.id, { gate: { command } });
+      t.due(s.id);
+      await t.tickAll();
+      row = t.repo.get(s.id);
+      assert.equal(row.lastOutcome, "error", command);
+      assert.match(row.lastError, pattern, command);
+    }
+
+    // validation
+    assert.throws(() => t.scheduler.update(s.id, { gate: {} }), /exactly one of command or agent/);
+    assert.throws(
+      () => t.scheduler.update(s.id, { gate: { command: "true", agent: { agentId: "gatekeeper", prompt: "x" } } }),
+      /exactly one/,
+    );
+    assert.throws(
+      () => t.scheduler.update(s.id, { gate: { agent: { agentId: "ghost", prompt: "x" } } }),
+      /gate agent "ghost" is unknown/,
+    );
+    t.scheduler.update(s.id, { gate: null });
+    assert.equal(t.repo.get(s.id).gate, null);
+  } finally {
+    await t.close(root);
+  }
+});
+
+test("a stored gate that cannot be read makes every fire an error, never an ungated run", async () => {
+  const { root, configDir } = makeRoot();
+  const t = makeScheduler(configDir);
+  try {
+    const s = t.scheduler.create({
+      name: "corrupt",
+      agentId: "coder",
+      prompt: "ok",
+      cron: "* * * * *",
+      gate: { command: "true" },
+    });
+    for (const [json, pattern] of [
+      ["{not json", /gate_json is not valid JSON/],
+      ['{"timeoutSeconds": 5}', /neither command nor agent/],
+    ]) {
+      t.db.prepare("UPDATE schedules SET gate_json = ? WHERE id = ?").run(json, s.id);
+      assert.ok(t.repo.get(s.id).gate.invalid, "read as an invalid gate, not as no gate");
+      t.due(s.id);
+      await t.tickAll();
+      const row = t.repo.get(s.id);
+      assert.equal(row.lastOutcome, "error");
+      assert.match(row.lastError, /stored gate is unusable/);
+      assert.match(row.lastError, pattern);
+      assert.equal(row.lastRunId, null, "the full run did not start");
+    }
+    assert.equal(t.runs.listRuns({}).length, 0);
+  } finally {
+    await t.close(root);
+  }
+});
+
+test("a gated fire claims its tick and runs in the background: the tick goes on, nothing fires twice", async () => {
+  const { root, configDir } = makeRoot();
+  const t = makeScheduler(configDir);
+  try {
+    const s = t.scheduler.create({
+      name: "slow gate",
+      agentId: "coder",
+      prompt: "noop",
+      cron: "* * * * *",
+      gate: { command: "sleep 2; exit 1", timeoutSeconds: 10 },
+    });
+    const other = t.scheduler.create({
+      name: "plain",
+      agentId: "free",
+      projectId: "demo",
+      prompt: "ok",
+      cron: "* * * * *",
+    });
+    // The gated one first: the plain run then takes the project while the gate is running.
+    t.repo.update(s.id, { nextRunAt: new Date(Date.now() - 2000).toISOString() });
+    t.repo.update(other.id, { nextRunAt: new Date(Date.now() - 1000).toISOString() });
+    const t0 = Date.now();
+    await t.scheduler.tick();
+    assert.ok(Date.now() - t0 < 1_500, "the tick did not wait for the gate");
+    assert.equal(t.repo.get(other.id).lastOutcome, "started", "another due schedule fired meanwhile");
+    const claimed = t.repo.get(s.id);
+    assert.ok(Date.parse(claimed.nextRunAt) > Date.now(), "next_run_at moved on before the gate ended");
+    assert.equal(claimed.lastOutcome, null, "the gate is still running");
+    // A tick (or another process that took the lease) does not see it as due any more.
+    assert.equal(
+      t.repo.due(new Date().toISOString()).some((d) => d.id === s.id),
+      false,
+    );
+    // A forced second fire while the gate runs is a busy skip, not a second gate.
+    const again = await t.scheduler.fireNow(s.id);
+    assert.equal(again.outcome, "skipped_busy");
+    assert.match(again.error, /gate from an earlier fire is still running/);
+    await t.scheduler.settled();
+    const row = t.repo.get(s.id);
+    assert.equal(row.lastOutcome, "skipped_gate");
+    assert.equal(t.repo.firings(s.id).filter((f) => f.outcome === "skipped_gate").length, 1);
+    await t.runs.waitForRun(t.repo.get(other.id).lastRunId, 10_000);
+  } finally {
+    await t.close(root);
+  }
+});
+
+test("agent gate: a cheap run decides; NO_WORK skips, its cost is counted apart from run cost; busy skips before the gate", async () => {
+  const { root, configDir } = makeRoot();
+  const t = makeScheduler(configDir);
+  try {
+    const gate = { agent: { agentId: "gatekeeper", prompt: "gate-nowork", budgetUsd: 0.2 } };
+    const s = t.scheduler.create({ name: "agent gated", agentId: "coder", prompt: "ok", cron: "* * * * *", gate });
+    t.due(s.id);
+    await t.tickAll();
+    let row = t.repo.get(s.id);
+    assert.equal(row.lastOutcome, "skipped_gate", "marker alone on the last line, any case, markdown stripped");
+    assert.equal(row.lastError, "Checked the board: nothing in Ready.\n\n**no_work**");
+    const [skip] = t.repo.firings(s.id);
+    assert.ok(skip.gateRunId);
+    assert.equal(skip.gateCostUsd, 0.0123);
+    const gateRun = t.runs.getRun(skip.gateRunId);
+    assert.equal(gateRun.kind, "gate");
+    assert.equal(gateRun.agentId, "gatekeeper");
+    assert.equal(gateRun.scheduleId, s.id);
+    assert.equal(
+      gateRun.command.argv[gateRun.command.argv.indexOf("--max-budget-usd") + 1],
+      "0.2",
+      "gate budget, no wrap-up reserve",
+    );
+    assert.ok(gateRun.command.argv.includes("haiku"));
+
+    // a marker that is not the last line lets the real run start
+    t.scheduler.update(s.id, { gate: { agent: { agentId: "gatekeeper", prompt: "gate-work" } } });
+    const real = await t.fireAndWait(s.id);
+    assert.equal(real.kind, "run");
+    assert.equal(real.agentId, "coder");
+    row = t.repo.get(s.id);
+    assert.equal(row.lastOutcome, "started");
+    assert.equal(row.lastRunId, real.id, "lastRunId is the real run, never the gate run");
+    assert.equal(t.repo.firings(s.id)[0].gateCostUsd, 0.0123);
+
+    const idle = t.scheduler.idleStats(row);
+    assert.equal(idle.runs, 1, "gate runs are not counted as runs");
+    assert.equal(idle.costUsd, 0.0123);
+    assert.equal(idle.gateChecks, 2);
+    assert.equal(idle.gateCostUsd, 0.0246);
+    assert.equal(t.runs.listRuns({ kind: "gate" }).length, 2);
+    assert.equal(t.runs.listRuns({ kind: "run" }).length, 1);
+
+    // the marker mentioned mid-sentence is not a verdict: the real run starts
+    t.scheduler.update(s.id, { gate: { agent: { agentId: "gatekeeper", prompt: "gate-mention" } } });
+    const mentioned = await t.fireAndWait(s.id);
+    assert.equal(mentioned.kind, "run");
+    assert.equal(t.repo.get(s.id).lastOutcome, "started");
+
+    // busy: the real agent is still running, so the tick skips without paying for a gate
+    t.scheduler.update(s.id, { prompt: "hang" });
+    const hung = await t.scheduler.fireNow(s.id, { skipGate: true });
+    assert.equal(hung.outcome, "started");
+    t.due(s.id);
+    await t.tickAll();
+    row = t.repo.get(s.id);
+    assert.equal(row.lastOutcome, "skipped_busy");
+    assert.equal(t.repo.firings(s.id)[0].gateRunId, null, "no gate run while busy");
+    assert.equal(t.runs.listRuns({ kind: "gate" }).length, 3);
+    t.runs.cancelRun(hung.runId);
+    await t.runs.waitForRun(hung.runId, 10_000);
+  } finally {
+    await t.close(root);
+  }
+});
+
+test("a timed-out run is resumed too; a schedule's on_failure overrides the agent's in both directions", async () => {
+  const { root, configDir } = makeRoot();
+  const t = makeScheduler(configDir);
+  try {
+    // agent says resume_once, schedule says none → fresh
+    const off = t.scheduler.create({
+      name: "no retry",
+      agentId: "resumer",
+      prompt: "budget",
+      cron: "* * * * *",
+      onFailure: "none",
+    });
+    const offFirst = await t.fireAndWait(off.id);
+    assert.equal(offFirst.status, "failed");
+    assert.equal(t.scheduler.resumeCandidate(t.repo.get(off.id)), null);
+    const offSecond = await t.fireAndWait(off.id);
+    assert.equal(offSecond.resumedFromRunId, null);
+
+    // agent says nothing, schedule says resume_once with its own budget → resumed after a timeout
+    const on = t.scheduler.create({
+      name: "retry hang",
+      agentId: "coder",
+      prompt: "hang",
+      cron: "* * * * *",
+      onFailure: "resume_once",
+      resumeBudgetUsd: 1,
+    });
+    const hung = await t.fireAndWait(on.id); // default_timeout_minutes 0.05 = 3 s
+    assert.equal(hung.status, "timed_out");
+    assert.equal(t.scheduler.resumeCandidate(t.repo.get(on.id)).id, hung.id);
+    const resumed = await t.fireAndWait(on.id);
+    assert.equal(resumed.resumedFromRunId, hung.id);
+    assert.match(resumed.prompt, /\(timed out\)/);
+    assert.equal(
+      resumed.command.argv[resumed.command.argv.indexOf("--max-budget-usd") + 1],
+      "0.5",
+      "$1 resume budget minus the default $0.50 reserve",
+    );
+    assert.equal(resumed.status, "completed");
+
+    // clearing the schedule's policy falls back to the agent's (none for coder)
+    t.scheduler.update(on.id, { onFailure: null, resumeBudgetUsd: null });
+    assert.equal(t.repo.get(on.id).onFailure, null);
+    assert.throws(
+      () =>
+        t.scheduler.create({
+          name: "bad",
+          agentId: "coder",
+          prompt: "x",
+          cron: "* * * * *",
+          onFailure: "retry_forever",
+        }),
+      /on_failure must be one of/,
+    );
+    assert.throws(
+      () => t.scheduler.create({ name: "bad2", agentId: "coder", prompt: "x", cron: "* * * * *", resumeBudgetUsd: -1 }),
+      /resume_budget_usd must be/,
+    );
+  } finally {
+    await t.close(root);
   }
 });
