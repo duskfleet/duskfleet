@@ -127,265 +127,289 @@ export default function SchedulesPage() {
               </th>
             </tr>
           </thead>
-          <tbody>
-            {schedules.map((s) => {
-              const firings = scheduleFirings(s.id, 6);
-              return (
-                <tr key={s.id} id={s.id}>
-                  <td className="status">
-                    <span
-                      className={`badge ${s.enabled ? "completed" : "cancelled"}`}
-                      title={
-                        s.enabled
-                          ? `Enabled · created ${fmtTime(s.createdAt)}`
-                          : `Paused ${fmtRelative(s.updatedAt)} (${fmtTime(s.updatedAt)}). Re-enable with update_schedule { "id": "${s.id}", "enabled": true }`
-                      }
-                    >
-                      {s.enabled ? "enabled" : "paused"}
-                    </span>
-                    {!s.enabled && (
-                      <div className="faint" style={{ fontSize: "0.8rem", marginTop: 4 }} title={fmtTime(s.updatedAt)}>
-                        since {fmtRelative(s.updatedAt)}
-                      </div>
-                    )}
-                    {s.runRequestedAt && (
-                      <div style={{ marginTop: 4 }}>
-                        <span
-                          className="badge pending"
-                          title={`Run requested ${fmtTime(s.runRequestedAt)}; the ticking process fires it on its next tick`}
+          {groupByProject(schedules).map((g) => (
+            <tbody key={g.projectId ?? "\u0000none"}>
+              <tr className="group-head">
+                <td colSpan={8}>
+                  {g.projectId ? (
+                    <Link href={`/?project=${encodeURIComponent(g.projectId)}`}>{g.projectId}</Link>
+                  ) : (
+                    <span>no project</span>
+                  )}
+                  <span className="sep">·</span>
+                  <span className="muted">
+                    {g.schedules.length} {g.schedules.length === 1 ? "schedule" : "schedules"}
+                    {g.paused > 0 && ` · ${g.paused} paused`}
+                  </span>
+                </td>
+              </tr>
+              {g.schedules.map((s) => {
+                const firings = scheduleFirings(s.id, 6);
+                return (
+                  <tr key={s.id} id={s.id}>
+                    <td className="status">
+                      <span
+                        className={`badge ${s.enabled ? "completed" : "cancelled"}`}
+                        title={
+                          s.enabled
+                            ? `Enabled · created ${fmtTime(s.createdAt)}`
+                            : `Paused ${fmtRelative(s.updatedAt)} (${fmtTime(s.updatedAt)}). Re-enable with update_schedule { "id": "${s.id}", "enabled": true }`
+                        }
+                      >
+                        {s.enabled ? "enabled" : "paused"}
+                      </span>
+                      {!s.enabled && (
+                        <div
+                          className="faint"
+                          style={{ fontSize: "0.8rem", marginTop: 4 }}
+                          title={fmtTime(s.updatedAt)}
                         >
-                          run requested
-                        </span>
+                          since {fmtRelative(s.updatedAt)}
+                        </div>
+                      )}
+                      {s.runRequestedAt && (
+                        <div style={{ marginTop: 4 }}>
+                          <span
+                            className="badge pending"
+                            title={`Run requested ${fmtTime(s.runRequestedAt)}; the ticking process fires it on its next tick`}
+                          >
+                            run requested
+                          </span>
+                        </div>
+                      )}
+                      {s.willResumeRunId && (
+                        <div style={{ marginTop: 4 }}>
+                          <Link
+                            href={`/runs/${s.willResumeRunId}`}
+                            className="badge attention"
+                            title={`on_failure: resume_once (${s.onFailureSource}): the next fire resumes the session of run ${s.willResumeRunId} instead of starting fresh. Once; a second failure is final.`}
+                          >
+                            next: resume
+                          </Link>
+                        </div>
+                      )}
+                    </td>
+                    <td className="what">
+                      <div className="prompt" title={s.prompt}>
+                        {s.name}
                       </div>
-                    )}
-                    {s.willResumeRunId && (
-                      <div style={{ marginTop: 4 }}>
-                        <Link
-                          href={`/runs/${s.willResumeRunId}`}
-                          className="badge attention"
-                          title={`on_failure: resume_once (${s.onFailureSource}): the next fire resumes the session of run ${s.willResumeRunId} instead of starting fresh. Once; a second failure is final.`}
-                        >
-                          next: resume
+                      <div className="where">
+                        <Link href={`/?agent=${encodeURIComponent(s.agentId)}`}>{s.agentId}</Link>
+                        {s.projectId && (
+                          <>
+                            <span className="sep">·</span>
+                            <Link href={`/?project=${encodeURIComponent(s.projectId)}`}>{s.projectId}</Link>
+                          </>
+                        )}
+                        {s.model && (
+                          <>
+                            <span className="sep">·</span>
+                            <span className="pill model">{s.model}</span>
+                          </>
+                        )}
+                        <span className="sep">·</span>
+                        <Link href={`/?schedule=${encodeURIComponent(s.id)}`} title="Runs started by this schedule">
+                          runs →
                         </Link>
-                      </div>
-                    )}
-                  </td>
-                  <td className="what">
-                    <div className="prompt" title={s.prompt}>
-                      {s.name}
-                    </div>
-                    <div className="where">
-                      <Link href={`/?agent=${encodeURIComponent(s.agentId)}`}>{s.agentId}</Link>
-                      {s.projectId && (
-                        <>
-                          <span className="sep">·</span>
-                          <Link href={`/?project=${encodeURIComponent(s.projectId)}`}>{s.projectId}</Link>
-                        </>
-                      )}
-                      {s.model && (
-                        <>
-                          <span className="sep">·</span>
-                          <span className="pill model">{s.model}</span>
-                        </>
-                      )}
-                      <span className="sep">·</span>
-                      <Link href={`/?schedule=${encodeURIComponent(s.id)}`} title="Runs started by this schedule">
-                        runs →
-                      </Link>
-                      {s.gate && (
-                        <>
-                          <span className="sep">·</span>
-                          {s.gate.invalid !== undefined ? (
-                            <span
-                              className="flag warn"
-                              title={`Stored gate is unusable: ${s.gate.invalid}. Every fire is an error until the gate is set again or cleared.`}
-                            >
-                              gate: invalid
-                            </span>
-                          ) : (
+                        {s.gate && (
+                          <>
+                            <span className="sep">·</span>
+                            {s.gate.invalid !== undefined ? (
+                              <span
+                                className="flag warn"
+                                title={`Stored gate is unusable: ${s.gate.invalid}. Every fire is an error until the gate is set again or cleared.`}
+                              >
+                                gate: invalid
+                              </span>
+                            ) : (
+                              <span
+                                className="muted"
+                                title={
+                                  s.gate.command !== undefined
+                                    ? `Gate: \`${s.gate.command}\` runs in the project first; exit 0 runs, exit 1-125 skips, anything else is an error`
+                                    : `Gate: agent ${s.gate.agent?.agentId} checks first ($${s.gate.agent?.budgetUsd ?? DEFAULT_GATE_BUDGET_USD} budget); "${s.gate.agent?.marker ?? DEFAULT_GATE_MARKER}" as the last line of its answer skips`
+                                }
+                              >
+                                gate: {s.gate.command !== undefined ? "command" : `agent ${s.gate.agent?.agentId}`}
+                              </span>
+                            )}
+                          </>
+                        )}
+                        {s.effectiveOnFailure === "resume_once" && (
+                          <>
+                            <span className="sep">·</span>
                             <span
                               className="muted"
-                              title={
-                                s.gate.command !== undefined
-                                  ? `Gate: \`${s.gate.command}\` runs in the project first; exit 0 runs, exit 1-125 skips, anything else is an error`
-                                  : `Gate: agent ${s.gate.agent?.agentId} checks first ($${s.gate.agent?.budgetUsd ?? DEFAULT_GATE_BUDGET_USD} budget); "${s.gate.agent?.marker ?? DEFAULT_GATE_MARKER}" as the last line of its answer skips`
-                              }
+                              title={`on_failure: resume_once from the ${s.onFailureSource}${s.resumeBudgetUsd !== null ? ` · resume budget $${s.resumeBudgetUsd}` : ""}: after a budget or timeout failure the next tick resumes the session once`}
                             >
-                              gate: {s.gate.command !== undefined ? "command" : `agent ${s.gate.agent?.agentId}`}
+                              resume once on failure
                             </span>
-                          )}
-                        </>
-                      )}
-                      {s.effectiveOnFailure === "resume_once" && (
-                        <>
-                          <span className="sep">·</span>
-                          <span
-                            className="muted"
-                            title={`on_failure: resume_once from the ${s.onFailureSource}${s.resumeBudgetUsd !== null ? ` · resume budget $${s.resumeBudgetUsd}` : ""}: after a budget or timeout failure the next tick resumes the session once`}
-                          >
-                            resume once on failure
-                          </span>
-                        </>
-                      )}
-                    </div>
-                    <div className="muted" style={{ fontSize: "0.8rem", marginTop: 4, maxWidth: 520 }} title={s.prompt}>
-                      {runTitle(s.prompt, 90)}
-                    </div>
-                    <ScheduleActions
-                      id={s.id}
-                      name={s.name}
-                      enabled={s.enabled}
-                      cron={s.cron}
-                      timeZone={s.timeZone}
-                      runRequested={s.runRequestedAt !== null}
-                    />
-                  </td>
-                  <td className="cron-cell">
-                    <div>{s.cronHuman}</div>
-                    <div className="mono muted" title={`cron "${s.cron}" evaluated in ${s.timeZone}`}>
-                      {s.cron} · {s.timeZone}
-                    </div>
-                  </td>
-                  <td
-                    className="when col-started"
-                    title={
-                      s.enabled
-                        ? fmtTime(s.nextRunAt)
-                        : s.theoreticalNextAt
-                          ? `Would next fire ${fmtTime(s.theoreticalNextAt)} if enabled`
-                          : undefined
-                    }
-                  >
-                    {s.enabled && s.nextRunAt ? (
-                      inFuture(s.nextRunAt)
-                    ) : s.enabled ? (
-                      "–"
-                    ) : (
-                      <span>
-                        paused
-                        {s.theoreticalNextAt && (
-                          <div className="faint" style={{ fontSize: "0.8rem" }}>
-                            would be {inFuture(s.theoreticalNextAt)}
-                          </div>
-                        )}
-                      </span>
-                    )}
-                  </td>
-                  <td>
-                    {s.lastOutcome ? (
-                      <div style={{ display: "grid", gap: 4 }}>
-                        <span>
-                          <span className={`badge ${OUTCOME_CLASS[s.lastOutcome] ?? "pending"}`}>
-                            {s.lastOutcome.replace("_", " ")}
-                          </span>{" "}
-                          <span className="muted" style={{ fontSize: "0.8rem" }} title={fmtTime(s.lastFiredAt)}>
-                            {fmtRelative(s.lastFiredAt)}
-                          </span>
-                        </span>
-                        {s.lastRun ? (
-                          <span
-                            style={{
-                              fontSize: "0.8rem",
-                              display: "flex",
-                              gap: 6,
-                              alignItems: "center",
-                              flexWrap: "wrap",
-                            }}
-                          >
-                            <Link href={`/runs/${s.lastRun.id}`}>last run →</Link>
-                            <StatusBadge status={s.lastRun.status} reasons={s.lastRun.reviewReasons} />
-                            {s.lastRun.needsReview && (
-                              <Link
-                                href={`/runs/${s.lastRun.id}#issues`}
-                                className="muted"
-                                title={`The run this schedule last started needs review: ${s.lastRun.reviewReasons.map((r) => REVIEW_REASON_LABELS[r]).join(", ")}`}
-                              >
-                                {s.lastRun.reviewReasons
-                                  .map((r) => REVIEW_REASON_LABELS[r])
-                                  .slice(0, 2)
-                                  .join(" · ")}
-                              </Link>
-                            )}
-                          </span>
-                        ) : (
-                          s.lastRunId && (
-                            <Link href={`/runs/${s.lastRunId}`} style={{ fontSize: "0.8rem" }}>
-                              last run →
-                            </Link>
-                          )
-                        )}
-                        {s.lastError && (
-                          <span className="muted" style={{ fontSize: "0.8rem" }} title={s.lastError}>
-                            {s.lastError.slice(0, 90)}
-                          </span>
-                        )}
-                        {firings.length > 1 && (
-                          <span
-                            style={{ display: "flex", gap: 3 }}
-                            title={firings.map((f) => `${f.outcome} ${fmtTime(f.firedAt)}`).join("\n")}
-                          >
-                            {firings.map((f) => (
-                              <span
-                                key={f.id}
-                                className={`badge ${OUTCOME_CLASS[f.outcome] ?? "pending"}`}
-                                style={{ padding: 0, width: 10, height: 10, borderRadius: 3 }}
-                              />
-                            ))}
-                          </span>
+                          </>
                         )}
                       </div>
-                    ) : (
-                      <span className="muted">{s.enabled ? "not yet" : "never"}</span>
-                    )}
-                  </td>
-                  <td className="num">{s.fires}</td>
-                  <td
-                    className="num"
-                    style={s.skips > 0 ? { color: "var(--warn)" } : undefined}
-                    title={
-                      s.skips > 0
-                        ? "Ticks skipped because the agent or project was busy. Skips are never queued."
-                        : undefined
-                    }
-                  >
-                    {s.skips}
-                  </td>
-                  <td
-                    className="num"
-                    title={`Last ${s.idle7d.days} days: ${s.idle7d.ticks} ticks, ${s.idle7d.fires} fires, ${s.idle7d.runs} runs (${fmtCost(s.idle7d.costUsd)}). ${s.idle7d.noopRuns} reported no work (${fmtCost(s.idle7d.noopCostUsd)}), matched by ${s.idle7d.noopPattern}${s.noopPattern ? " (this schedule's noop_pattern)" : " (scheduler.noop_pattern)"}.${s.idle7d.noopPatternError ? ` Not counted: ${s.idle7d.noopPatternError}.` : ""}`}
-                  >
-                    {s.idle7d.gateChecks > 0 && (
                       <div
                         className="muted"
-                        style={{ fontSize: "0.8rem" }}
-                        title={`Gate checked ${s.idle7d.gateChecks} ticks, skipped ${s.idle7d.gateSkips}; spent on gates ${fmtCost(s.idle7d.gateCostUsd)} (not in the run cost)`}
+                        style={{ fontSize: "0.8rem", marginTop: 4, maxWidth: 520 }}
+                        title={s.prompt}
                       >
-                        gate {s.idle7d.gateSkips}/{s.idle7d.gateChecks} skipped · {fmtCost(s.idle7d.gateCostUsd)}
+                        {runTitle(s.prompt, 90)}
                       </div>
-                    )}
-                    {s.idle7d.runs === 0 ? (
-                      <span className="faint">–</span>
-                    ) : (
-                      <div style={{ display: "grid", gap: 2 }}>
-                        <span
-                          style={
-                            s.idle7d.noopRuns > 0 && s.idle7d.noopRuns * 2 >= s.idle7d.runs
-                              ? { color: "var(--warn)" }
-                              : undefined
-                          }
+                      <ScheduleActions
+                        id={s.id}
+                        name={s.name}
+                        enabled={s.enabled}
+                        cron={s.cron}
+                        timeZone={s.timeZone}
+                        runRequested={s.runRequestedAt !== null}
+                      />
+                    </td>
+                    <td className="cron-cell">
+                      <div>{s.cronHuman}</div>
+                      <div className="mono muted" title={`cron "${s.cron}" evaluated in ${s.timeZone}`}>
+                        {s.cron} · {s.timeZone}
+                      </div>
+                    </td>
+                    <td
+                      className="when col-started"
+                      title={
+                        s.enabled
+                          ? fmtTime(s.nextRunAt)
+                          : s.theoreticalNextAt
+                            ? `Would next fire ${fmtTime(s.theoreticalNextAt)} if enabled`
+                            : undefined
+                      }
+                    >
+                      {s.enabled && s.nextRunAt ? (
+                        inFuture(s.nextRunAt)
+                      ) : s.enabled ? (
+                        "–"
+                      ) : (
+                        <span>
+                          paused
+                          {s.theoreticalNextAt && (
+                            <div className="faint" style={{ fontSize: "0.8rem" }}>
+                              would be {inFuture(s.theoreticalNextAt)}
+                            </div>
+                          )}
+                        </span>
+                      )}
+                    </td>
+                    <td>
+                      {s.lastOutcome ? (
+                        <div style={{ display: "grid", gap: 4 }}>
+                          <span>
+                            <span className={`badge ${OUTCOME_CLASS[s.lastOutcome] ?? "pending"}`}>
+                              {s.lastOutcome.replace("_", " ")}
+                            </span>{" "}
+                            <span className="muted" style={{ fontSize: "0.8rem" }} title={fmtTime(s.lastFiredAt)}>
+                              {fmtRelative(s.lastFiredAt)}
+                            </span>
+                          </span>
+                          {s.lastRun ? (
+                            <span
+                              style={{
+                                fontSize: "0.8rem",
+                                display: "flex",
+                                gap: 6,
+                                alignItems: "center",
+                                flexWrap: "wrap",
+                              }}
+                            >
+                              <Link href={`/runs/${s.lastRun.id}`}>last run →</Link>
+                              <StatusBadge status={s.lastRun.status} reasons={s.lastRun.reviewReasons} />
+                              {s.lastRun.needsReview && (
+                                <Link
+                                  href={`/runs/${s.lastRun.id}#issues`}
+                                  className="muted"
+                                  title={`The run this schedule last started needs review: ${s.lastRun.reviewReasons.map((r) => REVIEW_REASON_LABELS[r]).join(", ")}`}
+                                >
+                                  {s.lastRun.reviewReasons
+                                    .map((r) => REVIEW_REASON_LABELS[r])
+                                    .slice(0, 2)
+                                    .join(" · ")}
+                                </Link>
+                              )}
+                            </span>
+                          ) : (
+                            s.lastRunId && (
+                              <Link href={`/runs/${s.lastRunId}`} style={{ fontSize: "0.8rem" }}>
+                                last run →
+                              </Link>
+                            )
+                          )}
+                          {s.lastError && (
+                            <span className="muted" style={{ fontSize: "0.8rem" }} title={s.lastError}>
+                              {s.lastError.slice(0, 90)}
+                            </span>
+                          )}
+                          {firings.length > 1 && (
+                            <span
+                              style={{ display: "flex", gap: 3 }}
+                              title={firings.map((f) => `${f.outcome} ${fmtTime(f.firedAt)}`).join("\n")}
+                            >
+                              {firings.map((f) => (
+                                <span
+                                  key={f.id}
+                                  className={`badge ${OUTCOME_CLASS[f.outcome] ?? "pending"}`}
+                                  style={{ padding: 0, width: 10, height: 10, borderRadius: 3 }}
+                                />
+                              ))}
+                            </span>
+                          )}
+                        </div>
+                      ) : (
+                        <span className="muted">{s.enabled ? "not yet" : "never"}</span>
+                      )}
+                    </td>
+                    <td className="num">{s.fires}</td>
+                    <td
+                      className="num"
+                      style={s.skips > 0 ? { color: "var(--warn)" } : undefined}
+                      title={
+                        s.skips > 0
+                          ? "Ticks skipped because the agent or project was busy. Skips are never queued."
+                          : undefined
+                      }
+                    >
+                      {s.skips}
+                    </td>
+                    <td
+                      className="num"
+                      title={`Last ${s.idle7d.days} days: ${s.idle7d.ticks} ticks, ${s.idle7d.fires} fires, ${s.idle7d.runs} runs (${fmtCost(s.idle7d.costUsd)}). ${s.idle7d.noopRuns} reported no work (${fmtCost(s.idle7d.noopCostUsd)}), matched by ${s.idle7d.noopPattern}${s.noopPattern ? " (this schedule's noop_pattern)" : " (scheduler.noop_pattern)"}.${s.idle7d.noopPatternError ? ` Not counted: ${s.idle7d.noopPatternError}.` : ""}`}
+                    >
+                      {s.idle7d.gateChecks > 0 && (
+                        <div
+                          className="muted"
+                          style={{ fontSize: "0.8rem" }}
+                          title={`Gate checked ${s.idle7d.gateChecks} ticks, skipped ${s.idle7d.gateSkips}; spent on gates ${fmtCost(s.idle7d.gateCostUsd)} (not in the run cost)`}
                         >
-                          {s.idle7d.noopRuns} / {s.idle7d.runs} no-op
-                        </span>
-                        <span className="muted" style={{ fontSize: "0.8rem" }}>
-                          {fmtCost(s.idle7d.noopCostUsd)} of {fmtCost(s.idle7d.costUsd)}
-                        </span>
-                      </div>
-                    )}
-                  </td>
-                </tr>
-              );
-            })}
-          </tbody>
+                          gate {s.idle7d.gateSkips}/{s.idle7d.gateChecks} skipped · {fmtCost(s.idle7d.gateCostUsd)}
+                        </div>
+                      )}
+                      {s.idle7d.runs === 0 ? (
+                        <span className="faint">–</span>
+                      ) : (
+                        <div style={{ display: "grid", gap: 2 }}>
+                          <span
+                            style={
+                              s.idle7d.noopRuns > 0 && s.idle7d.noopRuns * 2 >= s.idle7d.runs
+                                ? { color: "var(--warn)" }
+                                : undefined
+                            }
+                          >
+                            {s.idle7d.noopRuns} / {s.idle7d.runs} no-op
+                          </span>
+                          <span className="muted" style={{ fontSize: "0.8rem" }}>
+                            {fmtCost(s.idle7d.noopCostUsd)} of {fmtCost(s.idle7d.costUsd)}
+                          </span>
+                        </div>
+                      )}
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          ))}
         </table>
       )}
 
@@ -428,6 +452,28 @@ export default function SchedulesPage() {
       </div>
     </>
   );
+}
+
+type ScheduleRow = ReturnType<typeof listSchedules>[number];
+
+interface ProjectGroup {
+  projectId: string | null;
+  schedules: ScheduleRow[];
+  paused: number;
+}
+
+/** Projects alphabetically by id, "no project" last; rows keep the order listSchedules() gave them. */
+function groupByProject(schedules: ScheduleRow[]): ProjectGroup[] {
+  const byProject = new Map<string | null, ScheduleRow[]>();
+  for (const s of schedules) {
+    const key = s.projectId ?? null;
+    const rows = byProject.get(key);
+    if (rows) rows.push(s);
+    else byProject.set(key, [s]);
+  }
+  return [...byProject.entries()]
+    .sort(([a], [b]) => (a === null ? 1 : b === null ? -1 : a.localeCompare(b)))
+    .map(([projectId, rows]) => ({ projectId, schedules: rows, paused: rows.filter((s) => !s.enabled).length }));
 }
 
 function inFuture(iso: string): string {

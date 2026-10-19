@@ -26,7 +26,9 @@ npm run cli -- serve
 
 A SQLite lease makes sure only one of them fires at a time; the others stand by and take over
 when the holder stops. The lease records the kind of process (`serve@host:pid`, `mcp@host:pid`);
-the dashboard's Schedules page and `duskfleet doctor` show it.
+the dashboard's Schedules page and `duskfleet doctor` show it. That page groups schedules by
+project (projects alphabetically, "no project" last), each group headed by the project link,
+its schedule count and how many are paused.
 
 **Relying on the MCP server alone means schedules stop when Claude Desktop or Claude Code
 closes.** To run them unattended, register `serve` as a per-user service once:
