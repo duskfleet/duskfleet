@@ -65,18 +65,17 @@ export default async function RunsPage({ searchParams }: { searchParams: Promise
           Runs
           {filtered && <span className="count"> · {activeLabel}</span>}
         </h1>
-        {filtered ? (
-          <span className="active-filter">
-            <span className="muted">
+        <span className="head-side">
+          {filtered && (
+            <span className="active-filter">
               showing {fmtInt(recent.length + running.length)} of {fmtInt(total)}
+              <Link href="/" className="clear">
+                × clear filters
+              </Link>
             </span>
-            <Link href="/" className="clear">
-              × clear filters
-            </Link>
-          </span>
-        ) : (
+          )}
           <span className="note">{fmtDayClock(new Date())}</span>
-        )}
+        </span>
       </div>
 
       <div className="toolbar">
@@ -96,45 +95,47 @@ export default async function RunsPage({ searchParams }: { searchParams: Promise
             </Link>
           ))}
         </div>
-        <div className="filters">
-          <span className="filter-label">Agent</span>
-          <Link href={qs({ agent: undefined })} className={`chip ${agent ? "" : "on"}`}>
-            all
-          </Link>
-          {agents
-            .filter((a) => !project || !a.project || a.project === project)
-            .map((a) => (
-              <Link
-                key={a.id}
-                href={qs({ agent: a.id })}
-                className={`chip ${agent === a.id ? "on" : ""}`}
-                title={a.name}
-              >
-                {a.id}
-              </Link>
-            ))}
-        </div>
-        {/* biome-ignore lint/a11y/useSemanticElements: the <search> element is not styled here; role="search" on the form is the established pattern */}
-        <form className="search" action="/" method="get" role="search">
-          {agent && <input type="hidden" name="agent" value={agent} />}
-          {project && <input type="hidden" name="project" value={project} />}
-          {schedule && <input type="hidden" name="schedule" value={schedule} />}
-          <input
-            type="search"
-            name="q"
-            defaultValue={q ?? ""}
-            placeholder="Search prompts or paste a run id…"
-            aria-label="Search runs"
-          />
-          <button type="submit" className="search-btn">
-            Search
-          </button>
-          {q && (
-            <Link href={qs({ q: undefined })} className="clear">
-              × clear search
+        <div className="toolbar-row">
+          <div className="filters">
+            <span className="filter-label">Agent</span>
+            <Link href={qs({ agent: undefined })} className={`chip ${agent ? "" : "on"}`}>
+              all
             </Link>
-          )}
-        </form>
+            {agents
+              .filter((a) => !project || !a.project || a.project === project)
+              .map((a) => (
+                <Link
+                  key={a.id}
+                  href={qs({ agent: a.id })}
+                  className={`chip ${agent === a.id ? "on" : ""}`}
+                  title={a.name}
+                >
+                  {a.id}
+                </Link>
+              ))}
+          </div>
+          {/* biome-ignore lint/a11y/useSemanticElements: the <search> element is not styled here; role="search" on the form is the established pattern */}
+          <form className="search" action="/" method="get" role="search">
+            {agent && <input type="hidden" name="agent" value={agent} />}
+            {project && <input type="hidden" name="project" value={project} />}
+            {schedule && <input type="hidden" name="schedule" value={schedule} />}
+            <input
+              type="search"
+              name="q"
+              defaultValue={q ?? ""}
+              placeholder="Search prompts or paste a run id…"
+              aria-label="Search runs"
+            />
+            <button type="submit" className="search-btn">
+              Search
+            </button>
+            {q && (
+              <Link href={qs({ q: undefined })} className="clear">
+                × clear search
+              </Link>
+            )}
+          </form>
+        </div>
       </div>
 
       <section
@@ -199,6 +200,7 @@ export default async function RunsPage({ searchParams }: { searchParams: Promise
         {filtered && <span className="count">· filtered by {activeLabel}</span>}
       </h2>
       <RunTable
+        ended
         runs={recent}
         emptyText={
           filtered
@@ -227,7 +229,7 @@ export default async function RunsPage({ searchParams }: { searchParams: Promise
           <h2>
             By model <span className="count">all runs</span>
           </h2>
-          <div className="card" style={{ padding: "4px 6px" }}>
+          <div className="card model-card">
             <table className="table">
               <thead>
                 <tr>

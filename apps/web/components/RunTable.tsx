@@ -1,7 +1,17 @@
 import { wrapUpPhase } from "@duskfleet/core";
 import Link from "next/link";
 import type { RunWithProject } from "@/lib/data";
-import { elapsedSince, fmtCost, fmtDuration, fmtRelative, fmtTime, runTitle, shortModel } from "@/lib/format";
+import {
+  elapsedSince,
+  fmtClock,
+  fmtCost,
+  fmtDuration,
+  fmtInt,
+  fmtRelative,
+  fmtTime,
+  runTitle,
+  shortModel,
+} from "@/lib/format";
 import { RunRow } from "./RunRow";
 import { StatusBadge } from "./StatusBadge";
 
@@ -10,8 +20,19 @@ import { StatusBadge } from "./StatusBadge";
  * prompt) is the identity of a run; agent, project and model are secondary.
  * Counters that only matter when debugging (turns, tool calls, tokens) live on
  * the detail page. Columns marked col-* collapse on narrow screens.
+ *
+ * `ended`: finished runs, so Duration / Ended (wall clock) instead of the live
+ * Elapsed / Started (relative).
  */
-export function RunTable({ runs, emptyText }: { runs: RunWithProject[]; emptyText: string }) {
+export function RunTable({
+  runs,
+  emptyText,
+  ended = false,
+}: {
+  runs: RunWithProject[];
+  emptyText: string;
+  ended?: boolean;
+}) {
   if (runs.length === 0) return <div className="empty">{emptyText}</div>;
   return (
     <table className="runs">
@@ -20,15 +41,18 @@ export function RunTable({ runs, emptyText }: { runs: RunWithProject[]; emptyTex
           <th>Status</th>
           <th>Run</th>
           <th className="col-model">Model</th>
-          <th className="num col-duration">Duration</th>
+          <th className="num col-duration">{ended ? "Duration" : "Elapsed"}</th>
+          <th className="num col-turns">Turns</th>
           <th className="num">Cost</th>
-          <th className="col-started">Started</th>
+          <th className="col-started">{ended ? "Ended" : "Started"}</th>
         </tr>
       </thead>
       <tbody>
         {runs.map((r) => {
-          const duration = r.status === "running" ? elapsedSince(r.startedAt) : r.durationMs;
+          const running = r.status === "running";
+          const duration = running ? elapsedSince(r.startedAt) : r.durationMs;
           const started = r.startedAt ?? r.createdAt;
+          const finished = r.endedAt ?? started;
           const href = `/runs/${r.id}`;
           const issues = `${href}#issues`;
           // The flags are the stored review reasons; the rule itself lives in core.
@@ -158,10 +182,17 @@ export function RunTable({ runs, emptyText }: { runs: RunWithProject[]; emptyTex
                 </span>
               </td>
               <td className="num col-duration">{fmtDuration(duration)}</td>
-              <td className="num">{fmtCost(r.costUsd)}</td>
-              <td className="when col-started" title={fmtTime(started)}>
-                {fmtRelative(started)}
-              </td>
+              <td className="num col-turns">{fmtInt(r.numTurns)}</td>
+              <td className="num">{running ? "–" : fmtCost(r.costUsd)}</td>
+              {ended ? (
+                <td className="when col-started" title={fmtTime(finished)}>
+                  {fmtClock(finished)}
+                </td>
+              ) : (
+                <td className="when col-started" title={fmtTime(started)}>
+                  {fmtRelative(started)}
+                </td>
+              )}
             </RunRow>
           );
         })}
