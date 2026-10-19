@@ -141,6 +141,16 @@ per agent, staggered so a PR opened by the developer meets the reviewer within t
 planner run lands just before a developer tick. A busy agent makes a tick skip
 (`skipped_busy`), never queue. See `docs/agents.md` and `docs/schedules.md`.
 
+The GitHub Project "DuskFleet Flow" (org project 2) is a read-only mirror of the labels:
+`node scripts/project-sync.mjs [--dry-run]` adds every open issue and PR to the project (the
+project's auto-add workflow covers issues only) and sets each item's Status from its `flow:`
+label (`Backlog` without one, `Done` when closed or merged). Labels stay the source of truth:
+agents never touch the project, and a Status dragged on the board is overwritten on the next
+sync. Its views: *Board* (open items by Status, Backlog hidden), *Backlog* (open issues with no
+`flow:` label, to pick what to promote), *Needs me* (`Ready to merge` and `Needs human`, the two
+states that wait for a human), *All*. The script needs the `project` scope once
+(`gh auth refresh -h github.com -s project`).
+
 ## Security model
 
 - The project path is passed as the child's **working directory**; nothing is ever built into a
