@@ -22,7 +22,8 @@ const BLOCKER_LINE = new RegExp(
   String.raw`^[ \t>*-]*(?:\[[\w-]+\][ \t]*)?(?:blocked by|depends on)\b[ \t:]*` + REF_LIST,
   "gim",
 );
-const CLOSES = new RegExp(String.raw`\b(?:closes|fixes|resolves)[ \t:]+` + REF_LIST, "gi");
+// Every keyword GitHub links a PR to an issue with: close(s|d), fix(es|ed), resolve(s|d).
+const CLOSES = new RegExp(String.raw`\b(?:close[sd]?|fix(?:es|ed)?|resolve[sd]?)[ \t:]+` + REF_LIST, "gi");
 
 function refsIn(text, pattern) {
   const found = new Set();
