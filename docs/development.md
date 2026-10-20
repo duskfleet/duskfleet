@@ -155,8 +155,13 @@ label (`Backlog` without one, `Done` when closed or merged). Labels stay the sou
 agents never touch the project, and a Status dragged on the board is overwritten on the next
 sync. Its views: *Board* (open items by Status, Backlog hidden), *Backlog* (open issues with no
 `flow:` label, to pick what to promote), *Needs me* (`Ready to merge` and `Needs human`, the two
-states that wait for a human), *All*. The script needs the `project` scope once
-(`gh auth refresh -h github.com -s project`).
+states that wait for a human), *All*. Run by hand, the script needs the `project` scope once
+(`gh auth refresh -h github.com -s project`). The workflow `.github/workflows/project-sync.yml`
+runs it on every open / close / label change of an issue or PR, once an hour as a safety net
+and on demand (*Actions → Project sync → Run workflow*); it needs the repository secret
+`PROJECT_SYNC_TOKEN` (the default token cannot touch an organization project; the scopes are
+listed in the workflow header). Without the secret the job fails loudly and the board simply
+lags until the script is run by hand.
 
 ## Security model
 
