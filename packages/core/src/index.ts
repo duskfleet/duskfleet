@@ -58,6 +58,8 @@ export {
 export * from "./execution/types.js";
 export {
   captureRunDiff,
+  DIFF_MAX_COUNTED_BYTES,
+  DIFF_MAX_COUNTED_FILES,
   DIFF_MAX_FILES,
   DIFF_MAX_PATCH_BYTES,
   type DiffFile,

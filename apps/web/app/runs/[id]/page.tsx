@@ -470,7 +470,7 @@ function Changes({ run, diff }: { run: Run; diff: RunDiff }) {
         <span className="count">
           {n === 0
             ? "no files changed"
-            : `${fmtInt(n)} file${n === 1 ? "" : "s"} · +${fmtInt(diff.additions)} −${fmtInt(diff.deletions)}`}
+            : `${fmtInt(n)} file${n === 1 ? "" : "s"} · +${fmtInt(diff.additions)}${diff.totalsPartial ? "+" : ""} −${fmtInt(diff.deletions)}`}
         </span>
       </h2>
       {n > 0 && (
@@ -482,7 +482,11 @@ function Changes({ run, diff }: { run: Run; diff: RunDiff }) {
               </span>
               <span className="file">{f.oldPath ? `${f.oldPath} → ${f.path}` : f.path}</span>
               <span className="lines">
-                {f.additions === null ? (
+                {f.uncounted ? (
+                  <span className="muted" title="past the line-counting caps">
+                    not counted
+                  </span>
+                ) : f.additions === null ? (
                   <span className="muted">binary</span>
                 ) : (
                   <>
@@ -504,6 +508,12 @@ function Changes({ run, diff }: { run: Run; diff: RunDiff }) {
           <>
             <span className="sep">·</span>
             <span className="muted">first {fmtInt(diff.changedFiles.length)} files listed</span>
+          </>
+        )}
+        {diff.totalsPartial && (
+          <>
+            <span className="sep">·</span>
+            <span className="muted">totals leave out untracked files past the counting caps</span>
           </>
         )}
         {diff.patchPath && (

@@ -69,7 +69,10 @@ they arrive and keeps the raw stream in `data/logs/<run_id>.jsonl`:
   project directory; at most 200 files listed) and the patch goes to
   `data/logs/<run_id>.diff` (cut at 1 MB). `get_run` and `run-info` return it as `diff`, the
   run page shows it under "Changes". A project that is not a git checkout gets no diff.
-  Edits that were already uncommitted before the run are part of the diff too.
+  Edits that were already uncommitted before the run are part of the diff too. Lines of
+  untracked files are counted for the first 1000 files / 64 MB only; past that a file is listed
+  as "not counted" and the totals are marked partial (`totalsPartial`). Diff and textconv
+  drivers of the checkout never run.
 
 `RunManager` is the only writer of a run's status, and every change goes through a checked
 transition. Each run records its owner process; orphan recovery closes a `running` row as

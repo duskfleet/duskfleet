@@ -16,9 +16,20 @@ import path from "node:path";
 export const DIFF_MAX_FILES = 200;
 /** The patch file is cut at this size (at a line boundary). */
 export const DIFF_MAX_PATCH_BYTES = 1024 * 1024;
+/**
+ * Line counts of untracked files are read synchronously in the shared server process, so they
+ * stop after this many files or this many bytes read; the rest is listed with `uncounted` and
+ * the totals are marked partial. Keeps a run that leaves thousands of files from freezing the
+ * other runs and the scheduler.
+ */
+export const DIFF_MAX_COUNTED_FILES = 1000;
+export const DIFF_MAX_COUNTED_BYTES = 64 * 1024 * 1024;
 const GIT_TIMEOUT_MS = 20_000;
 /** Read a whole git output up to this much; the patch is cut to DIFF_MAX_PATCH_BYTES afterwards. */
 const GIT_MAX_BUFFER = 16 * DIFF_MAX_PATCH_BYTES;
+/** Same heuristic as git: a NUL byte in the first 8000 bytes means binary. */
+const BINARY_SNIFF_BYTES = 8000;
+const READ_CHUNK_BYTES = 64 * 1024;
 
 export type DiffFileStatus = "added" | "modified" | "deleted" | "renamed" | "copied" | "type_changed" | "untracked";
 
@@ -28,9 +39,11 @@ export interface DiffFile {
   /** Source path of a rename or copy. */
   oldPath?: string;
   status: DiffFileStatus;
-  /** Lines added / deleted; null for a binary file. */
+  /** Lines added / deleted; null for a binary file, or when `uncounted` is set. */
   additions: number | null;
   deletions: number | null;
+  /** An untracked file past the counting caps: its lines were not read (not binary). */
+  uncounted?: true;
 }
 
 /** Payload of a run's `diff` event. */
@@ -42,6 +55,8 @@ export interface RunDiff {
   /** Totals over every changed file, not only the listed ones. */
   additions: number;
   deletions: number;
+  /** Some untracked files were past the counting caps: the totals leave their lines out. */
+  totalsPartial: boolean;
   filesChanged: number;
   /** The first DIFF_MAX_FILES files. */
   changedFiles: DiffFile[];
@@ -59,7 +74,11 @@ interface GitOutput {
   overflow: boolean;
 }
 
-function git(cwd: string, args: string[], okCodes: number[] = [0]): GitOutput {
+/**
+ * Run a read-only git command. An output past GIT_MAX_BUFFER is a failure unless
+ * `allowOverflow` is set: a cut `-z` list would yield half paths and wrong counts.
+ */
+function git(cwd: string, args: string[], okCodes: number[] = [0], allowOverflow = false): GitOutput {
   const r = spawnSync("git", args, {
     cwd,
     encoding: "utf8",
@@ -70,7 +89,7 @@ function git(cwd: string, args: string[], okCodes: number[] = [0]): GitOutput {
     env: { ...process.env, GIT_OPTIONAL_LOCKS: "0" },
   });
   const overflow = (r.error as NodeJS.ErrnoException | undefined)?.code === "ENOBUFS";
-  const ok = overflow || (!r.error && r.status !== null && okCodes.includes(r.status));
+  const ok = overflow ? allowOverflow : !r.error && r.status !== null && okCodes.includes(r.status);
   return { ok, stdout: typeof r.stdout === "string" ? r.stdout : "", overflow };
 }
 
@@ -132,23 +151,42 @@ export function parseNumstat(out: string): Map<string, { additions: number | nul
   return stats;
 }
 
-/** Lines of a new file, null when it looks binary or is too big to read for a count. */
+/**
+ * Lines of a new file, read in chunks (no size limit of its own: the caller budgets the bytes).
+ * Null when it looks binary or cannot be read.
+ */
 function countLines(file: string): number | null {
+  let fd: number;
   try {
-    const size = statSync(file).size;
-    if (size > DIFF_MAX_PATCH_BYTES) return null;
-    const buf = Buffer.alloc(size);
-    const fd = openSync(file, "r");
-    try {
-      readSync(fd, buf, 0, size, 0);
-    } finally {
-      closeSync(fd);
-    }
-    if (buf.includes(0)) return null;
-    if (size === 0) return 0;
+    fd = openSync(file, "r");
+  } catch {
+    return null;
+  }
+  try {
+    const buf = Buffer.alloc(READ_CHUNK_BYTES);
     let lines = 0;
-    for (const b of buf) if (b === 0x0a) lines++;
-    return buf[size - 1] === 0x0a ? lines : lines + 1;
+    let offset = 0;
+    let last = 0x0a;
+    for (;;) {
+      const n = readSync(fd, buf, 0, buf.length, offset);
+      if (n === 0) break;
+      const chunk = buf.subarray(0, n);
+      if (offset < BINARY_SNIFF_BYTES && chunk.subarray(0, BINARY_SNIFF_BYTES - offset).includes(0)) return null;
+      for (let at = chunk.indexOf(0x0a); at !== -1; at = chunk.indexOf(0x0a, at + 1)) lines++;
+      last = chunk[n - 1]!;
+      offset += n;
+    }
+    return last === 0x0a ? lines : lines + 1;
+  } catch {
+    return null;
+  } finally {
+    closeSync(fd);
+  }
+}
+
+function fileSize(file: string): number | null {
+  try {
+    return statSync(file).size;
   } catch {
     return null;
   }
@@ -167,25 +205,40 @@ export function capPatch(patch: string, max = DIFF_MAX_PATCH_BYTES): { text: str
  * git cannot read the checkout (no diff event then).
  */
 export function captureRunDiff(cwd: string, base: string, patchPath: string): RunDiff | null {
-  const common = ["--no-color", "--no-ext-diff", "--find-renames", "--relative"];
+  // --no-textconv: a textconv driver from the repo's config would run here and replace the real patch.
+  const noDrivers = ["--no-color", "--no-ext-diff", "--no-textconv"];
+  const common = [...noDrivers, "--find-renames", "--relative"];
   const names = git(cwd, ["diff", "--name-status", "-z", ...common, base]);
   const nums = git(cwd, ["diff", "--numstat", "-z", ...common, base]);
   const others = git(cwd, ["ls-files", "--others", "--exclude-standard", "-z"]);
   if (!names.ok || !nums.ok || !others.ok) return null;
 
   const stats = parseNumstat(nums.stdout);
-  const files = parseNameStatus(names.stdout).map((f) => ({ ...f, ...(stats.get(f.path) ?? {}) }));
+  const files: DiffFile[] = parseNameStatus(names.stdout).map((f) => ({ ...f, ...(stats.get(f.path) ?? {}) }));
   const untracked = others.stdout.split("\0").filter(Boolean);
+  let counted = 0;
+  let countedBytes = 0;
+  let totalsPartial = false;
   for (const file of untracked) {
-    const lines = countLines(path.join(cwd, file));
+    const full = path.join(cwd, file);
+    const size = fileSize(full);
+    if (size !== null && (counted >= DIFF_MAX_COUNTED_FILES || countedBytes + size > DIFF_MAX_COUNTED_BYTES)) {
+      files.push({ path: file, status: "untracked", additions: null, deletions: null, uncounted: true });
+      totalsPartial = true;
+      continue;
+    }
+    counted++;
+    countedBytes += size ?? 0;
+    const lines = countLines(full);
     files.push({ path: file, status: "untracked", additions: lines, deletions: lines === null ? null : 0 });
   }
 
-  let patch = git(cwd, ["diff", ...common, base]).stdout;
+  // The patch alone may overflow the buffer: what was read is cut to the cap below anyway.
+  let patch = git(cwd, ["diff", ...common, base], [0], true).stdout;
   for (const file of untracked.slice(0, DIFF_MAX_FILES)) {
     if (Buffer.byteLength(patch, "utf8") > DIFF_MAX_PATCH_BYTES) break;
     // --no-index exits 1 when the files differ, which they always do here.
-    patch += git(cwd, ["diff", "--no-color", "--no-ext-diff", "--no-index", "--", "/dev/null", file], [0, 1]).stdout;
+    patch += git(cwd, ["diff", ...noDrivers, "--no-index", "--", "/dev/null", file], [0, 1], true).stdout;
   }
   const capped = capPatch(patch);
   let written: string | null = null;
@@ -200,6 +253,7 @@ export function captureRunDiff(cwd: string, base: string, patchPath: string): Ru
     head: headSha(cwd),
     additions: files.reduce((n, f) => n + (f.additions ?? 0), 0),
     deletions: files.reduce((n, f) => n + (f.deletions ?? 0), 0),
+    totalsPartial,
     filesChanged: files.length,
     changedFiles: files.slice(0, DIFF_MAX_FILES),
     filesTruncated: files.length > DIFF_MAX_FILES,

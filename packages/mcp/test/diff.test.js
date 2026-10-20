@@ -15,6 +15,7 @@ import "./helpers.js"; // before @duskfleet/core: drops an inherited CLAUDE_BIN
 import {
   ClaudeCodeExecutor,
   captureRunDiff,
+  DIFF_MAX_COUNTED_FILES,
   DIFF_MAX_FILES,
   DIFF_MAX_PATCH_BYTES,
   headSha,
@@ -95,6 +96,7 @@ test("a run in a git checkout records a diff event and the patch", async () => {
     assert.equal(diff.filesChanged, 4);
     assert.equal(diff.additions, 3);
     assert.equal(diff.deletions, 1);
+    assert.equal(diff.totalsPartial, false);
     assert.equal(diff.filesTruncated, false);
 
     assert.equal(diff.patchPath, path.join(app.config.dataDir, "logs", `${run.id}.diff`));
@@ -193,6 +195,48 @@ test("captureRunDiff caps the file list and the patch", () => {
     } finally {
       rmSync(out, { force: true });
     }
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("captureRunDiff never runs a textconv driver of the checkout", () => {
+  const root = realpathSync(mkdtempSync(path.join(tmpdir(), "duskfleet-diff-")));
+  try {
+    makeRepo(root);
+    const base = headSha(root);
+    // Outside the working tree, so the attributes file is not itself an untracked change.
+    writeFileSync(path.join(root, ".git", "info", "attributes"), "*.txt diff=shout\n");
+    git(root, "config", "diff.shout.textconv", "echo TEXTCONV");
+    writeFileSync(path.join(root, "a.txt"), "one\ntwo\n");
+    const out = path.join(root, ".git", "run.diff");
+    const diff = captureRunDiff(root, base, out);
+    const patch = readFileSync(out, "utf8");
+    assert.match(patch, /^\+two$/m);
+    assert.ok(!patch.includes("TEXTCONV"), "the real patch, not the driver's output");
+    assert.deepEqual(diff.changedFiles, [{ path: "a.txt", status: "modified", additions: 1, deletions: 0 }]);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("captureRunDiff counts a large untracked text file and stops counting past the caps", () => {
+  const root = realpathSync(mkdtempSync(path.join(tmpdir(), "duskfleet-diff-")));
+  try {
+    makeRepo(root);
+    const base = headSha(root);
+    // Over the 1 MB patch cap: still counted, never shown as binary.
+    writeFileSync(path.join(root, "big.txt"), `${"z".repeat(99)}\n`.repeat(20_000));
+    const many = path.join(root, "many");
+    mkdirSync(many);
+    for (let i = 0; i < DIFF_MAX_COUNTED_FILES + 2; i++) writeFileSync(path.join(many, `${i}.txt`), "l\n");
+    const out = path.join(root, ".git", "run.diff");
+    const diff = captureRunDiff(root, base, out);
+    const big = diff.changedFiles.find((f) => f.path === "big.txt");
+    assert.deepEqual(big, { path: "big.txt", status: "untracked", additions: 20_000, deletions: 0 });
+    assert.equal(diff.filesChanged, DIFF_MAX_COUNTED_FILES + 3);
+    assert.equal(diff.totalsPartial, true);
+    assert.equal(diff.additions, 20_000 + DIFF_MAX_COUNTED_FILES - 1, "only the counted files are in the totals");
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
