@@ -280,9 +280,12 @@ export function captureRunDiff(
   const tracked = git(cwd, ["diff", ...common, base], [0], true, left());
   let incomplete = !tracked.ok || tracked.overflow;
   let patch = tracked.stdout;
-  for (const file of untracked.slice(0, DIFF_MAX_FILES)) {
+  // A nested repository or an unreadable entry gets no patch (it is listed as uncounted).
+  const patchable = untracked.filter((file) => kinds.get(file) !== "other");
+  // Untracked files past the first DIFF_MAX_FILES are left out of the patch: say so.
+  if (patchable.length > DIFF_MAX_FILES) incomplete = true;
+  for (const file of patchable.slice(0, DIFF_MAX_FILES)) {
     if (Buffer.byteLength(patch, "utf8") > DIFF_MAX_PATCH_BYTES) break;
-    if (kinds.get(file) === "other") continue; // a nested repository or an unreadable entry: no patch
     // --no-index exits 1 when the files differ, which they always do here.
     const one = git(cwd, ["diff", ...noDrivers, "--no-index", "--", "/dev/null", file], [0, 1], true, left());
     if (!one.ok || one.overflow) incomplete = true;

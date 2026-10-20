@@ -211,6 +211,27 @@ test("captureRunDiff caps the file list and the patch", () => {
   }
 });
 
+test("captureRunDiff marks the patch incomplete past the untracked file cap", () => {
+  const root = realpathSync(mkdtempSync(path.join(tmpdir(), "duskfleet-diff-")));
+  try {
+    makeRepo(root);
+    const base = headSha(root);
+    // Small files: the patch stays far under the byte cap, only the file cap leaves some out.
+    for (let i = 0; i < DIFF_MAX_FILES + 3; i++)
+      writeFileSync(path.join(root, `u${String(i).padStart(3, "0")}.txt`), `${i}\n`);
+    const out = path.join(root, "..", `${path.basename(root)}.diff`);
+    const diff = captureRunDiff(root, base, out);
+    try {
+      assert.ok(diff.patchBytes < DIFF_MAX_PATCH_BYTES);
+      assert.equal(diff.patchTruncated, true, "3 untracked files are missing from the patch");
+    } finally {
+      rmSync(out, { force: true });
+    }
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("captureRunDiff never runs a textconv driver of the checkout", () => {
   const root = realpathSync(mkdtempSync(path.join(tmpdir(), "duskfleet-diff-")));
   try {
