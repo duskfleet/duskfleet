@@ -3,7 +3,7 @@
  * This is what SQLite stores and what MCP tools return.
  */
 
-import type { DeniedTool, RunMcpInfo, SubagentRecord } from "../execution/types.js";
+import type { DeniedTool, RunMcpInfo, SubagentRecord, UsageByModel } from "../execution/types.js";
 
 export const RUN_STATUSES = ["pending", "running", "completed", "failed", "cancelled", "timed_out"] as const;
 export type RunStatus = (typeof RUN_STATUSES)[number];
@@ -67,6 +67,12 @@ export interface Run {
   outputTokens: number | null;
   cacheReadTokens: number | null;
   cacheCreationTokens: number | null;
+  /**
+   * Tokens per model id, from the result line's `modelUsage` (migration 13). The token totals
+   * above are its sum, subagents included. Null when the result had no `modelUsage` (older rows,
+   * runs without a result line); the totals then come from the result's `usage`.
+   */
+  usageByModel: UsageByModel | null;
   costUsd: number | null;
   permissionDenials: number | null;
   /** Tool calls refused by the permission system. Non-empty = the agent's allow-list is incomplete. */

@@ -10,15 +10,17 @@ import { listProjectAgents, projectAgentDefinitionHash } from "../config/agent-f
 import { loadConfig } from "../config/loader.js";
 import type { AgentDefinition, DuskFleetConfig, ProjectDefinition } from "../config/types.js";
 import { mergeSubagent, needsRepair, sameSubagent, subagentsFromLog } from "../execution/log-replay.js";
-import type {
-  ExecutionEvent,
-  ExecutionHandle,
-  ExecutionRequest,
-  ExecutionResult,
-  Executor,
-  McpServerInfo,
-  SubagentRecord,
-  TokenUsage,
+import { mergeUsageByModel } from "../execution/stream-json.js";
+import {
+  type ExecutionEvent,
+  type ExecutionHandle,
+  type ExecutionRequest,
+  type ExecutionResult,
+  type Executor,
+  type McpServerInfo,
+  MIXED_MODEL,
+  type SubagentRecord,
+  type TokenUsage,
 } from "../execution/types.js";
 import {
   isBudgetExhausted,
@@ -433,6 +435,7 @@ export class RunManager {
       outputTokens: null,
       cacheReadTokens: null,
       cacheCreationTokens: null,
+      usageByModel: null,
       costUsd: null,
       permissionDenials: null,
       deniedTools: [],
@@ -847,6 +850,7 @@ export class RunManager {
         outputTokens: result.usage.outputTokens,
         cacheReadTokens: result.usage.cacheReadTokens,
         cacheCreationTokens: result.usage.cacheCreationTokens,
+        usageByModel: result.usageByModel,
         costUsd: result.costUsd,
         permissionDenials: result.permissionDenials,
         deniedTools: result.deniedTools,
@@ -1038,16 +1042,18 @@ export function mergeResults(main: ExecutionResult, wrapUp: ExecutionResult): Ex
     cacheReadTokens: addNullable(main.usage.cacheReadTokens, wrapUp.usage.cacheReadTokens),
     cacheCreationTokens: addNullable(main.usage.cacheCreationTokens, wrapUp.usage.cacheCreationTokens),
   };
+  const usageByModel = mergeUsageByModel(main.usageByModel, wrapUp.usageByModel);
   return {
     ...main,
     outcome: wrapUp.outcome === "cancelled" ? "cancelled" : main.outcome,
-    model: main.model ?? wrapUp.model,
+    model: usageByModel && Object.keys(usageByModel).length > 1 ? MIXED_MODEL : (main.model ?? wrapUp.model),
     endedAt: wrapUp.endedAt,
     durationMs: Math.max(0, Date.parse(wrapUp.endedAt) - Date.parse(main.startedAt)),
     resultText: wrapUp.resultText ?? main.resultText,
     numTurns: addNullable(main.numTurns, wrapUp.numTurns),
     toolCalls: main.toolCalls + wrapUp.toolCalls,
     usage,
+    usageByModel,
     costUsd: addNullable(main.costUsd, wrapUp.costUsd),
     permissionDenials: main.permissionDenials + wrapUp.permissionDenials,
     deniedTools: [...main.deniedTools, ...wrapUp.deniedTools],

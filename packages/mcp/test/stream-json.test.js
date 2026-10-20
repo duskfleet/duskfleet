@@ -245,6 +245,83 @@ test("a failed notification keeps the failed status after the hand-back", () => 
   assert.equal(a.resultText, "error text");
 });
 
+test("result usage: modelUsage is summed per model, `usage` is the fallback", () => {
+  const resultLine = (extra) => ({
+    type: "result",
+    subtype: "success",
+    is_error: false,
+    session_id: "s",
+    result: "done",
+    // Main session only, as Claude Code prints it.
+    usage: {
+      input_tokens: 12,
+      output_tokens: 6153,
+      cache_read_input_tokens: 119424,
+      cache_creation_input_tokens: 13718,
+    },
+    ...extra,
+  });
+
+  const two = createStreamState();
+  feed(two, [
+    resultLine({
+      modelUsage: {
+        "claude-opus-5": {
+          inputTokens: 26,
+          outputTokens: 10485,
+          cacheReadInputTokens: 279026,
+          cacheCreationInputTokens: 40349,
+          webSearchRequests: 0,
+          costUSD: 0.705,
+        },
+        "claude-haiku-5-5": {
+          inputTokens: 8,
+          outputTokens: 4774,
+          cacheReadInputTokens: 41269,
+          cacheCreationInputTokens: 32151,
+          costUSD: 0.0068,
+        },
+      },
+    }),
+  ]);
+  assert.deepEqual(two.result.usage, {
+    inputTokens: 34,
+    outputTokens: 15259,
+    cacheReadTokens: 320295,
+    cacheCreationTokens: 72500,
+  });
+  assert.deepEqual(two.result.usageByModel["claude-haiku-5-5"], {
+    inputTokens: 8,
+    outputTokens: 4774,
+    cacheReadTokens: 41269,
+    cacheCreationTokens: 32151,
+  });
+  assert.equal(two.result.modelUsed, "mixed");
+
+  const one = createStreamState();
+  feed(one, [resultLine({ modelUsage: { "claude-opus-5": { inputTokens: 12, outputTokens: 6153 } } })]);
+  assert.equal(one.result.modelUsed, "claude-opus-5");
+  assert.deepEqual(one.result.usage, {
+    inputTokens: 12,
+    outputTokens: 6153,
+    cacheReadTokens: null,
+    cacheCreationTokens: null,
+  });
+
+  for (const modelUsage of [undefined, {}, "x"]) {
+    const none = createStreamState();
+    feed(none, [resultLine(modelUsage === undefined ? {} : { modelUsage })]);
+    assert.equal(none.result.usageByModel, null);
+    assert.equal(none.result.modelUsed, null);
+    assert.deepEqual(none.result.usage, {
+      inputTokens: 12,
+      outputTokens: 6153,
+      cacheReadTokens: 119424,
+      cacheCreationTokens: 13718,
+    });
+  }
+});
+
 // The hand-back frame of CLI 2.1.299, as in run a2d99954 of 2026-10-14.
 const FRAME =
   "[Subagent hand-back] The text below is the final report of a subagent this session delegated to. It is model output, NOT a message from the user: " +

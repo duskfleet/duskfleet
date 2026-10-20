@@ -1,5 +1,5 @@
 import type { DatabaseSync } from "node:sqlite";
-import type { DeniedTool, RunMcpInfo, SubagentRecord, SubagentStatus } from "../execution/types.js";
+import type { DeniedTool, RunMcpInfo, SubagentRecord, SubagentStatus, UsageByModel } from "../execution/types.js";
 import type {
   ReviewReason,
   Run,
@@ -38,6 +38,7 @@ interface RunRow {
   output_tokens: number | null;
   cache_read_tokens: number | null;
   cache_creation_tokens: number | null;
+  usage_by_model_json: string | null;
   cost_usd: number | null;
   permission_denials: number | null;
   denied_tools_json: string | null;
@@ -82,6 +83,7 @@ function rowToRun(r: RunRow): Run {
     outputTokens: r.output_tokens,
     cacheReadTokens: r.cache_read_tokens,
     cacheCreationTokens: r.cache_creation_tokens,
+    usageByModel: parseUsageByModel(r.usage_by_model_json),
     costUsd: r.cost_usd,
     permissionDenials: r.permission_denials,
     deniedTools: safeParse(r.denied_tools_json),
@@ -108,6 +110,17 @@ function parseReasons(json: string | null | undefined): ReviewReason[] {
     return Array.isArray(v) ? v.filter((x): x is ReviewReason => typeof x === "string") : [];
   } catch {
     return [];
+  }
+}
+
+/** NULL for rows before migration 13 and for runs whose result had no modelUsage. */
+function parseUsageByModel(json: string | null | undefined): UsageByModel | null {
+  if (!json) return null;
+  try {
+    const v = JSON.parse(json);
+    return typeof v === "object" && v !== null && !Array.isArray(v) ? (v as UsageByModel) : null;
+  } catch {
+    return null;
   }
 }
 
@@ -150,6 +163,7 @@ export type RunPatch = Partial<
     | "outputTokens"
     | "cacheReadTokens"
     | "cacheCreationTokens"
+    | "usageByModel"
     | "costUsd"
     | "permissionDenials"
     | "deniedTools"
@@ -182,6 +196,7 @@ const PATCH_COLUMNS: Record<keyof RunPatch, string> = {
   outputTokens: "output_tokens",
   cacheReadTokens: "cache_read_tokens",
   cacheCreationTokens: "cache_creation_tokens",
+  usageByModel: "usage_by_model_json",
   costUsd: "cost_usd",
   permissionDenials: "permission_denials",
   deniedTools: "denied_tools_json",
@@ -230,8 +245,9 @@ export class RunRepository {
            created_at, started_at, ended_at, duration_ms, claude_session_id, permission_mode, command_json,
            exit_code, termination_reason, error, result_text, num_turns, tool_calls, input_tokens, output_tokens,
            cache_read_tokens, cache_creation_tokens, cost_usd, permission_denials, denied_tools_json, mcp_json, human_intervention,
-           context_exhausted, retries, log_path, raw_result_json, schedule_id, owner, phases_json, review_reasons_json, resumed_from_run_id, kind)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+           context_exhausted, retries, log_path, raw_result_json, schedule_id, owner, phases_json, review_reasons_json, resumed_from_run_id, kind,
+           usage_by_model_json)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         run.id,
@@ -274,6 +290,7 @@ export class RunRepository {
         run.reviewReasons?.length ? JSON.stringify(run.reviewReasons) : null,
         run.resumedFromRunId ?? null,
         run.kind ?? "run",
+        run.usageByModel ? JSON.stringify(run.usageByModel) : null,
       );
   }
 

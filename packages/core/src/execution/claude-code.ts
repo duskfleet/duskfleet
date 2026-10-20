@@ -14,7 +14,14 @@ import { createInterface } from "node:readline";
 import type { RecordedCommand } from "../observability/run.js";
 import { logger } from "../util/log.js";
 import { createStreamState, ingestLine, looksLikeContextExhaustion } from "./stream-json.js";
-import type { ExecutionEvent, ExecutionHandle, ExecutionRequest, ExecutionResult, Executor } from "./types.js";
+import {
+  type ExecutionEvent,
+  type ExecutionHandle,
+  type ExecutionRequest,
+  type ExecutionResult,
+  type Executor,
+  MIXED_MODEL,
+} from "./types.js";
 
 const log = logger("execution");
 
@@ -251,7 +258,8 @@ function finalResult(input: {
   return {
     outcome: input.outcome,
     sessionId: input.state.sessionId ?? input.sessionId,
-    model: input.state.model ?? r?.modelUsed ?? null,
+    // Tokens spent on several models (subagents) make the run "mixed"; otherwise the main session's model.
+    model: r?.modelUsed === MIXED_MODEL ? MIXED_MODEL : (input.state.model ?? r?.modelUsed ?? null),
     startedAt: input.startedAt.toISOString(),
     endedAt: input.endedAt.toISOString(),
     durationMs: input.endedAt.getTime() - input.startedAt.getTime(),
@@ -263,6 +271,7 @@ function finalResult(input: {
     numTurns: r?.numTurns ?? null,
     toolCalls: input.state.toolCalls,
     usage: r?.usage ?? { inputTokens: null, outputTokens: null, cacheReadTokens: null, cacheCreationTokens: null },
+    usageByModel: r?.usageByModel ?? null,
     costUsd: r?.costUsd ?? null,
     permissionDenials: r?.permissionDenials ?? 0,
     deniedTools: r?.deniedTools ?? [],

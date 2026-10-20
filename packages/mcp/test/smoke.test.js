@@ -182,7 +182,17 @@ test("subagent invocations are recorded as run_agents rows with the persona hash
     const started = await app.runs.startRun({ prompt: "subagent", projectPath: app.project, model: "opus" });
     const run = await app.runs.waitForRun(started.id, 10_000);
     assert.equal(run.status, "completed");
-    assert.equal(run.modelUsed, "opus", "the subagent's haiku must not become the run model");
+    assert.equal(run.modelUsed, "mixed", "tokens on two models: neither the main model nor the subagent's haiku");
+    assert.equal(run.modelRequested, "opus");
+    assert.deepEqual(run.usageByModel, {
+      opus: { inputTokens: 22, outputTokens: 13, cacheReadTokens: 1200, cacheCreationTokens: 400 },
+      "claude-haiku-5-5": { inputTokens: 7, outputTokens: 60, cacheReadTokens: 500, cacheCreationTokens: 300 },
+    });
+    assert.deepEqual(
+      [run.inputTokens, run.outputTokens, run.cacheReadTokens, run.cacheCreationTokens],
+      [29, 73, 1700, 700],
+      "totals are the modelUsage sum, subagent included, not the main-session `usage`",
+    );
     assert.equal(run.resultText, "Reviewer found two issues.");
     assert.equal(run.toolCalls, 3, "Agent call + two subagent tool calls");
 
@@ -988,6 +998,7 @@ test("context exhaustion is detected from structured signals, not from prose", (
     durationMs: 1,
     costUsd: 0,
     usage: {},
+    usageByModel: null,
     permissionDenials: 0,
     deniedTools: [],
     modelUsed: null,

@@ -219,6 +219,12 @@ const MIGRATIONS: ReadonlyArray<{ version: number; sql: string; backfill?: (db: 
       ALTER TABLE schedule_firings ADD COLUMN gate_cost_usd REAL;
     `,
   },
+  {
+    // Tokens per model from the result line's modelUsage (subagents can run on another model).
+    // NULL for older rows and for runs whose result carried no modelUsage.
+    version: 13,
+    sql: `ALTER TABLE runs ADD COLUMN usage_by_model_json TEXT;`,
+  },
 ];
 
 /**
