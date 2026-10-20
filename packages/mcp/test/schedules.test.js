@@ -4,13 +4,15 @@
  * processes cannot both hold the lease.
  */
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 import {
+  BusyError,
   ClaudeCodeExecutor,
+  DailyCapError,
   DEFAULT_NOOP_PATTERN,
   isNoopRun,
   loadConfig,
@@ -404,6 +406,88 @@ test("a schedule of a max_concurrent: 2 agent fires while one run is active and 
     await new Promise((r) => setTimeout(r, 300));
     db.close();
     rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("max_daily_runs: the run past the cap is refused with DailyCapError and the tick records skipped_daily_cap", async () => {
+  const { root, configDir } = makeRoot();
+  writeFileSync(
+    path.join(configDir, "agents", "capped.md"),
+    `---\nproject: demo\nmax_daily_runs: 2\n---\nTwice a day.\n`,
+  );
+  const t = makeScheduler(configDir);
+  try {
+    // Yesterday's run does not count against today's cap (UTC day).
+    const old = await t.runs.startRun({ prompt: "ok", agentId: "capped" });
+    await t.runs.waitForRun(old.id, 15_000);
+    t.db
+      .prepare("UPDATE runs SET created_at = ? WHERE id = ?")
+      .run(new Date(Date.now() - 86_400_000).toISOString(), old.id);
+    // A UTC midnight between the two lines would move "today"; the test does not cross one in practice.
+
+    const s = t.scheduler.create({ name: "capped every minute", agentId: "capped", prompt: "ok", cron: "* * * * *" });
+    assert.equal((await t.fireAndWait(s.id)).status, "completed");
+    assert.equal((await t.fireAndWait(s.id)).status, "completed");
+
+    t.due(s.id);
+    await t.tickAll();
+    const after = t.repo.get(s.id);
+    assert.equal(after.lastOutcome, "skipped_daily_cap");
+    assert.equal(after.fires, 2);
+    assert.equal(after.skips, 1);
+    assert.match(after.lastError, /daily cap: agent capped already started 2 runs today \(UTC\); max_daily_runs is 2/);
+    assert.ok(after.nextRunAt > new Date().toISOString(), "a capped tick still advances next_run_at");
+
+    await assert.rejects(t.runs.startRun({ prompt: "ok", agentId: "capped" }), (err) => {
+      assert.ok(err instanceof DailyCapError, "refused as DailyCapError");
+      assert.ok(!(err instanceof BusyError), "a cap is not busy");
+      return true;
+    });
+    // Other agents are not affected.
+    const other = await t.runs.startRun({ prompt: "ok", agentId: "coder" });
+    await t.runs.waitForRun(other.id, 15_000);
+  } finally {
+    await t.close(root);
+  }
+});
+
+test("max_daily_cost_usd: refused once today's recorded cost reaches the cap; a gated schedule skips before its gate", async () => {
+  const { root, configDir, project } = makeRoot();
+  // fake-claude reports $0.0123 per run: two runs are $0.0246 >= $0.02
+  writeFileSync(
+    path.join(configDir, "agents", "thrifty.md"),
+    `---\nproject: demo\nmax_daily_cost_usd: 0.02\n---\nCheap.\n`,
+  );
+  const t = makeScheduler(configDir);
+  try {
+    for (let i = 0; i < 2; i++) {
+      const r = await t.runs.startRun({ prompt: "ok", agentId: "thrifty" });
+      assert.equal((await t.runs.waitForRun(r.id, 15_000)).status, "completed");
+    }
+    assert.match(
+      t.runs.dailyCapReason("thrifty"),
+      /already spent \$0\.0246 today \(UTC\); max_daily_cost_usd is 0\.02/,
+    );
+    await assert.rejects(t.runs.startRun({ prompt: "ok", agentId: "thrifty" }), DailyCapError);
+
+    const marker = path.join(project, "gate-ran");
+    const s = t.scheduler.create({
+      name: "thrifty gated",
+      agentId: "thrifty",
+      prompt: "ok",
+      cron: "* * * * *",
+      gate: { command: `touch "${marker}"` },
+    });
+    t.due(s.id);
+    await t.tickAll();
+    const after = t.repo.get(s.id);
+    assert.equal(after.lastOutcome, "skipped_daily_cap");
+    assert.equal(existsSync(marker), false, "the gate did not run for a capped agent");
+    const firing = t.repo.firings(s.id)[0];
+    assert.equal(firing.outcome, "skipped_daily_cap");
+    assert.equal(firing.gateCostUsd, null, "no gate ran on this tick");
+  } finally {
+    await t.close(root);
   }
 });
 

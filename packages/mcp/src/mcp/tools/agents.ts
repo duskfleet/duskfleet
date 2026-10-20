@@ -129,6 +129,9 @@ function presentAgent(a: AgentDefinition, config: DuskFleetConfig) {
     /** Runs of this agent allowed at once: its own max_concurrent, else the global max_concurrent_per_agent. */
     maxConcurrent: a.maxConcurrent ?? config.maxConcurrentPerAgent,
     isolated: a.isolated ?? false,
+    /** Daily caps (UTC day); null = no cap. */
+    maxDailyRuns: a.maxDailyRuns ?? null,
+    maxDailyCostUsd: a.maxDailyCostUsd ?? null,
     systemPrompt: a.systemPrompt,
     path: a.sourcePath,
   };
@@ -228,6 +231,21 @@ const agentFields = {
     .optional()
     .describe(
       "true = the agent never edits the project checkout (read-only, or works in its own git worktree): its runs neither count against nor wait for max_concurrent_per_project. A promise the prompt must keep; DuskFleet does not check it. Default false",
+    ),
+  max_daily_runs: z
+    .number()
+    .int()
+    .min(1)
+    .optional()
+    .describe(
+      "Runs of this agent allowed per UTC day (whole number >= 1, every run started since 00:00 UTC counts). The next one is refused; a schedule records skipped_daily_cap. Omit for no cap",
+    ),
+  max_daily_cost_usd: z
+    .number()
+    .positive()
+    .optional()
+    .describe(
+      "Spend of this agent allowed per UTC day: once the recorded cost of its runs since 00:00 UTC reaches it, the next run is refused (a schedule records skipped_daily_cap). A run in progress is not stopped. Omit for no cap",
     ),
   system_prompt: z.string().optional().describe("Appended to Claude Code's system prompt for every run of this agent"),
 };
@@ -350,6 +368,8 @@ export function registerAgentTools(server: McpServer, ctx: ToolContext): void {
               "add_dirs",
               "claude_agent",
               "project",
+              "max_daily_runs",
+              "max_daily_cost_usd",
             ]),
           )
           .optional()

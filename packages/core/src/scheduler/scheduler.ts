@@ -7,6 +7,8 @@
  *    late; its next_run_at is recomputed from now. Hourly jobs do not want a burst.
  *  - Busy is a skip, never a queue. RunManager's per-agent / per-project guards
  *    throw; the firing is recorded as `skipped_busy`.
+ *  - An agent over its daily cap (max_daily_runs / max_daily_cost_usd, UTC day) is a
+ *    skip too, recorded as `skipped_daily_cap`.
  *  - Only one process ticks: the SQLite lease (see ScheduleRepository) is renewed
  *    every tick and expires after 3 ticks without renewal. The `serve` role takes
  *    it from any other holder (`mcp`, `cli`, role-less) on its first tick: the
@@ -20,6 +22,7 @@
 
 import type { Run } from "../observability/run.js";
 import { BusyError } from "../orchestration/busy.js";
+import { DailyCapError } from "../orchestration/daily-cap.js";
 import type { RunManager } from "../orchestration/run-manager.js";
 import type { ScheduleRepository } from "../storage/schedules.js";
 import { logger } from "../util/log.js";
@@ -290,7 +293,8 @@ export class Scheduler {
           // Busy is a skip: the resume is tried again on the next tick. Anything else (agent
           // deleted, project gone, already resumed by another process) would come back on every
           // tick, so this fire starts fresh instead and last_run_id moves past the failed run.
-          if (err instanceof BusyError) throw err;
+          // A daily cap is a skip too: starting fresh would hit the same cap.
+          if (err instanceof BusyError || err instanceof DailyCapError) throw err;
           const message = err instanceof Error ? err.message : String(err);
           resumeError = message;
           log.warn("resume refused; starting fresh", { schedule: s.name, resumedFrom: resumable.id, message });
@@ -302,6 +306,8 @@ export class Scheduler {
         // Busy first: a gate costs time (and, for an agent gate, money) only when the run could start.
         const busy = this.runs.busyReason({ agentId: s.agentId, projectId: s.projectId });
         if (busy) throw new BusyError(busy);
+        const capped = this.runs.dailyCapReason(s.agentId);
+        if (capped) throw new DailyCapError(capped);
         // Claim the tick before the gate runs: next_run_at moves on now, so neither a later tick
         // nor another process that takes the lease during a long gate sees it as still due.
         this.repo.claimTick(s.id, nextRunAt);
@@ -329,6 +335,7 @@ export class Scheduler {
           };
         }
         if (verdict.kind === "busy") throw new BusyError(verdict.reason);
+        if (verdict.kind === "daily_cap") throw new DailyCapError(verdict.reason);
         if (verdict.kind === "error") throw new Error(`gate: ${verdict.reason}`);
       }
       const input: Parameters<RunManager["startRun"]>[0] = { prompt: s.prompt, agentId: s.agentId, scheduleId: s.id };
@@ -348,10 +355,10 @@ export class Scheduler {
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       // Structured, never matched on the text: a gate's stderr may well say "project busy".
-      const busy = err instanceof BusyError;
-      const outcome: ScheduleOutcome = busy ? "skipped_busy" : "error";
+      const outcome: ScheduleOutcome =
+        err instanceof BusyError ? "skipped_busy" : err instanceof DailyCapError ? "skipped_daily_cap" : "error";
       this.repo.recordFiring(s.id, outcome, null, message, nextRunAt, gateSpend);
-      (busy ? log.info : log.warn)("schedule not started", { schedule: s.name, outcome, message });
+      (outcome === "error" ? log.warn : log.info)("schedule not started", { schedule: s.name, outcome, message });
       return { outcome, runId: null, error: message };
     }
   }

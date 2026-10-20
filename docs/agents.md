@@ -43,6 +43,8 @@ permission_mode: acceptEdits      # acceptEdits | dontAsk | auto | manual  (plan
 # effort: high
 # max_concurrent: 3               # runs of this agent at once (whole number >= 1); default max_concurrent_per_agent (1)
 # isolated: true                  # never edits the project checkout: ignores max_concurrent_per_project
+# max_daily_runs: 24              # runs of this agent per UTC day (whole number >= 1); default no cap
+# max_daily_cost_usd: 10          # spend of this agent per UTC day; default no cap
 timeout_minutes: 30
 max_budget_usd: 5
 # wrap_up_reserve_usd: 0.5     # part of max_budget_usd kept for the wrap-up pass; default 10%, min $0.50, 0 = off
@@ -112,6 +114,28 @@ Two frontmatter fields lift the limits per agent:
 for `max_concurrent` is a config error naming the file. `list_agents` reports both fields
 (`maxConcurrent` is the effective limit) and the dashboard shows them in the limits row when
 they differ from the defaults.
+
+## Daily caps
+
+`max_concurrent` bounds how many runs are active at once; nothing in it bounds a day. An
+hourly schedule, or a loop of `run_agent` calls, can start runs all day long. Two frontmatter
+fields cap an agent per **UTC day** (from 00:00 UTC, whatever the schedule's time zone):
+
+- `max_daily_runs: <n>`: every run of the agent created since 00:00 UTC counts, whatever its
+  outcome (failed, cancelled, a gate run of this agent, a resume). The `n + 1`-th is refused.
+- `max_daily_cost_usd: <x>`: once the recorded cost of the agent's runs since 00:00 UTC is at
+  or above `x`, the next run is refused. A run in progress is not stopped and adds its cost only
+  when it ends, so a day can end above `x` by at most one run's `max_budget_usd` per active run.
+
+A refusal throws before anything is spawned or recorded, with a message starting
+`daily cap: agent <id> ...`. It is not "busy": busy clears when a run ends, a cap only at the
+next UTC midnight. A schedule of the agent records the tick as `skipped_daily_cap` (checked
+after the busy check and before any gate, so a capped tick spends nothing; a capped gate agent
+gives `skipped_daily_cap` too). A non-integer or a value below 1 for `max_daily_runs`, or a
+non-positive `max_daily_cost_usd`, is a config error naming the file. `list_agents` reports
+`maxDailyRuns` / `maxDailyCostUsd` (`null` = no cap); `update_agent` removes one with
+`clear: ["max_daily_runs"]`.
+
 ## Resume once on failure
 
 The wrap-up pass leaves a trace; it does not finish the job. `on_failure: resume_once` lets a

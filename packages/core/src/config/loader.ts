@@ -6,7 +6,7 @@ import { parse as parseYaml } from "yaml";
 import { z } from "zod";
 import { DEFAULT_NOOP_PATTERN, parseNoopPattern } from "../scheduler/idle.js";
 import { logger } from "../util/log.js";
-import { AGENT_ID_PATTERN, maxConcurrentSchema } from "./agent-files.js";
+import { AGENT_ID_PATTERN, maxConcurrentSchema, maxDailyCostUsdSchema, maxDailyRunsSchema } from "./agent-files.js";
 import {
   type AgentDefinition,
   type AgentSource,
@@ -123,6 +123,8 @@ const agentFrontmatterSchema = z.object({
   project: z.string().min(1).optional(),
   max_concurrent: maxConcurrentSchema.optional(),
   isolated: z.boolean().optional(),
+  max_daily_runs: maxDailyRunsSchema.optional(),
+  max_daily_cost_usd: maxDailyCostUsdSchema.optional(),
 });
 
 const projectsSchema = z.object({
@@ -259,6 +261,8 @@ export function loadAgents(agentsDir: string, source: AgentSource = "builtin"): 
     if (fm.project !== undefined) agent.project = fm.project;
     if (fm.max_concurrent !== undefined) agent.maxConcurrent = fm.max_concurrent;
     if (fm.isolated !== undefined) agent.isolated = fm.isolated;
+    if (fm.max_daily_runs !== undefined) agent.maxDailyRuns = fm.max_daily_runs;
+    if (fm.max_daily_cost_usd !== undefined) agent.maxDailyCostUsd = fm.max_daily_cost_usd;
     agents.set(id, agent);
   }
   return agents;

@@ -387,6 +387,17 @@ export class RunRepository {
     return (this.db.prepare("SELECT * FROM runs WHERE status = ?").all(status) as unknown as RunRow[]).map(rowToRun);
   }
 
+  /**
+   * Runs of an agent created at or after `sinceIso` (every kind and outcome) and their recorded
+   * cost (runs still going, or that never reported one, add 0). The daily caps read it.
+   */
+  agentUsageSince(agentId: string, sinceIso: string): { runs: number; costUsd: number } {
+    const r = this.db
+      .prepare("SELECT COUNT(*) AS runs, SUM(cost_usd) AS cost FROM runs WHERE agent_id = ? AND created_at >= ?")
+      .get(agentId, sinceIso) as { runs: number; cost: number | null };
+    return { runs: r.runs, costUsd: r.cost ?? 0 };
+  }
+
   /** How the given runs ended, in one query and without their result blobs. Unknown ids are left out. */
   summaries(ids: string[]): RunSummary[] {
     const unique = [...new Set(ids)];

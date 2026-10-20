@@ -1825,6 +1825,7 @@ summary:focus-visible {
   background: var(--run);
 }
 .sq.busy,
+.sq.capped,
 .sq.skipped {
   border-color: var(--faint);
 }

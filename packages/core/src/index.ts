@@ -52,6 +52,7 @@ export {
 export * from "./execution/types.js";
 export * from "./observability/run.js";
 export { BusyError } from "./orchestration/busy.js";
+export { DailyCapError } from "./orchestration/daily-cap.js";
 export { ProjectValidationError, validateProjectPath } from "./orchestration/project-validation.js";
 
 export {

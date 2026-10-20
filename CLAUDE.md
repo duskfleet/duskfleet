@@ -137,6 +137,8 @@ npm workspaces, one `config/` and one SQLite database shared by three deliverabl
   stays the hard cap. Refuse, never queue: the guards throw `BusyError` (`orchestration/busy.ts`,
   message still says "agent busy" / "project busy" for humans) and the scheduler records
   `skipped_busy` on `instanceof BusyError`, never by matching text; busy means "skip this tick".
+  Daily caps (`max_daily_runs`, `max_daily_cost_usd`, UTC day, counted from `runs`) are checked
+  there too but throw `DailyCapError` (`orchestration/daily-cap.ts`, not a BusyError): `skipped_daily_cap`.
 - **Subagents are rows, not prose** (`run_agents`, migration 5): the parser folds Claude Code's
   `task_started` / `task_notification` lines and the `agent_id` of nested messages into one
   `SubagentRecord` per Agent call; `RunManager` writes them on `subagent_start` / `subagent_end`

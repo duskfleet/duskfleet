@@ -557,6 +557,32 @@ test("max_concurrent must be a whole number >= 1", () => {
   }
 });
 
+test("daily caps load from frontmatter and are validated", async () => {
+  const app = makeApp({ agents: { capped: `---\nmax_daily_runs: 3\nmax_daily_cost_usd: 1.5\n---\nx\n` } });
+  try {
+    const a = app.config.agents.get("capped");
+    assert.equal(a.maxDailyRuns, 3);
+    assert.equal(a.maxDailyCostUsd, 1.5);
+  } finally {
+    await app.cleanup();
+  }
+  for (const [key, bad, msg] of [
+    ["max_daily_runs", "0", /max_daily_runs must be a whole number >= 1/],
+    ["max_daily_runs", "2.5", /max_daily_runs must be a whole number >= 1/],
+    ["max_daily_cost_usd", "0", /max_daily_cost_usd must be a number > 0/],
+    ["max_daily_cost_usd", '"lots"', /max_daily_cost_usd must be a number > 0/],
+  ]) {
+    assert.throws(
+      () => makeApp({ agents: { broken: `---\n${key}: ${bad}\n---\nx\n` } }),
+      (err) => {
+        assert.match(err.message, new RegExp(`invalid agent file .*broken\\.md: ${key}: `));
+        assert.match(err.message, msg);
+        return true;
+      },
+    );
+  }
+});
+
 test("MCP servers mounted and allow-list mismatches are recorded on the run", async () => {
   const app = makeApp();
   try {

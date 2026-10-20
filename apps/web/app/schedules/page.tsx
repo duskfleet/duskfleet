@@ -26,7 +26,17 @@ export const metadata = { title: "Schedules · DuskFleet" };
 const FIRINGS_SHOWN = 10;
 
 /** One square of the firing strip: how the run it started ended, or why it did not start. */
-type Verdict = "clean" | "review" | "failed" | "cancelled" | "running" | "busy" | "gate" | "skipped" | "gone";
+type Verdict =
+  | "clean"
+  | "review"
+  | "failed"
+  | "cancelled"
+  | "running"
+  | "busy"
+  | "capped"
+  | "gate"
+  | "skipped"
+  | "gone";
 
 const VERDICT_LABEL: Record<Verdict, string> = {
   clean: "clean",
@@ -35,6 +45,7 @@ const VERDICT_LABEL: Record<Verdict, string> = {
   cancelled: "cancelled",
   running: "running",
   busy: "skipped busy",
+  capped: "skipped, daily cap",
   gate: "skipped by the gate",
   skipped: "skipped, scheduler off",
   gone: "run no longer recorded",
@@ -43,6 +54,7 @@ const VERDICT_LABEL: Record<Verdict, string> = {
 /** The run's stored review reasons decide amber, as everywhere else (RunManager wrote them when it ended). */
 function verdictOf(outcome: ScheduleOutcome, run: RunSummary | null): Verdict {
   if (outcome === "skipped_busy") return "busy";
+  if (outcome === "skipped_daily_cap") return "capped";
   if (outcome === "skipped_gate") return "gate";
   if (outcome === "skipped_disabled") return "skipped";
   if (outcome === "error") return "failed";

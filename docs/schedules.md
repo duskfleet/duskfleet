@@ -144,7 +144,8 @@ for what it checks, and a cheap `model`.
 Rules:
 
 - The busy check comes first: a tick whose agent or project is busy is `skipped_busy` without
-  running the gate.
+  running the gate. Then the agent's daily caps: over a cap the tick is `skipped_daily_cap`
+  without running the gate.
 - A gated fire runs in the background of the tick: a gate can take minutes, and the tick goes
   on renewing the lease and serving other schedules and **Run now** requests. The fire claims
   its tick (`next_run_at` moves on) before the gate starts, so no other process fires it again
@@ -191,6 +192,9 @@ when they end with "nothing to do": they were blocked, not idle.
 ## Policies
 
 - A tick whose agent or project is still busy is recorded as `skipped_busy`, never queued (checked before any [gate](#gates-skip-cheaply-when-there-is-no-work)).
+- A tick whose agent reached its [daily cap](agents.md#daily-caps) (`max_daily_runs`,
+  `max_daily_cost_usd`, UTC day) is recorded as `skipped_daily_cap`, also before any gate; a
+  pending resume is not tried either. The cap lifts at 00:00 UTC.
 - Missed ticks (nobody running) are not caught up.
 - `scheduler.enabled: false` in `duskfleet.yaml` is the kill switch, re-read every tick.
 - Every run started by a schedule carries its `scheduleId`, and the schedule carries the

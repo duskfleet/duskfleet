@@ -40,6 +40,7 @@ import { parseHolder, processIdentity } from "../scheduler/crud.js";
 import type { ListRunsFilter, RunRepository } from "../storage/runs.js";
 import { logger } from "../util/log.js";
 import { BusyError } from "./busy.js";
+import { DailyCapError, dailyCapReason, utcDayStart } from "./daily-cap.js";
 import { validateProjectPath } from "./project-validation.js";
 import { assertTransition } from "./run-state.js";
 import { summarizeToolInput } from "./tool-summary.js";
@@ -363,6 +364,8 @@ export class RunManager {
 
     const busy = this.capacityError(agent, projectPath);
     if (busy) throw new BusyError(busy);
+    const capped = this.dailyCapError(agent);
+    if (capped) throw new DailyCapError(capped);
 
     const runId = randomUUID();
     const resume = input.resume ?? null;
@@ -644,6 +647,15 @@ export class RunManager {
   }
 
   /**
+   * Why a run of this agent would be refused by its daily caps right now, or null. Lets the
+   * scheduler skip a capped tick before it spends anything on a gate.
+   */
+  dailyCapReason(agentId: string): string | null {
+    this.reloadConfig();
+    return this.dailyCapError(this.resolveAgent(agentId));
+  }
+
+  /**
    * The project directory a run of this agent would use, resolved exactly as startRun does
    * (schedule gates run their command there).
    */
@@ -713,6 +725,12 @@ export class RunManager {
       );
     }
     return null;
+  }
+
+  /** The daily caps (max_daily_runs, max_daily_cost_usd, UTC day): why one more run is refused, or null. */
+  private dailyCapError(agent: AgentDefinition): string | null {
+    if (agent.maxDailyRuns === undefined && agent.maxDailyCostUsd === undefined) return null;
+    return dailyCapReason(agent, this.runs.agentUsageSince(agent.id, utcDayStart(new Date())));
   }
 
   /**

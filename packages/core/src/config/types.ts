@@ -77,6 +77,17 @@ export interface AgentDefinition {
    * agent's prompt keeps; DuskFleet does not check it. Default false.
    */
   isolated?: boolean;
+  /**
+   * Runs of this agent allowed per UTC day (integer >= 1), counted over every run started since
+   * 00:00 UTC whatever its outcome. The next run is refused (`DailyCapError`). Unset = no cap.
+   */
+  maxDailyRuns?: number;
+  /**
+   * Spend of this agent allowed per UTC day (USD > 0): once the recorded cost of its runs since
+   * 00:00 UTC reaches it, the next run is refused (`DailyCapError`). A run in progress is not
+   * stopped; its own max_budget_usd bounds the overshoot. Unset = no cap.
+   */
+  maxDailyCostUsd?: number;
   /** Markdown body of the agent file. Sent via --append-system-prompt when non-empty. */
   systemPrompt: string;
   /** Absolute path of the file this agent was loaded from. */
