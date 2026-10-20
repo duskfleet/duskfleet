@@ -46,6 +46,7 @@ export {
   resolveClaudeBinary,
 } from "./execution/claude-code.js";
 export { mergeSubagent, needsRepair, sameSubagent, subagentsFromLog } from "./execution/log-replay.js";
+export { allowListedMcpPrefixes, mcpToolPrefix, missingMcpServers } from "./execution/mcp.js";
 export {
   cleanHandBack,
   createStreamState,
@@ -60,10 +61,8 @@ export * from "./observability/run.js";
 export { BusyError } from "./orchestration/busy.js";
 export { DailyCapError } from "./orchestration/daily-cap.js";
 export { ProjectValidationError, validateProjectPath } from "./orchestration/project-validation.js";
-
 export {
   budgetPlan,
-  mcpToolPrefix,
   mergeResults,
   type ResumeRunInput,
   RunManager,

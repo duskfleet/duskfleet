@@ -7,12 +7,14 @@
  * Flags used were verified against `claude --help` for 2.1.285.
  */
 import { type ChildProcess, execFile, spawn } from "node:child_process";
+import { randomUUID } from "node:crypto";
 import { createWriteStream, existsSync, mkdirSync, type WriteStream } from "node:fs";
 import { homedir } from "node:os";
 import path from "node:path";
 import { createInterface } from "node:readline";
 import type { BillingType, RecordedCommand } from "../observability/run.js";
 import { logger } from "../util/log.js";
+import { missingMcpServers } from "./mcp.js";
 import { createStreamState, ingestLine, looksLikeContextExhaustion } from "./stream-json.js";
 import {
   type ExecutionEvent,
@@ -50,6 +52,8 @@ const RESULT_GRACE_MS = 5_000;
  * process groups (and `detached` would open a console there).
  */
 const OWN_PROCESS_GROUP = process.platform !== "win32";
+/** Resolution of a process ended at its init line because a required MCP server was absent. */
+const RESTART = Symbol("restart");
 
 export class ClaudeCodeExecutor implements Executor {
   readonly name = "claude-code";
@@ -125,14 +129,12 @@ export class ClaudeCodeExecutor implements Executor {
     };
 
     const startedAt = new Date();
-    const state = createStreamState();
     let outcome: ExecutionResult["outcome"] | null = null; // set by cancel/timeout before exit
     let killTimer: NodeJS.Timeout | null = null;
     let timeoutTimer: NodeJS.Timeout | null = null;
-    let resultTimer: NodeJS.Timeout | null = null;
     let closed = false; // stdio closed and the process exited: nothing left to signal
-    let graceKilled = false; // ended by DuskFleet after a result line: the result decides the outcome
-    let stderrTail = "";
+    let child: ChildProcess | null = null; // the process running now (a restart replaces it)
+    let restartInfo: { missing: string[]; mounted: string[] } | null = null;
     let logStream: WriteStream | null = null;
 
     if (req.logPath) {
@@ -145,40 +147,12 @@ export class ClaudeCodeExecutor implements Executor {
 
     const env = childEnv();
     const billingType = billingTypeOf(env);
-    let child: ChildProcess;
-    try {
-      child = spawn(this.binary, argv, {
-        cwd: req.cwd,
-        env,
-        stdio: ["ignore", "pipe", "pipe"],
-        shell: false, // never a shell: argv is passed verbatim to the binary
-        detached: OWN_PROCESS_GROUP,
-      });
-    } catch (err) {
-      logStream?.end();
-      const endedAt = new Date();
-      return {
-        command,
-        pid: null,
-        billingType,
-        cancel: () => {},
-        done: Promise.resolve(
-          finalResult({
-            outcome: "failed",
-            error: `spawn failed: ${String(err)}`,
-            startedAt,
-            endedAt,
-            exitCode: null,
-            signal: null,
-            state,
-            sessionId: req.sessionId,
-          }),
-        ),
-      };
-    }
+    const required = req.resumeSessionId ? [] : (req.requiredMcpServers ?? []);
+    const resultGraceMs = this.options.resultGraceMs ?? RESULT_GRACE_MS;
 
-    /** Signal the child's whole process group (the child alone where there are no groups). */
+    /** Signal the current child's whole process group (the child alone where there are no groups). */
     const signal = (sig: NodeJS.Signals) => {
+      if (!child) return;
       if (OWN_PROCESS_GROUP && child.pid) {
         try {
           process.kill(-child.pid, sig);
@@ -190,110 +164,209 @@ export class ClaudeCodeExecutor implements Executor {
       child.kill(sig);
     };
 
-    const terminate = (reason: ExecutionResult["outcome"]) => {
-      if (outcome || closed) return;
-      outcome = reason;
-      log.info(`terminating run (${reason})`, { pid: child.pid });
+    /** SIGTERM the group now, SIGKILL it if it is still there after the grace. */
+    const endGroup = () => {
       signal("SIGTERM");
       killTimer = setTimeout(() => {
         if (!closed) signal("SIGKILL");
       }, KILL_GRACE_MS);
     };
 
-    /**
-     * The result line is the end of the run. A child that is still running (or whose
-     * descendants, such as a user-level Stop hook, still hold its stdout) once the grace
-     * is over would hang the run until its timeout: end the group instead.
-     */
-    const resultGraceMs = this.options.resultGraceMs ?? RESULT_GRACE_MS;
-    const graceKill = () => {
-      resultTimer = null;
-      if (closed || outcome || graceKilled) return;
-      graceKilled = true;
-      const childAlive = child.exitCode === null && child.signalCode === null;
-      log.warn("process still running after its result line; ending its process group", {
-        pid: child.pid,
-        childAlive,
-      });
-      emit({ type: "grace_kill", pid: child.pid ?? null, afterMs: resultGraceMs, childAlive });
-      signal("SIGTERM");
-      killTimer = setTimeout(() => {
-        if (!closed) signal("SIGKILL");
-      }, KILL_GRACE_MS);
+    const terminate = (reason: ExecutionResult["outcome"]) => {
+      if (outcome || closed) return;
+      outcome = reason;
+      log.info(`terminating run (${reason})`, { pid: child?.pid });
+      endGroup();
     };
+
+    /**
+     * One process. Resolves with its result, or with RESTART when its `init` line lacked a
+     * required MCP server and the caller should spawn again (only offered to the first
+     * attempt; a second init is taken as it comes).
+     */
+    const attempt = (sessionId: string, attemptArgv: string[], mayRestart: boolean) => {
+      const proc = spawn(this.binary, attemptArgv, {
+        cwd: req.cwd,
+        env,
+        stdio: ["ignore", "pipe", "pipe"],
+        shell: false, // never a shell: argv is passed verbatim to the binary
+        detached: OWN_PROCESS_GROUP,
+      });
+      child = proc;
+      closed = false;
+      const state = createStreamState();
+      let resultTimer: NodeJS.Timeout | null = null;
+      let graceKilled = false; // ended by DuskFleet after a result line: the result decides the outcome
+      let restart = false; // ended by DuskFleet at its init line: the next process decides
+      let stderrTail = "";
+      let spawnError: string | null = null;
+
+      /**
+       * The result line is the end of the run. A child that is still running (or whose
+       * descendants, such as a user-level Stop hook, still hold its stdout) once the grace
+       * is over would hang the run until its timeout: end the group instead.
+       */
+      const graceKill = () => {
+        resultTimer = null;
+        if (closed || outcome || graceKilled || restart) return;
+        graceKilled = true;
+        const childAlive = proc.exitCode === null && proc.signalCode === null;
+        log.warn("process still running after its result line; ending its process group", {
+          pid: proc.pid,
+          childAlive,
+        });
+        emit({ type: "grace_kill", pid: proc.pid ?? null, afterMs: resultGraceMs, childAlive });
+        endGroup();
+      };
+
+      const done = new Promise<ExecutionResult | typeof RESTART>((resolve) => {
+        const stdout = createInterface({ input: proc.stdout!, crlfDelay: Infinity });
+        stdout.on("line", (line) => {
+          logStream?.write(line + "\n");
+          for (const ev of ingestLine(state, line)) {
+            emit(ev);
+            if (ev.type !== "init" || !mayRestart || restart || outcome) continue;
+            const missing = missingMcpServers(required, ev.mcpServers);
+            if (missing.length === 0) continue;
+            // Before the first model turn: end this process and start over with a fresh session.
+            restart = true;
+            restartInfo = { missing, mounted: ev.mcpServers.map((s) => s.name) };
+            log.warn("init reported no server for a required MCP prefix; restarting the process", {
+              pid: proc.pid,
+              missing,
+              mounted: ev.mcpServers.map((s) => s.name),
+            });
+            logStream?.write(`#restart ${missing.join(",")} ${new Date().toISOString()}\n`);
+            endGroup();
+          }
+          if (state.result && !resultTimer && !graceKilled && !closed && !restart) {
+            resultTimer = setTimeout(graceKill, resultGraceMs);
+          }
+        });
+
+        proc.stderr!.setEncoding("utf8");
+        proc.stderr!.on("data", (chunk: string) => {
+          stderrTail = (stderrTail + chunk).slice(-4000);
+          logStream?.write(`#stderr ${chunk.replace(/\n(?!$)/g, "\n#stderr ")}`);
+          emit({ type: "stderr", text: chunk });
+        });
+
+        proc.on("error", (err) => {
+          spawnError = err.message;
+        });
+
+        proc.on("close", (code, signal) => {
+          closed = true;
+          if (killTimer) clearTimeout(killTimer);
+          if (resultTimer) clearTimeout(resultTimer);
+          const endedAt = new Date();
+
+          if (restart && !outcome) {
+            resolve(RESTART);
+            return;
+          }
+          let error: string | null = null;
+          let finalOutcome: ExecutionResult["outcome"];
+          if (outcome) {
+            finalOutcome = outcome;
+          } else if (spawnError) {
+            finalOutcome = "failed";
+            error = spawnError;
+          } else if (!state.result) {
+            finalOutcome = "failed";
+            error =
+              `no result message received (exit ${code ?? "null"}, signal ${signal ?? "none"})` + tail(stderrTail);
+          } else if (state.result.isError || (!graceKilled && code !== null && code !== 0)) {
+            // After a grace kill the exit code is the signal's (143, 1...), not the run's verdict.
+            finalOutcome = "failed";
+            // A budget stop has no `result` text, only `errors: ["Reached maximum budget ($5)"]`.
+            error = state.result.resultText ?? state.result.errorText ?? `exit code ${code}` + tail(stderrTail);
+          } else {
+            finalOutcome = "completed";
+          }
+
+          resolve(
+            finalResult({
+              outcome: finalOutcome,
+              error,
+              startedAt,
+              endedAt,
+              exitCode: code,
+              signal,
+              state,
+              sessionId,
+            }),
+          );
+        });
+      });
+      return { proc, done };
+    };
+
+    const spawnFailed = (err: unknown): ExecutionResult =>
+      finalResult({
+        outcome: "failed",
+        error: `spawn failed: ${String(err)}`,
+        startedAt,
+        endedAt: new Date(),
+        exitCode: null,
+        signal: null,
+        state: createStreamState(),
+        sessionId: req.sessionId,
+      });
+
+    let first: ReturnType<typeof attempt>;
+    try {
+      first = attempt(req.sessionId, argv, required.length > 0);
+    } catch (err) {
+      logStream?.end();
+      return { command, pid: null, billingType, cancel: () => {}, done: Promise.resolve(spawnFailed(err)) };
+    }
 
     if (req.timeoutMs && req.timeoutMs > 0) {
       timeoutTimer = setTimeout(() => terminate("timed_out"), req.timeoutMs);
     }
 
-    const done = new Promise<ExecutionResult>((resolve) => {
-      let spawnError: string | null = null;
-
-      const stdout = createInterface({ input: child.stdout!, crlfDelay: Infinity });
-      stdout.on("line", (line) => {
-        logStream?.write(line + "\n");
-        for (const ev of ingestLine(state, line)) emit(ev);
-        if (state.result && !resultTimer && !graceKilled && !closed) {
-          resultTimer = setTimeout(graceKill, resultGraceMs);
-        }
-      });
-
-      child.stderr!.setEncoding("utf8");
-      child.stderr!.on("data", (chunk: string) => {
-        stderrTail = (stderrTail + chunk).slice(-4000);
-        logStream?.write(`#stderr ${chunk.replace(/\n(?!$)/g, "\n#stderr ")}`);
-        emit({ type: "stderr", text: chunk });
-      });
-
-      child.on("error", (err) => {
-        spawnError = err.message;
-      });
-
-      child.on("close", (code, signal) => {
-        closed = true;
-        if (timeoutTimer) clearTimeout(timeoutTimer);
-        if (killTimer) clearTimeout(killTimer);
-        if (resultTimer) clearTimeout(resultTimer);
-        logStream?.end();
-        const endedAt = new Date();
-
-        let error: string | null = null;
-        let finalOutcome: ExecutionResult["outcome"];
+    const done = first.done
+      .then((result) => {
+        if (result !== RESTART) return result;
         if (outcome) {
-          finalOutcome = outcome;
-        } else if (spawnError) {
-          finalOutcome = "failed";
-          error = spawnError;
-        } else if (!state.result) {
-          finalOutcome = "failed";
-          error = `no result message received (exit ${code ?? "null"}, signal ${signal ?? "none"})` + tail(stderrTail);
-        } else if (state.result.isError || (!graceKilled && code !== null && code !== 0)) {
-          // After a grace kill the exit code is the signal's (143, 1...), not the run's verdict.
-          finalOutcome = "failed";
-          // A budget stop has no `result` text, only `errors: ["Reached maximum budget ($5)"]`.
-          error = state.result.resultText ?? state.result.errorText ?? `exit code ${code}` + tail(stderrTail);
-        } else {
-          finalOutcome = "completed";
-        }
-
-        resolve(
-          finalResult({
-            outcome: finalOutcome,
-            error,
+          // Cancelled or timed out while the first process was going down: nothing to restart.
+          return finalResult({
+            outcome,
+            error: null,
             startedAt,
-            endedAt,
-            exitCode: code,
-            signal,
-            state,
+            endedAt: new Date(),
+            exitCode: null,
+            signal: null,
+            state: createStreamState(),
             sessionId: req.sessionId,
-          }),
-        );
+          });
+        }
+        // A new id: the first process may have written its session file already.
+        const sessionId = randomUUID();
+        let second: ReturnType<typeof attempt>;
+        try {
+          second = attempt(sessionId, this.buildArgv({ ...req, sessionId }), false);
+        } catch (err) {
+          return spawnFailed(err);
+        }
+        emit({
+          type: "mcp_restart",
+          missing: restartInfo?.missing ?? required,
+          mounted: restartInfo?.mounted ?? [],
+          pid: second.proc.pid ?? null,
+          sessionId,
+        });
+        return second.done.then((r) => (r === RESTART ? spawnFailed("restart offered twice") : r));
+      })
+      .finally(() => {
+        if (timeoutTimer) clearTimeout(timeoutTimer);
+        logStream?.end();
       });
-    });
 
     return {
       command,
-      pid: child.pid ?? null,
+      pid: first.proc.pid ?? null,
       billingType,
       done,
       cancel: () => terminate("cancelled"),

@@ -10,6 +10,7 @@ import { listProjectAgents, projectAgentDefinitionHash } from "../config/agent-f
 import { loadConfig } from "../config/loader.js";
 import type { AgentDefinition, DuskFleetConfig, ProjectDefinition } from "../config/types.js";
 import { mergeSubagent, needsRepair, sameSubagent, subagentsFromLog } from "../execution/log-replay.js";
+import { allowListedMcpPrefixes, mcpToolPrefix } from "../execution/mcp.js";
 import { mergeUsageByModel } from "../execution/stream-json.js";
 import {
   type ExecutionEvent,
@@ -160,9 +161,6 @@ function looksLikePath(value: string): boolean {
 }
 
 /** Claude Code derives MCP tool prefixes from the server name: "claude.ai Figma" → "mcp__claude_ai_Figma". */
-export function mcpToolPrefix(serverName: string): string {
-  return "mcp__" + serverName.replace(/[^A-Za-z0-9_-]/g, "_");
-}
 
 export class RunManager {
   private readonly active = new Map<string, ActiveRun>();
@@ -398,7 +396,12 @@ export class RunManager {
     if (agent.disallowedTools) request.disallowedTools = agent.disallowedTools;
     if (agent.effort) request.effort = agent.effort;
     if (agent.systemPrompt) request.appendSystemPrompt = agent.systemPrompt;
-    if (agent.inheritMcp || project?.inheritMcp) request.inheritMcp = true;
+    if (agent.inheritMcp || project?.inheritMcp) {
+      request.inheritMcp = true;
+      // Connectors load at start or not at all: a child whose init lacks one is restarted once.
+      const required = allowListedMcpPrefixes(agent.allowedTools ?? []);
+      if (required.length) request.requiredMcpServers = required;
+    }
     if (agent.claudeAgent) {
       // Only project-level agents load under --setting-sources project,local; fail early with the real list.
       const available = listProjectAgents(projectPath).map((a) => a.name);
@@ -907,16 +910,8 @@ export class RunManager {
     const used = [...active.usedServers].sort();
     const mountedPrefixes = new Set(active.mounted.map((m) => mcpToolPrefix(m.name)));
     const evidence = mountedPrefixes.size > 0 || used.length > 0;
-    const allowListedPrefixes = new Set(
-      active.allowedTools
-        .filter((t) => t.startsWith("mcp__"))
-        .map((t) => {
-          const m = /^(mcp__[^_].*?)(?:__|$)/.exec(t);
-          return m ? m[1]! : t;
-        }),
-    );
     const allowListedMissing = evidence
-      ? [...allowListedPrefixes].filter((p) => !mountedPrefixes.has(p) && !used.includes(p)).sort()
+      ? allowListedMcpPrefixes(active.allowedTools).filter((p) => !mountedPrefixes.has(p) && !used.includes(p))
       : [];
     return { mounted: active.mounted, used, allowListedMissing };
   }
@@ -1027,6 +1022,12 @@ export class RunManager {
         this.runs.addEvent(runId, "note", {
           message: `${event.childAlive ? "process" : "a descendant of the process"} still running ${event.afterMs / 1000} s after the result line: SIGTERM sent to its process group`,
           graceKill: { pid: event.pid, afterMs: event.afterMs, childAlive: event.childAlive },
+        });
+        break;
+      case "mcp_restart":
+        this.runs.addEvent(runId, "note", {
+          message: `init reported no server for ${event.missing.join(", ")} (mounted: ${event.mounted.join(", ") || "none"}): process restarted once with a new session (pid ${event.pid ?? "?"})`,
+          mcpRestart: { missing: event.missing, mounted: event.mounted, pid: event.pid, sessionId: event.sessionId },
         });
         break;
       default:
