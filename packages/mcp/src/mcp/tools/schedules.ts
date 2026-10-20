@@ -128,7 +128,7 @@ export function registerScheduleTools(server: McpServer, ctx: ToolContext): void
       title: "List schedules",
       description:
         "List cron schedules with next/last firing, outcome of the last tick (started | resumed | skipped_busy | skipped_gate | skipped_disabled | error), gate (the cheap check before each run, or null), lastRun (status, needsReview and reviewReasons of the run it last started: a schedule whose run failed or ran out of budget shows it here), " +
-        "effectiveOnFailure (none | resume_once: the schedule's own on_failure, else the agent's) with onFailureSource, willResumeRunId (the budget_exhausted / timed_out run the next fire resumes instead of starting fresh, or null) and scheduler status " +
+        "effectiveOnFailure (none | resume_once: the schedule's own on_failure, else the agent's) with onFailureSource, willResumeRunId (the budget_exhausted / timed_out run the next fire resumes instead of starting fresh, or null), effectiveProjectId (the project it runs on: projectId, else the agent's project; projectId stays the stored value) and scheduler status " +
         "(kill switch, which process holds the lease). A busy agent or project makes a tick skip, never queue.",
       inputSchema: {},
     },

@@ -544,7 +544,9 @@ export function listSchedules() {
     }
     // How the run it last started ended (the tick outcome alone hides a failed run) and what the
     // next fire does: the same core composition as list_schedules and the CLI.
-    const { lastRun, effectiveOnFailure, onFailureSource, willResumeRunId } = scheduleRunState(
+    // effectiveProjectId: the schedule's project, else its agent's (core scheduleProjectId),
+    // so the page groups bound agents under their project like the scheduler runs them.
+    const { lastRun, effectiveOnFailure, onFailureSource, willResumeRunId, effectiveProjectId } = scheduleRunState(
       s,
       cfg.agents.get(s.agentId),
       runs,
@@ -558,6 +560,7 @@ export function listSchedules() {
       effectiveOnFailure,
       onFailureSource,
       willResumeRunId,
+      effectiveProjectId,
       idle7d,
     };
   });

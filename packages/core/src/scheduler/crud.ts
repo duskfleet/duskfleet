@@ -55,7 +55,19 @@ export function validateScheduleInput(config: DuskFleetConfig, input: ScheduleIn
     throw new Error("resume_budget_usd must be a positive number");
   }
   if (input.noopPattern != null) parseNoopPattern(input.noopPattern);
-  if (input.gate != null) validateGate(config, input.gate, input.projectId ?? agent.project ?? null);
+  if (input.gate != null) validateGate(config, input.gate, scheduleProjectId(input, agent));
+}
+
+/**
+ * The project a schedule runs on: its own project_id when set, else the project its agent is
+ * bound to, else null (an unbound agent without a schedule project, or a deleted agent).
+ * The scheduler, the MCP / CLI listings and the dashboard grouping all use this one rule.
+ */
+export function scheduleProjectId(
+  schedule: { projectId?: string | null },
+  agent: Pick<AgentDefinition, "project"> | undefined,
+): string | null {
+  return schedule.projectId ?? agent?.project ?? null;
 }
 
 /** The policy a schedule applies after a failed run: its own, else its agent's, else none. */
@@ -93,7 +105,7 @@ export function willResume(
   if (!isResumable(lastRun) || lastRun.resumedFromRunId !== null || alreadyResumed) return false;
   return (
     lastRun.agentId === schedule.agentId &&
-    lastRun.projectId === (schedule.projectId ?? agent?.project ?? null) &&
+    lastRun.projectId === scheduleProjectId(schedule, agent) &&
     lastRun.prompt === schedule.prompt.trim() &&
     lastRun.modelRequested === (schedule.model ?? null)
   );
@@ -109,6 +121,11 @@ export interface ScheduleRunState {
   onFailureSource: "schedule" | "agent" | "default";
   /** Set when the next fire resumes this run instead of starting fresh. */
   willResumeRunId: string | null;
+  /**
+   * The project the schedule runs on (scheduleProjectId): its stored projectId, else its
+   * agent's project. projectId keeps the stored value, null for a bound agent.
+   */
+  effectiveProjectId: string | null;
 }
 
 /**
@@ -128,6 +145,7 @@ export function scheduleRunState(
     effectiveOnFailure: effectiveOnFailure(schedule, agent),
     onFailureSource: schedule.onFailure ? "schedule" : agent?.onFailure ? "agent" : "default",
     willResumeRunId: resume ? last.id : null,
+    effectiveProjectId: scheduleProjectId(schedule, agent),
   };
 }
 

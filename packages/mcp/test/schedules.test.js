@@ -21,6 +21,7 @@ import {
   RunRepository,
   ScheduleRepository,
   Scheduler,
+  scheduleProjectId,
 } from "@duskfleet/core";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
@@ -119,6 +120,7 @@ test("schedules over MCP: create, list, update, run now, delete; validation erro
     assert.equal(created.schedule.timeZone, "Europe/London");
     assert.equal(created.schedule.cronHuman, "weekdays 08–20 at :00");
     assert.equal(created.schedule.projectId, null, "bound agent: project comes from the agent");
+    assert.equal(created.schedule.effectiveProjectId, "demo", "effective project = the agent's");
     assert.ok(created.schedule.nextRunAt, "next_run_at computed");
     assert.equal(created.schedule.enabled, true);
 
@@ -160,6 +162,8 @@ test("schedules over MCP: create, list, update, run now, delete; validation erro
 
     const listed = ok(await client.callTool({ name: "list_schedules", arguments: {} }));
     assert.equal(listed.schedules.length, 1);
+    assert.equal(listed.schedules[0].projectId, null, "list_schedules keeps the stored project_id");
+    assert.equal(listed.schedules[0].effectiveProjectId, "demo", "and adds the effective one");
     assert.equal(listed.scheduler.enabled, true);
     assert.equal(listed.scheduler.running, true, "the MCP server ticks");
 
@@ -275,6 +279,15 @@ test("schedules over MCP: create, list, update, run now, delete; validation erro
     await client.close();
     rmSync(root, { recursive: true, force: true });
   }
+});
+
+test("scheduleProjectId: the schedule's project, else its agent's, else null", () => {
+  assert.equal(scheduleProjectId({ projectId: "demo" }, { project: undefined }), "demo", "schedule project");
+  assert.equal(scheduleProjectId({ projectId: "demo" }, { project: "demo" }), "demo", "both set, same project");
+  assert.equal(scheduleProjectId({ projectId: null }, { project: "app" }), "app", "bound agent");
+  assert.equal(scheduleProjectId({ projectId: null }, { project: undefined }), null, "unbound agent");
+  assert.equal(scheduleProjectId({ projectId: null }, undefined), null, "deleted agent");
+  assert.equal(scheduleProjectId({ projectId: "demo" }, undefined), "demo", "deleted agent, schedule project");
 });
 
 test("tick fires due schedules, honours the kill switch, and only the lease holder fires", async () => {

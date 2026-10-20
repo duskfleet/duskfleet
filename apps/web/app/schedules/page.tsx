@@ -545,7 +545,8 @@ interface ProjectGroup {
 function groupByProject(schedules: ScheduleRow[]): ProjectGroup[] {
   const byProject = new Map<string | null, ScheduleRow[]>();
   for (const s of schedules) {
-    const key = s.projectId ?? null;
+    // The project the schedule runs on: its own, else its agent's ("no project" = neither).
+    const key = s.effectiveProjectId;
     const rows = byProject.get(key);
     if (rows) rows.push(s);
     else byProject.set(key, [s]);
@@ -556,8 +557,8 @@ function groupByProject(schedules: ScheduleRow[]): ProjectGroup[] {
 }
 
 /** "project · name" where a schedule is named outside its project group (the status strip). */
-function scheduleTitle(s: { projectId: string | null; name: string }): string {
-  return s.projectId ? `${s.projectId} · ${s.name}` : s.name;
+function scheduleTitle(s: { effectiveProjectId: string | null; name: string }): string {
+  return s.effectiveProjectId ? `${s.effectiveProjectId} · ${s.name}` : s.name;
 }
 
 /** "02:00" today, "Mon 07:30" later on; with seconds for the lease expiry. */

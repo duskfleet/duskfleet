@@ -131,11 +131,11 @@ export class Scheduler {
     return this.repo.list().map((s) => this.withLastRun(s, now));
   }
 
-  /** One schedule with its run state (lastRun, effectiveOnFailure, onFailureSource, willResumeRunId) and idle7d. */
+  /** One schedule with its run state (lastRun, effectiveOnFailure, onFailureSource, willResumeRunId, effectiveProjectId) and idle7d. */
   withLastRun(s: Schedule, now: Date = this.now()): Schedule & ScheduleRunState & { idle7d: IdleStats } {
-    const { lastRun, effectiveOnFailure, onFailureSource, willResumeRunId } = this.runState(s);
+    const { lastRun, effectiveOnFailure, onFailureSource, willResumeRunId, effectiveProjectId } = this.runState(s);
     const idle7d = scheduleIdleStats(this.repo, s, this.runs.config.scheduler.noopPattern, now);
-    return { ...s, lastRun, effectiveOnFailure, onFailureSource, willResumeRunId, idle7d };
+    return { ...s, lastRun, effectiveOnFailure, onFailureSource, willResumeRunId, effectiveProjectId, idle7d };
   }
 
   /** Idle stats of one schedule over the last `days`. */
