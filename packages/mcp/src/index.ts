@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { logger } from "@duskfleet/core";
 /**
  * DuskFleet MCP server entry point (stdio transport).
  *
@@ -7,7 +8,6 @@
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { bootstrap } from "./bootstrap.js";
 import { createMcpServer } from "./mcp/server.js";
-import { logger } from "@duskfleet/core";
 
 const log = logger("mcp");
 
@@ -48,6 +48,6 @@ async function main(): Promise<void> {
 }
 
 main().catch((err) => {
-  log.error("fatal", { err: err instanceof Error ? err.stack ?? err.message : String(err) });
+  log.error("fatal", { err: err instanceof Error ? (err.stack ?? err.message) : String(err) });
   process.exit(1);
 });

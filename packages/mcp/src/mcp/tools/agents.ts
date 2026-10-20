@@ -1,25 +1,29 @@
-import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { z } from "zod";
+import path from "node:path";
 import {
   AGENT_ID_PATTERN,
+  type AgentDefinition,
+  type AgentSpec,
   agentKind,
-  assertAgentKind,
-  EFFORT_LEVELS,
-  PERMISSION_MODES,
   agentSpecSchema,
   agentToSpec,
+  assertAgentKind,
+  assertAgentSpecClean,
+  assertWrapUpReserve,
+  budgetPlan,
+  type DuskFleetConfig,
   deleteAgentFile,
+  EFFORT_LEVELS,
   listProjectAgents,
   loadAgents,
+  ON_FAILURE_POLICIES,
+  PERMISSION_MODES,
   projectIdFromPath,
   upsertUserProject,
   validateProjectPath,
   writeAgentFile,
-  type AgentDefinition,
-  type AgentSpec,
-  type DuskFleetConfig,
 } from "@duskfleet/core";
-import path from "node:path";
+import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { z } from "zod";
 import { errorResult, jsonResult, type ToolContext } from "../server.js";
 
 /** Permission modes a tool may set. bypassPermissions stays a hand-edited, config-gated choice. */
@@ -28,12 +32,15 @@ const MCP_PERMISSION_MODES = PERMISSION_MODES.filter((m) => m !== "bypassPermiss
 /** Validate what the loader would reject, *before* a file lands on disk and breaks every later config load. */
 function assertSpecLoadable(spec: AgentSpec, config: DuskFleetConfig): void {
   if (spec.project && !config.projects.has(spec.project)) {
-    throw new Error(`project "${spec.project}" is not in projects.yaml. Known projects: ${[...config.projects.keys()].join(", ") || "(none)"}`);
+    throw new Error(
+      `project "${spec.project}" is not in projects.yaml. Known projects: ${[...config.projects.keys()].join(", ") || "(none)"}`,
+    );
   }
 }
 
 function assertKind(kind: "own" | "link", spec: AgentSpec, config: DuskFleetConfig): void {
   assertAgentKind(kind, spec, (id) => config.projects.get(id)?.path ?? null);
+  assertWrapUpReserve(spec, config.claude.defaultMaxBudgetUsd);
 }
 
 /**
@@ -41,14 +48,24 @@ function assertKind(kind: "own" | "link", spec: AgentSpec, config: DuskFleetConf
  * reuse the entry with the same path, or register the folder in the private registry
  * (user_projects_file) under `project` or a slug of the folder name. Returns the id.
  */
-function projectFromFolder(ctx: ToolContext, config: DuskFleetConfig, projectPath: string, preferredId: string | undefined, claudeAgent: string | undefined): string {
+function projectFromFolder(
+  ctx: ToolContext,
+  config: DuskFleetConfig,
+  projectPath: string,
+  preferredId: string | undefined,
+  claudeAgent: string | undefined,
+): string {
   const resolved = validateProjectPath(projectPath, config);
   const agents = listProjectAgents(resolved);
   if (agents.length === 0) {
-    throw new Error(`${resolved} has no .claude/agents/ directory with agents. A link must point to a project folder that defines agents.`);
+    throw new Error(
+      `${resolved} has no .claude/agents/ directory with agents. A link must point to a project folder that defines agents.`,
+    );
   }
   if (claudeAgent && !agents.some((a) => a.name === claudeAgent)) {
-    throw new Error(`${resolved}/.claude/agents has no agent "${claudeAgent}" (available: ${agents.map((a) => a.name).join(", ")})`);
+    throw new Error(
+      `${resolved}/.claude/agents has no agent "${claudeAgent}" (available: ${agents.map((a) => a.name).join(", ")})`,
+    );
   }
   const existing = [...config.projects.values()].find((p) => p.path === resolved);
   if (existing) {
@@ -59,11 +76,18 @@ function projectFromFolder(ctx: ToolContext, config: DuskFleetConfig, projectPat
   }
   const id = preferredId ?? projectIdFromPath(resolved);
   if (config.projects.has(id)) {
-    throw new Error(`project id "${id}" already points to ${config.projects.get(id)!.path}; pass project with a different id for ${resolved}.`);
+    throw new Error(
+      `project id "${id}" already points to ${config.projects.get(id)!.path}; pass project with a different id for ${resolved}.`,
+    );
   }
-  upsertUserProject(config.userProjectsFile, { id, path: resolved, description: `Registered by create_agent (link) from ${resolved}` });
+  upsertUserProject(config.userProjectsFile, {
+    id,
+    path: resolved,
+    description: `Registered by create_agent (link) from ${resolved}`,
+  });
   const fresh = ctx.config; // reload: the new project must be visible before the agent file is validated
-  if (!fresh.projects.has(id)) throw new Error(`project "${id}" was written to ${config.userProjectsFile} but did not load`);
+  if (!fresh.projects.has(id))
+    throw new Error(`project "${id}" was written to ${config.userProjectsFile} but did not load`);
   return id;
 }
 
@@ -95,10 +119,20 @@ function presentAgent(a: AgentDefinition, config: DuskFleetConfig) {
     effort: a.effort ?? null,
     timeoutMinutes: a.timeoutMinutes ?? config.claude.defaultTimeoutMinutes,
     maxBudgetUsd: a.maxBudgetUsd ?? config.claude.defaultMaxBudgetUsd,
+    /** Dollars of maxBudgetUsd kept for the wrap-up pass after a budget exhaustion (0 = no wrap-up). */
+    wrapUpReserveUsd: budgetPlan(a, config).reserve,
+    onFailure: a.onFailure ?? "none",
+    resumeBudgetUsd: a.resumeBudgetUsd ?? null,
     inheritMcp: a.inheritMcp ?? false,
     addDirs: a.addDirs ?? [],
     claudeAgent: a.claudeAgent ?? null,
     project: a.project ?? null,
+    /** Runs of this agent allowed at once: its own max_concurrent, else the global max_concurrent_per_agent. */
+    maxConcurrent: a.maxConcurrent ?? config.maxConcurrentPerAgent,
+    isolated: a.isolated ?? false,
+    /** Daily caps (UTC day); null = no cap. */
+    maxDailyRuns: a.maxDailyRuns ?? null,
+    maxDailyCostUsd: a.maxDailyCostUsd ?? null,
     systemPrompt: a.systemPrompt,
     path: a.sourcePath,
   };
@@ -107,33 +141,113 @@ function presentAgent(a: AgentDefinition, config: DuskFleetConfig) {
 const agentFields = {
   name: z.string().min(1).optional().describe("Display name; defaults to the id"),
   description: z.string().optional().describe("One or two sentences: what the agent is for. Shown by list_agents"),
-  model: z.string().min(1).optional().describe("Claude model alias or id (haiku, sonnet, opus, ...). Omit to use the CLI default, which can be the most expensive model"),
-  permission_mode: z.enum(MCP_PERMISSION_MODES).optional().describe("acceptEdits (default) | dontAsk | plan | auto | manual. Unattended runs get no prompts: anything not allowed is denied"),
-  allowed_tools: z.array(z.string().min(1)).optional().describe('Claude Code --allowedTools entries, e.g. "Bash(npm test:*)". Needed for Bash under acceptEdits'),
+  model: z
+    .string()
+    .min(1)
+    .optional()
+    .describe(
+      "Claude model alias or id (haiku, sonnet, opus, ...). Omit to use the CLI default, which can be the most expensive model",
+    ),
+  permission_mode: z
+    .enum(MCP_PERMISSION_MODES)
+    .optional()
+    .describe(
+      "acceptEdits (default) | dontAsk | plan | auto | manual. Unattended runs get no prompts: anything not allowed is denied",
+    ),
+  allowed_tools: z
+    .array(z.string().min(1))
+    .optional()
+    .describe('Claude Code --allowedTools entries, e.g. "Bash(npm test:*)". Needed for Bash under acceptEdits'),
   disallowed_tools: z.array(z.string().min(1)).optional().describe('e.g. ["Edit","Write"] for a read-only agent'),
   effort: z.enum(EFFORT_LEVELS).optional().describe("Claude Code --effort level; omit for the CLI default"),
-  timeout_minutes: z.number().positive().optional().describe("Kill the run after this many minutes; defaults to claude.default_timeout_minutes"),
-  max_budget_usd: z.number().positive().optional().describe("Stop the run when its cost reaches this amount; defaults to claude.default_max_budget_usd"),
+  timeout_minutes: z
+    .number()
+    .positive()
+    .optional()
+    .describe("Kill the run after this many minutes; defaults to claude.default_timeout_minutes"),
+  max_budget_usd: z
+    .number()
+    .positive()
+    .optional()
+    .describe("Stop the run when its cost reaches this amount; defaults to claude.default_max_budget_usd"),
+  wrap_up_reserve_usd: z
+    .number()
+    .nonnegative()
+    .optional()
+    .describe(
+      "Part of max_budget_usd held back for a wrap-up pass: when the main pass runs out of budget the session is resumed with this amount and told to record where it stopped. Default 10% of the budget, at least $0.50, at most half of it; 0 disables",
+    ),
+  on_failure: z
+    .enum(ON_FAILURE_POLICIES)
+    .optional()
+    .describe(
+      "resume_once: a schedule's next tick resumes a run of this agent that ended budget_exhausted or timed_out, once (a second failure is final). Default none. A schedule can override it",
+    ),
+  resume_budget_usd: z
+    .number()
+    .positive()
+    .optional()
+    .describe("Budget of the resumed run (on_failure: resume_once); defaults to max_budget_usd"),
   inherit_mcp: z
     .boolean()
     .optional()
-    .describe("Let runs use the MCP servers of the DuskFleet user (claude.ai connectors like Atlassian/Figma). Default false. Each server still needs an allowed_tools entry such as \"mcp__claude_ai_Atlassian_Rovo\""),
-  add_dirs: z.array(z.string().min(1)).optional().describe("Extra directories the run may access (--add-dir); runs are otherwise confined to the project directory"),
+    .describe(
+      'Let runs use the MCP servers of the DuskFleet user (claude.ai connectors like Atlassian/Figma). Default false. Each server still needs an allowed_tools entry such as "mcp__claude_ai_Atlassian_Rovo"',
+    ),
+  add_dirs: z
+    .array(z.string().min(1))
+    .optional()
+    .describe("Extra directories the run may access (--add-dir); runs are otherwise confined to the project directory"),
   project: z
     .string()
     .min(1)
     .optional()
-    .describe("Bind the agent to a project id from list_projects: it is grouped under it, run_agent uses it by default, and runs on other projects are refused. Omit for a general-purpose agent"),
+    .describe(
+      "Bind the agent to a project id from list_projects: it is grouped under it, run_agent uses it by default, and runs on other projects are refused. Omit for a general-purpose agent",
+    ),
   project_path: z
     .string()
     .min(1)
     .optional()
-    .describe("For kind 'link': absolute path of the project FOLDER that defines agents in .claude/agents/. If that folder is not a registered project yet it is registered in the private registry (id = `project` if given, else the folder name) and the agent is bound to it"),
+    .describe(
+      "For kind 'link': absolute path of the project FOLDER that defines agents in .claude/agents/. If that folder is not a registered project yet it is registered in the private registry (id = `project` if given, else the folder name) and the agent is bound to it",
+    ),
   claude_agent: z
     .string()
     .min(1)
     .optional()
-    .describe("Reuse an agent the target project already defines in .claude/agents/<name>.md (see list_project_agents): the run adopts its prompt, tools and model via `claude --agent`. This DuskFleet agent then only supplies the unattended envelope: permissions, allow-list, budget, MCP"),
+    .describe(
+      "Reuse an agent the target project already defines in .claude/agents/<name>.md (see list_project_agents): the run adopts its prompt, tools and model via `claude --agent`. This DuskFleet agent then only supplies the unattended envelope: permissions, allow-list, budget, MCP",
+    ),
+  max_concurrent: z
+    .number()
+    .int()
+    .min(1)
+    .optional()
+    .describe(
+      "Runs of this agent allowed at the same time (whole number >= 1). Omit for the global max_concurrent_per_agent (default 1). max_concurrent_runs stays the hard cap",
+    ),
+  isolated: z
+    .boolean()
+    .optional()
+    .describe(
+      "true = the agent never edits the project checkout (read-only, or works in its own git worktree): its runs neither count against nor wait for max_concurrent_per_project. A promise the prompt must keep; DuskFleet does not check it. Default false",
+    ),
+  max_daily_runs: z
+    .number()
+    .int()
+    .min(1)
+    .optional()
+    .describe(
+      "Runs of this agent allowed per UTC day (whole number >= 1, every run started since 00:00 UTC counts). The next one is refused; a schedule records skipped_daily_cap. Omit for no cap",
+    ),
+  max_daily_cost_usd: z
+    .number()
+    .positive()
+    .optional()
+    .describe(
+      "Spend of this agent allowed per UTC day: once the recorded cost of its runs since 00:00 UTC reaches it, the next run is refused (a schedule records skipped_daily_cap). A run in progress is not stopped. Omit for no cap",
+    ),
   system_prompt: z.string().optional().describe("Appended to Claude Code's system prompt for every run of this agent"),
 };
 
@@ -177,9 +291,14 @@ export function registerAgentTools(server: McpServer, ctx: ToolContext): void {
         id: z.string().regex(AGENT_ID_PATTERN).describe("Lowercase letters, digits, - or _. Also the file name"),
         kind: z
           .enum(["own", "link"])
-          .describe("REQUIRED choice. 'own': new agent, persona in system_prompt. 'link': reuse <folder>/.claude/agents/<claude_agent>.md; requires claude_agent plus the folder as project_path (or an already registered project id)"),
+          .describe(
+            "REQUIRED choice. 'own': new agent, persona in system_prompt. 'link': reuse <folder>/.claude/agents/<claude_agent>.md; requires claude_agent plus the folder as project_path (or an already registered project id)",
+          ),
         ...agentFields,
-        overwrite: z.boolean().optional().describe("Replace an existing user agent or override a builtin one with the same id"),
+        overwrite: z
+          .boolean()
+          .optional()
+          .describe("Replace an existing user agent or override a builtin one with the same id"),
       },
     },
     async (args) => {
@@ -202,7 +321,7 @@ export function registerAgentTools(server: McpServer, ctx: ToolContext): void {
           registeredProject = fields.project;
         }
         const cfg = ctx.config;
-        const spec = agentSpecSchema.parse(fields);
+        const spec = assertAgentSpecClean(agentSpecSchema.parse(fields));
         assertKind(kind, spec, cfg);
         const fresh = writeAndVerify(ctx, cfg, spec);
         return jsonResult({
@@ -229,10 +348,31 @@ export function registerAgentTools(server: McpServer, ctx: ToolContext): void {
         "create_agent with the same id and overwrite: true makes a user override instead.",
       inputSchema: {
         id: z.string().regex(AGENT_ID_PATTERN).describe("Agent id from list_agents (user agents only)"),
-        kind: z.enum(["own", "link"]).optional().describe("Change the kind; the resulting agent is validated like create_agent"),
+        kind: z
+          .enum(["own", "link"])
+          .optional()
+          .describe("Change the kind; the resulting agent is validated like create_agent"),
         ...agentFields,
         clear: z
-          .array(z.enum(["model", "allowed_tools", "disallowed_tools", "effort", "timeout_minutes", "max_budget_usd", "inherit_mcp", "add_dirs", "claude_agent", "project"]))
+          .array(
+            z.enum([
+              "model",
+              "allowed_tools",
+              "disallowed_tools",
+              "effort",
+              "timeout_minutes",
+              "max_budget_usd",
+              "wrap_up_reserve_usd",
+              "on_failure",
+              "resume_budget_usd",
+              "inherit_mcp",
+              "add_dirs",
+              "claude_agent",
+              "project",
+              "max_daily_runs",
+              "max_daily_cost_usd",
+            ]),
+          )
           .optional()
           .describe("Optional fields to remove entirely (fall back to agent/CLI defaults)"),
       },
@@ -241,19 +381,29 @@ export function registerAgentTools(server: McpServer, ctx: ToolContext): void {
       try {
         const config = ctx.config;
         const existing = config.agents.get(args.id);
-        if (!existing) return errorResult(new Error(`unknown agent "${args.id}". Known: ${[...config.agents.keys()].join(", ")}`));
+        if (!existing)
+          return errorResult(new Error(`unknown agent "${args.id}". Known: ${[...config.agents.keys()].join(", ")}`));
         if (existing.source !== "user") {
           return errorResult(
-            new Error(`"${args.id}" is a builtin agent (${existing.sourcePath}). Use create_agent with overwrite: true to create a user override.`),
+            new Error(
+              `"${args.id}" is a builtin agent (${existing.sourcePath}). Use create_agent with overwrite: true to create a user override.`,
+            ),
           );
         }
         const { id: _id, clear, kind: requestedKind, project_path, ...changes } = args;
-        if (project_path) changes.project = projectFromFolder(ctx, config, project_path, changes.project, changes.claude_agent ?? existing.claudeAgent);
+        if (project_path)
+          changes.project = projectFromFolder(
+            ctx,
+            config,
+            project_path,
+            changes.project,
+            changes.claude_agent ?? existing.claudeAgent,
+          );
         const cfgNow = ctx.config;
         const merged: AgentSpec = { ...agentToSpec(existing) };
         for (const [k, v] of Object.entries(changes)) if (v !== undefined) (merged as Record<string, unknown>)[k] = v;
         for (const k of clear ?? []) delete (merged as Record<string, unknown>)[k];
-        const spec = agentSpecSchema.parse(merged);
+        const spec = assertAgentSpecClean(agentSpecSchema.parse(merged));
         const kind = requestedKind ?? agentKind(spec);
         assertKind(kind, spec, cfgNow);
         const fresh = writeAndVerify(ctx, cfgNow, spec);
@@ -268,19 +418,32 @@ export function registerAgentTools(server: McpServer, ctx: ToolContext): void {
     "delete_agent",
     {
       title: "Delete agent",
-      description: "Delete a user agent file. Builtin agents cannot be deleted. Past runs keep their recorded agent id.",
-      inputSchema: { id: z.string().regex(AGENT_ID_PATTERN).describe("Agent id from list_agents. Only user agents (data/agents) can be deleted") },
+      description:
+        "Delete a user agent file. Builtin agents cannot be deleted. Past runs keep their recorded agent id.",
+      inputSchema: {
+        id: z
+          .string()
+          .regex(AGENT_ID_PATTERN)
+          .describe("Agent id from list_agents. Only user agents (data/agents) can be deleted"),
+      },
     },
     async (args) => {
       try {
         const config = ctx.config;
         const existing = config.agents.get(args.id);
         if (!existing) return errorResult(new Error(`unknown agent "${args.id}"`));
-        if (existing.source !== "user") return errorResult(new Error(`"${args.id}" is a builtin agent (${existing.sourcePath}) and cannot be deleted through MCP.`));
+        if (existing.source !== "user")
+          return errorResult(
+            new Error(`"${args.id}" is a builtin agent (${existing.sourcePath}) and cannot be deleted through MCP.`),
+          );
         // The default agent must keep resolving: deleting a user override is fine when a builtin remains.
         const builtinRemains = loadAgents(path.join(config.configDir, "agents"), "builtin").has(args.id);
         if (args.id === config.defaultAgent && !builtinRemains) {
-          return errorResult(new Error(`"${args.id}" is the default_agent in duskfleet.yaml and has no builtin fallback; change default_agent first.`));
+          return errorResult(
+            new Error(
+              `"${args.id}" is the default_agent in duskfleet.yaml and has no builtin fallback; change default_agent first.`,
+            ),
+          );
         }
         deleteAgentFile(config.userAgentsDir, args.id);
         const after = ctx.config.agents.get(args.id);
@@ -309,7 +472,10 @@ export function registerAgentTools(server: McpServer, ctx: ToolContext): void {
         let projectPath: string;
         if (args.project_id) {
           const p = config.projects.get(args.project_id);
-          if (!p) return errorResult(new Error(`unknown project "${args.project_id}". Known: ${[...config.projects.keys()].join(", ")}`));
+          if (!p)
+            return errorResult(
+              new Error(`unknown project "${args.project_id}". Known: ${[...config.projects.keys()].join(", ")}`),
+            );
           projectPath = p.path;
         } else if (args.project_path) {
           projectPath = validateProjectPath(args.project_path, config);

@@ -19,10 +19,16 @@
     "test": "npm test -w @duskfleet/mcp",
     "mcp": "node packages/mcp/dist/index.js",
     "cli": "node packages/mcp/dist/cli.js",
-    "web": "npm run dev -w @duskfleet/web"
+    "web": "npm run dev -w @duskfleet/web",
+    "lint": "biome ci .",
+    "lint:fix": "biome check --write .",
+    "check:public": "node scripts/check-public.mjs",
+    "test:coverage": "npm run test:coverage -w @duskfleet/mcp",
+    "check": "npm run check:public && npm run lint && npm run build && npm run typecheck && npm run typecheck -w @duskfleet/web && npm test"
   },
   "devDependencies": {
-    "@types/node": "^24.19.0",
+    "@biomejs/biome": "^2.5.15",
+    "@types/node": "^24.19.2",
     "typescript": "^7.0.2"
   }
 }

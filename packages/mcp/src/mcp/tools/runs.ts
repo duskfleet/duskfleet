@@ -1,6 +1,6 @@
+import { RUN_STATUSES, type Run, type RunAgent, subagentView, summarizeRun } from "@duskfleet/core";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
-import { RUN_STATUSES, summarizeRun, type Run, type RunAgent } from "@duskfleet/core";
 import { errorResult, jsonResult, type ToolContext } from "../server.js";
 
 const MAX_WAIT_SECONDS = 300;
@@ -17,14 +17,16 @@ function presentRun(run: Run, includeOutput: boolean) {
         ? resultText.slice(0, 297) + "..."
         : resultText,
     resultTruncated: includeOutput && resultText !== null && resultText.length > OUTPUT_LIMIT,
-    ...(includeOutput && resultText && resultText.length > OUTPUT_LIMIT ? { resultText: resultText.slice(0, OUTPUT_LIMIT) } : {}),
+    ...(includeOutput && resultText && resultText.length > OUTPUT_LIMIT
+      ? { resultText: resultText.slice(0, OUTPUT_LIMIT) }
+      : {}),
   };
 }
 
 /** Subagent rows are small except for prompt and report; those are shortened unless output was asked for. */
 function presentSubagent(s: RunAgent, includeOutput: boolean) {
-  const clip = (t: string | null) => (includeOutput || !t || t.length <= 300 ? t : t.slice(0, 297) + "...");
-  return { ...s, prompt: clip(s.prompt), resultText: clip(s.resultText) };
+  // Same names as the CLI run-info (subagentView): the largest strings are sent, and clipped, once.
+  return subagentView(s, (t) => (includeOutput || !t || t.length <= 300 ? t : t.slice(0, 297) + "..."));
 }
 
 export function registerRunTools(server: McpServer, ctx: ToolContext): void {
@@ -39,11 +41,33 @@ export function registerRunTools(server: McpServer, ctx: ToolContext): void {
         "Poll with get_run afterwards.",
       inputSchema: {
         prompt: z.string().min(1).describe("The task for the agent"),
-        project_path: z.string().optional().describe("Absolute path of the project (or ~/...); a registered project id is accepted too. Mutually exclusive with project_id"),
-        project_id: z.string().optional().describe("Id of a project from list_projects. Optional when the agent is bound to a project (list_agents → project)"),
-        agent_id: z.string().optional().describe("Agent id from list_agents; required unless duskfleet.yaml sets default_agent"),
-        model: z.string().optional().describe("Claude model alias or id, e.g. 'sonnet', 'opus'. Omit to use the agent/CLI default"),
-        wait_seconds: z.number().int().min(0).max(MAX_WAIT_SECONDS).optional().describe(`Wait up to N seconds (max ${MAX_WAIT_SECONDS}) for the run to finish`),
+        project_path: z
+          .string()
+          .optional()
+          .describe(
+            "Absolute path of the project (or ~/...); a registered project id is accepted too. Mutually exclusive with project_id",
+          ),
+        project_id: z
+          .string()
+          .optional()
+          .describe(
+            "Id of a project from list_projects. Optional when the agent is bound to a project (list_agents → project)",
+          ),
+        agent_id: z
+          .string()
+          .optional()
+          .describe("Agent id from list_agents; required unless duskfleet.yaml sets default_agent"),
+        model: z
+          .string()
+          .optional()
+          .describe("Claude model alias or id, e.g. 'sonnet', 'opus'. Omit to use the agent/CLI default"),
+        wait_seconds: z
+          .number()
+          .int()
+          .min(0)
+          .max(MAX_WAIT_SECONDS)
+          .optional()
+          .describe(`Wait up to N seconds (max ${MAX_WAIT_SECONDS}) for the run to finish`),
       },
     },
     async (args) => {
@@ -82,7 +106,13 @@ export function registerRunTools(server: McpServer, ctx: ToolContext): void {
       if (!run) return errorResult(`run not found: ${run_id}`);
       const view = presentRun(run, Boolean(include_output));
       const subagents = ctx.runs.agents(run_id).map((s) => presentSubagent(s, Boolean(include_output)));
-      return jsonResult(include_output ? { ...view, subagents, events: ctx.runs.events(run_id) } : { ...view, subagents });
+      /** The run that continued this one's session after a budget / timeout failure (on_failure: resume_once), or null. */
+      const resumedByRunId = ctx.runs.resumedBy(run_id)?.id ?? null;
+      return jsonResult(
+        include_output
+          ? { ...view, resumedByRunId, subagents, events: ctx.runs.events(run_id) }
+          : { ...view, resumedByRunId, subagents },
+      );
     },
   );
 
@@ -93,6 +123,10 @@ export function registerRunTools(server: McpServer, ctx: ToolContext): void {
       description: "List recent runs, newest first, with optional filters.",
       inputSchema: {
         status: z.enum(RUN_STATUSES).optional().describe("Only runs in this status"),
+        kind: z
+          .enum(["run", "gate"])
+          .optional()
+          .describe("Only real runs, or only schedule gate-agent runs; both by default"),
         agent_id: z.string().optional().describe("Only runs of this agent (id from list_agents)"),
         project_path: z.string().optional().describe("Exact resolved project path"),
         limit: z.number().int().min(1).max(200).optional().describe("Default 20"),
@@ -101,10 +135,17 @@ export function registerRunTools(server: McpServer, ctx: ToolContext): void {
     async (args) => {
       const filter: Parameters<typeof ctx.runs.listRuns>[0] = {};
       if (args.status !== undefined) filter.status = args.status;
+      if (args.kind !== undefined) filter.kind = args.kind;
       if (args.agent_id !== undefined) filter.agentId = args.agent_id;
       if (args.project_path !== undefined) filter.projectPath = args.project_path;
       if (args.limit !== undefined) filter.limit = args.limit;
-      return jsonResult({ active: ctx.runs.activeCount(), runs: ctx.runs.listRuns(filter).map(summarizeRun) });
+      const runs = ctx.runs.listRuns(filter);
+      // Linked retries both ways: a run that was resumed points at its retry, the retry at its origin.
+      const resumedBy = ctx.runs.resumedByMany(runs.map((r) => r.id));
+      return jsonResult({
+        active: ctx.runs.activeCount(),
+        runs: runs.map((r) => ({ ...summarizeRun(r), resumedByRunId: resumedBy.get(r.id) ?? null })),
+      });
     },
   );
 

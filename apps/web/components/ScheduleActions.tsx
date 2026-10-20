@@ -2,7 +2,13 @@
 
 import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
-import { deleteScheduleAction, requestScheduleRunAction, setScheduleEnabledAction, updateScheduleWhenAction, type ActionResult } from "@/app/schedules/actions";
+import {
+  type ActionResult,
+  deleteScheduleAction,
+  requestScheduleRunAction,
+  setScheduleEnabledAction,
+  updateScheduleWhenAction,
+} from "@/app/schedules/actions";
 
 /**
  * Inline controls for one schedule: run now (a request the ticking process
@@ -55,11 +61,25 @@ export function ScheduleActions({
       >
         <label>
           <span className="l">cron</span>
-          <input className="mono" value={draftCron} onChange={(e) => setDraftCron(e.target.value)} placeholder="0 8-20 * * 1-5" spellCheck={false} autoFocus />
+          <input
+            className="mono"
+            value={draftCron}
+            onChange={(e) => setDraftCron(e.target.value)}
+            placeholder="0 8-20 * * 1-5"
+            spellCheck={false}
+            autoFocus
+          />
         </label>
         <label>
           <span className="l">time zone</span>
-          <input className="mono" value={draftTz} onChange={(e) => setDraftTz(e.target.value)} placeholder="Europe/London" spellCheck={false} list="duskfleet-timezones" />
+          <input
+            className="mono"
+            value={draftTz}
+            onChange={(e) => setDraftTz(e.target.value)}
+            placeholder="Europe/London"
+            spellCheck={false}
+            list="duskfleet-timezones"
+          />
         </label>
         <datalist id="duskfleet-timezones">
           {TIME_ZONES.map((z) => (
@@ -67,7 +87,11 @@ export function ScheduleActions({
           ))}
         </datalist>
         <span className="row">
-          <button type="submit" className="copy-btn" disabled={pending || (draftCron.trim() === cron && draftTz.trim() === timeZone)}>
+          <button
+            type="submit"
+            className="copy-btn"
+            disabled={pending || (draftCron.trim() === cron && draftTz.trim() === timeZone)}
+          >
             {pending ? "…" : "Save"}
           </button>
           <button
@@ -85,7 +109,9 @@ export function ScheduleActions({
           </button>
         </span>
         {result && !result.ok && <span className="err">{result.message}</span>}
-        <span className="hint">5 fields: minute hour day-of-month month day-of-week. Resuming or editing recomputes the next tick from now.</span>
+        <span className="hint">
+          5 fields: minute hour day-of-month month day-of-week. Resuming or editing recomputes the next tick from now.
+        </span>
       </form>
     );
   }
@@ -95,7 +121,12 @@ export function ScheduleActions({
       {mode === "confirm-delete" ? (
         <>
           <span className="muted">Delete &quot;{name}&quot;?</span>
-          <button type="button" className="copy-btn danger" disabled={pending} onClick={() => apply(() => deleteScheduleAction(id))}>
+          <button
+            type="button"
+            className="copy-btn danger"
+            disabled={pending}
+            onClick={() => apply(() => deleteScheduleAction(id))}
+          >
             {pending ? "…" : "Yes, delete"}
           </button>
           <button type="button" className="copy-btn" disabled={pending} onClick={() => setMode("idle")}>
@@ -126,10 +157,22 @@ export function ScheduleActions({
           >
             {pending ? "…" : enabled ? "Pause" : "Resume"}
           </button>
-          <button type="button" className="copy-btn" disabled={pending} title="Change the cron expression or the time zone" onClick={() => setMode("edit")}>
+          <button
+            type="button"
+            className="copy-btn"
+            disabled={pending}
+            title="Change the cron expression or the time zone"
+            onClick={() => setMode("edit")}
+          >
             Edit when
           </button>
-          <button type="button" className="copy-btn danger" disabled={pending} title="Remove the schedule; past runs are kept" onClick={() => setMode("confirm-delete")}>
+          <button
+            type="button"
+            className="copy-btn danger"
+            disabled={pending}
+            title="Remove the schedule; past runs are kept"
+            onClick={() => setMode("confirm-delete")}
+          >
             Delete
           </button>
         </>

@@ -14,11 +14,12 @@
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "start": "node dist/index.js",
     "test": "node --test test/*.test.js",
-    "tools": "node dist/tools-catalog.js"
+    "tools": "node dist/tools-catalog.js",
+    "test:coverage": "node --test --experimental-test-coverage --test-coverage-exclude=\"test/**\" --test-coverage-lines=80 test/*.test.js"
   },
   "dependencies": {
     "@duskfleet/core": "0.1.0",
-    "@modelcontextprotocol/sdk": "^1.31.0",
-    "zod": "^4.6.5"
+    "@modelcontextprotocol/sdk": "^1.32.1",
+    "zod": "^4.6.7"
   }
 }

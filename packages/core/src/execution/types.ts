@@ -3,7 +3,7 @@
  * uses to run an agent. `ClaudeCodeExecutor` is the one implementation today.
  */
 import type { EffortLevel, PermissionMode } from "../config/types.js";
-import type { RecordedCommand } from "../observability/run.js";
+import type { BillingType, RecordedCommand } from "../observability/run.js";
 
 export interface ExecutionRequest {
   /** Working directory for the child process. Must already be validated. */
@@ -11,6 +11,12 @@ export interface ExecutionRequest {
   prompt: string;
   /** Session id chosen by the caller so it is known before the process starts. */
   sessionId: string;
+  /**
+   * Continue an existing session (`claude --resume <id>`) instead of starting one with
+   * `--session-id`. Used by the wrap-up pass after a budget exhaustion. The log file is
+   * appended, not replaced.
+   */
+  resumeSessionId?: string;
   permissionMode: PermissionMode;
   model?: string;
   allowedTools?: string[];
@@ -35,12 +41,25 @@ export interface ExecutionRequest {
  * otherwise (see SubagentRecord).
  */
 export type ExecutionEvent =
-  | { type: "init"; sessionId: string; model: string | null; tools: string[]; mcpServers: McpServerInfo[]; cliVersion: string | null }
+  | {
+      type: "init";
+      sessionId: string;
+      model: string | null;
+      tools: string[];
+      mcpServers: McpServerInfo[];
+      cliVersion: string | null;
+    }
   | { type: "tool_use"; name: string; id: string | null; input?: unknown; agentId: string | null }
   | { type: "assistant_text"; text: string; agentId: string | null }
   | { type: "subagent_start"; subagent: SubagentRecord }
   | { type: "subagent_end"; subagent: SubagentRecord }
   | { type: "stderr"; text: string }
+  /**
+   * The process (or a descendant holding its stdio, such as a user-level Stop hook) was still
+   * running `afterMs` after the result line, so its process group was sent SIGTERM (SIGKILL
+   * after the kill grace). `childAlive` is false when only descendants were left.
+   */
+  | { type: "grace_kill"; pid: number | null; afterMs: number; childAlive: boolean }
   | { type: "parse_error"; line: string };
 
 export type SubagentStatus = "running" | "completed" | "failed" | "interrupted";
@@ -89,6 +108,12 @@ export interface TokenUsage {
   cacheCreationTokens: number | null;
 }
 
+/** Token usage keyed by model id, as the result line's `modelUsage` reports it. */
+export type UsageByModel = Record<string, TokenUsage>;
+
+/** `modelUsed` of a run whose tokens were spent on more than one model (subagents). */
+export const MIXED_MODEL = "mixed";
+
 export type ExecutionOutcome = "completed" | "failed" | "cancelled" | "timed_out";
 
 export interface McpServerInfo {
@@ -126,7 +151,10 @@ export interface ExecutionResult {
   resultText: string | null;
   numTurns: number | null;
   toolCalls: number;
+  /** Run totals: the sum of `usageByModel` when known, else the result line's `usage`. */
   usage: TokenUsage;
+  /** Per model, from the result line's `modelUsage`; null when it had none. */
+  usageByModel: UsageByModel | null;
   costUsd: number | null;
   permissionDenials: number;
   deniedTools: DeniedTool[];
@@ -141,6 +169,8 @@ export interface ExecutionResult {
 export interface ExecutionHandle {
   command: RecordedCommand;
   pid: number | null;
+  /** From the environment the child was spawned with; executors that cannot tell leave it out. */
+  billingType?: BillingType;
   done: Promise<ExecutionResult>;
   cancel(): void;
 }

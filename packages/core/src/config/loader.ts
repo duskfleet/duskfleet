@@ -1,18 +1,23 @@
-import { readFileSync, readdirSync, existsSync, statSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { parse as parseYaml } from "yaml";
 import { z } from "zod";
-import { AGENT_ID_PATTERN } from "./agent-files.js";
+import { DEFAULT_NOOP_PATTERN, parseNoopPattern } from "../scheduler/idle.js";
+import { logger } from "../util/log.js";
+import { AGENT_ID_PATTERN, maxConcurrentSchema, maxDailyCostUsdSchema, maxDailyRunsSchema } from "./agent-files.js";
 import {
-  EFFORT_LEVELS,
-  PERMISSION_MODES,
   type AgentDefinition,
   type AgentSource,
   type DuskFleetConfig,
+  EFFORT_LEVELS,
+  ON_FAILURE_POLICIES,
+  PERMISSION_MODES,
   type ProjectDefinition,
 } from "./types.js";
+
+const log = logger("config");
 
 /**
  * Locates the config directory.
@@ -63,7 +68,10 @@ const globalSchema = z.object({
     .object({
       binary: z.string().nullable().default(null),
       strict_mcp_config: z.boolean().default(true),
-      setting_sources: z.array(z.enum(["user", "project", "local"])).nullable().default(null),
+      setting_sources: z
+        .array(z.enum(["user", "project", "local"]))
+        .nullable()
+        .default(null),
       allow_bypass_permissions: z.boolean().default(false),
       default_timeout_minutes: z.number().positive().default(30),
       default_max_budget_usd: z.number().positive().default(5),
@@ -74,6 +82,23 @@ const globalSchema = z.object({
       enabled: z.boolean().default(true),
       tick_seconds: z.number().int().min(5).max(300).default(30),
       default_time_zone: z.string().default("Europe/London"),
+      // A bad marker only feeds the idle-cost stats: warn and use the default rather than
+      // failing every config reload (every run, list_* call and scheduler tick).
+      noop_pattern: z
+        .string()
+        .default(DEFAULT_NOOP_PATTERN)
+        .transform((p) => {
+          try {
+            parseNoopPattern(p);
+            return p;
+          } catch (err) {
+            log.warn("scheduler.noop_pattern ignored, using the default", {
+              err: err instanceof Error ? err.message : String(err),
+              default: DEFAULT_NOOP_PATTERN,
+            });
+            return DEFAULT_NOOP_PATTERN;
+          }
+        }),
     })
     .prefault({}),
 });
@@ -89,10 +114,17 @@ const agentFrontmatterSchema = z.object({
   effort: z.enum(EFFORT_LEVELS).optional(),
   timeout_minutes: z.number().positive().optional(),
   max_budget_usd: z.number().positive().optional(),
+  wrap_up_reserve_usd: z.number().nonnegative().optional(),
+  on_failure: z.enum(ON_FAILURE_POLICIES).optional(),
+  resume_budget_usd: z.number().positive().optional(),
   inherit_mcp: z.boolean().optional(),
   add_dirs: z.array(z.string()).optional(),
   claude_agent: z.string().min(1).optional(),
   project: z.string().min(1).optional(),
+  max_concurrent: maxConcurrentSchema.optional(),
+  isolated: z.boolean().optional(),
+  max_daily_runs: maxDailyRunsSchema.optional(),
+  max_daily_cost_usd: maxDailyCostUsdSchema.optional(),
 });
 
 const projectsSchema = z.object({
@@ -171,6 +203,7 @@ export function loadConfig(configDir: string): DuskFleetConfig {
       enabled: g.scheduler.enabled,
       tickSeconds: g.scheduler.tick_seconds,
       defaultTimeZone: g.scheduler.default_time_zone,
+      noopPattern: g.scheduler.noop_pattern,
     },
     agents,
     projects,
@@ -190,10 +223,17 @@ export function loadAgents(agentsDir: string, source: AgentSource = "builtin"): 
   const agents = new Map<string, AgentDefinition>();
   if (!existsSync(agentsDir)) return agents;
 
-  for (const file of readdirSync(agentsDir).filter((f) => f.endsWith(".md")).sort()) {
+  for (const file of readdirSync(agentsDir)
+    .filter((f) => f.endsWith(".md"))
+    .sort()) {
     const sourcePath = path.join(agentsDir, file);
     const { frontmatter, body } = splitFrontmatter(readFileSync(sourcePath, "utf8"));
-    const fm = agentFrontmatterSchema.parse(frontmatter);
+    const parsed = agentFrontmatterSchema.safeParse(frontmatter);
+    if (!parsed.success) {
+      const issues = parsed.error.issues.map((i) => `${i.path.join(".") || "(frontmatter)"}: ${i.message}`);
+      throw new Error(`invalid agent file ${sourcePath}: ${issues.join("; ")}`);
+    }
+    const fm = parsed.data;
     const id = fm.id ?? file.replace(/\.md$/, "");
     if (agents.has(id)) throw new Error(`Duplicate agent id "${id}" in ${sourcePath}`);
 
@@ -212,10 +252,17 @@ export function loadAgents(agentsDir: string, source: AgentSource = "builtin"): 
     if (fm.effort !== undefined) agent.effort = fm.effort;
     if (fm.timeout_minutes !== undefined) agent.timeoutMinutes = fm.timeout_minutes;
     if (fm.max_budget_usd !== undefined) agent.maxBudgetUsd = fm.max_budget_usd;
+    if (fm.wrap_up_reserve_usd !== undefined) agent.wrapUpReserveUsd = fm.wrap_up_reserve_usd;
+    if (fm.on_failure !== undefined) agent.onFailure = fm.on_failure;
+    if (fm.resume_budget_usd !== undefined) agent.resumeBudgetUsd = fm.resume_budget_usd;
     if (fm.inherit_mcp !== undefined) agent.inheritMcp = fm.inherit_mcp;
     if (fm.add_dirs !== undefined) agent.addDirs = fm.add_dirs.map(expandHome);
     if (fm.claude_agent !== undefined) agent.claudeAgent = fm.claude_agent;
     if (fm.project !== undefined) agent.project = fm.project;
+    if (fm.max_concurrent !== undefined) agent.maxConcurrent = fm.max_concurrent;
+    if (fm.isolated !== undefined) agent.isolated = fm.isolated;
+    if (fm.max_daily_runs !== undefined) agent.maxDailyRuns = fm.max_daily_runs;
+    if (fm.max_daily_cost_usd !== undefined) agent.maxDailyCostUsd = fm.max_daily_cost_usd;
     agents.set(id, agent);
   }
   return agents;

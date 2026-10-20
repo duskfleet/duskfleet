@@ -1,4 +1,6 @@
 #!/usr/bin/env node
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 /**
  * Small local CLI. Same orchestration layer as the MCP server, useful for
  * testing without an MCP client.
@@ -8,6 +10,7 @@
  *   duskfleet run --project <id or path> [--agent <id>] [--model <m>] [--no-wait] -- "<prompt>"
  *   duskfleet runs [--status <s>] [--limit <n>]
  *   duskfleet run-info <run_id> [--events]
+ *   duskfleet repair-subagents # backfill subagent rows of finished runs from their logs
  *   duskfleet schedules
  *   duskfleet schedules run-now <id or name>   # stamp run_requested_at; the lease holder fires it next tick
  *   duskfleet tools           # MCP tool catalogue (names, descriptions, input schemas)
@@ -17,13 +20,10 @@
  *   duskfleet doctor           # also reports the service and who holds the scheduler lease
  */
 import { parseArgs } from "node:util";
-import { fileURLToPath } from "node:url";
-import path from "node:path";
+import { findRepoRoot, parseHolder, RUN_STATUSES, type RunStatus, subagentView, summarizeRun } from "@duskfleet/core";
 import { bootstrap } from "./bootstrap.js";
+import { installService, renderService, type ServiceTarget, serviceStatus, uninstallService } from "./service.js";
 import { buildToolCatalog } from "./tools-catalog.js";
-import { installService, renderService, serviceStatus, uninstallService, type ServiceTarget } from "./service.js";
-import { findRepoRoot, parseHolder, summarizeRun } from "@duskfleet/core";
-import { RUN_STATUSES, type RunStatus } from "@duskfleet/core";
 
 function print(value: unknown): void {
   process.stdout.write(JSON.stringify(value, null, 2) + "\n");
@@ -38,6 +38,7 @@ function usage(): never {
       '  duskfleet run --project <id or path> [--agent <id>] [--model <m>] [--no-wait] -- "<prompt>"',
       "  duskfleet runs [--status <status>] [--limit <n>]",
       "  duskfleet run-info <run_id> [--events]",
+      "  duskfleet repair-subagents",
       "  duskfleet schedules",
       "  duskfleet schedules run-now <schedule id or name>",
       "  duskfleet tools",
@@ -92,7 +93,16 @@ async function main(): Promise<void> {
       }
       const { unit, ran } = installService(target);
       const status = serviceStatus(process.platform);
-      print({ installed: true, platform: unit.platform, label: unit.label, unitPath: unit.unitPath, logPath: target.logPath, ran, status, notes: unit.notes });
+      print({
+        installed: true,
+        platform: unit.platform,
+        label: unit.label,
+        unitPath: unit.unitPath,
+        logPath: target.logPath,
+        ran,
+        status,
+        notes: unit.notes,
+      });
       return done(status.running === false ? 1 : 0);
     }
     case "uninstall-service": {
@@ -214,14 +224,16 @@ async function main(): Promise<void> {
         return done();
       }
       if (sub) usage();
-      print({ scheduler: app.scheduler.status(), schedules: app.scheduler.list() });
+      print({ scheduler: app.scheduler.status(), schedules: app.scheduler.listWithLastRun() });
       return done();
     }
     case "serve": {
       // Keeps the scheduler ticking without any MCP host. Safe next to the MCP server:
       // only the lease holder fires. Stop with SIGINT/SIGTERM.
       app.scheduler.start();
-      process.stderr.write(`duskfleet serve: scheduler ticking every ${app.config.scheduler.tickSeconds}s (holder ${app.scheduler.status().holder}); Ctrl-C to stop\n`);
+      process.stderr.write(
+        `duskfleet serve: scheduler ticking every ${app.config.scheduler.tickSeconds}s (holder ${app.scheduler.status().holder}); Ctrl-C to stop\n`,
+      );
       // The scheduler's own interval is unref'd (it must not keep the MCP server alive) and a
       // pending promise does not hold the event loop either, so without a ref'd handle this
       // process exited with 0 right after its first tick and launchd restarted it every 10 s
@@ -251,8 +263,13 @@ async function main(): Promise<void> {
         process.stderr.write(`run not found: ${id}\n`);
         return done(1);
       }
-      const subagents = app.runs.agents(id);
+      const subagents = app.runs.agents(id).map((s) => subagentView(s)); // same names as get_run
       print(values.events ? { ...run, subagents, events: app.runs.events(id) } : { ...run, subagents });
+      return done();
+    }
+    case "repair-subagents": {
+      // One-shot backfill of subagent rows recorded by an older parser, from each finished run's log.
+      print(await app.runs.repairSubagents());
       return done();
     }
     default:

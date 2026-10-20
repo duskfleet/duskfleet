@@ -1,0 +1,33 @@
+# Weekly dependency updates, grouped so a week yields one or two PRs rather than ten.
+# Runtime dependencies are deliberately few (CLAUDE.md "Keep it small"); a bump that adds a transitive
+# native addon or a new framework should be declined, not merged.
+version: 2
+updates:
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 5
+    groups:
+      runtime:
+        dependency-type: production
+      dev-tooling:
+        dependency-type: development
+    ignore:
+      # Next.js majors change the App Router contract; take them on purpose, not from a bot.
+      - dependency-name: next
+        update-types: ["version-update:semver-major"]
+      # Types must match the minimum runtime (engines.node >=24): newer majors type APIs Node 24 lacks.
+      - dependency-name: "@types/node"
+        update-types: ["version-update:semver-major"]
+      # apps/web stays on TypeScript 5: Next.js 15 needs the compiler API that the TypeScript 7 entry
+      # point no longer exports. Move it on purpose, with a green next build.
+      - dependency-name: typescript
+        update-types: ["version-update:semver-major"]
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday

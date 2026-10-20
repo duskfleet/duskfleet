@@ -1,6 +1,15 @@
 import type { DatabaseSync } from "node:sqlite";
-import type { DeniedTool, RunMcpInfo, SubagentRecord, SubagentStatus } from "../execution/types.js";
-import type { Run, RunAgent, RunEvent, RunStatus } from "../observability/run.js";
+import type { DeniedTool, RunMcpInfo, SubagentRecord, SubagentStatus, UsageByModel } from "../execution/types.js";
+import type {
+  ReviewReason,
+  Run,
+  RunAgent,
+  RunEvent,
+  RunKind,
+  RunPhase,
+  RunStatus,
+  RunSummary,
+} from "../observability/run.js";
 
 /** Row shape as SQLite returns it. */
 interface RunRow {
@@ -29,6 +38,7 @@ interface RunRow {
   output_tokens: number | null;
   cache_read_tokens: number | null;
   cache_creation_tokens: number | null;
+  usage_by_model_json: string | null;
   cost_usd: number | null;
   permission_denials: number | null;
   denied_tools_json: string | null;
@@ -39,6 +49,12 @@ interface RunRow {
   log_path: string | null;
   raw_result_json: string | null;
   schedule_id: string | null;
+  owner: string | null;
+  phases_json: string | null;
+  review_reasons_json: string | null;
+  resumed_from_run_id: string | null;
+  kind: string | null;
+  billing_type: string | null;
 }
 
 function rowToRun(r: RunRow): Run {
@@ -68,6 +84,7 @@ function rowToRun(r: RunRow): Run {
     outputTokens: r.output_tokens,
     cacheReadTokens: r.cache_read_tokens,
     cacheCreationTokens: r.cache_creation_tokens,
+    usageByModel: parseUsageByModel(r.usage_by_model_json),
     costUsd: r.cost_usd,
     permissionDenials: r.permission_denials,
     deniedTools: safeParse(r.denied_tools_json),
@@ -78,11 +95,51 @@ function rowToRun(r: RunRow): Run {
     logPath: r.log_path,
     rawResultJson: r.raw_result_json,
     scheduleId: r.schedule_id ?? null,
+    owner: r.owner ?? null,
+    phases: parsePhases(r.phases_json),
+    reviewReasons: parseReasons(r.review_reasons_json),
+    resumedFromRunId: r.resumed_from_run_id ?? null,
+    kind: r.kind === "gate" ? "gate" : "run",
+    billingType: r.billing_type === "api" || r.billing_type === "subscription" ? r.billing_type : null,
   };
+}
+
+/** NULL until the run is terminal (and for rows written before migration 8 that the backfill did not reach). */
+function parseReasons(json: string | null | undefined): ReviewReason[] {
+  if (!json) return [];
+  try {
+    const v = JSON.parse(json);
+    return Array.isArray(v) ? v.filter((x): x is ReviewReason => typeof x === "string") : [];
+  } catch {
+    return [];
+  }
+}
+
+/** NULL for rows before migration 13 and for runs whose result had no modelUsage. */
+function parseUsageByModel(json: string | null | undefined): UsageByModel | null {
+  if (!json) return null;
+  try {
+    const v = JSON.parse(json);
+    return typeof v === "object" && v !== null && !Array.isArray(v) ? (v as UsageByModel) : null;
+  } catch {
+    return null;
+  }
+}
+
+function parsePhases(json: string | null | undefined): RunPhase[] {
+  if (!json) return [];
+  try {
+    const v = JSON.parse(json);
+    return Array.isArray(v) ? (v as RunPhase[]) : [];
+  } catch {
+    return [];
+  }
 }
 
 export interface ListRunsFilter {
   status?: RunStatus;
+  /** Only real runs or only gate runs; both when omitted. */
+  kind?: RunKind;
   agentId?: string;
   projectPath?: string;
   limit?: number;
@@ -108,6 +165,7 @@ export type RunPatch = Partial<
     | "outputTokens"
     | "cacheReadTokens"
     | "cacheCreationTokens"
+    | "usageByModel"
     | "costUsd"
     | "permissionDenials"
     | "deniedTools"
@@ -118,6 +176,9 @@ export type RunPatch = Partial<
     | "logPath"
     | "rawResultJson"
     | "command"
+    | "phases"
+    | "reviewReasons"
+    | "billingType"
   >
 >;
 
@@ -138,6 +199,7 @@ const PATCH_COLUMNS: Record<keyof RunPatch, string> = {
   outputTokens: "output_tokens",
   cacheReadTokens: "cache_read_tokens",
   cacheCreationTokens: "cache_creation_tokens",
+  usageByModel: "usage_by_model_json",
   costUsd: "cost_usd",
   permissionDenials: "permission_denials",
   deniedTools: "denied_tools_json",
@@ -148,7 +210,34 @@ const PATCH_COLUMNS: Record<keyof RunPatch, string> = {
   logPath: "log_path",
   rawResultJson: "raw_result_json",
   command: "command_json",
+  phases: "phases_json",
+  reviewReasons: "review_reasons_json",
+  billingType: "billing_type",
 };
+
+/**
+ * "This run needs review" as a boolean expression over the `runs` table, for the aggregate
+ * queries (overview KPIs, agent stats). It reads the reasons `RunManager` stored at the
+ * terminal transition, the same value `Run.reviewReasons` exposes: no second copy of the rule.
+ */
+export const NEEDS_REVIEW_SQL = `(COALESCE(review_reasons_json, '[]') <> '[]')`;
+
+const SUMMARY_COLUMNS = "id, status, review_reasons_json, termination_reason, cost_usd, ended_at";
+type SummaryRow = Pick<
+  RunRow,
+  "id" | "status" | "review_reasons_json" | "termination_reason" | "cost_usd" | "ended_at"
+>;
+
+function rowToSummary(r: SummaryRow): RunSummary {
+  return {
+    id: r.id,
+    status: r.status as RunStatus,
+    reviewReasons: parseReasons(r.review_reasons_json),
+    terminationReason: r.termination_reason,
+    costUsd: r.cost_usd,
+    endedAt: r.ended_at,
+  };
+}
 
 export class RunRepository {
   constructor(private readonly db: DatabaseSync) {}
@@ -160,8 +249,9 @@ export class RunRepository {
            created_at, started_at, ended_at, duration_ms, claude_session_id, permission_mode, command_json,
            exit_code, termination_reason, error, result_text, num_turns, tool_calls, input_tokens, output_tokens,
            cache_read_tokens, cache_creation_tokens, cost_usd, permission_denials, denied_tools_json, mcp_json, human_intervention,
-           context_exhausted, retries, log_path, raw_result_json, schedule_id)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+           context_exhausted, retries, log_path, raw_result_json, schedule_id, owner, phases_json, review_reasons_json, resumed_from_run_id, kind,
+           usage_by_model_json, billing_type)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         run.id,
@@ -199,10 +289,55 @@ export class RunRepository {
         run.logPath,
         run.rawResultJson,
         run.scheduleId,
+        run.owner,
+        JSON.stringify(run.phases ?? []),
+        run.reviewReasons?.length ? JSON.stringify(run.reviewReasons) : null,
+        run.resumedFromRunId ?? null,
+        run.kind ?? "run",
+        run.usageByModel ? JSON.stringify(run.usageByModel) : null,
+        run.billingType ?? null,
       );
   }
 
+  /** The run that resumed `runId` (on_failure: resume_once), or null. At most one exists: a resume is tried once. */
+  resumedBy(runId: string): Run | null {
+    const row = this.db
+      .prepare("SELECT * FROM runs WHERE resumed_from_run_id = ? ORDER BY created_at DESC LIMIT 1")
+      .get(runId) as unknown as RunRow | undefined;
+    return row ? rowToRun(row) : null;
+  }
+
+  /** A resume that never started (spawn failure) drops its link, so the original can be resumed again. */
+  releaseResumeClaim(runId: string): void {
+    this.db.prepare("UPDATE runs SET resumed_from_run_id = NULL WHERE id = ?").run(runId);
+  }
+
+  /** For a list page: id → id of the run that resumed it, for every id that has one. */
+  resumedByMany(ids: string[]): Map<string, string> {
+    const out = new Map<string, string>();
+    if (ids.length === 0) return out;
+    const rows = this.db
+      .prepare(
+        `SELECT id, resumed_from_run_id FROM runs WHERE resumed_from_run_id IN (${ids.map(() => "?").join(",")}) ORDER BY created_at ASC`,
+      )
+      .all(...ids) as Array<{ id: string; resumed_from_run_id: string }>;
+    for (const r of rows) out.set(r.resumed_from_run_id, r.id);
+    return out;
+  }
+
   update(id: string, patch: RunPatch): void {
+    this.updateWhere(id, patch, null);
+  }
+
+  /**
+   * Apply the patch only while the row still has status `expected` (compare-and-set
+   * between processes sharing the database). Returns false when another writer got there first.
+   */
+  updateIfStatus(id: string, expected: RunStatus, patch: RunPatch): boolean {
+    return this.updateWhere(id, patch, expected);
+  }
+
+  private updateWhere(id: string, patch: RunPatch, expected: RunStatus | null): boolean {
     const sets: string[] = [];
     const values: Array<string | number | null> = [];
     for (const [key, value] of Object.entries(patch) as Array<[keyof RunPatch, unknown]>) {
@@ -212,9 +347,15 @@ export class RunRepository {
       else if (typeof value === "object" && value !== null) values.push(JSON.stringify(value));
       else values.push(value as string | number | null);
     }
-    if (sets.length === 0) return;
+    if (sets.length === 0) return false;
     values.push(id);
-    this.db.prepare(`UPDATE runs SET ${sets.join(", ")} WHERE id = ?`).run(...values);
+    let where = "id = ?";
+    if (expected !== null) {
+      where += " AND status = ?";
+      values.push(expected);
+    }
+    const r = this.db.prepare(`UPDATE runs SET ${sets.join(", ")} WHERE ${where}`).run(...values);
+    return Number(r.changes) > 0;
   }
 
   get(id: string): Run | null {
@@ -233,6 +374,10 @@ export class RunRepository {
       where.push("agent_id = ?");
       values.push(filter.agentId);
     }
+    if (filter.kind) {
+      where.push("kind = ?");
+      values.push(filter.kind);
+    }
     if (filter.projectPath) {
       where.push("project_path = ?");
       values.push(filter.projectPath);
@@ -247,6 +392,29 @@ export class RunRepository {
     return (this.db.prepare("SELECT * FROM runs WHERE status = ?").all(status) as unknown as RunRow[]).map(rowToRun);
   }
 
+  /**
+   * Runs of an agent created at or after `sinceIso` (every kind and outcome) and their recorded
+   * cost (runs still going, or that never reported one, add 0). The daily caps read it.
+   */
+  agentUsageSince(agentId: string, sinceIso: string): { runs: number; costUsd: number } {
+    const r = this.db
+      .prepare("SELECT COUNT(*) AS runs, SUM(cost_usd) AS cost FROM runs WHERE agent_id = ? AND created_at >= ?")
+      .get(agentId, sinceIso) as { runs: number; cost: number | null };
+    return { runs: r.runs, costUsd: r.cost ?? 0 };
+  }
+
+  /** How the given runs ended, in one query and without their result blobs. Unknown ids are left out. */
+  summaries(ids: string[]): RunSummary[] {
+    const unique = [...new Set(ids)];
+    if (unique.length === 0) return [];
+    const marks = unique.map(() => "?").join(", ");
+    return (
+      this.db
+        .prepare(`SELECT ${SUMMARY_COLUMNS} FROM runs WHERE id IN (${marks})`)
+        .all(...unique) as unknown as SummaryRow[]
+    ).map(rowToSummary);
+  }
+
   addEvent(runId: string, type: RunEvent["type"], payload: unknown, agentId: string | null = null): void {
     this.db
       .prepare("INSERT INTO run_events (run_id, ts, type, payload, agent_id) VALUES (?, ?, ?, ?, ?)")
@@ -255,8 +423,17 @@ export class RunRepository {
 
   events(runId: string, limit = 200): RunEvent[] {
     const rows = this.db
-      .prepare("SELECT id, run_id, ts, type, payload, agent_id FROM run_events WHERE run_id = ? ORDER BY id ASC LIMIT ?")
-      .all(runId, limit) as Array<{ id: number; run_id: string; ts: string; type: RunEvent["type"]; payload: string | null; agent_id: string | null }>;
+      .prepare(
+        "SELECT id, run_id, ts, type, payload, agent_id FROM run_events WHERE run_id = ? ORDER BY id ASC LIMIT ?",
+      )
+      .all(runId, limit) as Array<{
+      id: number;
+      run_id: string;
+      ts: string;
+      type: RunEvent["type"];
+      payload: string | null;
+      agent_id: string | null;
+    }>;
     return rows.map((r) => ({
       id: r.id,
       runId: r.run_id,
@@ -311,9 +488,24 @@ export class RunRepository {
       );
   }
 
+  /** Ids of finished runs with a log and at least one subagent row (the subagent backfill's candidates). */
+  finishedRunIdsWithAgents(): string[] {
+    const rows = this.db
+      .prepare(
+        `SELECT DISTINCT r.id FROM runs r JOIN run_agents a ON a.run_id = r.id
+         WHERE r.status IN ('completed', 'failed', 'cancelled', 'timed_out') AND r.log_path IS NOT NULL`,
+      )
+      .all() as Array<{ id: string }>;
+    return rows.map((r) => r.id);
+  }
+
   /** Subagent invocations of a run, in start order. */
   agents(runId: string): RunAgent[] {
-    return (this.db.prepare("SELECT * FROM run_agents WHERE run_id = ? ORDER BY id ASC").all(runId) as unknown as RunAgentRow[]).map(rowToRunAgent);
+    return (
+      this.db
+        .prepare("SELECT * FROM run_agents WHERE run_id = ? ORDER BY id ASC")
+        .all(runId) as unknown as RunAgentRow[]
+    ).map(rowToRunAgent);
   }
 }
 

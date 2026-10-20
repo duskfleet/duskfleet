@@ -10,6 +10,10 @@ export type PermissionMode = (typeof PERMISSION_MODES)[number];
 export const EFFORT_LEVELS = ["low", "medium", "high", "xhigh", "max"] as const;
 export type EffortLevel = (typeof EFFORT_LEVELS)[number];
 
+/** `none`: a failed run is final. `resume_once`: the next tick of the schedule resumes the session, once. */
+export const ON_FAILURE_POLICIES = ["none", "resume_once"] as const;
+export type OnFailurePolicy = (typeof ON_FAILURE_POLICIES)[number];
+
 /** Where an agent definition was loaded from. Only "user" agents are writable by tools. */
 export type AgentSource = "builtin" | "user";
 
@@ -27,6 +31,20 @@ export interface AgentDefinition {
   effort?: EffortLevel;
   timeoutMinutes?: number;
   maxBudgetUsd?: number;
+  /**
+   * Dollars held back from `maxBudgetUsd` for a wrap-up pass: when the main pass ends
+   * `budget_exhausted`, the session is resumed with this budget and told to record where it
+   * stopped. Default 10% of the budget, at least $0.50, never more than half of it. 0 disables.
+   */
+  wrapUpReserveUsd?: number;
+  /**
+   * What a schedule does on the tick after a run of this agent ended `budget_exhausted` or
+   * `timed_out`: `resume_once` resumes that session (one retry, a second failure is final)
+   * instead of starting fresh. A schedule can override it. Default none.
+   */
+  onFailure?: OnFailurePolicy;
+  /** Budget of the resumed run (`on_failure: resume_once`). Defaults to `maxBudgetUsd`. */
+  resumeBudgetUsd?: number;
   /**
    * Let runs see the MCP servers of the user running DuskFleet (claude.ai
    * connectors such as Atlassian or Figma, user/project .mcp.json). Default
@@ -48,6 +66,28 @@ export interface AgentDefinition {
    * Unset = general-purpose agent, runs anywhere.
    */
   project?: string;
+  /**
+   * Runs of this agent allowed at the same time (integer >= 1). Unset = the global
+   * max_concurrent_per_agent (default 1). max_concurrent_runs stays the hard cap.
+   */
+  maxConcurrent?: number;
+  /**
+   * The agent never edits the project checkout (read-only, or works in its own git worktree).
+   * Its runs neither count against nor wait for max_concurrent_per_project. A promise the
+   * agent's prompt keeps; DuskFleet does not check it. Default false.
+   */
+  isolated?: boolean;
+  /**
+   * Runs of this agent allowed per UTC day (integer >= 1), counted over every run started since
+   * 00:00 UTC whatever its outcome. The next run is refused (`DailyCapError`). Unset = no cap.
+   */
+  maxDailyRuns?: number;
+  /**
+   * Spend of this agent allowed per UTC day (USD > 0): once the recorded cost of its runs since
+   * 00:00 UTC reaches it, the next run is refused (`DailyCapError`). A run in progress is not
+   * stopped; its own max_budget_usd bounds the overshoot. Unset = no cap.
+   */
+  maxDailyCostUsd?: number;
   /** Markdown body of the agent file. Sent via --append-system-prompt when non-empty. */
   systemPrompt: string;
   /** Absolute path of the file this agent was loaded from. */
@@ -81,6 +121,8 @@ export interface SchedulerConfig {
   tickSeconds: number;
   /** Default IANA zone for new schedules. */
   defaultTimeZone: string;
+  /** Default no-op marker for idle-cost stats: `/regex/flags` or a plain case-insensitive regex. */
+  noopPattern: string;
 }
 
 export interface DuskFleetConfig {

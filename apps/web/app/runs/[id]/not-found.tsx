@@ -11,7 +11,8 @@ export default function RunNotFound() {
       <div className="empty">
         <div style={{ fontSize: "1.1rem", fontWeight: 600, color: "var(--text)" }}>No run with this id.</div>
         <div style={{ marginTop: 6 }}>
-          It may have been recorded in another database, or the id was mistyped. <Link href="/">Back to recent runs</Link>.
+          It may have been recorded in another database, or the id was mistyped.{" "}
+          <Link href="/">Back to recent runs</Link>.
         </div>
       </div>
     </>
