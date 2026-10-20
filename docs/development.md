@@ -127,12 +127,19 @@ PR:     flow: needs-review ──► flow: in-review ──► flow: changes-req
   with `flow: needs-review`. Each pickup swaps the label first, as a lock against a second run.
 - The reviewer picks the oldest PR labelled `flow: needs-review` (fallback: the oldest open PR
   without a `VERDICT:` comment naming its current head SHA), swaps it to `flow: in-review`,
-  runs the built-in `code-review` skill with `--comment` (inline correctness findings), then
-  checks the rules of CLAUDE.md — and, for a PR that closes an issue, the issue's own
-  acceptance criteria — and posts one summary comment ending with `VERDICT: approve` or
-  `VERDICT: changes`. The verdict's label (`flow: ready-to-merge` or `flow: changes-requested`)
-  is the hand-off. Read-only agent; after three `VERDICT: changes` rounds it parks the PR with
-  `flow: needs-human`.
+  runs a correctness pass through a subagent with a fixed brief (it posts the findings that
+  hold as inline comments), then checks the rules of CLAUDE.md — and, for a PR that closes an
+  issue, the issue's own acceptance criteria — and posts one summary comment ending with
+  `VERDICT: approve` or `VERDICT: changes`. The verdict's label (`flow: ready-to-merge` or
+  `flow: changes-requested`) is the hand-off. Read-only agent; after three `VERDICT: changes`
+  rounds it parks the PR with `flow: needs-human`. The built-in `code-review` skill is not
+  used unattended: its fork gathers context with commands no allow-list can permit
+  (`git diff @{upstream}...HEAD`, `;` chains), so it was denied in most runs.
+- Dependabot PRs take a short path instead of the two passes: all checks green, only manifests,
+  lockfile or workflow files changed, no added dependency, no major bump (and `@types/node`
+  on the Node floor's major) → `flow: ready-to-merge`; a red check or a bump outside those
+  bounds → `flow: changes-requested`, and a wanted major → `flow: needs-human`. Still a
+  review: grouped bumps have broken the web build before.
 
 The DuskFleet side is three user agents in `data/agents/` (developer, reviewer, planner) that
 link the local Claude Code agents (`claude_agent`) and add only the unattended envelope:
