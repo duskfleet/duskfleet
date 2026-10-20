@@ -73,7 +73,12 @@ recurse into itself.
 | `cancel_run` | SIGTERM (then SIGKILL) the run's process; recorded as `cancelled` |
 
 `create_agent` and `update_agent` validate the spec before writing and roll the file back if
-the config no longer loads, so one bad agent file never breaks later config reloads.
+the config no longer loads, so one bad agent file never breaks later config reloads. They
+also refuse a spec that would be unfit for a public repo: a home directory path
+(`/Users/<name>`, `/home/<name>`, `C:\Users\<name>`, `/Volumes/<name>`, or this machine's home
+directory) or a secret-looking value (API keys, GitHub / Slack / AWS tokens, private keys,
+`password: ...`-style assignments) in any field. `add_dirs` entries inside your home directory
+are stored as `~/...` instead; placeholders such as `/Users/<you>` are fine.
 
 ## A typical conversation
 

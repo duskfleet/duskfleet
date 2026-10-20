@@ -119,7 +119,8 @@ npm workspaces, one `config/` and one SQLite database shared by three deliverabl
 - **Agents can be bound to a project** (`project: <id>`): grouped, default target, refused
   elsewhere. `create_agent`/`update_agent` validate the spec *before* writing, and roll the
   file back if the config no longer loads: one bad agent file would otherwise break every
-  later config reload.
+  later config reload. They also refuse home paths and secret-looking values in any field
+  (`assertAgentSpecClean`, `core/src/config/agent-lint.ts`); `add_dirs` under home become `~/...`.
 - **Two agent kinds, always explicit**: `own` (persona written here, body = system prompt,
   no `claude_agent`) or `link` (`claude_agent` + a project folder given as `project_path` or a
   registered `project` id; runs as `claude --agent <name>` in that folder using its

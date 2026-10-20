@@ -7,6 +7,7 @@ import {
   agentSpecSchema,
   agentToSpec,
   assertAgentKind,
+  assertAgentSpecClean,
   assertWrapUpReserve,
   budgetPlan,
   type DuskFleetConfig,
@@ -320,7 +321,7 @@ export function registerAgentTools(server: McpServer, ctx: ToolContext): void {
           registeredProject = fields.project;
         }
         const cfg = ctx.config;
-        const spec = agentSpecSchema.parse(fields);
+        const spec = assertAgentSpecClean(agentSpecSchema.parse(fields));
         assertKind(kind, spec, cfg);
         const fresh = writeAndVerify(ctx, cfg, spec);
         return jsonResult({
@@ -402,7 +403,7 @@ export function registerAgentTools(server: McpServer, ctx: ToolContext): void {
         const merged: AgentSpec = { ...agentToSpec(existing) };
         for (const [k, v] of Object.entries(changes)) if (v !== undefined) (merged as Record<string, unknown>)[k] = v;
         for (const k of clear ?? []) delete (merged as Record<string, unknown>)[k];
-        const spec = agentSpecSchema.parse(merged);
+        const spec = assertAgentSpecClean(agentSpecSchema.parse(merged));
         const kind = requestedKind ?? agentKind(spec);
         assertKind(kind, spec, cfgNow);
         const fresh = writeAndVerify(ctx, cfgNow, spec);

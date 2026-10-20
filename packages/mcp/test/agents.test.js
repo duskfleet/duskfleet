@@ -14,7 +14,7 @@ import {
   rmSync,
   writeFileSync,
 } from "node:fs";
-import { tmpdir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import path from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
@@ -158,6 +158,33 @@ test("agents can be created, updated, run and deleted over MCP without touching 
       /cannot exceed half of the budget/,
     );
     assert.ok(!existsSync(path.join(userDir, "big-reserve.md")), "nothing written for a refused reserve");
+
+    // public-repo hygiene (#72): home paths and secrets are refused before writing; add_dirs fold to ~
+    fails(
+      await client.callTool({
+        name: "create_agent",
+        arguments: { id: "leaky", kind: "own", system_prompt: `Edit ${["", "home", "bob"].join("/")}/repo` },
+      }),
+      /not written.*system_prompt: Linux home path/,
+    );
+    fails(
+      await client.callTool({
+        name: "create_agent",
+        arguments: { id: "leaky", kind: "own", system_prompt: `Use ${"sk-ant-"}${"x".repeat(24)}` },
+      }),
+      /Anthropic API key/,
+    );
+    assert.ok(!existsSync(path.join(userDir, "leaky.md")), "nothing written for a refused spec");
+    const tilde = ok(
+      await client.callTool({
+        name: "create_agent",
+        arguments: { id: "tilde", kind: "own", system_prompt: "x", add_dirs: [path.join(homedir(), "elsewhere")] },
+      }),
+    );
+    assert.match(readFileSync(tilde.agent.path, "utf8"), /add_dirs:\n\s+- ~\/elsewhere\n/);
+    assert.deepEqual(tilde.agent.addDirs, [path.join(homedir(), "elsewhere")], "the loader expands it again");
+    ok(await client.callTool({ name: "update_agent", arguments: { id: "tilde", description: "round trip" } }));
+    ok(await client.callTool({ name: "delete_agent", arguments: { id: "tilde" } }));
 
     // update merges and can clear optional fields
     const updated = ok(

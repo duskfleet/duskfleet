@@ -24,7 +24,10 @@ entry that does the job, link it; write a persona only when nothing exists.
 | `data/agents/<id>.md` (`user_agents_dir`) | `create_agent` over MCP, or by hand | **user** agents, git-ignored. Same id as a builtin = override |
 
 Both are re-read on every run and every `list_agents` call, so edits apply without restarting
-anything. Code never writes into `config/agents`.
+anything. Code never writes into `config/agents`. Because a user agent may later be committed,
+`create_agent` / `update_agent` refuse home directory paths and secret-looking values in any
+field, and store `add_dirs` inside your home directory as `~/...`
+([MCP server](mcp-server.md)).
 
 ## Frontmatter
 

@@ -20,6 +20,7 @@ export {
   renderAgentMarkdown,
   writeAgentFile,
 } from "./config/agent-files.js";
+export { type AgentLintProblem, assertAgentSpecClean, collapseHome, lintAgentSpec } from "./config/agent-lint.js";
 export {
   expandHome,
   findRepoRoot,
