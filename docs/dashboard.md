@@ -32,8 +32,8 @@ in the nav); the other pages are static.
   aggregate stats. User agents can be deleted or
   unlinked from here, with an inline confirmation; builtins are read-only.
 - **Schedules**: a status strip (kill switch, lease holder and when its lease expires, next
-  firing, last 7 days fired / skipped busy), then the schedules grouped by project ("no project"
-  last), one card each: cron (raw and in plain words), agent, model, the
+  firing, last 7 days fired / skipped busy), then the schedules grouped by project (the
+  schedule's own, else its agent's; "no project" last), one card each: cron (raw and in plain words), agent, model, the
   [gate](schedules.md#gates-skip-cheaply-when-there-is-no-work) and on-failure policy in force, the
   prompt, the last 10 firings as squares coloured by how the run they started **ended** (clean,
   needs review from the stored review reasons, failed, running, cancelled, skipped busy, skipped by

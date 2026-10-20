@@ -224,8 +224,23 @@ export class ScheduleRepository {
   }
 
   /**
-   * Claim a tick before a slow step (a gate): advance next_run_at now, so the schedule is no
-   * longer due for anyone while the step runs. recordFiring writes the same value when it ends.
+   * Compare-and-set claim of a due tick: advance next_run_at only if it still holds the value
+   * this process read (`expected`). True when this call claimed the tick; false when someone
+   * else (another process that took the lease, an edit) moved it first: then do not fire.
+   * The lease decides who ticks, this makes a double fire impossible even if it changes hands
+   * between `due()` and the fire.
+   */
+  claimDue(id: string, expected: string | null, nextRunAt: string | null): boolean {
+    const r = this.db
+      .prepare("UPDATE schedules SET next_run_at = ?, updated_at = ? WHERE id = ? AND next_run_at IS ?")
+      .run(nextRunAt, new Date().toISOString(), id, expected);
+    return Number(r.changes) > 0;
+  }
+
+  /**
+   * Claim a manual fire's tick before a slow step (a gate): advance next_run_at now, so the
+   * schedule is no longer due for anyone while the step runs. recordFiring writes the same value
+   * when it ends. Scheduled fires are claimed earlier, by claimDue.
    */
   claimTick(id: string, nextRunAt: string | null): void {
     this.db

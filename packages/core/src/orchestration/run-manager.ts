@@ -1018,6 +1018,12 @@ export class RunManager {
       case "parse_error":
         this.runs.addEvent(runId, "error", { parseError: event.line });
         break;
+      case "grace_kill":
+        this.runs.addEvent(runId, "note", {
+          message: `${event.childAlive ? "process" : "a descendant of the process"} still running ${event.afterMs / 1000} s after the result line: SIGTERM sent to its process group`,
+          graceKill: { pid: event.pid, afterMs: event.afterMs, childAlive: event.childAlive },
+        });
+        break;
       default:
         break; // assistant_text and stderr go to the log file only
     }

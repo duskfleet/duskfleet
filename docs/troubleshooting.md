@@ -7,7 +7,12 @@
   `~/.claude/settings.json` (for example a `Stop` hook that shows a desktop notification) may be
   blocking in a headless context. Set `claude.setting_sources: [project, local]` so runs skip
   user-level settings, or make the hook non-blocking. Inspect `data/logs/<run_id>.jsonl`: if the
-  last line is an `assistant` message with no `result` line, this is the cause.
+  last line is an `assistant` message with no `result` line, this is the cause. Once the
+  `result` line is out, DuskFleet does not wait: each run leads its own process group, and if the
+  process (or anything it spawned that still holds its output, such as a hook) is alive 5 s
+  later, the group gets SIGTERM, then SIGKILL after 5 s more. The run keeps the result's verdict
+  and its events carry a note "still running 5 s after the result line". Keep
+  `setting_sources` anyway: a hook that blocks before the result is not covered.
 - **A completed run is "needs review"**: it hit a permission denial or an allow-listed MCP
   server never mounted. Open the run detail: the denied calls are listed with the command or
   file, and `mcp.allowListedMissing` names the server. Fix the agent's `allowed_tools` (or

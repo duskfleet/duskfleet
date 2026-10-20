@@ -87,6 +87,7 @@ export {
   processIdentity,
   type ScheduleRunState,
   type SchedulerRole,
+  scheduleProjectId,
   scheduleRunState,
   updateSchedule,
   validateScheduleInput,

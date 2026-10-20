@@ -20,11 +20,17 @@
  *   "budget"  -> spends the whole --max-budget-usd and stops with the real budget shape
  *                 (subtype error_max_budget_usd, terminal_reason budget_exhausted, no `result`,
  *                 errors: [...], is_error true, exit 1; from run a2d99954 of 2026-10-14)
+ *   "linger"  -> like "ok", but keeps running after the result line (grace kill tests)
+ *   "linger-hook" -> like "ok", then exits while a spawned descendant keeps stdout open
+ *                 (a user-level Stop hook); the descendant's pid is written to ./hook.pid
  *
  * With `--resume <id>` (the wrap-up pass) the prompt is DuskFleet's fixed text, so the
  * behaviour comes from FAKE_CLAUDE_RESUME instead: unset = a short successful pass that
  * says where it stopped; "budget" = exhausts the reserve too; "hang" = never ends.
  */
+import { spawn } from "node:child_process";
+import { writeFileSync } from "node:fs";
+
 const args = process.argv.slice(2);
 const prompt = args[args.length - 1] ?? "ok";
 const sessionIdx = args.indexOf("--session-id");
@@ -415,5 +421,17 @@ if (resumeIdx >= 0) {
     terminal_reason: isError ? "api_error" : "completed",
     stop_reason: "end_turn",
   });
-  process.exit(isError ? 1 : 0);
+  if (prompt === "linger") {
+    setInterval(() => {}, 1000); // never exits after its result (until the grace kill)
+  } else if (prompt === "linger-hook") {
+    // A "Stop hook": a descendant that inherits stdout and outlives us, so the pipe never
+    // closes. Its pid goes to hook.pid in the cwd so the test can check it was killed.
+    const hook = spawn(process.execPath, ["-e", "setInterval(() => {}, 1000)"], {
+      stdio: ["ignore", "inherit", "inherit"],
+    });
+    writeFileSync("hook.pid", String(hook.pid));
+    process.exit(0);
+  } else {
+    process.exit(isError ? 1 : 0);
+  }
 }

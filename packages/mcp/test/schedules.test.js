@@ -23,6 +23,7 @@ import {
   RunRepository,
   ScheduleRepository,
   Scheduler,
+  scheduleProjectId,
 } from "@duskfleet/core";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
@@ -121,6 +122,7 @@ test("schedules over MCP: create, list, update, run now, delete; validation erro
     assert.equal(created.schedule.timeZone, "Europe/London");
     assert.equal(created.schedule.cronHuman, "weekdays 08–20 at :00");
     assert.equal(created.schedule.projectId, null, "bound agent: project comes from the agent");
+    assert.equal(created.schedule.effectiveProjectId, "demo", "effective project = the agent's");
     assert.ok(created.schedule.nextRunAt, "next_run_at computed");
     assert.equal(created.schedule.enabled, true);
 
@@ -162,6 +164,8 @@ test("schedules over MCP: create, list, update, run now, delete; validation erro
 
     const listed = ok(await client.callTool({ name: "list_schedules", arguments: {} }));
     assert.equal(listed.schedules.length, 1);
+    assert.equal(listed.schedules[0].projectId, null, "list_schedules keeps the stored project_id");
+    assert.equal(listed.schedules[0].effectiveProjectId, "demo", "and adds the effective one");
     assert.equal(listed.scheduler.enabled, true);
     assert.equal(listed.scheduler.running, true, "the MCP server ticks");
 
@@ -279,6 +283,15 @@ test("schedules over MCP: create, list, update, run now, delete; validation erro
   }
 });
 
+test("scheduleProjectId: the schedule's project, else its agent's, else null", () => {
+  assert.equal(scheduleProjectId({ projectId: "demo" }, { project: undefined }), "demo", "schedule project");
+  assert.equal(scheduleProjectId({ projectId: "demo" }, { project: "demo" }), "demo", "both set, same project");
+  assert.equal(scheduleProjectId({ projectId: null }, { project: "app" }), "app", "bound agent");
+  assert.equal(scheduleProjectId({ projectId: null }, { project: undefined }), null, "unbound agent");
+  assert.equal(scheduleProjectId({ projectId: null }, undefined), null, "deleted agent");
+  assert.equal(scheduleProjectId({ projectId: "demo" }, undefined), "demo", "deleted agent, schedule project");
+});
+
 test("tick fires due schedules, honours the kill switch, and only the lease holder fires", async () => {
   const { root, configDir, project } = makeRoot();
   const config = loadConfig(configDir);
@@ -345,6 +358,68 @@ test("tick fires due schedules, honours the kill switch, and only the lease hold
     runs.shutdown();
     await new Promise((r) => setTimeout(r, 300));
     db.close();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("compare-and-set claim: two tickers on one DB never fire the same tick twice, even across a lease handover", async () => {
+  const { root, configDir } = makeRoot();
+  const config = loadConfig(configDir);
+  // Two processes: own connection, own RunManager, own repository, same database file.
+  const side = () => {
+    const db = openDatabase(config.dataDir);
+    const runs = new RunManager(
+      config,
+      new RunRepository(db),
+      new ClaudeCodeExecutor({ binary: config.claude.binary, strictMcpConfig: true, allowBypassPermissions: false }),
+    );
+    return { db, runs, repo: new ScheduleRepository(db) };
+  };
+  const pa = side();
+  const pb = side();
+  const a = new Scheduler(pa.repo, pa.runs, { tickMs: 1000, holder: "A" });
+  const b = new Scheduler(pb.repo, pb.runs, { tickMs: 1000, holder: "B" });
+  try {
+    const s = a.create({ name: "cas", agentId: "free", projectId: "demo", prompt: "ok", cron: "* * * * *" });
+    const dueAt = new Date(Date.now() - 1000).toISOString();
+    pa.repo.update(s.id, { nextRunAt: dueAt });
+
+    // The claim itself: only the caller holding the value it read wins.
+    const next = new Date(Date.now() + 60_000).toISOString();
+    assert.equal(pa.repo.claimDue(s.id, "1999-01-01T00:00:00.000Z", next), false, "stale expectation loses");
+    assert.equal(pa.repo.get(s.id).nextRunAt, dueAt, "a lost claim changes nothing");
+
+    // A read the due list, then lost the lease before firing; B took over and fired the tick.
+    const stale = pa.repo.due(new Date().toISOString());
+    assert.equal(stale.length, 1);
+    await b.tick();
+    assert.equal(b.status().leaseHeldByThisProcess, true);
+    const fired = pb.repo.get(s.id);
+    assert.equal(fired.fires, 1);
+    assert.ok(Date.parse(fired.nextRunAt) > Date.now(), "B advanced next_run_at");
+
+    // Let B's run end first: both "processes" share this pid, so A's orphan sweep would
+    // otherwise take B's live run for its own lost one.
+    await pb.runs.waitForRun(fired.lastRunId, 10_000);
+
+    // A gets the lease back and works through its stale snapshot: the CAS fails, nothing fires.
+    b.stop(); // releases the lease
+    pa.repo.due = () => stale;
+    await a.tick();
+    assert.equal(a.status().leaseHeldByThisProcess, true);
+    const after = pa.repo.get(s.id);
+    assert.equal(after.fires, 1, "A did not fire the tick B already fired");
+    assert.equal(after.lastRunId, fired.lastRunId);
+    assert.equal(pa.repo.firings(s.id).length, 1, "no firing recorded for the lost claim, not even a skip");
+    assert.equal(after.nextRunAt, fired.nextRunAt, "next_run_at untouched by the loser");
+  } finally {
+    a.stop();
+    b.stop();
+    pa.runs.shutdown();
+    pb.runs.shutdown();
+    await new Promise((r) => setTimeout(r, 300));
+    pa.db.close();
+    pb.db.close();
     rmSync(root, { recursive: true, force: true });
   }
 });

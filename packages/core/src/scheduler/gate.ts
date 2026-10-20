@@ -17,6 +17,9 @@ import type { DuskFleetConfig } from "../config/types.js";
 import { BusyError } from "../orchestration/busy.js";
 import { DailyCapError } from "../orchestration/daily-cap.js";
 import type { RunManager } from "../orchestration/run-manager.js";
+// crud.ts imports validateGate from here: a cycle, safe because both sides only call
+// functions at run time, never at module evaluation.
+import { scheduleProjectId } from "./crud.js";
 import {
   DEFAULT_GATE_BUDGET_USD,
   DEFAULT_GATE_MARKER,
@@ -185,7 +188,7 @@ export async function runAgentGate(
     kind: "gate",
     maxBudgetUsd: gate.budgetUsd ?? DEFAULT_GATE_BUDGET_USD,
   };
-  const projectId = s.projectId ?? runs.config.agents.get(s.agentId)?.project ?? null;
+  const projectId = scheduleProjectId(s, runs.config.agents.get(s.agentId));
   if (projectId) input.projectId = projectId;
   if (gate.model) input.model = gate.model;
   let startedId: string;

@@ -54,6 +54,12 @@ export type ExecutionEvent =
   | { type: "subagent_start"; subagent: SubagentRecord }
   | { type: "subagent_end"; subagent: SubagentRecord }
   | { type: "stderr"; text: string }
+  /**
+   * The process (or a descendant holding its stdio, such as a user-level Stop hook) was still
+   * running `afterMs` after the result line, so its process group was sent SIGTERM (SIGKILL
+   * after the kill grace). `childAlive` is false when only descendants were left.
+   */
+  | { type: "grace_kill"; pid: number | null; afterMs: number; childAlive: boolean }
   | { type: "parse_error"; line: string };
 
 export type SubagentStatus = "running" | "completed" | "failed" | "interrupted";
