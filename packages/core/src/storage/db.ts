@@ -225,6 +225,12 @@ const MIGRATIONS: ReadonlyArray<{ version: number; sql: string; backfill?: (db: 
     version: 13,
     sql: `ALTER TABLE runs ADD COLUMN usage_by_model_json TEXT;`,
   },
+  {
+    // Who pays for cost_usd: 'api' (ANTHROPIC_API_KEY in the child's environment) or
+    // 'subscription'. Set when the run spawns; NULL for older rows (unknown, not guessed).
+    version: 14,
+    sql: `ALTER TABLE runs ADD COLUMN billing_type TEXT;`,
+  },
 ];
 
 /**

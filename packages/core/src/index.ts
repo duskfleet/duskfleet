@@ -38,7 +38,12 @@ export {
 } from "./config/project-files.js";
 export * from "./config/types.js";
 export * from "./evals/types.js";
-export { ClaudeCodeExecutor, type ClaudeCodeExecutorOptions, resolveClaudeBinary } from "./execution/claude-code.js";
+export {
+  billingTypeOf,
+  ClaudeCodeExecutor,
+  type ClaudeCodeExecutorOptions,
+  resolveClaudeBinary,
+} from "./execution/claude-code.js";
 export { mergeSubagent, needsRepair, sameSubagent, subagentsFromLog } from "./execution/log-replay.js";
 export {
   cleanHandBack,

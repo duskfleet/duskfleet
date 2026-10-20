@@ -3,7 +3,7 @@
  * uses to run an agent. `ClaudeCodeExecutor` is the one implementation today.
  */
 import type { EffortLevel, PermissionMode } from "../config/types.js";
-import type { RecordedCommand } from "../observability/run.js";
+import type { BillingType, RecordedCommand } from "../observability/run.js";
 
 export interface ExecutionRequest {
   /** Working directory for the child process. Must already be validated. */
@@ -169,6 +169,8 @@ export interface ExecutionResult {
 export interface ExecutionHandle {
   command: RecordedCommand;
   pid: number | null;
+  /** From the environment the child was spawned with; executors that cannot tell leave it out. */
+  billingType?: BillingType;
   done: Promise<ExecutionResult>;
   cancel(): void;
 }

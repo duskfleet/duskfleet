@@ -11,7 +11,7 @@ import { createWriteStream, existsSync, mkdirSync, type WriteStream } from "node
 import { homedir } from "node:os";
 import path from "node:path";
 import { createInterface } from "node:readline";
-import type { RecordedCommand } from "../observability/run.js";
+import type { BillingType, RecordedCommand } from "../observability/run.js";
 import { logger } from "../util/log.js";
 import { createStreamState, ingestLine, looksLikeContextExhaustion } from "./stream-json.js";
 import {
@@ -143,11 +143,13 @@ export class ClaudeCodeExecutor implements Executor {
       if (req.resumeSessionId) logStream.write(`#resume ${req.resumeSessionId} ${startedAt.toISOString()}\n`);
     }
 
+    const env = childEnv();
+    const billingType = billingTypeOf(env);
     let child: ChildProcess;
     try {
       child = spawn(this.binary, argv, {
         cwd: req.cwd,
-        env: childEnv(),
+        env,
         stdio: ["ignore", "pipe", "pipe"],
         shell: false, // never a shell: argv is passed verbatim to the binary
         detached: OWN_PROCESS_GROUP,
@@ -158,6 +160,7 @@ export class ClaudeCodeExecutor implements Executor {
       return {
         command,
         pid: null,
+        billingType,
         cancel: () => {},
         done: Promise.resolve(
           finalResult({
@@ -291,6 +294,7 @@ export class ClaudeCodeExecutor implements Executor {
     return {
       command,
       pid: child.pid ?? null,
+      billingType,
       done,
       cancel: () => terminate("cancelled"),
     };
@@ -352,6 +356,14 @@ function childEnv(): NodeJS.ProcessEnv {
   // DuskFleet's own variable: an agent running `npm test` here would launch the real claude.
   delete env["CLAUDE_BIN"];
   return env;
+}
+
+/**
+ * `api` when the child gets an `ANTHROPIC_API_KEY` (Claude Code then bills that key per token),
+ * `subscription` otherwise (the reported cost is an estimate, not billed).
+ */
+export function billingTypeOf(env: NodeJS.ProcessEnv): BillingType {
+  return env["ANTHROPIC_API_KEY"]?.trim() ? "api" : "subscription";
 }
 
 /**

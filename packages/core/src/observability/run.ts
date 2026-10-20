@@ -109,9 +109,17 @@ export interface Run {
   resumedFromRunId: string | null;
   /** `gate` = a schedule's gate agent deciding whether there is work; its cost is counted apart. `run` otherwise. */
   kind: RunKind;
+  /**
+   * Who pays for `costUsd` (migration 14): `api` when the child was spawned with an
+   * `ANTHROPIC_API_KEY` in its environment (billed per token), `subscription` otherwise (the
+   * cost is what Claude Code reports, not billed). Null until the run spawns, and for older rows.
+   */
+  billingType: BillingType | null;
 }
 
 export type RunKind = "run" | "gate";
+
+export type BillingType = "api" | "subscription";
 
 /** The wrap-up phase of a run, when there was one. */
 export function wrapUpPhase(run: Pick<Run, "phases">): RunPhase | null {
@@ -270,6 +278,8 @@ export function summarizeRun(run: Run) {
     createdAt: run.createdAt,
     durationMs: run.durationMs,
     costUsd: run.costUsd,
+    /** `subscription` = costUsd is reported by Claude Code, not billed; null = unknown (older run). */
+    billingType: run.billingType,
     numTurns: run.numTurns,
     toolCalls: run.toolCalls,
     deniedTools: run.deniedTools,

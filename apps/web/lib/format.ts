@@ -27,6 +27,15 @@ export function fmtCost(usd: number | null | undefined): string {
   return `$${usd.toFixed(2)}`;
 }
 
+/** Tooltip for a run's cost by billing type; null when it says nothing (api is billed, unknown is unknown). */
+export function billingNote(billingType: "api" | "subscription" | null | undefined): string | null {
+  return billingType === "subscription"
+    ? "Subscription run: cost reported by Claude Code, not billed"
+    : billingType === "api"
+      ? "API key run: billed per token"
+      : null;
+}
+
 export function fmtTime(iso: string | null | undefined): string {
   if (!iso) return "–";
   return new Date(iso).toLocaleString();

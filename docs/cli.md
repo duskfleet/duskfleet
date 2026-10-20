@@ -35,7 +35,7 @@ explicit model uses the Claude Code default.
 (`pending → running → completed | failed | cancelled | timed_out`), timestamps and duration,
 `claudeSessionId`, `permissionMode`, the exact `command` (binary, argv, cwd), `exitCode`,
 `terminationReason`, `error`, `resultText`, `numTurns`, `toolCalls`, input/output/cache tokens,
-`usageByModel` (the same tokens per model id), `costUsd`, `permissionDenials`, `deniedTools`, `mcp` (mounted, used, allow-listed but missing),
+`usageByModel` (the same tokens per model id), `costUsd`, `billingType`, `permissionDenials`, `deniedTools`, `mcp` (mounted, used, allow-listed but missing),
 `humanIntervention`, `contextExhausted`, `scheduleId`, `logPath`, `phases` (the main pass and,
 after a budget exhaustion, the [wrap-up pass](agents.md#budget-reserve-and-wrap-up-pass)), `resumedFromRunId` (the run whose session it resumed, see [resume once](schedules.md#resume-once-on-failure)).
 
@@ -46,6 +46,11 @@ spent on more than one model (a subagent on another model), otherwise the model 
 With a wrap-up pass the totals and `usageByModel` cover both passes; a pass without `modelUsage`
 counts under its own model, and when that is unknown `usageByModel` is null rather than partial.
 The dashboard's per-model breakdown counts a `mixed` run under the model it requested.
+
+`billingType` is set when the run spawns: `api` when the child's environment has an
+`ANTHROPIC_API_KEY` (Claude Code bills that key per token), `subscription` otherwise (`costUsd`
+is then what Claude Code reports, not what you are billed). It is null for runs recorded before it
+existed. The dashboard marks subscription costs "reported, not billed".
 
 `contextExhausted` comes only from structured signals (termination reason, result subtype,
 stop reason, or the error text of a failed run), never from scanning the result's prose.

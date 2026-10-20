@@ -455,6 +455,7 @@ export class RunManager {
       reviewReasons: [],
       resumedFromRunId: resume?.fromRun.id ?? null,
       kind,
+      billingType: null,
     };
 
     // Insert first so that events emitted by the executor always find the row. For a resume the
@@ -514,7 +515,11 @@ export class RunManager {
       cancelRequested: false,
       startedAtMs: Date.now(),
     });
-    this.transition(run, "running", { startedAt: new Date().toISOString(), command: handle.command });
+    this.transition(run, "running", {
+      startedAt: new Date().toISOString(),
+      command: handle.command,
+      billingType: handle.billingType ?? null,
+    });
     log.info("run started", {
       runId,
       agent: agent.id,

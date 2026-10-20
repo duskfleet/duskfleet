@@ -8,6 +8,7 @@ import { Prose } from "@/components/Prose";
 import { StatusBadge } from "@/components/StatusBadge";
 import { adjacentRuns, agentSummary, getRun, homeDir, projectLabel } from "@/lib/data";
 import {
+  billingNote,
   elapsedSince,
   fmtCompact,
   fmtCost,
@@ -161,7 +162,11 @@ export default async function RunPage({
 
       <div className="facts">
         <Fact label="Duration" value={fmtDuration(duration)} />
-        <Fact label="Cost" value={fmtCost(run.costUsd)} />
+        <Fact
+          label={run.billingType === "subscription" ? "Cost · reported, not billed" : "Cost"}
+          value={fmtCost(run.costUsd)}
+          title={billingNote(run.billingType) ?? undefined}
+        />
         <Fact label="Turns" value={fmtInt(run.numTurns)} />
         <Fact label="Tool calls" value={fmtInt(run.toolCalls)} />
         <Fact

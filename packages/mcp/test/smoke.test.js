@@ -14,6 +14,7 @@ import { fileURLToPath } from "node:url";
 import "./helpers.js"; // before @duskfleet/core: drops an inherited CLAUDE_BIN
 
 import {
+  billingTypeOf,
   budgetPlan,
   ClaudeCodeExecutor,
   loadConfig,
@@ -102,6 +103,28 @@ test("successful run is recorded with metrics", async () => {
 
     const events = app.runs.events(run.id).map((e) => e.type);
     assert.deepEqual(events, ["status_change", "status_change", "init", "tool_use", "status_change"]);
+  } finally {
+    await app.cleanup();
+  }
+});
+
+test("billingTypeOf: an ANTHROPIC_API_KEY in the child's environment means api, else subscription", () => {
+  assert.equal(billingTypeOf({ ANTHROPIC_API_KEY: "sk-ant-test" }), "api");
+  assert.equal(billingTypeOf({}), "subscription");
+  assert.equal(billingTypeOf({ ANTHROPIC_API_KEY: "  " }), "subscription", "a blank key authenticates nothing");
+});
+
+test("billing_type is recorded when the run spawns and survives the reload", async () => {
+  const app = makeApp();
+  try {
+    const started = await app.runs.startRun({ prompt: "ok", projectPath: app.project });
+    const expected = billingTypeOf(process.env);
+    assert.equal(started.billingType, expected);
+    const run = await app.runs.waitForRun(started.id, 10_000);
+    assert.equal(run.billingType, expected);
+    assert.equal(summarizeRun(run).billingType, expected);
+    const raw = app.db.prepare("SELECT billing_type FROM runs WHERE id = ?").get(run.id);
+    assert.equal(raw.billing_type, expected);
   } finally {
     await app.cleanup();
   }

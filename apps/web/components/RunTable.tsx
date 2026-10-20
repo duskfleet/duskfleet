@@ -2,6 +2,7 @@ import { wrapUpPhase } from "@duskfleet/core";
 import Link from "next/link";
 import type { RunWithProject } from "@/lib/data";
 import {
+  billingNote,
   elapsedSince,
   fmtClock,
   fmtCost,
@@ -183,7 +184,9 @@ export function RunTable({
               </td>
               <td className="num col-duration">{fmtDuration(duration)}</td>
               <td className="num col-turns">{fmtInt(r.numTurns)}</td>
-              <td className="num">{running ? "–" : fmtCost(r.costUsd)}</td>
+              <td className="num" title={billingNote(r.billingType) ?? undefined}>
+                {running ? "–" : fmtCost(r.costUsd)}
+              </td>
               {ended ? (
                 <td className="when col-started" title={fmtTime(finished)}>
                   {fmtClock(finished)}

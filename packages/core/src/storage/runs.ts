@@ -54,6 +54,7 @@ interface RunRow {
   review_reasons_json: string | null;
   resumed_from_run_id: string | null;
   kind: string | null;
+  billing_type: string | null;
 }
 
 function rowToRun(r: RunRow): Run {
@@ -99,6 +100,7 @@ function rowToRun(r: RunRow): Run {
     reviewReasons: parseReasons(r.review_reasons_json),
     resumedFromRunId: r.resumed_from_run_id ?? null,
     kind: r.kind === "gate" ? "gate" : "run",
+    billingType: r.billing_type === "api" || r.billing_type === "subscription" ? r.billing_type : null,
   };
 }
 
@@ -176,6 +178,7 @@ export type RunPatch = Partial<
     | "command"
     | "phases"
     | "reviewReasons"
+    | "billingType"
   >
 >;
 
@@ -209,6 +212,7 @@ const PATCH_COLUMNS: Record<keyof RunPatch, string> = {
   command: "command_json",
   phases: "phases_json",
   reviewReasons: "review_reasons_json",
+  billingType: "billing_type",
 };
 
 /**
@@ -246,8 +250,8 @@ export class RunRepository {
            exit_code, termination_reason, error, result_text, num_turns, tool_calls, input_tokens, output_tokens,
            cache_read_tokens, cache_creation_tokens, cost_usd, permission_denials, denied_tools_json, mcp_json, human_intervention,
            context_exhausted, retries, log_path, raw_result_json, schedule_id, owner, phases_json, review_reasons_json, resumed_from_run_id, kind,
-           usage_by_model_json)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+           usage_by_model_json, billing_type)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         run.id,
@@ -291,6 +295,7 @@ export class RunRepository {
         run.resumedFromRunId ?? null,
         run.kind ?? "run",
         run.usageByModel ? JSON.stringify(run.usageByModel) : null,
+        run.billingType ?? null,
       );
   }
 
