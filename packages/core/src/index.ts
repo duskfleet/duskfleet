@@ -56,6 +56,17 @@ export {
   type StreamState,
 } from "./execution/stream-json.js";
 export * from "./execution/types.js";
+export {
+  captureRunDiff,
+  DIFF_MAX_FILES,
+  DIFF_MAX_PATCH_BYTES,
+  type DiffFile,
+  type DiffFileStatus,
+  headSha,
+  parseNameStatus,
+  parseNumstat,
+  type RunDiff,
+} from "./git/diff.js";
 export * from "./observability/run.js";
 export { BusyError } from "./orchestration/busy.js";
 export { DailyCapError } from "./orchestration/daily-cap.js";

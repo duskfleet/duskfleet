@@ -23,6 +23,7 @@ import {
   type TokenUsage,
   type UsageByModel,
 } from "../execution/types.js";
+import { captureRunDiff, headSha } from "../git/diff.js";
 import {
   isBudgetExhausted,
   isResumable,
@@ -109,6 +110,8 @@ interface ActiveRun {
   cancelRequested: boolean;
   /** When the main pass was launched; the wrap-up pass only gets what is left of the run's timeout. */
   startedAtMs: number;
+  /** HEAD of the project before the spawn; null when it is not a git checkout (no diff event then). */
+  gitBase: string | null;
 }
 
 /** What the wrap-up pass is told. It must not start new work; it must leave a trace of where the run stopped. */
@@ -290,6 +293,11 @@ export class RunManager {
 
   events(runId: string) {
     return this.runs.events(runId);
+  }
+
+  /** What the run changed in its git checkout (the `diff` event), or null. A pure read. */
+  diff(runId: string) {
+    return this.runs.diff(runId);
   }
 
   /** Subagent invocations recorded for a run (see RunAgent). A pure read. */
@@ -480,6 +488,8 @@ export class RunManager {
       });
     }
 
+    // What the checkout looked like before the agent touched it; the diff event compares with it.
+    const gitBase = headSha(projectPath);
     let handle: ExecutionHandle;
     try {
       handle = this.executor.execute(request, (event) => this.onEvent(runId, event));
@@ -514,6 +524,7 @@ export class RunManager {
       mainResult: null,
       cancelRequested: false,
       startedAtMs: Date.now(),
+      gitBase,
     });
     this.transition(run, "running", {
       startedAt: new Date().toISOString(),
@@ -859,6 +870,7 @@ export class RunManager {
         });
         return;
       }
+      if (active?.gitBase) this.recordDiff(runId, active.projectPath, active.gitBase);
       this.transition(current, result.outcome, {
         endedAt: result.endedAt,
         durationMs: result.durationMs,
@@ -893,6 +905,23 @@ export class RunManager {
       });
     } catch (err) {
       log.error("failed to record run completion", { runId, err: err instanceof Error ? err.message : String(err) });
+    }
+  }
+
+  /**
+   * The `diff` event: what the run changed since `base`, the patch next to the JSONL log.
+   * Written before the final status so a reader that sees the run ended also sees its diff.
+   * A git failure is a note, never a reason to lose the run's result.
+   */
+  private recordDiff(runId: string, projectPath: string, base: string): void {
+    try {
+      const diff = captureRunDiff(projectPath, base, path.join(this.config.dataDir, "logs", `${runId}.diff`));
+      if (diff) this.runs.addEvent(runId, "diff", diff);
+      else this.runs.addEvent(runId, "note", { message: "git diff of the run could not be read" });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      log.warn("diff capture failed", { runId, err: message });
+      this.runs.addEvent(runId, "note", { message: `git diff of the run could not be recorded: ${message}` });
     }
   }
 
