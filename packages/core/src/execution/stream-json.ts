@@ -21,7 +21,14 @@
  * Unknown fields and unknown line types are ignored so CLI upgrades degrade gracefully.
  */
 import { summarizeToolInput } from "../orchestration/tool-summary.js";
-import type { DeniedTool, ExecutionEvent, SubagentRecord, TokenUsage } from "./types.js";
+import {
+  type DeniedTool,
+  type ExecutionEvent,
+  MIXED_MODEL,
+  type SubagentRecord,
+  type TokenUsage,
+  type UsageByModel,
+} from "./types.js";
 
 export interface ParsedResult {
   isError: boolean;
@@ -35,9 +42,12 @@ export interface ParsedResult {
   numTurns: number | null;
   durationMs: number | null;
   costUsd: number | null;
+  /** Run totals: the sum of `usageByModel` when the result has `modelUsage`, else its `usage`. */
   usage: TokenUsage;
+  usageByModel: UsageByModel | null;
   permissionDenials: number;
   deniedTools: DeniedTool[];
+  /** The single model in `modelUsage`, `"mixed"` when there are several, null without it. */
   modelUsed: string | null;
   raw: unknown;
 }
@@ -517,12 +527,9 @@ function parseResult(msg: Json): ParsedResult {
     });
   const denials = deniedTools.length;
 
-  // modelUsage is keyed by model id; when exactly one model was used, report it.
-  let modelUsed: string | null = null;
-  if (isObject(msg["modelUsage"])) {
-    const keys = Object.keys(msg["modelUsage"]);
-    if (keys.length >= 1) modelUsed = keys.join(",");
-  }
+  const usageByModel = parseModelUsage(msg["modelUsage"]);
+  const models = usageByModel ? Object.keys(usageByModel) : [];
+  const modelUsed = models.length === 0 ? null : models.length === 1 ? models[0]! : MIXED_MODEL;
 
   return {
     isError: msg["is_error"] === true,
@@ -538,17 +545,63 @@ function parseResult(msg: Json): ParsedResult {
     numTurns: num(msg["num_turns"]),
     durationMs: num(msg["duration_ms"]),
     costUsd: num(msg["total_cost_usd"]),
-    usage: {
-      inputTokens: num(usage["input_tokens"]),
-      outputTokens: num(usage["output_tokens"]),
-      cacheReadTokens: num(usage["cache_read_input_tokens"]),
-      cacheCreationTokens: num(usage["cache_creation_input_tokens"]),
-    },
+    // `usage` counts the main session only; `modelUsage` covers subagents too (verified
+    // 2026-10-20 on a logged run: main 6153 output tokens, modelUsage 10485 + 4774).
+    usage: usageByModel
+      ? sumUsage(Object.values(usageByModel))
+      : {
+          inputTokens: num(usage["input_tokens"]),
+          outputTokens: num(usage["output_tokens"]),
+          cacheReadTokens: num(usage["cache_read_input_tokens"]),
+          cacheCreationTokens: num(usage["cache_creation_input_tokens"]),
+        },
+    usageByModel,
     permissionDenials: denials,
     deniedTools,
     modelUsed,
     raw: msg,
   };
+}
+
+/**
+ * The result line's `modelUsage`: `{ "<model id>": { inputTokens, outputTokens,
+ * cacheReadInputTokens, cacheCreationInputTokens, costUSD, ... } }` (Claude Code 2.1.3xx).
+ * Null when absent, not an object, or without one usable entry.
+ */
+function parseModelUsage(v: unknown): UsageByModel | null {
+  if (!isObject(v)) return null;
+  const out: UsageByModel = {};
+  for (const [model, u] of Object.entries(v)) {
+    if (!isObject(u)) continue;
+    out[model] = {
+      inputTokens: num(u["inputTokens"]),
+      outputTokens: num(u["outputTokens"]),
+      cacheReadTokens: num(u["cacheReadInputTokens"]),
+      cacheCreationTokens: num(u["cacheCreationInputTokens"]),
+    };
+  }
+  return Object.keys(out).length ? out : null;
+}
+
+/** Field-wise sum; a field stays null only when it is null in every entry. */
+export function sumUsage(entries: TokenUsage[]): TokenUsage {
+  const total = emptyUsage();
+  for (const u of entries) {
+    for (const key of Object.keys(total) as Array<keyof TokenUsage>) {
+      const v = u[key];
+      if (v !== null) total[key] = (total[key] ?? 0) + v;
+    }
+  }
+  return total;
+}
+
+/** Per-model usage of two processes (main pass + wrap-up) as one map; null when both are null. */
+export function mergeUsageByModel(a: UsageByModel | null, b: UsageByModel | null): UsageByModel | null {
+  if (!a) return b;
+  if (!b) return a;
+  const out: UsageByModel = { ...a };
+  for (const [model, u] of Object.entries(b)) out[model] = out[model] ? sumUsage([out[model], u]) : u;
+  return out;
 }
 
 /**

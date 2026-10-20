@@ -10,7 +10,8 @@
  *   "crash"    -> exits 3 with no result line
  *   "subagent" -> delegates to a project agent "reviewer" (task_started, nested
  *                 messages with agent_id/parent_tool_use_id, task_notification,
- *                 hand-back tool_result), shapes from a real run of 2026-10-12
+ *                 hand-back tool_result), shapes from a real run of 2026-10-12; its result
+ *                 line has a main-session-only `usage` and a two-model `modelUsage`
  *   "subagent-hang" -> same, but the process is killed before the hand-back
  *   "env"      -> like "ok", result text says whether CLAUDE_BIN reached the child
  *   "gate-nowork" / "gate-work" / "gate-mention" -> like "ok"; a schedule gate agent's answer:
@@ -19,11 +20,17 @@
  *   "budget"  -> spends the whole --max-budget-usd and stops with the real budget shape
  *                 (subtype error_max_budget_usd, terminal_reason budget_exhausted, no `result`,
  *                 errors: [...], is_error true, exit 1; from run a2d99954 of 2026-10-14)
+ *   "linger"  -> like "ok", but keeps running after the result line (grace kill tests)
+ *   "linger-hook" -> like "ok", then exits while a spawned descendant keeps stdout open
+ *                 (a user-level Stop hook); the descendant's pid is written to ./hook.pid
  *
  * With `--resume <id>` (the wrap-up pass) the prompt is DuskFleet's fixed text, so the
  * behaviour comes from FAKE_CLAUDE_RESUME instead: unset = a short successful pass that
  * says where it stopped; "budget" = exhausts the reserve too; "hang" = never ends.
  */
+import { spawn } from "node:child_process";
+import { writeFileSync } from "node:fs";
+
 const args = process.argv.slice(2);
 const prompt = args[args.length - 1] ?? "ok";
 const sessionIdx = args.indexOf("--session-id");
@@ -45,6 +52,18 @@ if (args[0] === "--version") {
 }
 
 const out = (o) => process.stdout.write(JSON.stringify(o) + "\n");
+
+/** One `modelUsage` value as Claude Code 2.1.3xx prints it (verified 2026-10-20). */
+const modelUsageEntry = (input, output, cacheRead, cacheCreation, costUSD) => ({
+  inputTokens: input,
+  outputTokens: output,
+  cacheReadInputTokens: cacheRead,
+  cacheCreationInputTokens: cacheCreation,
+  webSearchRequests: 0,
+  costUSD,
+  contextWindow: 1000000,
+  maxOutputTokens: 128000,
+});
 
 out({
   type: "system",
@@ -91,7 +110,7 @@ const budgetStop = () => {
     session_id: sessionId,
     total_cost_usd: maxBudget,
     usage: { input_tokens: 22, output_tokens: 13, cache_creation_input_tokens: 100, cache_read_input_tokens: 2000 },
-    modelUsage: { [model]: { inputTokens: 22, outputTokens: 13 } },
+    modelUsage: { [model]: modelUsageEntry(22, 13, 2000, 100, maxBudget) },
     permission_denials: [],
     terminal_reason: "budget_exhausted",
     stop_reason: "tool_use",
@@ -138,7 +157,7 @@ if (resumeIdx >= 0) {
       session_id: sessionId,
       total_cost_usd: 0.02,
       usage: { input_tokens: 11, output_tokens: 12, cache_creation_input_tokens: 0, cache_read_input_tokens: 1000 },
-      modelUsage: { [model]: { inputTokens: 11, outputTokens: 12 } },
+      modelUsage: { [model]: modelUsageEntry(11, 12, 1000, 0, 0.02) },
       permission_denials: [],
       terminal_reason: "completed",
       stop_reason: "end_turn",
@@ -336,10 +355,12 @@ if (resumeIdx >= 0) {
       result: "Reviewer found two issues.",
       session_id: sessionId,
       total_cost_usd: 0.05,
-      usage: { input_tokens: 29, output_tokens: 73, cache_creation_input_tokens: 300, cache_read_input_tokens: 500 },
+      // As in a real run (2026-10-19): `usage` is the main session only, `modelUsage` adds the
+      // subagent's model, so the run totals are the modelUsage sum (29 / 73 / 1700 / 700).
+      usage: { input_tokens: 22, output_tokens: 13, cache_creation_input_tokens: 400, cache_read_input_tokens: 1200 },
       modelUsage: {
-        [model]: { inputTokens: 22, outputTokens: 13 },
-        "claude-haiku-5-5": { inputTokens: 7, outputTokens: 60 },
+        [model]: modelUsageEntry(22, 13, 1200, 400, 0.04),
+        "claude-haiku-5-5": modelUsageEntry(7, 60, 500, 300, 0.01),
       },
       permission_denials: [],
       terminal_reason: "completed",
@@ -395,10 +416,22 @@ if (resumeIdx >= 0) {
     session_id: sessionId,
     total_cost_usd: 0.0123,
     usage: { input_tokens: 22, output_tokens: 13, cache_creation_input_tokens: 328, cache_read_input_tokens: 24254 },
-    modelUsage: { [model]: { inputTokens: 22, outputTokens: 13 } },
+    modelUsage: { [model]: modelUsageEntry(22, 13, 24254, 328, 0.0123) },
     permission_denials: prompt === "denied" ? [{ tool_name: "Bash" }] : [],
     terminal_reason: isError ? "api_error" : "completed",
     stop_reason: "end_turn",
   });
-  process.exit(isError ? 1 : 0);
+  if (prompt === "linger") {
+    setInterval(() => {}, 1000); // never exits after its result (until the grace kill)
+  } else if (prompt === "linger-hook") {
+    // A "Stop hook": a descendant that inherits stdout and outlives us, so the pipe never
+    // closes. Its pid goes to hook.pid in the cwd so the test can check it was killed.
+    const hook = spawn(process.execPath, ["-e", "setInterval(() => {}, 1000)"], {
+      stdio: ["ignore", "inherit", "inherit"],
+    });
+    writeFileSync("hook.pid", String(hook.pid));
+    process.exit(0);
+  } else {
+    process.exit(isError ? 1 : 0);
+  }
 }

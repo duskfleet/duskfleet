@@ -14,7 +14,14 @@ import { createInterface } from "node:readline";
 import type { RecordedCommand } from "../observability/run.js";
 import { logger } from "../util/log.js";
 import { createStreamState, ingestLine, looksLikeContextExhaustion } from "./stream-json.js";
-import type { ExecutionEvent, ExecutionHandle, ExecutionRequest, ExecutionResult, Executor } from "./types.js";
+import {
+  type ExecutionEvent,
+  type ExecutionHandle,
+  type ExecutionRequest,
+  type ExecutionResult,
+  type Executor,
+  MIXED_MODEL,
+} from "./types.js";
 
 const log = logger("execution");
 
@@ -26,10 +33,23 @@ export interface ClaudeCodeExecutorOptions {
   settingSources?: string[] | null;
   /** Only when true will bypassPermissions be translated into --dangerously-skip-permissions. */
   allowBypassPermissions: boolean;
+  /**
+   * How long the process group may outlive the `result` line before it is sent SIGTERM
+   * (then SIGKILL after the kill grace). Default 5 s; tests shorten it.
+   */
+  resultGraceMs?: number;
 }
 
 /** Grace period between SIGTERM and SIGKILL when cancelling or timing out. */
 const KILL_GRACE_MS = 5_000;
+/** Default time the child may keep running (or keep its stdio open) after printing its result. */
+const RESULT_GRACE_MS = 5_000;
+/**
+ * The child leads its own process group, so a signal reaches what it spawned too (hooks,
+ * shells) and a grandchild holding stdout open cannot keep the run alive. Windows has no
+ * process groups (and `detached` would open a console there).
+ */
+const OWN_PROCESS_GROUP = process.platform !== "win32";
 
 export class ClaudeCodeExecutor implements Executor {
   readonly name = "claude-code";
@@ -109,6 +129,9 @@ export class ClaudeCodeExecutor implements Executor {
     let outcome: ExecutionResult["outcome"] | null = null; // set by cancel/timeout before exit
     let killTimer: NodeJS.Timeout | null = null;
     let timeoutTimer: NodeJS.Timeout | null = null;
+    let resultTimer: NodeJS.Timeout | null = null;
+    let closed = false; // stdio closed and the process exited: nothing left to signal
+    let graceKilled = false; // ended by DuskFleet after a result line: the result decides the outcome
     let stderrTail = "";
     let logStream: WriteStream | null = null;
 
@@ -127,6 +150,7 @@ export class ClaudeCodeExecutor implements Executor {
         env: childEnv(),
         stdio: ["ignore", "pipe", "pipe"],
         shell: false, // never a shell: argv is passed verbatim to the binary
+        detached: OWN_PROCESS_GROUP,
       });
     } catch (err) {
       logStream?.end();
@@ -150,13 +174,48 @@ export class ClaudeCodeExecutor implements Executor {
       };
     }
 
+    /** Signal the child's whole process group (the child alone where there are no groups). */
+    const signal = (sig: NodeJS.Signals) => {
+      if (OWN_PROCESS_GROUP && child.pid) {
+        try {
+          process.kill(-child.pid, sig);
+          return;
+        } catch {
+          // ESRCH: the group is gone already; fall through to the child itself.
+        }
+      }
+      child.kill(sig);
+    };
+
     const terminate = (reason: ExecutionResult["outcome"]) => {
-      if (outcome || child.exitCode !== null) return;
+      if (outcome || closed) return;
       outcome = reason;
       log.info(`terminating run (${reason})`, { pid: child.pid });
-      child.kill("SIGTERM");
+      signal("SIGTERM");
       killTimer = setTimeout(() => {
-        if (child.exitCode === null) child.kill("SIGKILL");
+        if (!closed) signal("SIGKILL");
+      }, KILL_GRACE_MS);
+    };
+
+    /**
+     * The result line is the end of the run. A child that is still running (or whose
+     * descendants, such as a user-level Stop hook, still hold its stdout) once the grace
+     * is over would hang the run until its timeout: end the group instead.
+     */
+    const resultGraceMs = this.options.resultGraceMs ?? RESULT_GRACE_MS;
+    const graceKill = () => {
+      resultTimer = null;
+      if (closed || outcome || graceKilled) return;
+      graceKilled = true;
+      const childAlive = child.exitCode === null && child.signalCode === null;
+      log.warn("process still running after its result line; ending its process group", {
+        pid: child.pid,
+        childAlive,
+      });
+      emit({ type: "grace_kill", pid: child.pid ?? null, afterMs: resultGraceMs, childAlive });
+      signal("SIGTERM");
+      killTimer = setTimeout(() => {
+        if (!closed) signal("SIGKILL");
       }, KILL_GRACE_MS);
     };
 
@@ -171,6 +230,9 @@ export class ClaudeCodeExecutor implements Executor {
       stdout.on("line", (line) => {
         logStream?.write(line + "\n");
         for (const ev of ingestLine(state, line)) emit(ev);
+        if (state.result && !resultTimer && !graceKilled && !closed) {
+          resultTimer = setTimeout(graceKill, resultGraceMs);
+        }
       });
 
       child.stderr!.setEncoding("utf8");
@@ -185,8 +247,10 @@ export class ClaudeCodeExecutor implements Executor {
       });
 
       child.on("close", (code, signal) => {
+        closed = true;
         if (timeoutTimer) clearTimeout(timeoutTimer);
         if (killTimer) clearTimeout(killTimer);
+        if (resultTimer) clearTimeout(resultTimer);
         logStream?.end();
         const endedAt = new Date();
 
@@ -200,7 +264,8 @@ export class ClaudeCodeExecutor implements Executor {
         } else if (!state.result) {
           finalOutcome = "failed";
           error = `no result message received (exit ${code ?? "null"}, signal ${signal ?? "none"})` + tail(stderrTail);
-        } else if (state.result.isError || (code !== null && code !== 0)) {
+        } else if (state.result.isError || (!graceKilled && code !== null && code !== 0)) {
+          // After a grace kill the exit code is the signal's (143, 1...), not the run's verdict.
           finalOutcome = "failed";
           // A budget stop has no `result` text, only `errors: ["Reached maximum budget ($5)"]`.
           error = state.result.resultText ?? state.result.errorText ?? `exit code ${code}` + tail(stderrTail);
@@ -251,7 +316,8 @@ function finalResult(input: {
   return {
     outcome: input.outcome,
     sessionId: input.state.sessionId ?? input.sessionId,
-    model: input.state.model ?? r?.modelUsed ?? null,
+    // Tokens spent on several models (subagents) make the run "mixed"; otherwise the main session's model.
+    model: r?.modelUsed === MIXED_MODEL ? MIXED_MODEL : (input.state.model ?? r?.modelUsed ?? null),
     startedAt: input.startedAt.toISOString(),
     endedAt: input.endedAt.toISOString(),
     durationMs: input.endedAt.getTime() - input.startedAt.getTime(),
@@ -263,6 +329,7 @@ function finalResult(input: {
     numTurns: r?.numTurns ?? null,
     toolCalls: input.state.toolCalls,
     usage: r?.usage ?? { inputTokens: null, outputTokens: null, cacheReadTokens: null, cacheCreationTokens: null },
+    usageByModel: r?.usageByModel ?? null,
     costUsd: r?.costUsd ?? null,
     permissionDenials: r?.permissionDenials ?? 0,
     deniedTools: r?.deniedTools ?? [],

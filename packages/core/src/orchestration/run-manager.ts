@@ -10,15 +10,18 @@ import { listProjectAgents, projectAgentDefinitionHash } from "../config/agent-f
 import { loadConfig } from "../config/loader.js";
 import type { AgentDefinition, DuskFleetConfig, ProjectDefinition } from "../config/types.js";
 import { mergeSubagent, needsRepair, sameSubagent, subagentsFromLog } from "../execution/log-replay.js";
-import type {
-  ExecutionEvent,
-  ExecutionHandle,
-  ExecutionRequest,
-  ExecutionResult,
-  Executor,
-  McpServerInfo,
-  SubagentRecord,
-  TokenUsage,
+import { mergeUsageByModel } from "../execution/stream-json.js";
+import {
+  type ExecutionEvent,
+  type ExecutionHandle,
+  type ExecutionRequest,
+  type ExecutionResult,
+  type Executor,
+  type McpServerInfo,
+  MIXED_MODEL,
+  type SubagentRecord,
+  type TokenUsage,
+  type UsageByModel,
 } from "../execution/types.js";
 import {
   isBudgetExhausted,
@@ -433,6 +436,7 @@ export class RunManager {
       outputTokens: null,
       cacheReadTokens: null,
       cacheCreationTokens: null,
+      usageByModel: null,
       costUsd: null,
       permissionDenials: null,
       deniedTools: [],
@@ -847,6 +851,7 @@ export class RunManager {
         outputTokens: result.usage.outputTokens,
         cacheReadTokens: result.usage.cacheReadTokens,
         cacheCreationTokens: result.usage.cacheCreationTokens,
+        usageByModel: result.usageByModel,
         costUsd: result.costUsd,
         permissionDenials: result.permissionDenials,
         deniedTools: result.deniedTools,
@@ -995,6 +1000,12 @@ export class RunManager {
       case "parse_error":
         this.runs.addEvent(runId, "error", { parseError: event.line });
         break;
+      case "grace_kill":
+        this.runs.addEvent(runId, "note", {
+          message: `${event.childAlive ? "process" : "a descendant of the process"} still running ${event.afterMs / 1000} s after the result line: SIGTERM sent to its process group`,
+          graceKill: { pid: event.pid, afterMs: event.afterMs, childAlive: event.childAlive },
+        });
+        break;
       default:
         break; // assistant_text and stderr go to the log file only
     }
@@ -1031,6 +1042,18 @@ function defined<T extends object>(patch: T): Partial<T> {
   return Object.fromEntries(Object.entries(patch).filter(([, v]) => v !== undefined)) as Partial<T>;
 }
 
+/**
+ * One pass's per-model usage, so the merged map always sums to the merged totals: the
+ * pass's own map when it has one, nothing when it spent no tokens, its totals under its
+ * model when that model is known, otherwise "unknown" (undefined).
+ */
+function passUsageByModel(r: ExecutionResult): UsageByModel | null | undefined {
+  if (r.usageByModel) return r.usageByModel;
+  if (Object.values(r.usage).every((v) => v === null)) return null;
+  if (r.model && r.model !== MIXED_MODEL) return { [r.model]: r.usage };
+  return undefined;
+}
+
 export function mergeResults(main: ExecutionResult, wrapUp: ExecutionResult): ExecutionResult {
   const usage: TokenUsage = {
     inputTokens: addNullable(main.usage.inputTokens, wrapUp.usage.inputTokens),
@@ -1038,16 +1061,23 @@ export function mergeResults(main: ExecutionResult, wrapUp: ExecutionResult): Ex
     cacheReadTokens: addNullable(main.usage.cacheReadTokens, wrapUp.usage.cacheReadTokens),
     cacheCreationTokens: addNullable(main.usage.cacheCreationTokens, wrapUp.usage.cacheCreationTokens),
   };
+  // A pass whose tokens cannot be attributed to a model drops the map: a partial map
+  // would no longer sum to the totals above.
+  const mainByModel = passUsageByModel(main);
+  const wrapUpByModel = passUsageByModel(wrapUp);
+  const usageByModel =
+    mainByModel === undefined || wrapUpByModel === undefined ? null : mergeUsageByModel(mainByModel, wrapUpByModel);
   return {
     ...main,
     outcome: wrapUp.outcome === "cancelled" ? "cancelled" : main.outcome,
-    model: main.model ?? wrapUp.model,
+    model: usageByModel && Object.keys(usageByModel).length > 1 ? MIXED_MODEL : (main.model ?? wrapUp.model),
     endedAt: wrapUp.endedAt,
     durationMs: Math.max(0, Date.parse(wrapUp.endedAt) - Date.parse(main.startedAt)),
     resultText: wrapUp.resultText ?? main.resultText,
     numTurns: addNullable(main.numTurns, wrapUp.numTurns),
     toolCalls: main.toolCalls + wrapUp.toolCalls,
     usage,
+    usageByModel,
     costUsd: addNullable(main.costUsd, wrapUp.costUsd),
     permissionDenials: main.permissionDenials + wrapUp.permissionDenials,
     deniedTools: [...main.deniedTools, ...wrapUp.deniedTools],
