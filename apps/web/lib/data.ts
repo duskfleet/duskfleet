@@ -567,6 +567,29 @@ export function scheduleFirings(id: string, limit = 10) {
   return services().schedules.firings(id, limit);
 }
 
+/**
+ * The last `limit` firings of each schedule, each with how the run it started ended (the
+ * stored `reviewReasons`, as everywhere else; null for skips, errors, or a pruned run). Two
+ * queries for the whole page, no result blobs.
+ */
+export function scheduleFiringsWithRuns(ids: readonly string[], limit = 10) {
+  const { runs, schedules } = services();
+  const firings = new Map(ids.map((id) => [id, schedules.firings(id, limit)]));
+  const runIds = [...firings.values()].flat().flatMap((f) => (f.runId ? [f.runId] : []));
+  const byId = new Map(runs.summaries(runIds).map((r) => [r.id, r]));
+  return new Map(
+    [...firings].map(([id, list]) => [
+      id,
+      list.map((f) => ({ ...f, run: f.runId ? (byId.get(f.runId) ?? null) : null })),
+    ]),
+  );
+}
+
+/** Firing counts over the last `days` days, across every schedule. */
+export function firingTotals(days = 7): { started: number; skippedBusy: number } {
+  return services().schedules.firingTotals(new Date(Date.now() - days * 24 * 3600_000).toISOString());
+}
+
 export function schedulerLease() {
   return services().schedules.leaseInfo();
 }

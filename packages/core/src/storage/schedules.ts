@@ -337,6 +337,17 @@ export class ScheduleRepository {
     }));
   }
 
+  /** Ticks since `sinceIso` across every schedule: how many started a run (started + resumed) and how many were skipped busy. */
+  firingTotals(sinceIso: string): { started: number; skippedBusy: number } {
+    const r = this.db
+      .prepare(
+        `SELECT SUM(outcome IN ('started', 'resumed')) AS started, SUM(outcome = 'skipped_busy') AS skipped_busy
+         FROM schedule_firings WHERE fired_at >= ?`,
+      )
+      .get(sinceIso) as { started: number | null; skipped_busy: number | null };
+    return { started: r.started ?? 0, skippedBusy: r.skipped_busy ?? 0 };
+  }
+
   // ---- lease ---------------------------------------------------------------
 
   /**

@@ -314,6 +314,8 @@ test("tick fires due schedules, honours the kill switch, and only the lease hold
     assert.equal(after.lastOutcome, "skipped_busy");
     assert.equal(after.skips, 1);
     assert.equal(repo.firings(s.id).length, 2);
+    assert.deepEqual(repo.firingTotals(new Date(0).toISOString()), { started: 1, skippedBusy: 1 });
+    assert.deepEqual(repo.firingTotals(new Date(Date.now() + 60_000).toISOString()), { started: 0, skippedBusy: 0 });
 
     // kill switch
     writeFileSync(

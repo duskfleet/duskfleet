@@ -1550,8 +1550,338 @@ summary:focus-visible {
 }
 
 /* ---- schedules ----------------------------------------------------------- */
-.runs td.cron-cell .mono {
+/* status strip: scheduler / lease holder / next firing / last 7 days */
+.sched-strip {
+  display: grid;
+  grid-template-columns: 1fr 1.25fr 1.33fr 1.33fr;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  box-shadow: var(--shadow);
+  overflow: hidden;
+  margin-bottom: 24px;
+}
+.sched-strip .cell {
+  padding: 12px 18px;
+  border-right: 1px solid var(--border);
+  min-width: 0;
+}
+.sched-strip .cell:last-child {
+  border-right: none;
+}
+.sched-strip .label {
+  font-size: 12px;
+  line-height: 17.5px;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  font-weight: 600;
+}
+.sched-strip .value {
+  font-family: var(--font-display);
+  font-size: 20px;
+  line-height: 29px;
+  font-weight: 600;
+  margin-top: 2px;
+  color: var(--text);
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.sched-strip .value.ok {
+  color: var(--ok);
+}
+.sched-strip .value.neutral {
+  color: var(--muted);
+}
+.sched-strip .value.mono {
+  font-family: var(--font-mono);
+  font-size: 15px;
+  line-height: 22px;
+  font-weight: 500;
+  margin-top: 5px;
+}
+.sched-strip .value .dot {
+  flex: none;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: currentColor;
+  align-self: center;
+}
+.sched-strip .value .aside {
+  font-size: 15px;
+  line-height: 22px;
+  font-weight: 500;
+  color: var(--muted);
+  margin-left: -4px;
+}
+.sched-strip .sub {
+  font-size: 12px;
+  line-height: 17.5px;
+  color: var(--faint);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+/* one group per project ("no project" last): a heading, then its cards */
+.sched-group + .sched-group {
+  margin-top: 28px;
+}
+.sched-group > h2 {
+  margin-top: 0;
+}
+.sched-group > h2 a {
+  color: inherit;
+}
+/* one card per schedule: what it runs on the left, last firings on the right, actions below */
+.sched-list {
+  display: grid;
+  gap: 12px;
+}
+.sched-card {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 420px;
+  column-gap: 24px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  box-shadow: var(--shadow);
+  padding: 16px 18px 12px;
+}
+.sched-card.paused {
+  opacity: 0.75;
+}
+.sched-card:target {
+  border-color: var(--accent);
+}
+.sched-card .main {
+  min-width: 0;
+}
+.sched-card .title-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.sched-card h3 {
+  font-family: var(--font-display);
+  font-size: 18px;
+  line-height: 26px;
+  font-weight: 600;
+  margin: 0;
+  color: var(--text);
+}
+.sched-card .meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: 8px;
+  font-size: 13.5px;
+  line-height: 19.5px;
+  color: var(--muted);
+}
+.sched-card .sep {
+  color: var(--faint);
+}
+.sched-card .meta a.agent {
+  color: var(--amber);
+}
+.sched-card .meta .model {
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+  line-height: 18px;
+}
+.cron-chip {
+  font-family: var(--font-mono);
+  font-size: 13.5px;
+  line-height: 19.5px;
+  padding: 1px 8px;
+  border-radius: 6px;
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  color: var(--text);
+  white-space: pre;
+}
+.sched-card blockquote {
+  margin: 10px 0 0;
+  padding: 4px 0 4px 12px;
+  border-left: 3px solid var(--dusk);
+  font-size: 14px;
+  line-height: 20.5px;
+  color: var(--muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.sched-card .firings {
+  min-width: 0;
+}
+.sched-card .firings .label {
+  font-size: 11px;
+  line-height: 16px;
+  color: var(--faint);
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  font-weight: 600;
+}
+.sched-card .squares {
+  display: flex;
+  gap: 4px;
+  margin-top: 8px;
+}
+.sched-card .squares .sq {
+  flex: 1 1 0;
+  height: 28px;
+  border-radius: 5px;
+}
+.sched-card .squares a.sq:hover {
+  filter: brightness(1.15);
+}
+.sched-card .last {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 8px;
+  font-size: 12.5px;
+  line-height: 18px;
+  color: var(--muted);
+}
+.sched-card .last a {
+  color: var(--amber);
+  white-space: nowrap;
+}
+.sched-card .last .v.clean {
+  color: var(--ok);
+}
+.sched-card .last .v.review {
+  color: var(--warn);
+}
+.sched-card .last .v.failed {
+  color: var(--bad-ink);
+}
+.sched-card .last .v.running {
+  color: var(--run);
+}
+.sched-card .foot {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 1px solid var(--border);
+  font-size: 12.5px;
+  line-height: 18px;
+}
+.sched-card .foot-facts {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  min-width: 0;
+}
+.sched-card .foot-facts .skips {
+  color: var(--warn);
+}
+.sched-card .foot-facts .err {
+  color: var(--bad-ink);
+  overflow-wrap: anywhere;
+}
+.sched-card .foot-facts .idle {
+  font-variant-numeric: tabular-nums;
+}
+.sched-card .foot-facts .idle.warn {
+  color: var(--warn);
+}
+.sched-card .foot .sched-actions,
+.sched-card .foot .sched-edit {
+  margin-top: 0;
+}
+/* firing squares, shared by the cards and the legend */
+.sq {
+  display: inline-block;
+  border: 1px solid transparent;
+}
+.sq.clean {
+  background: var(--ok);
+}
+.sq.review {
+  background: var(--warn);
+}
+.sq.failed {
+  background: var(--coral);
+}
+.sq.cancelled {
+  background: var(--muted);
+}
+.sq.running {
+  background: var(--run);
+}
+.sq.busy,
+.sq.skipped {
+  border-color: var(--faint);
+}
+.sq.skipped {
+  border-style: dashed;
+}
+.sq.gate {
+  border-color: var(--faint);
+  border-style: dotted;
+}
+.sq.none,
+.sq.gone {
+  background: var(--panel-2);
+  border-color: var(--border);
+}
+.sq.gone {
+  border-style: dashed;
+}
+.sched-legend {
+  display: flex;
+  gap: 16px;
+  flex-wrap: wrap;
+  margin-top: 16px;
+  font-size: 12.5px;
+  line-height: 18px;
+  color: var(--muted);
+}
+.sched-legend > span {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.sched-legend .sq {
+  width: 10px;
+  height: 10px;
+  border-radius: 3px;
+}
+.sched-howto {
+  margin-top: 24px;
+  display: grid;
+  gap: 10px;
+}
+.sched-howto summary {
+  cursor: pointer;
+  color: var(--muted);
+  font-weight: 500;
+}
+.sched-howto p {
+  margin: 0;
+  font-size: 0.86rem;
+}
+.sched-howto .cmd pre {
   font-size: 0.8rem;
+}
+.sched-howto-label {
+  font-size: 0.8rem;
+  margin-bottom: 6px;
 }
 .sched-actions {
   display: inline-flex;
@@ -1609,34 +1939,6 @@ summary:focus-visible {
 }
 .runs tr:target td {
   background: var(--accent-bg);
-}
-/* schedules: one tbody per project, its first row is the group header */
-.runs tr.group-head td,
-.runs tbody tr.group-head:hover td {
-  background: var(--panel-2);
-  color: var(--muted);
-  font-size: 12px;
-  font-weight: 600;
-  line-height: 17.5px;
-  padding-top: 8px;
-  padding-bottom: 8px;
-}
-.runs tbody + tbody tr.group-head td {
-  border-top: 1px solid var(--border-strong);
-}
-.runs tr.group-head .sep {
-  color: var(--faint);
-  margin: 0 6px;
-}
-.runs tr.group-head .muted {
-  font-weight: 400;
-}
-.howto {
-  display: grid;
-  gap: 10px;
-}
-.howto .cmd pre {
-  font-size: 0.8rem;
 }
 
 /* ---- MCP docs ------------------------------------------------------------ */
@@ -1970,6 +2272,22 @@ details.desc ul {
   }
   .two-col {
     grid-template-columns: 1fr;
+  }
+  .sched-strip {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .sched-strip .cell:nth-child(2) {
+    border-right: none;
+  }
+  .sched-strip .cell:nth-child(-n + 2) {
+    border-bottom: 1px solid var(--border);
+  }
+  .sched-card {
+    grid-template-columns: 1fr;
+    row-gap: 14px;
+  }
+  .sched-card blockquote {
+    white-space: normal;
   }
 }
 @media (max-width: 600px) {

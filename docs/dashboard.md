@@ -31,22 +31,26 @@ in the nav); the other pages are static.
   past 4 entries), limits (timeout, budget and the wrap-up reserve), prompt preview and
   aggregate stats. User agents can be deleted or
   unlinked from here, with an inline confirmation; builtins are read-only.
-- **Schedules**: state, cron (human and raw), next tick (theoretical one for paused schedules),
-  last outcome and firing history, the state of the run it last started, the on-failure policy
-  in force and a "next: resume" badge when the next fire will resume that run, and the
-  **Idle · 7 d** column: no-op runs out of all runs and the dollars they cost (amber when at
-  least half the runs were no-ops; see [idle cost](schedules.md#idle-cost)), plus the
-  schedule's [gate](schedules.md#gates-skip-cheaply-when-there-is-no-work) and what it skipped and
-  cost. A `skipped gate` tick is grey; its reason is the tick's error text.
+- **Schedules**: a status strip (kill switch, lease holder and when its lease expires, next
+  firing, last 7 days fired / skipped busy), then the schedules grouped by project ("no project"
+  last), one card each: cron (raw and in plain words), agent, model, the
+  [gate](schedules.md#gates-skip-cheaply-when-there-is-no-work) and on-failure policy in force, the
+  prompt, the last 10 firings as squares coloured by how the run they started **ended** (clean,
+  needs review from the stored review reasons, failed, running, cancelled, skipped busy, skipped by
+  the gate, run gone), and a footer with the next tick (theoretical one for paused schedules), the
+  fired / skipped counters, the [idle cost](schedules.md#idle-cost) over 7 days (no-op runs out of
+  all runs and the dollars they cost, amber when at least half were no-ops), what the gate skipped
+  and cost, and the last error. A "next: resume" badge says the next fire will resume the last run
+  (`on_failure: resume_once`). Each card can be run now, paused / resumed, have its cron and time
+  zone edited, or be deleted (inline confirmation); the changes go through the same validation as
+  `update_schedule`. **Run now** does not start Claude from the dashboard: it marks the row and the
+  process that holds the scheduler lease fires it on its next tick (within `tick_seconds`, paused
+  or not, busy = skip), so it waits while no process ticks. A callout warns when only an MCP host
+  ticks, with the `install-service` command. Creating a schedule and changing its agent, project,
+  prompt, model, gate or on-failure policy stay on MCP (copyable `create_schedule` example).
 - **Spent** (Runs page) splits into "on runs" and "on gates" once a gate agent has run; gate
   runs carry a `gate` flag in the run list and are left out of the run counts (total, clean,
-  failed, needs review): a gate is a yes/no check, not work. Each row can be run now, paused / resumed, have its cron and
-  time zone edited, or be deleted (inline confirmation); the changes go through the same
-  validation as `update_schedule`. **Run now** does not start Claude from the dashboard: it marks
-  the row and the process that holds the scheduler lease fires it on its next tick (within
-  `tick_seconds`, paused or not, busy = skip), so it waits while no process ticks. The badge says which kind of process ticks (service, MCP host) and
-  warns when only an MCP host does, with the `install-service` command. Creating a schedule and
-  changing its agent, project, prompt or model stay on MCP (copyable `create_schedule` example).
+  failed, needs review): a gate is a yes/no check, not work.
 - **MCP**: the tool catalogue (`packages/mcp/dist/tools.json`, generated at build time from the
   real server) with a sticky index, plus the registration snippets for Claude Desktop and
   Claude Code with your absolute paths.
