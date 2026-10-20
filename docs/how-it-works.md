@@ -71,8 +71,12 @@ they arrive and keeps the raw stream in `data/logs/<run_id>.jsonl`:
   run page shows it under "Changes". A project that is not a git checkout gets no diff.
   Edits that were already uncommitted before the run are part of the diff too. Lines of
   untracked files are counted for the first 1000 files / 64 MB only; past that a file is listed
-  as "not counted" and the totals are marked partial (`totalsPartial`). Diff and textconv
-  drivers of the checkout never run.
+  as "not counted" and the totals are marked partial (`totalsPartial`). An untracked symlink
+  counts as one line (its target is never read); a nested repository or anything else that is
+  not a regular file is listed as "not counted". The whole capture has a 30 s budget: work
+  past it is skipped and marked the same way. `patchTruncated` means the patch is incomplete
+  (cut at 1 MB, or a git read failed or ran out of time). Diff and textconv drivers of the
+  checkout never run.
 
 `RunManager` is the only writer of a run's status, and every change goes through a checked
 transition. Each run records its owner process; orphan recovery closes a `running` row as

@@ -62,6 +62,7 @@ export {
   DIFF_MAX_COUNTED_FILES,
   DIFF_MAX_FILES,
   DIFF_MAX_PATCH_BYTES,
+  DIFF_TIME_BUDGET_MS,
   type DiffFile,
   type DiffFileStatus,
   headSha,

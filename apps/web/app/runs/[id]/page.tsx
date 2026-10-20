@@ -513,14 +513,14 @@ function Changes({ run, diff }: { run: Run; diff: RunDiff }) {
         {diff.totalsPartial && (
           <>
             <span className="sep">·</span>
-            <span className="muted">totals leave out untracked files past the counting caps</span>
+            <span className="muted">totals leave out the untracked entries marked "not counted"</span>
           </>
         )}
         {diff.patchPath && (
           <>
             <span className="sep">·</span>
             <a href={`/runs/${run.id}/diff`} target="_blank" rel="noreferrer">
-              open the patch{diff.patchTruncated ? " (cut at 1 MB)" : ""}
+              open the patch{diff.patchTruncated ? " (incomplete)" : ""}
             </a>
           </>
         )}

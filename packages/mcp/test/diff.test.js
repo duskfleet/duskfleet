@@ -4,7 +4,17 @@
  */
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { test } from "node:test";
@@ -18,6 +28,7 @@ import {
   DIFF_MAX_COUNTED_FILES,
   DIFF_MAX_FILES,
   DIFF_MAX_PATCH_BYTES,
+  DIFF_TIME_BUDGET_MS,
   headSha,
   loadConfig,
   openDatabase,
@@ -238,6 +249,72 @@ test("captureRunDiff counts a large untracked text file and stops counting past 
     assert.equal(diff.totalsPartial, true);
     assert.equal(diff.additions, 20_000 + DIFF_MAX_COUNTED_FILES - 1, "only the counted files are in the totals");
   } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("captureRunDiff: an untracked symlink is one line, a nested repository is not counted", () => {
+  const root = realpathSync(mkdtempSync(path.join(tmpdir(), "duskfleet-diff-")));
+  const outside = realpathSync(mkdtempSync(path.join(tmpdir(), "duskfleet-diff-outside-")));
+  try {
+    makeRepo(root);
+    const base = headSha(root);
+    writeFileSync(path.join(outside, "long.txt"), "x\n".repeat(30));
+    symlinkSync(path.join(outside, "long.txt"), path.join(root, "to-file"));
+    symlinkSync(outside, path.join(root, "to-dir"));
+    makeRepo(path.join(root, "nested"));
+    const out = path.join(root, ".git", "run.diff");
+    const diff = captureRunDiff(root, base, out);
+    const byPath = Object.fromEntries(diff.changedFiles.map((f) => [f.path, f]));
+    assert.deepEqual(byPath["to-file"], { path: "to-file", status: "untracked", additions: 1, deletions: 0 });
+    assert.deepEqual(byPath["to-dir"], { path: "to-dir", status: "untracked", additions: 1, deletions: 0 });
+    assert.deepEqual(byPath["nested/"], {
+      path: "nested/",
+      status: "untracked",
+      additions: null,
+      deletions: null,
+      uncounted: true,
+    });
+    assert.equal(diff.additions, 2);
+    assert.equal(diff.totalsPartial, true);
+    assert.equal(diff.patchTruncated, false, "the nested repository is skipped, not a failed read");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+    rmSync(outside, { recursive: true, force: true });
+  }
+});
+
+test("captureRunDiff: past the time budget the work is skipped and marked, never reported complete", () => {
+  const root = realpathSync(mkdtempSync(path.join(tmpdir(), "duskfleet-diff-")));
+  try {
+    makeRepo(root);
+    const base = headSha(root);
+    writeFileSync(path.join(root, "a.txt"), "one\ntwo\n");
+    const out = path.join(root, ".git", "run.diff");
+    // No time at all: the file lists cannot be read, so there is no diff rather than a wrong one.
+    assert.equal(captureRunDiff(root, base, out, 0), null);
+    assert.ok(DIFF_TIME_BUDGET_MS > 0);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("captureRunDiff: a patch read that fails marks the patch incomplete", {
+  skip: process.platform === "win32" || process.getuid?.() === 0,
+}, () => {
+  const root = realpathSync(mkdtempSync(path.join(tmpdir(), "duskfleet-diff-")));
+  const locked = path.join(root, "locked.txt");
+  try {
+    makeRepo(root);
+    const base = headSha(root);
+    writeFileSync(path.join(root, "a.txt"), "one\ntwo\n");
+    writeFileSync(locked, "secret\n");
+    chmodSync(locked, 0);
+    const diff = captureRunDiff(root, base, path.join(root, ".git", "run.diff"));
+    assert.ok(diff.changedFiles.some((f) => f.path === "locked.txt"));
+    assert.equal(diff.patchTruncated, true, "git diff --no-index failed on the unreadable file");
+  } finally {
+    if (existsSync(locked)) chmodSync(locked, 0o644);
     rmSync(root, { recursive: true, force: true });
   }
 });

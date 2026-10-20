@@ -9,7 +9,7 @@
  * gives `null` and no diff event.
  */
 import { spawnSync } from "node:child_process";
-import { closeSync, mkdirSync, openSync, readSync, statSync, writeFileSync } from "node:fs";
+import { closeSync, lstatSync, mkdirSync, openSync, readSync, writeFileSync } from "node:fs";
 import path from "node:path";
 
 /** At most this many files are listed in the event; `filesChanged` keeps the real count. */
@@ -24,6 +24,12 @@ export const DIFF_MAX_PATCH_BYTES = 1024 * 1024;
  */
 export const DIFF_MAX_COUNTED_FILES = 1000;
 export const DIFF_MAX_COUNTED_BYTES = 64 * 1024 * 1024;
+/**
+ * Wall-clock budget for one captureRunDiff, across every git call and line count: the reads are
+ * synchronous on the shared event loop. Past it, the remaining work is skipped and marked
+ * (uncounted files, a truncated patch, or no diff when the file lists themselves ran out).
+ */
+export const DIFF_TIME_BUDGET_MS = 30_000;
 const GIT_TIMEOUT_MS = 20_000;
 /** Read a whole git output up to this much; the patch is cut to DIFF_MAX_PATCH_BYTES afterwards. */
 const GIT_MAX_BUFFER = 16 * DIFF_MAX_PATCH_BYTES;
@@ -42,7 +48,10 @@ export interface DiffFile {
   /** Lines added / deleted; null for a binary file, or when `uncounted` is set. */
   additions: number | null;
   deletions: number | null;
-  /** An untracked file past the counting caps: its lines were not read (not binary). */
+  /**
+   * An untracked entry whose lines were not read (not binary): past the counting caps or the
+   * time budget, or not a regular file (a nested repository is listed as `dir/`).
+   */
   uncounted?: true;
 }
 
@@ -55,7 +64,7 @@ export interface RunDiff {
   /** Totals over every changed file, not only the listed ones. */
   additions: number;
   deletions: number;
-  /** Some untracked files were past the counting caps: the totals leave their lines out. */
+  /** Some untracked entries are `uncounted`: the totals leave their lines out. */
   totalsPartial: boolean;
   filesChanged: number;
   /** The first DIFF_MAX_FILES files. */
@@ -64,6 +73,7 @@ export interface RunDiff {
   /** `data/logs/<run_id>.diff`; null when nothing changed. */
   patchPath: string | null;
   patchBytes: number;
+  /** The patch is incomplete: cut at DIFF_MAX_PATCH_BYTES, or a patch read failed or ran out of time. */
   patchTruncated: boolean;
 }
 
@@ -78,12 +88,19 @@ interface GitOutput {
  * Run a read-only git command. An output past GIT_MAX_BUFFER is a failure unless
  * `allowOverflow` is set: a cut `-z` list would yield half paths and wrong counts.
  */
-function git(cwd: string, args: string[], okCodes: number[] = [0], allowOverflow = false): GitOutput {
+function git(
+  cwd: string,
+  args: string[],
+  okCodes: number[] = [0],
+  allowOverflow = false,
+  timeoutMs = GIT_TIMEOUT_MS,
+): GitOutput {
+  if (timeoutMs <= 0) return { ok: false, stdout: "", overflow: false };
   const r = spawnSync("git", args, {
     cwd,
     encoding: "utf8",
     maxBuffer: GIT_MAX_BUFFER,
-    timeout: GIT_TIMEOUT_MS,
+    timeout: Math.min(timeoutMs, GIT_TIMEOUT_MS),
     windowsHide: true,
     // Read-only: never take the index lock another git process (the agent's own) may need.
     env: { ...process.env, GIT_OPTIONAL_LOCKS: "0" },
@@ -184,11 +201,18 @@ function countLines(file: string): number | null {
   }
 }
 
-function fileSize(file: string): number | null {
+/**
+ * What an untracked entry is, without following a symlink: its target may be outside the
+ * project, or a directory. `other` covers a nested repository (`dir/`) and anything unreadable.
+ */
+function entryKind(file: string): { kind: "file"; size: number } | { kind: "symlink" } | { kind: "other" } {
+  if (file.endsWith("/")) return { kind: "other" };
   try {
-    return statSync(file).size;
+    const st = lstatSync(file);
+    if (st.isSymbolicLink()) return { kind: "symlink" };
+    return st.isFile() ? { kind: "file", size: st.size } : { kind: "other" };
   } catch {
-    return null;
+    return { kind: "other" };
   }
 }
 
@@ -204,41 +228,65 @@ export function capPatch(patch: string, max = DIFF_MAX_PATCH_BYTES): { text: str
  * Compare the project directory with `base` and write the patch to `patchPath`. Null when
  * git cannot read the checkout (no diff event then).
  */
-export function captureRunDiff(cwd: string, base: string, patchPath: string): RunDiff | null {
+export function captureRunDiff(
+  cwd: string,
+  base: string,
+  patchPath: string,
+  timeBudgetMs = DIFF_TIME_BUDGET_MS,
+): RunDiff | null {
+  const deadline = Date.now() + timeBudgetMs;
+  const left = () => deadline - Date.now();
   // --no-textconv: a textconv driver from the repo's config would run here and replace the real patch.
   const noDrivers = ["--no-color", "--no-ext-diff", "--no-textconv"];
   const common = [...noDrivers, "--find-renames", "--relative"];
-  const names = git(cwd, ["diff", "--name-status", "-z", ...common, base]);
-  const nums = git(cwd, ["diff", "--numstat", "-z", ...common, base]);
-  const others = git(cwd, ["ls-files", "--others", "--exclude-standard", "-z"]);
+  const names = git(cwd, ["diff", "--name-status", "-z", ...common, base], [0], false, left());
+  const nums = git(cwd, ["diff", "--numstat", "-z", ...common, base], [0], false, left());
+  const others = git(cwd, ["ls-files", "--others", "--exclude-standard", "-z"], [0], false, left());
   if (!names.ok || !nums.ok || !others.ok) return null;
 
   const stats = parseNumstat(nums.stdout);
   const files: DiffFile[] = parseNameStatus(names.stdout).map((f) => ({ ...f, ...(stats.get(f.path) ?? {}) }));
   const untracked = others.stdout.split("\0").filter(Boolean);
+  const kinds = new Map<string, ReturnType<typeof entryKind>["kind"]>();
   let counted = 0;
   let countedBytes = 0;
   let totalsPartial = false;
   for (const file of untracked) {
-    const full = path.join(cwd, file);
-    const size = fileSize(full);
-    if (size !== null && (counted >= DIFF_MAX_COUNTED_FILES || countedBytes + size > DIFF_MAX_COUNTED_BYTES)) {
+    const entry = entryKind(path.join(cwd, file));
+    kinds.set(file, entry.kind);
+    if (entry.kind === "symlink") {
+      // Git's view of a link: one line holding the target path. The target is never read.
+      files.push({ path: file, status: "untracked", additions: 1, deletions: 0 });
+      continue;
+    }
+    if (entry.kind === "other") {
+      files.push({ path: file, status: "untracked", additions: null, deletions: null, uncounted: true });
+      totalsPartial = true;
+      continue;
+    }
+    if (counted >= DIFF_MAX_COUNTED_FILES || countedBytes + entry.size > DIFF_MAX_COUNTED_BYTES || left() <= 0) {
       files.push({ path: file, status: "untracked", additions: null, deletions: null, uncounted: true });
       totalsPartial = true;
       continue;
     }
     counted++;
-    countedBytes += size ?? 0;
-    const lines = countLines(full);
+    countedBytes += entry.size;
+    const lines = countLines(path.join(cwd, file));
     files.push({ path: file, status: "untracked", additions: lines, deletions: lines === null ? null : 0 });
   }
 
-  // The patch alone may overflow the buffer: what was read is cut to the cap below anyway.
-  let patch = git(cwd, ["diff", ...common, base], [0], true).stdout;
+  // The patch alone may overflow the buffer: what was read is cut to the cap below anyway. Any
+  // other failure (timeout, non-zero exit) leaves a partial or empty output: marked incomplete.
+  const tracked = git(cwd, ["diff", ...common, base], [0], true, left());
+  let incomplete = !tracked.ok || tracked.overflow;
+  let patch = tracked.stdout;
   for (const file of untracked.slice(0, DIFF_MAX_FILES)) {
     if (Buffer.byteLength(patch, "utf8") > DIFF_MAX_PATCH_BYTES) break;
+    if (kinds.get(file) === "other") continue; // a nested repository or an unreadable entry: no patch
     // --no-index exits 1 when the files differ, which they always do here.
-    patch += git(cwd, ["diff", ...noDrivers, "--no-index", "--", "/dev/null", file], [0, 1], true).stdout;
+    const one = git(cwd, ["diff", ...noDrivers, "--no-index", "--", "/dev/null", file], [0, 1], true, left());
+    if (!one.ok || one.overflow) incomplete = true;
+    patch += one.stdout;
   }
   const capped = capPatch(patch);
   let written: string | null = null;
@@ -259,6 +307,6 @@ export function captureRunDiff(cwd: string, base: string, patchPath: string): Ru
     filesTruncated: files.length > DIFF_MAX_FILES,
     patchPath: written,
     patchBytes: Buffer.byteLength(capped.text, "utf8"),
-    patchTruncated: capped.truncated,
+    patchTruncated: capped.truncated || incomplete,
   };
 }
