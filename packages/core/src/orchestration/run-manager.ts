@@ -21,6 +21,7 @@ import {
   MIXED_MODEL,
   type SubagentRecord,
   type TokenUsage,
+  type UsageByModel,
 } from "../execution/types.js";
 import {
   isBudgetExhausted,
@@ -1035,6 +1036,18 @@ function defined<T extends object>(patch: T): Partial<T> {
   return Object.fromEntries(Object.entries(patch).filter(([, v]) => v !== undefined)) as Partial<T>;
 }
 
+/**
+ * One pass's per-model usage, so the merged map always sums to the merged totals: the
+ * pass's own map when it has one, nothing when it spent no tokens, its totals under its
+ * model when that model is known, otherwise "unknown" (undefined).
+ */
+function passUsageByModel(r: ExecutionResult): UsageByModel | null | undefined {
+  if (r.usageByModel) return r.usageByModel;
+  if (Object.values(r.usage).every((v) => v === null)) return null;
+  if (r.model && r.model !== MIXED_MODEL) return { [r.model]: r.usage };
+  return undefined;
+}
+
 export function mergeResults(main: ExecutionResult, wrapUp: ExecutionResult): ExecutionResult {
   const usage: TokenUsage = {
     inputTokens: addNullable(main.usage.inputTokens, wrapUp.usage.inputTokens),
@@ -1042,7 +1055,12 @@ export function mergeResults(main: ExecutionResult, wrapUp: ExecutionResult): Ex
     cacheReadTokens: addNullable(main.usage.cacheReadTokens, wrapUp.usage.cacheReadTokens),
     cacheCreationTokens: addNullable(main.usage.cacheCreationTokens, wrapUp.usage.cacheCreationTokens),
   };
-  const usageByModel = mergeUsageByModel(main.usageByModel, wrapUp.usageByModel);
+  // A pass whose tokens cannot be attributed to a model drops the map: a partial map
+  // would no longer sum to the totals above.
+  const mainByModel = passUsageByModel(main);
+  const wrapUpByModel = passUsageByModel(wrapUp);
+  const usageByModel =
+    mainByModel === undefined || wrapUpByModel === undefined ? null : mergeUsageByModel(mainByModel, wrapUpByModel);
   return {
     ...main,
     outcome: wrapUp.outcome === "cancelled" ? "cancelled" : main.outcome,

@@ -43,6 +43,9 @@ Token totals come from the result line's `modelUsage`, summed over every model, 
 the tokens of subagents; the result's own `usage` counts the main session only and is used just
 when `modelUsage` is missing (then `usageByModel` is null). `modelUsed` is `mixed` when tokens were
 spent on more than one model (a subagent on another model), otherwise the model that ran.
+With a wrap-up pass the totals and `usageByModel` cover both passes; a pass without `modelUsage`
+counts under its own model, and when that is unknown `usageByModel` is null rather than partial.
+The dashboard's per-model breakdown counts a `mixed` run under the model it requested.
 
 `contextExhausted` comes only from structured signals (termination reason, result subtype,
 stop reason, or the error text of a failed run), never from scanning the result's prose.

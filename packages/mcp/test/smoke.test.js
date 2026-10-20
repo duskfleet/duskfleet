@@ -18,6 +18,7 @@ import {
   ClaudeCodeExecutor,
   loadConfig,
   looksLikeContextExhaustion,
+  mergeResults,
   needsReview,
   openDatabase,
   RunManager,
@@ -984,6 +985,51 @@ test("needs review is true for budget, timeout, crash and orphan runs, and false
   } finally {
     await app.cleanup();
   }
+});
+
+test("mergeResults keeps usageByModel summing to the totals across the wrap-up pass", () => {
+  const u = (i, o) => ({ inputTokens: i, outputTokens: o, cacheReadTokens: null, cacheCreationTokens: null });
+  const pass = (over) => ({
+    outcome: "completed",
+    model: "claude-haiku-5-5",
+    startedAt: "2026-10-20T10:00:00.000Z",
+    endedAt: "2026-10-20T10:01:00.000Z",
+    resultText: null,
+    numTurns: 1,
+    toolCalls: 0,
+    usage: u(10, 5),
+    usageByModel: { "claude-haiku-5-5": u(10, 5) },
+    costUsd: 0.01,
+    permissionDenials: 0,
+    deniedTools: [],
+    contextExhausted: false,
+    subagents: [],
+    ...over,
+  });
+  const sumOf = (map) =>
+    Object.values(map).reduce((s, x) => ({ i: s.i + (x.inputTokens ?? 0), o: s.o + (x.outputTokens ?? 0) }), {
+      i: 0,
+      o: 0,
+    });
+
+  // Wrap-up without modelUsage: its tokens go under its own model.
+  const a = mergeResults(pass({}), pass({ usage: u(3, 2), usageByModel: null }));
+  assert.deepEqual(sumOf(a.usageByModel), { i: a.usage.inputTokens, o: a.usage.outputTokens });
+  assert.equal(a.model, "claude-haiku-5-5");
+
+  // Wrap-up on another model without modelUsage: both models, mixed.
+  const b = mergeResults(pass({}), pass({ model: "claude-sonnet-5", usage: u(3, 2), usageByModel: null }));
+  assert.deepEqual(Object.keys(b.usageByModel).sort(), ["claude-haiku-5-5", "claude-sonnet-5"]);
+  assert.equal(b.model, "mixed");
+
+  // Wrap-up whose tokens cannot be attributed: no partial map.
+  const c = mergeResults(pass({}), pass({ model: null, usage: u(3, 2), usageByModel: null }));
+  assert.equal(c.usageByModel, null);
+  assert.equal(c.usage.inputTokens, 13);
+
+  // Wrap-up that spent nothing measurable leaves the main map as is.
+  const d = mergeResults(pass({}), pass({ model: null, usage: u(null, null), usageByModel: null }));
+  assert.deepEqual(d.usageByModel, { "claude-haiku-5-5": u(10, 5) });
 });
 
 test("context exhaustion is detected from structured signals, not from prose", () => {

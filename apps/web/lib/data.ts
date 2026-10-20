@@ -18,6 +18,7 @@ import {
   listProjectAgents,
   loadAgents,
   loadConfig,
+  MIXED_MODEL,
   NEEDS_REVIEW_SQL,
   nextFire,
   openDatabase,
@@ -303,7 +304,7 @@ export function agentStats(): AgentStats[] {
               AVG(duration_ms)                                  AS avg_duration_ms,
               MAX(created_at)                                   AS last_run_at,
               (SELECT model_used FROM runs r2 WHERE r2.agent_id = runs.agent_id AND r2.model_used IS NOT NULL
-                 ORDER BY r2.created_at DESC LIMIT 1)          AS last_model_used,
+                 AND r2.model_used != '${MIXED_MODEL}' ORDER BY r2.created_at DESC LIMIT 1)          AS last_model_used,
               (SELECT ${NEEDS_REVIEW_SQL} FROM runs r3
                  WHERE r3.agent_id = runs.agent_id AND r3.status IN ('completed','failed','timed_out','cancelled')
                  ORDER BY r3.created_at DESC LIMIT 1)          AS last_needs_review
@@ -423,12 +424,15 @@ export interface ModelStats {
   costUsd: number;
 }
 
-/** Cost and speed per model actually used, for the overview breakdown. */
+/**
+ * Cost and speed per model actually used, for the overview breakdown. A run that spent
+ * tokens on several models (model_used 'mixed') counts under the model it asked for.
+ */
 export function modelStats(): ModelStats[] {
   const { db } = services();
   const rows = db
     .prepare(
-      `SELECT COALESCE(model_used, model_requested, 'default') AS model,
+      `SELECT COALESCE(NULLIF(model_used, '${MIXED_MODEL}'), model_requested, 'default') AS model,
               COUNT(*)                 AS runs,
               AVG(duration_ms)         AS avg_duration_ms,
               AVG(cost_usd)            AS avg_cost_usd,
