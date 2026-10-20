@@ -233,7 +233,7 @@ export default function SchedulesPage() {
                             title={
                               s.enabled
                                 ? `Enabled · created ${fmtTime(s.createdAt)}`
-                                : `Paused ${fmtRelative(s.updatedAt)} (${fmtTime(s.updatedAt)}). Re-enable with update_schedule { "id": "${s.id}", "enabled": true }`
+                                : `Paused · last changed ${fmtRelative(s.updatedAt)} (${fmtTime(s.updatedAt)}). Re-enable with update_schedule { "id": "${s.id}", "enabled": true }`
                             }
                           >
                             {s.enabled ? "enabled" : "paused"}
@@ -361,9 +361,11 @@ export default function SchedulesPage() {
                               "never fired"
                             )}
                             {!s.enabled && (
-                              <span title={fmtTime(s.updatedAt)}>
+                              <span
+                                title={`${fmtTime(s.updatedAt)}. Firings, run now and edits also update this time, so it is not the pause date.`}
+                              >
                                 {" "}
-                                · paused since{" "}
+                                · paused, last changed{" "}
                                 {new Date(s.updatedAt).toLocaleDateString(undefined, {
                                   day: "numeric",
                                   month: "short",
