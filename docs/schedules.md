@@ -25,7 +25,9 @@ npm run cli -- serve
 ```
 
 A SQLite lease makes sure only one of them fires at a time; the others stand by and take over
-when the holder stops. The lease records the kind of process (`serve@host:pid`, `mcp@host:pid`);
+when the holder stops. Each due tick is also claimed with a compare-and-set on its
+`next_run_at` before it fires, so even a lease that changes hands in the middle of a tick cannot
+fire the same tick twice: the process that loses the claim records nothing. The lease records the kind of process (`serve@host:pid`, `mcp@host:pid`);
 the dashboard's Schedules page and `duskfleet doctor` show it. That page groups schedules by
 the project they run on: the schedule's own `project_id`, else the project its agent is bound
 to (projects alphabetically, "no project" last, normally empty: only a schedule whose agent was

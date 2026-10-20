@@ -12,6 +12,8 @@
  *    it from any other holder (`mcp`, `cli`, role-less) on its first tick: the
  *    installed service runs the latest build, an MCP server a host keeps alive
  *    may not, and it must never hold the lease for days.
+ *  - The lease decides who ticks; a compare-and-set on next_run_at (claimDue) decides who
+ *    fires a due tick, so a lease handover in the middle of a tick cannot fire it twice.
  *  - A process without a RunManager (the dashboard) triggers a schedule by setting
  *    `run_requested_at`; the lease holder fires it on its next tick, paused or not.
  *  - The lease holder also sweeps orphaned runs (owner process gone) at most once a
@@ -247,8 +249,19 @@ export class Scheduler {
    * lease and serving other due schedules and run-now requests meanwhile. The fire claims its
    * tick (next_run_at) before the gate starts, so no later tick, here or in another process
    * that took the lease over, fires it again.
+   *
+   * A scheduled (non-manual) fire is claimed first with a compare-and-set on the next_run_at
+   * this tick read: if another process fired it meanwhile (the lease changed hands between
+   * `due()` and here), the claim fails and this tick leaves it alone, recording nothing.
    */
   private async dispatch(s: Schedule, manual: boolean): Promise<void> {
+    if (!manual) {
+      const next = s.enabled ? this.computeNext(s.cron, s.timeZone) : null;
+      if (!this.repo.claimDue(s.id, s.nextRunAt, next)) {
+        log.info("tick already claimed elsewhere; not firing", { schedule: s.name, nextRunAt: s.nextRunAt });
+        return;
+      }
+    }
     if (!s.gate) {
       await this.fire(s, manual);
       return;
@@ -304,7 +317,8 @@ export class Scheduler {
         if (busy) throw new BusyError(busy);
         // Claim the tick before the gate runs: next_run_at moves on now, so neither a later tick
         // nor another process that takes the lease during a long gate sees it as still due.
-        this.repo.claimTick(s.id, nextRunAt);
+        // A scheduled fire was already claimed by dispatch (claimDue); a manual one is claimed here.
+        if (manual) this.repo.claimTick(s.id, nextRunAt);
         this.gating.add(s.id);
         let verdict: Awaited<ReturnType<typeof evaluateGate>>;
         try {

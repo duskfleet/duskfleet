@@ -360,6 +360,68 @@ test("tick fires due schedules, honours the kill switch, and only the lease hold
   }
 });
 
+test("compare-and-set claim: two tickers on one DB never fire the same tick twice, even across a lease handover", async () => {
+  const { root, configDir } = makeRoot();
+  const config = loadConfig(configDir);
+  // Two processes: own connection, own RunManager, own repository, same database file.
+  const side = () => {
+    const db = openDatabase(config.dataDir);
+    const runs = new RunManager(
+      config,
+      new RunRepository(db),
+      new ClaudeCodeExecutor({ binary: config.claude.binary, strictMcpConfig: true, allowBypassPermissions: false }),
+    );
+    return { db, runs, repo: new ScheduleRepository(db) };
+  };
+  const pa = side();
+  const pb = side();
+  const a = new Scheduler(pa.repo, pa.runs, { tickMs: 1000, holder: "A" });
+  const b = new Scheduler(pb.repo, pb.runs, { tickMs: 1000, holder: "B" });
+  try {
+    const s = a.create({ name: "cas", agentId: "free", projectId: "demo", prompt: "ok", cron: "* * * * *" });
+    const dueAt = new Date(Date.now() - 1000).toISOString();
+    pa.repo.update(s.id, { nextRunAt: dueAt });
+
+    // The claim itself: only the caller holding the value it read wins.
+    const next = new Date(Date.now() + 60_000).toISOString();
+    assert.equal(pa.repo.claimDue(s.id, "1999-01-01T00:00:00.000Z", next), false, "stale expectation loses");
+    assert.equal(pa.repo.get(s.id).nextRunAt, dueAt, "a lost claim changes nothing");
+
+    // A read the due list, then lost the lease before firing; B took over and fired the tick.
+    const stale = pa.repo.due(new Date().toISOString());
+    assert.equal(stale.length, 1);
+    await b.tick();
+    assert.equal(b.status().leaseHeldByThisProcess, true);
+    const fired = pb.repo.get(s.id);
+    assert.equal(fired.fires, 1);
+    assert.ok(Date.parse(fired.nextRunAt) > Date.now(), "B advanced next_run_at");
+
+    // Let B's run end first: both "processes" share this pid, so A's orphan sweep would
+    // otherwise take B's live run for its own lost one.
+    await pb.runs.waitForRun(fired.lastRunId, 10_000);
+
+    // A gets the lease back and works through its stale snapshot: the CAS fails, nothing fires.
+    b.stop(); // releases the lease
+    pa.repo.due = () => stale;
+    await a.tick();
+    assert.equal(a.status().leaseHeldByThisProcess, true);
+    const after = pa.repo.get(s.id);
+    assert.equal(after.fires, 1, "A did not fire the tick B already fired");
+    assert.equal(after.lastRunId, fired.lastRunId);
+    assert.equal(pa.repo.firings(s.id).length, 1, "no firing recorded for the lost claim, not even a skip");
+    assert.equal(after.nextRunAt, fired.nextRunAt, "next_run_at untouched by the loser");
+  } finally {
+    a.stop();
+    b.stop();
+    pa.runs.shutdown();
+    pb.runs.shutdown();
+    await new Promise((r) => setTimeout(r, 300));
+    pa.db.close();
+    pb.db.close();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("a schedule of a max_concurrent: 2 agent fires while one run is active and skips while two are", async () => {
   const { root, configDir } = makeRoot();
   writeFileSync(
