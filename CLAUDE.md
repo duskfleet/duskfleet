@@ -13,7 +13,7 @@ npm install --cache "$TMPDIR/npm-cache"   # ~/.npm has root-owned files on this 
 npm run build        # core + mcp (tsc). Run after every change under packages/: the CLI,
                      # the MCP server and the dashboard all import from dist/
 npm run typecheck    # core + mcp;  web: npm run typecheck -w @duskfleet/web
-npm test             # packages/mcp/test/*.test.js, node --test, ~25 s, no network, no cost
+npm test             # packages/core/test then packages/mcp/test, node --test, ~25 s, no network, no cost
 npm run cli -- doctor | agents | projects | run | runs | run-info | schedules
 npm run cli -- schedules run-now <id or name>   # stamps run_requested_at; the lease holder fires it next tick.
                      # The command for git hooks / scripts: `run --no-wait` leaves the run unread once the CLI exits

@@ -39,7 +39,8 @@ packages/core/src/index.ts       public API of @duskfleet/core
 packages/mcp/src/mcp             MCP server + tools (one file per tool group)
 packages/mcp/src/cli.ts          local CLI
 packages/mcp/src/index.ts        MCP server entry point
-packages/mcp/test                fake Claude binary + tests
+packages/core/test               unit tests of core modules (nothing spawned)
+packages/mcp/test                fake Claude binary + end-to-end tests
 apps/web/app                     Next.js routes: /, /agents, /runs/[id], /schedules, /mcp
 apps/web/lib/data.ts             server-only read access to config + SQLite
 ```
@@ -49,9 +50,16 @@ apps/web/lib/data.ts             server-only read access to config + SQLite
 ```bash
 npm run build          # core + mcp (tsc). The CLI, the MCP server and the dashboard import from dist/
 npm run typecheck      # core + mcp; dashboard: npm run typecheck -w @duskfleet/web
-npm test               # packages/mcp/test/*.test.js, node --test, ~25 s, no network, no cost
+npm test               # packages/core/test, then packages/mcp/test; node --test, ~25 s, no network, no cost
+npm test -w @duskfleet/core   # core unit tests alone, under a second
 npm run check          # everything CI runs, in the same order (hygiene, lint, build, typecheck, tests)
 ```
+
+One home per module: a test that only calls core functions (state machine, loader, parser, cron,
+tool summaries) lives in `packages/core/test` and imports `@duskfleet/core`; a test that needs the
+CLI, the MCP server or a spawned fake Claude lives in `packages/mcp/test`. Both import the built
+`dist/`, so run `npm run build` first. `npm run test:coverage` runs both suites in one process set,
+so the 80 % gate still counts the core tests.
 
 The tests use `packages/mcp/test/fake-claude.js`, a stand-in for the Claude binary that replays
 the real `stream-json` event shapes, so they never launch a real Claude. They cover the
