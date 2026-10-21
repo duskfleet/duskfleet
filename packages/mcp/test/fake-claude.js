@@ -28,6 +28,9 @@
  *   "linger"  -> like "ok", but keeps running after the result line (grace kill tests)
  *   "linger-hook" -> like "ok", then exits while a spawned descendant keeps stdout open
  *                 (a user-level Stop hook); the descendant's pid is written to ./hook.pid
+ *   "deferred-mcp" -> like "ok", but the init reports `mcp_servers: []` and no mcp__ tool
+ *                 (Claude Code 2.1.306 with claude.ai connectors loaded as deferred tools,
+ *                 run 938683d0 of 2026-10-21) and one Atlassian connector tool is called
  *
  * With `--resume <id>` (the wrap-up pass) the prompt is DuskFleet's fixed text, so the
  * behaviour comes from FAKE_CLAUDE_RESUME instead: unset = a short successful pass that
@@ -86,7 +89,7 @@ out({
   cwd: process.cwd(),
   session_id: sessionId,
   tools: ["Bash", "Edit", "Read"],
-  mcp_servers: [{ name: "claude.ai Figma", status: "connected" }],
+  mcp_servers: prompt === "deferred-mcp" ? [] : [{ name: "claude.ai Figma", status: "connected" }],
   model,
   permissionMode: "acceptEdits",
   claude_code_version: "9.9.9",
@@ -401,6 +404,28 @@ if (resumeIdx >= 0) {
     process.exit(0);
   }
 } else {
+  if (prompt === "deferred-mcp") {
+    out({
+      type: "assistant",
+      message: {
+        model,
+        role: "assistant",
+        content: [
+          {
+            type: "tool_use",
+            id: "toolu_m1",
+            name: "mcp__claude_ai_Atlassian_Rovo__searchJiraIssuesUsingJql",
+            input: { jql: 'project = SL AND status = "In Review"' },
+          },
+        ],
+        usage: { input_tokens: 10, output_tokens: 5 },
+      },
+    });
+    out({
+      type: "user",
+      message: { role: "user", content: [{ tool_use_id: "toolu_m1", type: "tool_result", content: "[]" }] },
+    });
+  }
   out({
     type: "assistant",
     message: {

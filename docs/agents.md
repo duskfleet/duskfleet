@@ -239,7 +239,11 @@ settings, not loaded in runs) and `mcp__claude_ai_Atlassian_Rovo__*` as a claude
 connector (what runs see). Every run records what was mounted and which servers were
 actually called (`get_run` → `mcp`, dashboard → Technical details). An allow-list entry
 whose server never mounted is reported as `mcp.allowListedMissing`, flags the run as
-**needs review** and adds a note event, instead of failing silently.
+**needs review** and adds a note event, instead of failing silently. The check only runs
+when Claude Code listed the mounted servers at init: with claude.ai connectors loaded as
+deferred tools that list is empty (Claude Code 2.1.306), and a server that was allow-listed
+but not called in that run is not reported, since a call on one server says nothing about
+another.
 
 ## Subagents inside runs
 

@@ -851,7 +851,7 @@ export class RunManager {
       const mcp = this.summarizeMcp(active);
       if (mcp.allowListedMissing.length) {
         this.runs.addEvent(runId, "note", {
-          message: `allow-listed MCP servers never mounted in this run: ${mcp.allowListedMissing.join(", ")} (mounted: ${mcp.mounted.map((m) => mcpToolPrefix(m.name)).join(", ") || "none reported"})`,
+          message: `allow-listed MCP servers never mounted in this run: ${mcp.allowListedMissing.join(", ")} (mounted: ${mcp.mounted.map((m) => mcpToolPrefix(m.name)).join(", ")})`,
         });
       }
       // Subagents still open when the process ended (cancel, timeout, crash) never handed back.
@@ -934,14 +934,17 @@ export class RunManager {
   /**
    * What MCP looked like in this run. "Missing" = an allow-listed mcp__ entry whose
    * server prefix matches neither a mounted server nor a server actually called.
-   * Mounted lists can be empty while connectors are still connecting at init, so a
-   * prefix is only reported missing when the run gave us *some* MCP evidence.
+   * Only an init line that lists the mounted servers is evidence of what mounted: the list
+   * is empty while connectors are still connecting, and Claude Code 2.1.306 reports
+   * `mcp_servers: []` for claude.ai connectors it loads as deferred tools (verified
+   * 2026-10-21). A server that was merely not called in that run leaves no trace, so a
+   * call on one server never proves that another allow-listed server was absent.
    */
   private summarizeMcp(active: ActiveRun | undefined): import("../execution/types.js").RunMcpInfo {
     if (!active) return { mounted: [], used: [], allowListedMissing: [] };
     const used = [...active.usedServers].sort();
     const mountedPrefixes = new Set(active.mounted.map((m) => mcpToolPrefix(m.name)));
-    const evidence = mountedPrefixes.size > 0 || used.length > 0;
+    const evidence = mountedPrefixes.size > 0;
     const allowListedPrefixes = new Set(
       active.allowedTools
         .filter((t) => t.startsWith("mcp__"))

@@ -57,6 +57,10 @@ function makeApp({ extraYaml = "", agents = {} } = {}) {
     path.join(configDir, "agents", "connected.md"),
     `---\npermission_mode: dontAsk\ninherit_mcp: true\nadd_dirs: ["${root}/extra"]\nallowed_tools: ["mcp__claude_ai_Figma", "mcp__plugin_productivity_atlassian", "mcp__claude_ai_Figma__get_metadata"]\n---\nUse MCP.\n`,
   );
+  writeFileSync(
+    path.join(configDir, "agents", "two-connectors.md"),
+    `---\npermission_mode: dontAsk\ninherit_mcp: true\nallowed_tools: ["mcp__claude_ai_Atlassian_Rovo", "mcp__claude_ai_Figma"]\n---\nUse MCP.\n`,
+  );
   const config = loadConfig(configDir);
   const db = openDatabase(config.dataDir);
   const executor = new ClaudeCodeExecutor({
@@ -664,6 +668,30 @@ test("MCP servers mounted and allow-list mismatches are recorded on the run", as
     assert.equal(summary.id, run.id);
     assert.equal(summary.needsReview, true);
     assert.deepEqual(summary.mcpAllowListedMissing, ["mcp__plugin_productivity_atlassian"]);
+  } finally {
+    await app.cleanup();
+  }
+});
+
+test("an allow-listed server that was simply not called is not 'missing' when init listed no servers", async () => {
+  // Claude Code 2.1.306 reports mcp_servers: [] for claude.ai connectors (deferred tools), so a
+  // call on Atlassian says nothing about Figma: no note, no needs-review (false positive seen 2026-10-21).
+  const app = makeApp();
+  try {
+    const started = await app.runs.startRun({
+      prompt: "deferred-mcp",
+      projectPath: app.project,
+      agentId: "two-connectors",
+    });
+    const run = await app.runs.waitForRun(started.id, 10_000);
+    assert.equal(run.status, "completed");
+    assert.deepEqual(run.mcp.mounted, []);
+    assert.deepEqual(run.mcp.used, ["mcp__claude_ai_Atlassian_Rovo"]);
+    assert.deepEqual(run.mcp.allowListedMissing, []);
+    assert.deepEqual(run.reviewReasons, []);
+    const notes = app.runs.events(run.id).filter((e) => e.type === "note");
+    assert.equal(notes.length, 0);
+    assert.equal(summarizeRun(app.runs.listRuns({ limit: 1 })[0]).needsReview, false);
   } finally {
     await app.cleanup();
   }
