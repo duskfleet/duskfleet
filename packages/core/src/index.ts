@@ -87,7 +87,7 @@ export {
   WRAP_UP_PROMPT,
 } from "./orchestration/run-manager.js";
 export { assertTransition, IllegalTransitionError } from "./orchestration/run-state.js";
-export { summarizeToolInput } from "./orchestration/tool-summary.js";
+export { allowListedMcpMissing, summarizeToolInput } from "./orchestration/tool-summary.js";
 export {
   assertTimeZone,
   CronError,

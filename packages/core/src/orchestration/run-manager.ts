@@ -45,7 +45,7 @@ import { BusyError } from "./busy.js";
 import { DailyCapError, dailyCapReason, utcDayStart } from "./daily-cap.js";
 import { validateProjectPath } from "./project-validation.js";
 import { assertTransition } from "./run-state.js";
-import { summarizeToolInput } from "./tool-summary.js";
+import { allowListedMcpMissing, summarizeToolInput } from "./tool-summary.js";
 
 const log = logger("orchestration");
 
@@ -941,12 +941,11 @@ export class RunManager {
   private summarizeMcp(active: ActiveRun | undefined): import("../execution/types.js").RunMcpInfo {
     if (!active) return { mounted: [], used: [], allowListedMissing: [] };
     const used = [...active.usedServers].sort();
-    const mountedPrefixes = new Set(active.mounted.map((m) => mcpToolPrefix(m.name)));
-    const evidence = mountedPrefixes.size > 0 || used.length > 0;
-    const allowListedMissing = evidence
-      ? allowListedMcpPrefixes(active.allowedTools).filter((p) => !mountedPrefixes.has(p) && !used.includes(p))
-      : [];
-    return { mounted: active.mounted, used, allowListedMissing };
+    return {
+      mounted: active.mounted,
+      used,
+      allowListedMissing: allowListedMcpMissing(active.allowedTools, active.mounted, used),
+    };
   }
 
   private resolveAgent(agentId: string | undefined): AgentDefinition {
