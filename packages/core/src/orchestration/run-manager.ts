@@ -1111,6 +1111,8 @@ export function mergeResults(main: ExecutionResult, wrapUp: ExecutionResult): Ex
     permissionDenials: main.permissionDenials + wrapUp.permissionDenials,
     deniedTools: [...main.deniedTools, ...wrapUp.deniedTools],
     contextExhausted: main.contextExhausted || wrapUp.contextExhausted,
+    // A run cancelled during its wrap-up is stored as cancelled: no failure code, as for any cancel.
+    failure: wrapUp.outcome === "cancelled" ? null : (main.failure ?? wrapUp.failure),
     subagents: [...main.subagents, ...wrapUp.subagents],
   };
 }

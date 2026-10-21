@@ -11,7 +11,8 @@
  *   setup      auth_required (Claude is not logged in), model_not_found
  *   limit      max_turns_exhausted, provider_quota (with `retryNotBefore` when the message says when)
  *   transient  transient_upstream (429 / 503 / 529 / overloaded): retrying later may work
- *   refusal    refusal (`stop_reason: refusal`), even on a run that exited 0
+ *   refusal    refusal (`stop_reason: refusal`), even on a run that exited 0 (never on a
+ *              cancelled or timed-out one)
  */
 
 export const FAILURE_CODES = [
@@ -80,7 +81,9 @@ export function classifyFailure(input: FailureInput): FailureClassification | nu
     detail,
   });
 
-  // A refusal can end a run that exits 0: the stop reason is structured, so it counts on any outcome.
+  // A refusal can end a run that exits 0: the stop reason is structured, so it counts on a completed
+  // run as on a failed one. A cancelled or timed-out run ended for another reason.
+  if (input.outcome === "cancelled" || input.outcome === "timed_out") return null;
   if (input.stopReason?.toLowerCase() === "refusal") return make("refusal");
   if (input.outcome !== "failed") return null;
 
@@ -108,8 +111,9 @@ export function classifyFailure(input: FailureInput): FailureClassification | nu
   ) {
     return make("model_not_found");
   }
-  // "Rate limit reached" is a 429 (transient), not the account's usage limit.
-  if (/usage limit|hit your (?:\w+ )?limit|(?<!rate )limit reached|out of extra usage|\bquota\b/i.test(err)) {
+  // "Rate limit reached" is a 429 (transient), not the account's usage limit. No bare "quota":
+  // a 429 rate_limit_error message can mention one and is still transient.
+  if (/usage limit|hit your (?:\w+ )?limit|(?<!rate )limit reached|out of extra usage/i.test(err)) {
     const at = parseResetTime(err, input.endedAt);
     return make("provider_quota", at ? { retryNotBefore: at } : null);
   }

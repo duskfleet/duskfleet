@@ -99,7 +99,9 @@ stop reason, or the error text of a failed run), never from scanning the result'
 
 `errorCode` says why a run failed, as a code a script can act on; `errorFamily` groups the codes
 by what to do about them. Same rule as `contextExhausted`: structured fields and a failed run's
-error text only. Null when the failure matches no code, and for runs recorded before it existed.
+error text only (when Claude Code flagged its result as an error, or there was no result line;
+a non-zero exit after a non-error result is not scanned). Never set on a cancelled or timed-out
+run. Null when the failure matches no code, and for runs recorded before it existed.
 
 | `errorCode` | `errorFamily` | From |
 |---|---|---|

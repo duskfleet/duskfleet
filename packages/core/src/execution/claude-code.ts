@@ -341,7 +341,9 @@ function finalResult(input: {
     contextExhausted: looksLikeContextExhaustion(r),
     failure: classifyFailure({
       outcome: input.outcome,
-      error: input.error,
+      // A result line with is_error false carries the agent's prose even when the exit code is
+      // non-zero: never scan it ("the 503 retry test now passes" is not an outage).
+      error: !r || r.isError ? input.error : null,
       terminalReason: r?.terminalReason ?? null,
       subtype: r?.subtype ?? null,
       stopReason: r?.stopReason ?? null,

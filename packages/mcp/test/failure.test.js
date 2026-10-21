@@ -72,6 +72,7 @@ test("transient_upstream for 429 / 503 / 529 / overloaded", () => {
     "API Error: 429 rate_limit_error",
     "API Error: 429 Rate limit reached for requests",
     'API Error: {"type":"overloaded_error"}',
+    'API Error: 429 {"type":"error","error":{"type":"rate_limit_error","message":"exceeded your rate limit quota"}}',
   ]) {
     assert.deepEqual(failed(e), { code: "transient_upstream", family: "transient", detail: null }, e);
   }
@@ -87,6 +88,21 @@ test("refusal from stop_reason, even on a completed run", () => {
     endedAt,
   });
   assert.deepEqual(r, { code: "refusal", family: "refusal", detail: null });
+  assert.equal(failed("exit code 1", { stopReason: "refusal" })?.code, "refusal");
+});
+
+test("a cancelled or timed-out run is never a refusal", () => {
+  for (const outcome of ["cancelled", "timed_out"]) {
+    const r = classifyFailure({
+      outcome,
+      error: null,
+      terminalReason: null,
+      subtype: null,
+      stopReason: "refusal",
+      endedAt,
+    });
+    assert.equal(r, null, outcome);
+  }
 });
 
 test("a completed, cancelled or timed-out run's text is never classified", () => {

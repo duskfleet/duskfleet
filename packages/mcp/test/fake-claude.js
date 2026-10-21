@@ -21,6 +21,8 @@
  *                 (subtype error_max_budget_usd, terminal_reason budget_exhausted, no `result`,
  *                 errors: [...], is_error true, exit 1; from run a2d99954 of 2026-10-14)
  *   "max-turns" -> result subtype error_max_turns, is_error true, no `result`, exit 1
+ *   "prose-exit" -> like "ok" (is_error false), but the result text mentions "503" and "not
+ *                 logged in" and the process exits 1: the failure classifier must not read it
  *   "linger"  -> like "ok", but keeps running after the result line (grace kill tests)
  *   "linger-hook" -> like "ok", then exits while a spawned descendant keeps stdout open
  *                 (a user-level Stop hook); the descendant's pid is written to ./hook.pid
@@ -422,7 +424,9 @@ if (resumeIdx >= 0) {
             ? "Ready ticket found: SL-9."
             : prompt === "gate-mention"
               ? "Found SL-9 in Ready, so this is not NO_WORK"
-              : "Done: created hello.txt";
+              : prompt === "prose-exit"
+                ? "The 503 retry test now passes; the not logged in banner is fixed."
+                : "Done: created hello.txt";
   out({
     type: "result",
     subtype: isError ? "error_during_execution" : "success",
@@ -450,6 +454,6 @@ if (resumeIdx >= 0) {
     writeFileSync("hook.pid", String(hook.pid));
     process.exit(0);
   } else {
-    process.exit(isError ? 1 : 0);
+    process.exit(isError || prompt === "prose-exit" ? 1 : 0);
   }
 }
