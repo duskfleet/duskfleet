@@ -936,9 +936,9 @@ export class RunManager {
    * server prefix matches neither a mounted server nor a server actually called.
    * Only an init line that lists the mounted servers is evidence of what mounted: the list
    * is empty while connectors are still connecting, and Claude Code 2.1.306 reports
-   * `mcp_servers: []` for claude.ai connectors it loads as deferred tools (verified
-   * 2026-10-21). A server that was merely not called in that run leaves no trace, so a
-   * call on one server never proves that another allow-listed server was absent.
+   * `mcp_servers: []` for connectors it loads as deferred tools (verified 2026-10-21).
+   * A server that was merely not called in that run leaves no trace, so a call on one
+   * server never proves that another allow-listed server was absent.
    */
   private summarizeMcp(active: ActiveRun | undefined): import("../execution/types.js").RunMcpInfo {
     if (!active) return { mounted: [], used: [], allowListedMissing: [] };
