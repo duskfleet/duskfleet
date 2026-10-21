@@ -39,6 +39,9 @@ example no writable temp directory) gives outcome `error`. `doctor` exits 1 when
 probe cancels the run, removes its temporary directory and exits 130 without a report.
 
 Each run writes a raw event log to `data/logs/<run_id>.jsonl` and a structured row to SQLite.
+In a git checkout it also writes the patch of what it changed to `data/logs/<run_id>.diff`;
+`run-info` shows the summary as `diff` (base commit, files with lines added / deleted), the
+same field as `get_run` ([how it works](how-it-works.md#what-gets-recorded)).
 
 ## Firing an agent from a script or a git hook
 
@@ -88,7 +91,7 @@ explicit model uses the Claude Code default.
 
 `id`, `agentId`, `projectPath`, `prompt`, `modelRequested`/`modelUsed`, `status`
 (`pending → running → completed | failed | cancelled | timed_out`), timestamps and duration,
-`claudeSessionId`, `permissionMode`, the exact `command` (binary, argv, cwd), `exitCode`,
+`claudeSessionId`, `permissionMode`, the exact `command` (binary, argv, cwd; the prompt is sent on stdin, so it is not in argv), `exitCode`,
 `terminationReason`, `error`, `resultText`, `numTurns`, `toolCalls`, input/output/cache tokens,
 `usageByModel` (the same tokens per model id), `costUsd`, `billingType`, `permissionDenials`, `deniedTools`, `mcp` (mounted, used, allow-listed but missing),
 `humanIntervention`, `contextExhausted`, `errorCode`/`errorFamily`/`errorDetail`, `scheduleId`, `logPath`, `phases` (the main pass and,

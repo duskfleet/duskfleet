@@ -3,7 +3,7 @@
  * Fake Claude Code binary for smoke tests. Emits stream-json lines in the
  * shapes verified against Claude Code 2.1.285, without calling any API.
  *
- * Behaviour is chosen by the prompt (last argv element):
+ * Behaviour is chosen by the prompt, read from stdin as the executor sends it (never argv):
  *   "ok"       -> tool_use + text + successful result (default)
  *   "error"    -> result with is_error=true
  *   "auth"     -> like "error", with a logged-out result text (doctor --probe advice)
@@ -18,6 +18,8 @@
  *   "gate-nowork" / "gate-work" / "gate-mention" -> like "ok"; a schedule gate agent's answer:
  *                 the marker alone on the last line (as **no_work**), work found, and the
  *                 marker only mentioned mid-sentence (must not skip)
+ *   "edit"     -> like "ok", after editing the cwd: appends to a.txt, deletes gone.txt,
+ *                 writes new.txt and a binary blob.bin (for the git diff event)
  *   "budget"  -> spends the whole --max-budget-usd and stops with the real budget shape
  *                 (subtype error_max_budget_usd, terminal_reason budget_exhausted, no `result`,
  *                 errors: [...], is_error true, exit 1; from run a2d99954 of 2026-10-14)
@@ -33,11 +35,9 @@
  * says where it stopped; "budget" = exhausts the reserve too; "hang" = never ends.
  */
 import { spawn } from "node:child_process";
-import { writeFileSync } from "node:fs";
+import { appendFileSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 
 const args = process.argv.slice(2);
-// FAKE_CLAUDE_MODE picks the behaviour when the prompt is fixed by DuskFleet (doctor --probe).
-const prompt = process.env.FAKE_CLAUDE_MODE ?? args[args.length - 1] ?? "ok";
 const sessionIdx = args.indexOf("--session-id");
 const resumeIdx = args.indexOf("--resume");
 const sessionId =
@@ -60,7 +60,21 @@ if (args[0] === "--version") {
   process.exit(0);
 }
 
+// Read after --version: execFile leaves stdin open, so reading it there would block forever.
+// FAKE_CLAUDE_MODE picks the behaviour when the prompt is fixed by DuskFleet (doctor --probe).
+// stdin is read either way so the executor's write never hits a closed pipe.
+const stdinPrompt = readFileSync(0, "utf8").trim() || "ok";
+const prompt = process.env.FAKE_CLAUDE_MODE ?? stdinPrompt;
+
 const out = (o) => process.stdout.write(JSON.stringify(o) + "\n");
+
+if (prompt === "edit") {
+  // Edits the project checkout like an agent would (for the diff event), then behaves like "ok".
+  appendFileSync("a.txt", "two\nthree\n");
+  rmSync("gone.txt", { force: true });
+  writeFileSync("new.txt", "fresh\n");
+  writeFileSync("blob.bin", Buffer.from([0, 1, 2, 3]));
+}
 
 /** One `modelUsage` value as Claude Code 2.1.3xx prints it (verified 2026-10-20). */
 const modelUsageEntry = (input, output, cacheRead, cacheCreation, costUSD) => ({

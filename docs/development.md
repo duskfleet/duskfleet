@@ -39,7 +39,8 @@ packages/core/src/index.ts       public API of @duskfleet/core
 packages/mcp/src/mcp             MCP server + tools (one file per tool group)
 packages/mcp/src/cli.ts          local CLI
 packages/mcp/src/index.ts        MCP server entry point
-packages/mcp/test                fake Claude binary + tests
+packages/core/test               unit tests of core modules (nothing spawned)
+packages/mcp/test                fake Claude binary + end-to-end tests
 apps/web/app                     Next.js routes: /, /agents, /runs/[id], /schedules, /mcp
 apps/web/lib/data.ts             server-only read access to config + SQLite
 ```
@@ -49,9 +50,16 @@ apps/web/lib/data.ts             server-only read access to config + SQLite
 ```bash
 npm run build          # core + mcp (tsc). The CLI, the MCP server and the dashboard import from dist/
 npm run typecheck      # core + mcp; dashboard: npm run typecheck -w @duskfleet/web
-npm test               # packages/mcp/test/*.test.js, node --test, ~25 s, no network, no cost
+npm test               # packages/core/test, then packages/mcp/test; node --test, ~25 s, no network, no cost
+npm test -w @duskfleet/core   # core unit tests alone, under a second
 npm run check          # everything CI runs, in the same order (hygiene, lint, build, typecheck, tests)
 ```
+
+One home per module: a test that only calls core functions (state machine, loader, parser, cron,
+tool summaries) lives in `packages/core/test` and imports `@duskfleet/core`; a test that needs the
+CLI, the MCP server or a spawned fake Claude lives in `packages/mcp/test`. Both import the built
+`dist/`, so run `npm run build` first. `npm run test:coverage` runs both suites in one process set,
+so the 80 % gate still counts the core tests.
 
 The tests use `packages/mcp/test/fake-claude.js`, a stand-in for the Claude binary that replays
 the real `stream-json` event shapes, so they never launch a real Claude. They cover the
@@ -143,6 +151,28 @@ PR:     flow: needs-review ──► flow: in-review ──► flow: changes-req
   bounds → `flow: changes-requested`, and a wanted major → `flow: needs-human`. Still a
   review: grouped bumps have broken the web build before.
 
+- The PR gate keeps the labels true to the merge state, with no agent involved. A PR labelled
+  `flow: needs-review` or `flow: ready-to-merge` was fine when it got the label; once `main`
+  moves it can conflict, and the ruleset on `main` requires an up-to-date branch with a green
+  `checks` job. `node scripts/pr-gate.mjs [--dry-run] [--update-branch]` reads every open PR
+  in those two states (drafts and Dependabot excluded) and, when it conflicts with its base or
+  a required check (read from the rulesets on the base branch; a failed non-required job such
+  as `sync` does not count) failed on its head, swaps the label to `flow: changes-requested`
+  and then posts one comment starting with `[pr-gate]` (head SHA and the reasons; it is
+  written last, so a failed label call is retried on the next run). One failing PR does not
+  stop the others; the script exits non-zero at the end. The developer's next run merges
+  the base into the branch or fixes the check, and hands the PR back to the reviewer as after
+  any review. A PR that is merely behind its base is updated in place with `--update-branch`.
+  Idempotent: a head that already carries a `[pr-gate]` comment is left alone, so a human can
+  overrule the gate by relabelling. The workflow `.github/workflows/pr-gate.yml` runs it on
+  every push to `main`, after every CI run, once an hour and on demand. With the repository
+  secret `PR_GATE_TOKEN` (a user token with write access; scopes in the workflow header) it
+  also updates branches and its label changes fire the project sync; with the default token it
+  only relabels, since a push or a label set by `GITHUB_TOKEN` starts no other workflow. The
+  reviewer checks the same state before and after its passes (`gh pr view <n> --json
+  mergeable,statusCheckRollup`): a conflicting or red PR gets `VERDICT: changes` without a
+  review.
+
 The DuskFleet side is three user agents in `data/agents/` (developer, reviewer, planner) that
 link the local Claude Code agents (`claude_agent`) and add only the unattended envelope:
 permission mode, `gh` / `git` / `npm` allow-list, budget and timeout — plus one cron schedule
@@ -169,6 +199,8 @@ lags until the script is run by hand.
 
 - The project path is passed as the child's **working directory**; nothing is ever built into a
   shell string (`spawn(binary, argv, { shell: false })`).
+- The prompt is written to the child's **stdin**, never passed as an argument: it does not show
+  up in `ps` output nor in the recorded command, only in the run's `prompt` column.
 - Project paths are validated before anything runs; `allowed_project_roots` fences them.
 - Permission mode is explicit per agent; `bypassPermissions` is off unless enabled in config.
 - Every run stores the full command it executed.
@@ -188,7 +220,7 @@ lags until the script is run by hand.
 
   | Flag | Purpose in DuskFleet |
   |---|---|
-  | `-p, --print` | Non-interactive execution |
+  | `-p, --print` | Non-interactive execution; with no positional prompt it reads the prompt from stdin (`--input-format` defaults to `text`), which is how the executor sends it |
   | `--output-format stream-json` + `--verbose` | Line-delimited JSON events (`stream-json` refuses to run without `--verbose`) |
   | `--session-id <uuid>` | The run knows its session id before the process starts |
   | `--model <model>` | Only passed when explicitly selected |

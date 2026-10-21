@@ -56,6 +56,20 @@ export {
   type StreamState,
 } from "./execution/stream-json.js";
 export * from "./execution/types.js";
+export {
+  captureRunDiff,
+  DIFF_MAX_COUNTED_BYTES,
+  DIFF_MAX_COUNTED_FILES,
+  DIFF_MAX_FILES,
+  DIFF_MAX_PATCH_BYTES,
+  DIFF_TIME_BUDGET_MS,
+  type DiffFile,
+  type DiffFileStatus,
+  headSha,
+  parseNameStatus,
+  parseNumstat,
+  type RunDiff,
+} from "./git/diff.js";
 export * from "./observability/failure.js";
 export * from "./observability/run.js";
 export { BusyError } from "./orchestration/busy.js";
@@ -64,7 +78,6 @@ export { ProjectValidationError, validateProjectPath } from "./orchestration/pro
 
 export {
   budgetPlan,
-  mcpToolPrefix,
   mergeResults,
   type ResumeRunInput,
   RunManager,
@@ -74,7 +87,7 @@ export {
   WRAP_UP_PROMPT,
 } from "./orchestration/run-manager.js";
 export { assertTransition, IllegalTransitionError } from "./orchestration/run-state.js";
-export { summarizeToolInput } from "./orchestration/tool-summary.js";
+export { allowListedMcpMissing, mcpToolPrefix, summarizeToolInput } from "./orchestration/tool-summary.js";
 export {
   assertTimeZone,
   CronError,
@@ -85,6 +98,7 @@ export {
   parseCron,
 } from "./scheduler/cron.js";
 export {
+  autoPauseReason,
   createSchedule,
   DEFAULT_TIME_ZONE,
   effectiveOnFailure,
@@ -121,6 +135,6 @@ export { type FireResult, Scheduler, type SchedulerOptions, type SchedulerStatus
 export * from "./scheduler/types.js";
 export { migrationDigests, openDatabase } from "./storage/db.js";
 export { type ListRunsFilter, NEEDS_REVIEW_SQL, type RunPatch, RunRepository } from "./storage/runs.js";
-export { parseGate, ScheduleRepository } from "./storage/schedules.js";
+export { type EndedRunFacts, parseGate, ScheduleRepository } from "./storage/schedules.js";
 
 export { type LogLevel, logger } from "./util/log.js";
