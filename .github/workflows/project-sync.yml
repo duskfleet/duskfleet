@@ -1,0 +1,53 @@
+# Keeps the GitHub Project "DuskFleet Flow" in step with the flow labels (docs/development.md
+# "Issue and review flow by agents"): every label change on an issue or PR, and an hourly
+# safety net, run scripts/project-sync.mjs. Labels stay the source of truth; this only moves
+# the board.
+#
+# The default GITHUB_TOKEN cannot read or write an organization project, so the job uses the
+# PROJECT_SYNC_TOKEN secret: a token with the `project` and `repo` scopes (classic) or, if
+# fine-grained, organization permission "Projects: read and write" plus repository
+# permissions "Issues: read", "Pull requests: read" and "Metadata: read".
+#
+# `pull_request_target` runs in the context of the base branch (secrets available, the PR's
+# code is never checked out), which is what a sync of labels needs.
+name: Project sync
+
+on:
+  issues:
+    types: [opened, reopened, closed, labeled, unlabeled]
+  pull_request_target:
+    types: [opened, reopened, closed, labeled, unlabeled]
+  schedule:
+    - cron: "17 * * * *"
+  workflow_dispatch:
+
+# One sync at a time; a queued run picks up whatever changed meanwhile.
+concurrency:
+  group: project-sync
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  sync:
+    name: sync
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+
+      - name: Mirror flow labels into the project
+        env:
+          GH_TOKEN: ${{ secrets.PROJECT_SYNC_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          if [ -z "$GH_TOKEN" ]; then
+            echo "::error::PROJECT_SYNC_TOKEN secret is not set (see the header of this workflow)"
+            exit 1
+          fi
+          node scripts/project-sync.mjs

@@ -1001,6 +1001,42 @@ pre.block.bad {
   color: var(--muted);
 }
 
+/* ---- changes (git diff of a run) ------------------------------------------ */
+.changes {
+  list-style: none;
+  margin: 0;
+  padding: 6px 0;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  font-size: 13px;
+  line-height: 19px;
+}
+.changes li {
+  display: grid;
+  grid-template-columns: 22px minmax(0, 1fr) auto;
+  gap: 10px;
+  padding: 3px 14px;
+}
+.changes .st {
+  font-family: var(--font-mono);
+  color: var(--muted);
+}
+.changes .file {
+  font-family: var(--font-mono);
+  overflow-wrap: anywhere;
+}
+.changes .lines {
+  font-family: var(--font-mono);
+  white-space: nowrap;
+}
+.changes .add {
+  color: var(--ok);
+}
+.changes .del {
+  color: var(--bad-ink);
+}
+
 /* ---- key/value ----------------------------------------------------------- */
 .kv {
   display: grid;
@@ -1835,6 +1871,10 @@ summary:focus-visible {
 .sq.gate {
   border-color: var(--faint);
   border-style: dotted;
+}
+.sq.paused {
+  border-color: var(--warn);
+  border-style: dashed;
 }
 .sq.none,
 .sq.gone {

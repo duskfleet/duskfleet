@@ -12,6 +12,7 @@ import { createWriteStream, existsSync, mkdirSync, type WriteStream } from "node
 import { homedir } from "node:os";
 import path from "node:path";
 import { createInterface } from "node:readline";
+import { classifyFailure } from "../observability/failure.js";
 import type { BillingType, RecordedCommand } from "../observability/run.js";
 import { logger } from "../util/log.js";
 import { missingMcpServers } from "./mcp.js";
@@ -111,9 +112,9 @@ export class ClaudeCodeExecutor implements Executor {
     if (req.allowedTools?.length) argv.push("--allowedTools", ...req.allowedTools);
     if (req.disallowedTools?.length) argv.push("--disallowedTools", ...req.disallowedTools);
     if (req.appendSystemPrompt) argv.push("--append-system-prompt", req.appendSystemPrompt);
-    // The prompt is the final positional argument. `--` guards against prompts
-    // that begin with a dash being parsed as flags.
-    argv.push("--", req.prompt);
+    // No positional prompt: `execute` writes it on stdin (`-p` reads the prompt from stdin when
+    // none is given; `--input-format` defaults to text, verified against claude --help 2.1.3xx).
+    // The prompt therefore stays out of `ps` output and of the recorded command.
     return argv;
   }
 
@@ -188,11 +189,15 @@ export class ClaudeCodeExecutor implements Executor {
       const proc = spawn(this.binary, attemptArgv, {
         cwd: req.cwd,
         env,
-        stdio: ["ignore", "pipe", "pipe"],
+        stdio: ["pipe", "pipe", "pipe"], // stdin carries the prompt, never argv
         shell: false, // never a shell: argv is passed verbatim to the binary
         detached: OWN_PROCESS_GROUP,
       });
       child = proc;
+      // The prompt goes on stdin, then EOF. A child that exits (or fails to spawn) before reading
+      // it closes the pipe: EPIPE is expected there and the exit path reports the real outcome.
+      proc.stdin!.on("error", (err) => log.debug("stdin write failed", { pid: proc.pid, err: err.message }));
+      proc.stdin!.end(req.prompt, "utf8");
       closed = false;
       const state = createStreamState();
       let resultTimer: NodeJS.Timeout | null = null;
@@ -411,6 +416,16 @@ function finalResult(input: {
     permissionDenials: r?.permissionDenials ?? 0,
     deniedTools: r?.deniedTools ?? [],
     contextExhausted: looksLikeContextExhaustion(r),
+    failure: classifyFailure({
+      outcome: input.outcome,
+      // A result line with is_error false carries the agent's prose even when the exit code is
+      // non-zero: never scan it ("the 503 retry test now passes" is not an outage).
+      error: !r || r.isError ? input.error : null,
+      terminalReason: r?.terminalReason ?? null,
+      subtype: r?.subtype ?? null,
+      stopReason: r?.stopReason ?? null,
+      endedAt: input.endedAt,
+    }),
     rawResult: r?.raw ?? null,
     subagents: [...input.state.subagents.values()],
   };

@@ -112,7 +112,9 @@ PR:     flow: needs-review ──► flow: in-review ──► flow: changes-req
   parks issues that need a decision with `flow: needs-human`, and promotes candidates to
   `flow: ready` up to six, at most two units of work in flight per area, and none while eight
   PRs wait for a merge. It never promotes an issue without a `priority:` label, a `roadmap`
-  issue or one that already has an open PR.
+  issue, one that already has an open PR, or an `area: website` issue: the public site
+  (`duskfleet-website`) is the owner's work, and the developer agents of this repository
+  would build it into the dashboard.
 - Dependencies are lines in an issue's body or comments: `Blocked by #65` (or
   `Depends on #62, #61`). While one of them is open the issue carries the `blocked` label and
   stays out of the queue; the planner removes the label once all of them are closed. A
@@ -141,6 +143,28 @@ PR:     flow: needs-review ──► flow: in-review ──► flow: changes-req
   bounds → `flow: changes-requested`, and a wanted major → `flow: needs-human`. Still a
   review: grouped bumps have broken the web build before.
 
+- The PR gate keeps the labels true to the merge state, with no agent involved. A PR labelled
+  `flow: needs-review` or `flow: ready-to-merge` was fine when it got the label; once `main`
+  moves it can conflict, and the ruleset on `main` requires an up-to-date branch with a green
+  `checks` job. `node scripts/pr-gate.mjs [--dry-run] [--update-branch]` reads every open PR
+  in those two states (drafts and Dependabot excluded) and, when it conflicts with its base or
+  a required check (read from the rulesets on the base branch; a failed non-required job such
+  as `sync` does not count) failed on its head, swaps the label to `flow: changes-requested`
+  and then posts one comment starting with `[pr-gate]` (head SHA and the reasons; it is
+  written last, so a failed label call is retried on the next run). One failing PR does not
+  stop the others; the script exits non-zero at the end. The developer's next run merges
+  the base into the branch or fixes the check, and hands the PR back to the reviewer as after
+  any review. A PR that is merely behind its base is updated in place with `--update-branch`.
+  Idempotent: a head that already carries a `[pr-gate]` comment is left alone, so a human can
+  overrule the gate by relabelling. The workflow `.github/workflows/pr-gate.yml` runs it on
+  every push to `main`, after every CI run, once an hour and on demand. With the repository
+  secret `PR_GATE_TOKEN` (a user token with write access; scopes in the workflow header) it
+  also updates branches and its label changes fire the project sync; with the default token it
+  only relabels, since a push or a label set by `GITHUB_TOKEN` starts no other workflow. The
+  reviewer checks the same state before and after its passes (`gh pr view <n> --json
+  mergeable,statusCheckRollup`): a conflicting or red PR gets `VERDICT: changes` without a
+  review.
+
 The DuskFleet side is three user agents in `data/agents/` (developer, reviewer, planner) that
 link the local Claude Code agents (`claude_agent`) and add only the unattended envelope:
 permission mode, `gh` / `git` / `npm` allow-list, budget and timeout — plus one cron schedule
@@ -155,13 +179,20 @@ label (`Backlog` without one, `Done` when closed or merged). Labels stay the sou
 agents never touch the project, and a Status dragged on the board is overwritten on the next
 sync. Its views: *Board* (open items by Status, Backlog hidden), *Backlog* (open issues with no
 `flow:` label, to pick what to promote), *Needs me* (`Ready to merge` and `Needs human`, the two
-states that wait for a human), *All*. The script needs the `project` scope once
-(`gh auth refresh -h github.com -s project`).
+states that wait for a human), *All*. Run by hand, the script needs the `project` scope once
+(`gh auth refresh -h github.com -s project`). The workflow `.github/workflows/project-sync.yml`
+runs it on every open / close / label change of an issue or PR, once an hour as a safety net
+and on demand (*Actions → Project sync → Run workflow*); it needs the repository secret
+`PROJECT_SYNC_TOKEN` (the default token cannot touch an organization project; the scopes are
+listed in the workflow header). Without the secret the job fails loudly and the board simply
+lags until the script is run by hand.
 
 ## Security model
 
 - The project path is passed as the child's **working directory**; nothing is ever built into a
   shell string (`spawn(binary, argv, { shell: false })`).
+- The prompt is written to the child's **stdin**, never passed as an argument: it does not show
+  up in `ps` output nor in the recorded command, only in the run's `prompt` column.
 - Project paths are validated before anything runs; `allowed_project_roots` fences them.
 - Permission mode is explicit per agent; `bypassPermissions` is off unless enabled in config.
 - Every run stores the full command it executed.
@@ -181,7 +212,7 @@ states that wait for a human), *All*. The script needs the `project` scope once
 
   | Flag | Purpose in DuskFleet |
   |---|---|
-  | `-p, --print` | Non-interactive execution |
+  | `-p, --print` | Non-interactive execution; with no positional prompt it reads the prompt from stdin (`--input-format` defaults to `text`), which is how the executor sends it |
   | `--output-format stream-json` + `--verbose` | Line-delimited JSON events (`stream-json` refuses to run without `--verbose`) |
   | `--session-id <uuid>` | The run knows its session id before the process starts |
   | `--model <model>` | Only passed when explicitly selected |

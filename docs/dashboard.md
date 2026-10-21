@@ -18,13 +18,17 @@ in the nav); the other pages are static.
 - **Run detail**: short title, status line, duration / cost / turns / tool calls / tokens (a
   subscription run's cost is labelled "reported, not billed"; an API key run's is billed, see
   [`billingType`](cli.md#what-a-run-records); the list's cost cell says the same on hover), the
-  issues (denied calls highlighted in the timeline, missing MCP servers, context exhaustion),
+  issues (denied calls highlighted in the timeline, missing MCP servers, context exhaustion,
+  the error labelled with its [`errorCode`](cli.md#what-a-run-records) and the quota reset time,
+  a "Claude is not logged in" callout with the login link for `auth_required`, a refusal warning),
   the linked retry when the run resumed an earlier one or was resumed by a later one
   (`on_failure: resume_once`; the list shows "resumes ↗" / "retried ↗" flags),
   final message (long results collapse), a callout when a budget exhaustion was followed by a
   wrap-up pass (what the main pass spent, what the wrap-up cost and whether it recorded where
   it stopped; the wrap-up's own tool calls sit between `wrap-up started` / `wrap-up ended`
-  rows of the timeline), event timeline with legend and grouped repeats,
+  rows of the timeline), a **Changes** section when the project is a git checkout (files the
+  run changed with lines added / deleted, the base commit, a link to the patch at
+  `/runs/<id>/diff`), event timeline with legend and grouped repeats,
   previous / next run of the same agent, a "run again" CLI command, the `claude --resume`
   command and the exact command executed. Home paths print as `~/…`; Copy buttons give the
   full value.

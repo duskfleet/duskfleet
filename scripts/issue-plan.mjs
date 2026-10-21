@@ -3,7 +3,9 @@
 // open issues with their flow / priority / area labels, their declared blockers and whether
 // those are still open, the open PRs that close them, and two deterministic lists:
 //   labelActions - `blocked` labels to add or remove, from declared blockers only;
-//   candidates   - issues that may be promoted to `flow: ready`, best first.
+//   candidates   - issues that may be promoted to `flow: ready`, best first. Never an
+//                  `area: website` issue: the public site (duskfleet-website) is the owner's
+//                  work; the developer agents here would build it into the dashboard.
 // Read-only: it never changes a label. Run from the repository (gh resolves {owner}/{repo}).
 //
 //   node scripts/issue-plan.mjs
@@ -136,6 +138,7 @@ const candidates = issues
       issue.priority !== null &&
       issue.flow === null &&
       !issue.roadmap &&
+      !issue.areas.includes("website") &&
       issue.openBlockers.length === 0 &&
       (!issue.blockedLabel || issue.blockers.length > 0) &&
       issue.openPrs.length === 0,
