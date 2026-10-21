@@ -163,8 +163,6 @@ function looksLikePath(value: string): boolean {
   return /[\\/]/.test(value) || value.startsWith("~") || /^[A-Za-z]:/.test(value);
 }
 
-/** Claude Code derives MCP tool prefixes from the server name: "claude.ai Figma" → "mcp__claude_ai_Figma". */
-
 export class RunManager {
   private readonly active = new Map<string, ActiveRun>();
 

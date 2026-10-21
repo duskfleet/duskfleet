@@ -1231,6 +1231,9 @@ test("a timed-out run is resumed too; a schedule's on_failure overrides the agen
     assert.equal(t.scheduler.resumeCandidate(t.repo.get(off.id)), null);
     const offSecond = await t.fireAndWait(off.id);
     assert.equal(offSecond.resumedFromRunId, null);
+    // Done with it: on a minute boundary its "* * * * *" would be due again inside the next
+    // ticks, fire first on the same project and leave "retry hang" skipped_busy (a CI flake).
+    t.scheduler.update(off.id, { enabled: false });
 
     // agent says nothing, schedule says resume_once with its own budget → resumed after a timeout
     const on = t.scheduler.create({
