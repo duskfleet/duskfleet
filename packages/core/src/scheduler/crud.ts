@@ -16,7 +16,17 @@ import type { ScheduleRepository } from "../storage/schedules.js";
 import { assertTimeZone, CronError, nextFire, parseCron } from "./cron.js";
 import { validateGate } from "./gate.js";
 import { parseNoopPattern } from "./idle.js";
-import type { Schedule, ScheduleInput, SchedulePatch } from "./types.js";
+import {
+  CATCH_UP_CAP,
+  CATCH_UP_POLICIES,
+  CONCURRENCY_POLICIES,
+  DEFAULT_CATCH_UP_POLICY,
+  DEFAULT_CONCURRENCY_POLICY,
+  IMPLEMENTED_CATCH_UP_POLICIES,
+  type Schedule,
+  type ScheduleInput,
+  type SchedulePatch,
+} from "./types.js";
 
 export const DEFAULT_TIME_ZONE = "Europe/London";
 
@@ -56,6 +66,24 @@ export function validateScheduleInput(config: DuskFleetConfig, input: ScheduleIn
   }
   if (input.noopPattern != null) parseNoopPattern(input.noopPattern);
   if (input.gate != null) validateGate(config, input.gate, scheduleProjectId(input, agent));
+  validatePolicies(input);
+}
+
+/** concurrency_policy and catch_up_policy: known values, and only the ones the scheduler implements. */
+function validatePolicies(input: Pick<ScheduleInput, "concurrencyPolicy" | "catchUpPolicy">): void {
+  const concurrency = input.concurrencyPolicy ?? DEFAULT_CONCURRENCY_POLICY;
+  if (!(CONCURRENCY_POLICIES as readonly string[]).includes(concurrency)) {
+    throw new Error(`concurrency_policy must be one of ${CONCURRENCY_POLICIES.join(", ")}`);
+  }
+  const catchUp = input.catchUpPolicy ?? DEFAULT_CATCH_UP_POLICY;
+  if (!(CATCH_UP_POLICIES as readonly string[]).includes(catchUp)) {
+    throw new Error(`catch_up_policy must be one of ${CATCH_UP_POLICIES.join(", ")}`);
+  }
+  if (!IMPLEMENTED_CATCH_UP_POLICIES.includes(catchUp)) {
+    throw new Error(
+      `catch_up_policy ${catchUp} is not implemented yet (planned: replay up to ${CATCH_UP_CAP} missed ticks, never for sub-hourly schedules); use ${IMPLEMENTED_CATCH_UP_POLICIES.join(", ")}`,
+    );
+  }
 }
 
 /**
@@ -185,6 +213,8 @@ export function updateSchedule(
     resumeBudgetUsd: patch.resumeBudgetUsd === undefined ? existing.resumeBudgetUsd : patch.resumeBudgetUsd,
     noopPattern: patch.noopPattern === undefined ? existing.noopPattern : patch.noopPattern,
     gate: patch.gate === undefined ? existing.gate : patch.gate,
+    concurrencyPolicy: patch.concurrencyPolicy ?? existing.concurrencyPolicy,
+    catchUpPolicy: patch.catchUpPolicy ?? existing.catchUpPolicy,
   };
   validateScheduleInput(config, merged);
   if (merged.name !== existing.name && repo.findByName(merged.name))

@@ -49,6 +49,29 @@ export interface ScheduleGate {
   };
 }
 
+/**
+ * What a tick does when the schedule's agent or project is still busy. `skip_if_active` (the
+ * only value for now) records `skipped_busy`; a busy tick is never queued.
+ */
+export const CONCURRENCY_POLICIES = ["skip_if_active"] as const;
+export type ConcurrencyPolicy = (typeof CONCURRENCY_POLICIES)[number];
+
+/**
+ * What happens to ticks that were due while no process ticked. `skip_missed`: the schedule fires
+ * once when it is next considered and next_run_at is recomputed from now, the rest are dropped.
+ * `enqueue_missed_with_cap` (replay up to `CATCH_UP_CAP` missed ticks, never for sub-hourly
+ * schedules) is reserved: validation refuses it until it is implemented.
+ */
+export const CATCH_UP_POLICIES = ["skip_missed", "enqueue_missed_with_cap"] as const;
+export type CatchUpPolicy = (typeof CATCH_UP_POLICIES)[number];
+/** The values validation accepts today. */
+export const IMPLEMENTED_CATCH_UP_POLICIES: readonly CatchUpPolicy[] = ["skip_missed"];
+/** Most missed ticks `enqueue_missed_with_cap` would replay. */
+export const CATCH_UP_CAP = 3;
+
+export const DEFAULT_CONCURRENCY_POLICY: ConcurrencyPolicy = "skip_if_active";
+export const DEFAULT_CATCH_UP_POLICY: CatchUpPolicy = "skip_missed";
+
 export const DEFAULT_GATE_MARKER = "NO_WORK";
 export const DEFAULT_GATE_BUDGET_USD = 0.5;
 export const DEFAULT_GATE_TIMEOUT_SECONDS = 60;
@@ -94,6 +117,10 @@ export interface Schedule {
   noopPattern: string | null;
   /** Checked before every fresh run; null = no gate. */
   gate: ScheduleGate | null;
+  /** What a tick does while the agent or project is busy (stored, default skip_if_active). */
+  concurrencyPolicy: ConcurrencyPolicy;
+  /** What happens to ticks missed while nobody ticked (stored, default skip_missed). */
+  catchUpPolicy: CatchUpPolicy;
 }
 
 export interface ScheduleInput {
@@ -109,6 +136,8 @@ export interface ScheduleInput {
   resumeBudgetUsd?: number | null;
   noopPattern?: string | null;
   gate?: ScheduleGate | null;
+  concurrencyPolicy?: ConcurrencyPolicy;
+  catchUpPolicy?: CatchUpPolicy;
 }
 
 export type SchedulePatch = Partial<ScheduleInput>;

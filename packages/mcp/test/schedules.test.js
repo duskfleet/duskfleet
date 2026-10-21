@@ -125,6 +125,21 @@ test("schedules over MCP: create, list, update, run now, delete; validation erro
     assert.equal(created.schedule.effectiveProjectId, "demo", "effective project = the agent's");
     assert.ok(created.schedule.nextRunAt, "next_run_at computed");
     assert.equal(created.schedule.enabled, true);
+    assert.equal(created.schedule.concurrencyPolicy, "skip_if_active");
+    assert.equal(created.schedule.catchUpPolicy, "skip_missed");
+    fails(
+      await client.callTool({
+        name: "create_schedule",
+        arguments: {
+          name: "catch up",
+          agent_id: "coder",
+          prompt: "ok",
+          cron: "0 * * * *",
+          catch_up_policy: "enqueue_missed_with_cap",
+        },
+      }),
+      /not implemented yet/,
+    );
 
     fails(
       await client.callTool({
@@ -927,6 +942,50 @@ test("idle cost: 7-day ticks, fires, no-op runs by marker and what they cost, pe
     assert.equal(t.scheduler.idleStats(t.repo.get(s.id), 0).runs, 0);
     const hung = t.runs.listRuns({ status: "running" })[0];
     if (hung) t.runs.cancelRun(hung.id);
+  } finally {
+    await t.close(root);
+  }
+});
+
+test("policy enums: stored defaults, explicit values kept by edits, the reserved catch-up value and unknowns refused; missed ticks fire once", async () => {
+  const { root, configDir } = makeRoot();
+  const t = makeScheduler(configDir);
+  try {
+    const s = t.scheduler.create({ name: "policies", agentId: "coder", prompt: "ok", cron: "0 * * * *" });
+    assert.equal(s.concurrencyPolicy, "skip_if_active");
+    assert.equal(s.catchUpPolicy, "skip_missed");
+    const row = t.db.prepare("SELECT concurrency_policy, catch_up_policy FROM schedules WHERE id = ?").get(s.id);
+    assert.deepEqual({ ...row }, { concurrency_policy: "skip_if_active", catch_up_policy: "skip_missed" });
+
+    const explicit = t.scheduler.update(s.id, { concurrencyPolicy: "skip_if_active", catchUpPolicy: "skip_missed" });
+    assert.equal(explicit.catchUpPolicy, "skip_missed");
+    assert.equal(t.scheduler.update(s.id, { prompt: "ok again" }).catchUpPolicy, "skip_missed", "an edit keeps it");
+
+    assert.throws(
+      () => t.scheduler.update(s.id, { catchUpPolicy: "enqueue_missed_with_cap" }),
+      /enqueue_missed_with_cap is not implemented yet .*up to 3 missed ticks, never for sub-hourly/,
+    );
+    assert.throws(
+      () =>
+        t.scheduler.create({ name: "bad", agentId: "coder", prompt: "ok", cron: "0 * * * *", catchUpPolicy: "replay" }),
+      /catch_up_policy must be one of skip_missed, enqueue_missed_with_cap/,
+    );
+    assert.throws(
+      () => t.scheduler.update(s.id, { concurrencyPolicy: "queue" }),
+      /concurrency_policy must be one of skip_if_active/,
+    );
+    assert.equal(t.repo.get(s.id).catchUpPolicy, "skip_missed", "a refused edit writes nothing");
+
+    // skip_missed: three hourly ticks missed while nobody ticked give one fire, and the next
+    // tick is computed from now, not from the missed ones.
+    t.repo.update(s.id, { nextRunAt: new Date(Date.now() - 3 * 3600_000 - 1000).toISOString() });
+    await t.tickAll();
+    await t.tickAll();
+    const after = t.repo.get(s.id);
+    assert.equal(after.fires, 1);
+    assert.equal(t.scheduler.firings(s.id).length, 1);
+    assert.ok(Date.parse(after.nextRunAt) > Date.now(), "next_run_at moved past now");
+    await t.runs.waitForRun(after.lastRunId, 15_000);
   } finally {
     await t.close(root);
   }

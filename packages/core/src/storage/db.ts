@@ -242,6 +242,16 @@ const MIGRATIONS: ReadonlyArray<{ version: number; sql: string; backfill?: (db: 
       ALTER TABLE runs ADD COLUMN error_detail_json TEXT;
     `,
   },
+  {
+    // Schedule policies made explicit: what a busy tick does (concurrency_policy, only
+    // skip_if_active) and what happens to ticks missed while nobody ticked (catch_up_policy,
+    // skip_missed; enqueue_missed_with_cap is reserved). Existing rows get today's behaviour.
+    version: 16,
+    sql: `
+      ALTER TABLE schedules ADD COLUMN concurrency_policy TEXT NOT NULL DEFAULT 'skip_if_active';
+      ALTER TABLE schedules ADD COLUMN catch_up_policy TEXT NOT NULL DEFAULT 'skip_missed';
+    `,
+  },
 ];
 
 /**
