@@ -3,6 +3,7 @@
  * uses to run an agent. `ClaudeCodeExecutor` is the one implementation today.
  */
 import type { EffortLevel, PermissionMode } from "../config/types.js";
+import type { FailureClassification } from "../observability/failure.js";
 import type { BillingType, RecordedCommand } from "../observability/run.js";
 
 export interface ExecutionRequest {
@@ -160,6 +161,8 @@ export interface ExecutionResult {
   deniedTools: DeniedTool[];
   /** Heuristic: the run stopped because the context window was exhausted. */
   contextExhausted: boolean;
+  /** Why the run failed, as a code (`classifyFailure`); null when unknown or when it did not fail. */
+  failure: FailureClassification | null;
   /** Full raw result object from the tool, for later analysis. */
   rawResult: unknown;
   /** Subagent invocations observed in the stream, in start order. */

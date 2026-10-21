@@ -70,6 +70,7 @@ export {
   parseNumstat,
   type RunDiff,
 } from "./git/diff.js";
+export * from "./observability/failure.js";
 export * from "./observability/run.js";
 export { BusyError } from "./orchestration/busy.js";
 export { DailyCapError } from "./orchestration/daily-cap.js";
@@ -98,6 +99,7 @@ export {
   parseCron,
 } from "./scheduler/cron.js";
 export {
+  autoPauseReason,
   createSchedule,
   DEFAULT_TIME_ZONE,
   effectiveOnFailure,
@@ -134,6 +136,6 @@ export { type FireResult, Scheduler, type SchedulerOptions, type SchedulerStatus
 export * from "./scheduler/types.js";
 export { migrationDigests, openDatabase } from "./storage/db.js";
 export { type ListRunsFilter, NEEDS_REVIEW_SQL, type RunPatch, RunRepository } from "./storage/runs.js";
-export { parseGate, ScheduleRepository } from "./storage/schedules.js";
+export { type EndedRunFacts, parseGate, ScheduleRepository } from "./storage/schedules.js";
 
 export { type LogLevel, logger } from "./util/log.js";

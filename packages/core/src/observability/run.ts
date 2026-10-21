@@ -4,6 +4,7 @@
  */
 
 import type { DeniedTool, RunMcpInfo, SubagentRecord, UsageByModel } from "../execution/types.js";
+import type { FailureCode, FailureDetail, FailureFamily } from "./failure.js";
 
 export const RUN_STATUSES = ["pending", "running", "completed", "failed", "cancelled", "timed_out"] as const;
 export type RunStatus = (typeof RUN_STATUSES)[number];
@@ -85,6 +86,16 @@ export interface Run {
    */
   humanIntervention: boolean;
   contextExhausted: boolean;
+  /**
+   * Why the run failed, as a code and its family (`classifyFailure`, migration 15): set by the
+   * executor from structured fields and a failed run's error text, never from result prose.
+   * Null when the failure is not one it knows, when the run did not fail, and for older rows.
+   * `refusal` is the one code a completed run can carry.
+   */
+  errorCode: FailureCode | null;
+  errorFamily: FailureFamily | null;
+  /** Login URL (auth_required) or reset time (provider_quota), when the error message gave one. */
+  errorDetail: FailureDetail | null;
   retries: number;
   logPath: string | null;
   rawResultJson: string | null;
@@ -290,6 +301,10 @@ export function summarizeRun(run: Run) {
     humanIntervention: run.humanIntervention,
     contextExhausted: run.contextExhausted,
     terminationReason: run.terminationReason,
+    /** Why it failed, as a code (auth_required, provider_quota, ...); null when unknown. */
+    errorCode: run.errorCode,
+    errorFamily: run.errorFamily,
+    errorDetail: run.errorDetail,
     /** Outcome and cost of the wrap-up pass after a budget exhaustion; null when there was none. */
     wrapUp: summarizeWrapUp(run),
     /** The run whose session this one resumed (on_failure: resume_once); null for a fresh run. */

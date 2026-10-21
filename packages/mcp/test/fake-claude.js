@@ -3,7 +3,7 @@
  * Fake Claude Code binary for smoke tests. Emits stream-json lines in the
  * shapes verified against Claude Code 2.1.285, without calling any API.
  *
- * Behaviour is chosen by the prompt (last argv element):
+ * Behaviour is chosen by the prompt, read from stdin as the executor sends it (never argv):
  *   "ok"       -> tool_use + text + successful result (default)
  *   "error"    -> result with is_error=true
  *   "hang"     -> emits init then sleeps forever (for cancel / timeout tests)
@@ -22,6 +22,9 @@
  *   "budget"  -> spends the whole --max-budget-usd and stops with the real budget shape
  *                 (subtype error_max_budget_usd, terminal_reason budget_exhausted, no `result`,
  *                 errors: [...], is_error true, exit 1; from run a2d99954 of 2026-10-14)
+ *   "max-turns" -> result subtype error_max_turns, is_error true, no `result`, exit 1
+ *   "prose-exit" -> like "ok" (is_error false), but the result text mentions "503" and "not
+ *                 logged in" and the process exits 1: the failure classifier must not read it
  *   "linger"  -> like "ok", but keeps running after the result line (grace kill tests)
  *   "linger-hook" -> like "ok", then exits while a spawned descendant keeps stdout open
  *                 (a user-level Stop hook); the descendant's pid is written to ./hook.pid
@@ -31,10 +34,9 @@
  * says where it stopped; "budget" = exhausts the reserve too; "hang" = never ends.
  */
 import { spawn } from "node:child_process";
-import { appendFileSync, rmSync, writeFileSync } from "node:fs";
+import { appendFileSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 
 const args = process.argv.slice(2);
-const prompt = args[args.length - 1] ?? "ok";
 const sessionIdx = args.indexOf("--session-id");
 const resumeIdx = args.indexOf("--resume");
 const sessionId =
@@ -52,6 +54,9 @@ if (args[0] === "--version") {
   process.stdout.write("9.9.9 (fake)\n");
   process.exit(0);
 }
+
+// Read after --version: execFile leaves stdin open, so reading it there would block forever.
+const prompt = readFileSync(0, "utf8").trim() || "ok";
 
 const out = (o) => process.stdout.write(JSON.stringify(o) + "\n");
 
@@ -176,6 +181,23 @@ if (resumeIdx >= 0) {
   }
 } else if (prompt === "budget") {
   budgetStop();
+} else if (prompt === "max-turns") {
+  // Subtype from the Agent SDK's result types (error_max_turns, no `result` text); not yet
+  // captured from a real CLI run, so no terminal_reason is invented here.
+  out({
+    type: "result",
+    subtype: "error_max_turns",
+    is_error: true,
+    duration_ms: 900,
+    duration_api_ms: 800,
+    num_turns: 3,
+    session_id: sessionId,
+    total_cost_usd: 0.01,
+    usage: { input_tokens: 10, output_tokens: 5, cache_creation_input_tokens: 0, cache_read_input_tokens: 0 },
+    permission_denials: [],
+    stop_reason: "tool_use",
+  });
+  process.exit(1);
 } else if (prompt === "hang") {
   setInterval(() => {}, 1000); // keep alive until killed
 } else if (prompt === "crash") {
@@ -414,7 +436,9 @@ if (resumeIdx >= 0) {
             ? "Ready ticket found: SL-9."
             : prompt === "gate-mention"
               ? "Found SL-9 in Ready, so this is not NO_WORK"
-              : "Done: created hello.txt";
+              : prompt === "prose-exit"
+                ? "The 503 retry test now passes; the not logged in banner is fixed."
+                : "Done: created hello.txt";
   out({
     type: "result",
     subtype: isError ? "error_during_execution" : "success",
@@ -442,6 +466,6 @@ if (resumeIdx >= 0) {
     writeFileSync("hook.pid", String(hook.pid));
     process.exit(0);
   } else {
-    process.exit(isError ? 1 : 0);
+    process.exit(isError || prompt === "prose-exit" ? 1 : 0);
   }
 }

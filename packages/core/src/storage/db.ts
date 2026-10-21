@@ -231,6 +231,27 @@ const MIGRATIONS: ReadonlyArray<{ version: number; sql: string; backfill?: (db: 
     version: 14,
     sql: `ALTER TABLE runs ADD COLUMN billing_type TEXT;`,
   },
+  {
+    // Why a run failed, as a code (classifyFailure): error_code (auth_required, provider_quota, ...),
+    // its family (setup / limit / transient / refusal) and the detail some codes carry (login URL,
+    // retry_not_before) as JSON. NULL for older rows and for failures that match no code.
+    version: 15,
+    sql: `
+      ALTER TABLE runs ADD COLUMN error_code TEXT;
+      ALTER TABLE runs ADD COLUMN error_family TEXT;
+      ALTER TABLE runs ADD COLUMN error_detail_json TEXT;
+    `,
+  },
+  {
+    // Auto-pause: the scheduler pauses a schedule whose last scheduler.auto_pause_after runs were
+    // all empty (0 tool calls) or needs review, and says why. auto_paused_at stays after a resume
+    // so the runs before it do not count again.
+    version: 16,
+    sql: `
+      ALTER TABLE schedules ADD COLUMN paused_reason TEXT;
+      ALTER TABLE schedules ADD COLUMN auto_paused_at TEXT;
+    `,
+  },
 ];
 
 /**

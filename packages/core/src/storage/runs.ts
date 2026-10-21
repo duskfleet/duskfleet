@@ -1,6 +1,7 @@
 import type { DatabaseSync } from "node:sqlite";
 import type { DeniedTool, RunMcpInfo, SubagentRecord, SubagentStatus, UsageByModel } from "../execution/types.js";
 import type { RunDiff } from "../git/diff.js";
+import { FAILURE_CODES, FAILURE_FAMILY, type FailureCode, type FailureDetail } from "../observability/failure.js";
 import type {
   ReviewReason,
   Run,
@@ -56,6 +57,9 @@ interface RunRow {
   resumed_from_run_id: string | null;
   kind: string | null;
   billing_type: string | null;
+  error_code: string | null;
+  error_family: string | null;
+  error_detail_json: string | null;
 }
 
 function rowToRun(r: RunRow): Run {
@@ -92,6 +96,7 @@ function rowToRun(r: RunRow): Run {
     mcp: parseMcp(r.mcp_json),
     humanIntervention: r.human_intervention === 1,
     contextExhausted: r.context_exhausted === 1,
+    ...parseFailure(r),
     retries: r.retries,
     logPath: r.log_path,
     rawResultJson: r.raw_result_json,
@@ -114,6 +119,22 @@ function parseReasons(json: string | null | undefined): ReviewReason[] {
   } catch {
     return [];
   }
+}
+
+/** NULL for rows before migration 15 and for runs without a known failure; an unknown code reads as none. */
+function parseFailure(r: RunRow): Pick<Run, "errorCode" | "errorFamily" | "errorDetail"> {
+  const code = (FAILURE_CODES as readonly string[]).includes(r.error_code ?? "") ? (r.error_code as FailureCode) : null;
+  if (!code) return { errorCode: null, errorFamily: null, errorDetail: null };
+  let detail: FailureDetail | null = null;
+  if (r.error_detail_json) {
+    try {
+      const v = JSON.parse(r.error_detail_json);
+      if (typeof v === "object" && v !== null && !Array.isArray(v)) detail = v as FailureDetail;
+    } catch {
+      /* keep null */
+    }
+  }
+  return { errorCode: code, errorFamily: FAILURE_FAMILY[code], errorDetail: detail };
 }
 
 /** NULL for rows before migration 13 and for runs whose result had no modelUsage. */
@@ -173,6 +194,9 @@ export type RunPatch = Partial<
     | "mcp"
     | "humanIntervention"
     | "contextExhausted"
+    | "errorCode"
+    | "errorFamily"
+    | "errorDetail"
     | "retries"
     | "logPath"
     | "rawResultJson"
@@ -207,6 +231,9 @@ const PATCH_COLUMNS: Record<keyof RunPatch, string> = {
   mcp: "mcp_json",
   humanIntervention: "human_intervention",
   contextExhausted: "context_exhausted",
+  errorCode: "error_code",
+  errorFamily: "error_family",
+  errorDetail: "error_detail_json",
   retries: "retries",
   logPath: "log_path",
   rawResultJson: "raw_result_json",
@@ -251,8 +278,8 @@ export class RunRepository {
            exit_code, termination_reason, error, result_text, num_turns, tool_calls, input_tokens, output_tokens,
            cache_read_tokens, cache_creation_tokens, cost_usd, permission_denials, denied_tools_json, mcp_json, human_intervention,
            context_exhausted, retries, log_path, raw_result_json, schedule_id, owner, phases_json, review_reasons_json, resumed_from_run_id, kind,
-           usage_by_model_json, billing_type)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+           usage_by_model_json, billing_type, error_code, error_family, error_detail_json)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         run.id,
@@ -297,6 +324,9 @@ export class RunRepository {
         run.kind ?? "run",
         run.usageByModel ? JSON.stringify(run.usageByModel) : null,
         run.billingType ?? null,
+        run.errorCode ?? null,
+        run.errorFamily ?? null,
+        run.errorDetail ? JSON.stringify(run.errorDetail) : null,
       );
   }
 

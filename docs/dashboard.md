@@ -18,7 +18,9 @@ in the nav); the other pages are static.
 - **Run detail**: short title, status line, duration / cost / turns / tool calls / tokens (a
   subscription run's cost is labelled "reported, not billed"; an API key run's is billed, see
   [`billingType`](cli.md#what-a-run-records); the list's cost cell says the same on hover), the
-  issues (denied calls highlighted in the timeline, missing MCP servers, context exhaustion),
+  issues (denied calls highlighted in the timeline, missing MCP servers, context exhaustion,
+  the error labelled with its [`errorCode`](cli.md#what-a-run-records) and the quota reset time,
+  a "Claude is not logged in" callout with the login link for `auth_required`, a refusal warning),
   the linked retry when the run resumed an earlier one or was resumed by a later one
   (`on_failure: resume_once`; the list shows "resumes ↗" / "retried ↗" flags),
   final message (long results collapse), a callout when a budget exhaustion was followed by a

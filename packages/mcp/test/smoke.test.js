@@ -85,6 +85,9 @@ test("successful run is recorded with metrics", async () => {
     assert.deepEqual(started.command.argv.slice(0, 4), ["-p", "--output-format", "stream-json", "--verbose"]);
     assert.ok(started.command.argv.includes("--model") && started.command.argv.includes("haiku"));
     assert.ok(started.command.argv.includes("--append-system-prompt"));
+    assert.ok(!started.command.argv.includes("ok"), "the prompt goes on stdin: not in argv, not in command_json");
+    assert.ok(!started.command.argv.includes("--"), "no positional prompt left to guard");
+    assert.equal(started.prompt, "ok", "the prompt column keeps it");
 
     const run = await app.runs.waitForRun(started.id, 10_000);
     assert.equal(run.status, "completed");
@@ -139,6 +142,39 @@ test("error result marks the run failed", async () => {
     assert.equal(run.exitCode, 1);
     assert.match(run.error, /API Error/);
     assert.equal(run.terminationReason, "api_error");
+    // A generic API error matches no failure code.
+    assert.equal(run.errorCode, null);
+    assert.equal(run.errorFamily, null);
+  } finally {
+    await app.cleanup();
+  }
+});
+
+test("a max-turns stop is stored as error_code max_turns_exhausted", async () => {
+  const app = makeApp();
+  try {
+    const started = await app.runs.startRun({ prompt: "max-turns", projectPath: app.project });
+    const run = await app.runs.waitForRun(started.id, 10_000);
+    assert.equal(run.status, "failed");
+    assert.equal(run.errorCode, "max_turns_exhausted");
+    assert.equal(run.errorFamily, "limit");
+    assert.equal(run.errorDetail, null);
+    const summary = summarizeRun(run);
+    assert.equal(summary.errorCode, "max_turns_exhausted");
+  } finally {
+    await app.cleanup();
+  }
+});
+
+test("a non-zero exit after a non-error result does not classify the agent's prose", async () => {
+  const app = makeApp();
+  try {
+    const started = await app.runs.startRun({ prompt: "prose-exit", projectPath: app.project });
+    const run = await app.runs.waitForRun(started.id, 10_000);
+    assert.equal(run.status, "failed");
+    assert.match(run.error, /503 retry test/);
+    assert.equal(run.errorCode, null);
+    assert.equal(run.errorFamily, null);
   } finally {
     await app.cleanup();
   }
@@ -758,7 +794,7 @@ test("the wrap-up pass runs claude --resume with the reserve budget and the fixe
     assert.equal(argv[r + 1], started.claudeSessionId);
     assert.ok(!argv.includes("--session-id"), "a resumed pass never passes --session-id");
     assert.equal(argv[argv.indexOf("--max-budget-usd") + 1], "0.5");
-    assert.equal(argv[argv.length - 1], WRAP_UP_PROMPT);
+    assert.ok(!argv.includes(WRAP_UP_PROMPT), "the wrap-up prompt goes on stdin, never argv");
   } finally {
     await app.cleanup();
   }
@@ -1079,6 +1115,36 @@ test("mergeResults keeps usageByModel summing to the totals across the wrap-up p
   // Wrap-up that spent nothing measurable leaves the main map as is.
   const d = mergeResults(pass({}), pass({ model: null, usage: u(null, null), usageByModel: null }));
   assert.deepEqual(d.usageByModel, { "claude-haiku-5-5": u(10, 5) });
+});
+
+test("mergeResults: a wrap-up cancel drops the failure code, otherwise main's wins over the wrap-up's", () => {
+  const quota = { code: "provider_quota", family: "limit", detail: null };
+  const overloaded = { code: "transient_upstream", family: "transient", detail: null };
+  const pass = (over) => ({
+    outcome: "failed",
+    model: "claude-haiku-5-5",
+    startedAt: "2026-10-20T10:00:00.000Z",
+    endedAt: "2026-10-20T10:01:00.000Z",
+    resultText: null,
+    numTurns: 1,
+    toolCalls: 0,
+    usage: { inputTokens: 1, outputTokens: 1, cacheReadTokens: null, cacheCreationTokens: null },
+    usageByModel: null,
+    costUsd: 0.01,
+    permissionDenials: 0,
+    deniedTools: [],
+    contextExhausted: false,
+    failure: null,
+    subagents: [],
+    ...over,
+  });
+
+  const cancelled = mergeResults(pass({ failure: quota }), pass({ outcome: "cancelled" }));
+  assert.equal(cancelled.outcome, "cancelled");
+  assert.equal(cancelled.failure, null);
+
+  assert.deepEqual(mergeResults(pass({ failure: quota }), pass({ failure: overloaded })).failure, quota);
+  assert.deepEqual(mergeResults(pass({}), pass({ failure: overloaded })).failure, overloaded);
 });
 
 test("context exhaustion is detected from structured signals, not from prose", () => {
