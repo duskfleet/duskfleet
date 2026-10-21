@@ -1,4 +1,4 @@
-import { REVIEW_REASON_LABELS, type Run, type RunEvent, wrapUpPhase } from "@duskfleet/core";
+import { FAILURE_LABELS, REVIEW_REASON_LABELS, type Run, type RunEvent, wrapUpPhase } from "@duskfleet/core";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { AutoRefresh } from "@/components/AutoRefresh";
@@ -55,7 +55,7 @@ export default async function RunPage({
   const mainPhase = run.phases.find((p) => p.phase === "main") ?? null;
   const reasons = run.reviewReasons; // stored by RunManager when the run ended
   const needsAttention = reasons.length > 0;
-  const hasIssues = needsAttention || Boolean(run.error) || wrapUp !== null;
+  const hasIssues = needsAttention || Boolean(run.error) || run.errorCode !== null || wrapUp !== null;
   const resume = run.claudeSessionId
     ? `cd ${shellQuote(run.projectPath)} && claude --resume ${run.claudeSessionId}`
     : null;
@@ -283,11 +283,41 @@ export default async function RunPage({
             </div>
           </div>
         )}
+        {run.errorCode === "auth_required" && (
+          <div className="callout bad">
+            <span className="icon">!</span>
+            <div>
+              <strong>Claude is not logged in.</strong> Every run on this machine fails until it is: run{" "}
+              <code>claude /login</code> in a terminal
+              {run.errorDetail?.loginUrl ? (
+                <>
+                  {" "}
+                  or open{" "}
+                  <a href={run.errorDetail.loginUrl} target="_blank" rel="noreferrer">
+                    the login page
+                  </a>
+                </>
+              ) : null}
+              , then run it again.
+            </div>
+          </div>
+        )}
+        {run.errorCode === "refusal" && !run.error && (
+          <div className="callout warn">
+            <span className="icon">!</span>
+            <div>
+              <strong>{FAILURE_LABELS.refusal}.</strong> The run ended with <code>stop_reason: refusal</code>: check the
+              result before relying on it.
+            </div>
+          </div>
+        )}
         {run.error && (
           <div className="callout bad">
             <span className="icon">×</span>
             <div>
-              <strong>Error.</strong> {tildeText(run.error, home)}
+              <strong>Error{run.errorCode ? `: ${FAILURE_LABELS[run.errorCode]}` : ""}.</strong>{" "}
+              {run.errorDetail?.retryNotBefore ? <>Resets {fmtTime(run.errorDetail.retryNotBefore)}. </> : null}
+              {tildeText(run.error, home)}
             </div>
           </div>
         )}

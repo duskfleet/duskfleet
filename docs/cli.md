@@ -78,7 +78,7 @@ explicit model uses the Claude Code default.
 `claudeSessionId`, `permissionMode`, the exact `command` (binary, argv, cwd), `exitCode`,
 `terminationReason`, `error`, `resultText`, `numTurns`, `toolCalls`, input/output/cache tokens,
 `usageByModel` (the same tokens per model id), `costUsd`, `billingType`, `permissionDenials`, `deniedTools`, `mcp` (mounted, used, allow-listed but missing),
-`humanIntervention`, `contextExhausted`, `scheduleId`, `logPath`, `phases` (the main pass and,
+`humanIntervention`, `contextExhausted`, `errorCode`/`errorFamily`/`errorDetail`, `scheduleId`, `logPath`, `phases` (the main pass and,
 after a budget exhaustion, the [wrap-up pass](agents.md#budget-reserve-and-wrap-up-pass)), `resumedFromRunId` (the run whose session it resumed, see [resume once](schedules.md#resume-once-on-failure)).
 
 Token totals come from the result line's `modelUsage`, summed over every model, so they include
@@ -96,6 +96,19 @@ existed. The dashboard marks subscription costs "reported, not billed".
 
 `contextExhausted` comes only from structured signals (termination reason, result subtype,
 stop reason, or the error text of a failed run), never from scanning the result's prose.
+
+`errorCode` says why a run failed, as a code a script can act on; `errorFamily` groups the codes
+by what to do about them. Same rule as `contextExhausted`: structured fields and a failed run's
+error text only. Null when the failure matches no code, and for runs recorded before it existed.
+
+| `errorCode` | `errorFamily` | From |
+|---|---|---|
+| `auth_required` | `setup` | "Not logged in", "Please run /login", invalid API key, expired OAuth token; `errorDetail.loginUrl` when the message gives a URL |
+| `model_not_found` | `setup` | "issue with the selected model", a model that does not exist, `not_found_error` on a model |
+| `max_turns_exhausted` | `limit` | result subtype or terminal reason `max_turns` (`error_max_turns`) |
+| `provider_quota` | `limit` | usage limit reached / "hit your limit"; `errorDetail.retryNotBefore` (ISO) from `limit reached\|<epoch>`, "resets at <ISO>" or "resets 3pm (Europe/London)" |
+| `transient_upstream` | `transient` | API errors 429, 503, 529, `overloaded`, `rate_limit_error`: a later retry may work |
+| `refusal` | `refusal` | `stop_reason: refusal`, the one code a completed (exit 0) run can carry |
 
 `duskfleet runs` adds `needsReview` and `reviewReasons` per run (see
 [dashboard](dashboard.md#needs-review)); `duskfleet schedules` adds `lastRun` per schedule.

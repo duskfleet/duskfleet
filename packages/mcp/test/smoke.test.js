@@ -139,6 +139,25 @@ test("error result marks the run failed", async () => {
     assert.equal(run.exitCode, 1);
     assert.match(run.error, /API Error/);
     assert.equal(run.terminationReason, "api_error");
+    // A generic API error matches no failure code.
+    assert.equal(run.errorCode, null);
+    assert.equal(run.errorFamily, null);
+  } finally {
+    await app.cleanup();
+  }
+});
+
+test("a max-turns stop is stored as error_code max_turns_exhausted", async () => {
+  const app = makeApp();
+  try {
+    const started = await app.runs.startRun({ prompt: "max-turns", projectPath: app.project });
+    const run = await app.runs.waitForRun(started.id, 10_000);
+    assert.equal(run.status, "failed");
+    assert.equal(run.errorCode, "max_turns_exhausted");
+    assert.equal(run.errorFamily, "limit");
+    assert.equal(run.errorDetail, null);
+    const summary = summarizeRun(run);
+    assert.equal(summary.errorCode, "max_turns_exhausted");
   } finally {
     await app.cleanup();
   }
