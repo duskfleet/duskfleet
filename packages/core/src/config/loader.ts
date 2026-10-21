@@ -99,6 +99,7 @@ const globalSchema = z.object({
             return DEFAULT_NOOP_PATTERN;
           }
         }),
+      auto_pause_after: z.number().int().min(0).default(5),
     })
     .prefault({}),
 });
@@ -204,6 +205,7 @@ export function loadConfig(configDir: string): DuskFleetConfig {
       tickSeconds: g.scheduler.tick_seconds,
       defaultTimeZone: g.scheduler.default_time_zone,
       noopPattern: g.scheduler.noop_pattern,
+      autoPauseAfter: g.scheduler.auto_pause_after,
     },
     agents,
     projects,

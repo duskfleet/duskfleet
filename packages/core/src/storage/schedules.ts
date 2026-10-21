@@ -44,6 +44,17 @@ interface ScheduleRow {
   resume_budget_usd: number | null;
   noop_pattern: string | null;
   gate_json: string | null;
+  paused_reason: string | null;
+  auto_paused_at: string | null;
+}
+
+/** One ended run of a schedule as the auto-pause streak reads it (`ScheduleRepository.recentEndedRuns`). */
+export interface EndedRunFacts {
+  id: string;
+  /** Completed with 0 tool calls. */
+  empty: boolean;
+  /** Stored review reasons are not empty. */
+  needsReview: boolean;
 }
 
 /**
@@ -98,6 +109,8 @@ function rowToSchedule(r: ScheduleRow): Schedule {
     resumeBudgetUsd: r.resume_budget_usd ?? null,
     noopPattern: r.noop_pattern ?? null,
     gate: parseGate(r.gate_json, r.name),
+    pausedReason: r.paused_reason ?? null,
+    autoPausedAt: r.auto_paused_at ?? null,
   };
 }
 
@@ -165,7 +178,7 @@ export class ScheduleRepository {
     return this.get(id)!;
   }
 
-  update(id: string, patch: SchedulePatch & { nextRunAt?: string | null }): Schedule {
+  update(id: string, patch: SchedulePatch & { nextRunAt?: string | null; pausedReason?: string | null }): Schedule {
     const sets: string[] = ["updated_at = ?"];
     const values: Array<string | number | null> = [new Date().toISOString()];
     const map: Record<string, string> = {
@@ -182,6 +195,7 @@ export class ScheduleRepository {
       resumeBudgetUsd: "resume_budget_usd",
       noopPattern: "noop_pattern",
       gate: "gate_json",
+      pausedReason: "paused_reason",
     };
     for (const [k, v] of Object.entries(patch)) {
       if (v === undefined || !(k in map)) continue;
@@ -279,6 +293,36 @@ export class ScheduleRepository {
         now,
         id,
       );
+  }
+
+  /**
+   * Pause a schedule on the scheduler's own decision and say why. Compare-and-set on `enabled`:
+   * a schedule paused (or deleted) by someone else meanwhile is left alone. True when it paused.
+   */
+  autoPause(id: string, reason: string, nowIso: string = new Date().toISOString()): boolean {
+    const r = this.db
+      .prepare(
+        "UPDATE schedules SET enabled = 0, next_run_at = NULL, paused_reason = ?, auto_paused_at = ?, updated_at = ? WHERE id = ? AND enabled = 1",
+      )
+      .run(reason, nowIso, nowIso, id);
+    return Number(r.changes) > 0;
+  }
+
+  /**
+   * The last `limit` ended real runs (kind 'run'; gate runs are not the schedule's work) the
+   * schedule started, newest first, created after `sinceIso` when given. Running runs are left
+   * out: they have not ended yet.
+   */
+  recentEndedRuns(scheduleId: string, sinceIso: string | null, limit: number): EndedRunFacts[] {
+    const rows = this.db
+      .prepare(
+        `SELECT id, status = 'completed' AND COALESCE(tool_calls, 0) = 0 AS empty, ${NEEDS_REVIEW_SQL} AS needs_review
+         FROM runs WHERE schedule_id = ? AND kind = 'run' AND status IN ('completed', 'failed', 'cancelled', 'timed_out')
+           AND (? IS NULL OR created_at > ?)
+         ORDER BY created_at DESC, rowid DESC LIMIT ?`,
+      )
+      .all(scheduleId, sinceIso, sinceIso, limit) as Array<{ id: string; empty: number; needs_review: number }>;
+    return rows.map((r) => ({ id: r.id, empty: r.empty === 1, needsReview: r.needs_review === 1 }));
   }
 
   /** Ticks considered since `sinceIso`, by outcome. */

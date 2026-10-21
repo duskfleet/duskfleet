@@ -1836,6 +1836,10 @@ summary:focus-visible {
   border-color: var(--faint);
   border-style: dotted;
 }
+.sq.paused {
+  border-color: var(--warn);
+  border-style: dashed;
+}
 .sq.none,
 .sq.gone {
   background: var(--panel-2);
