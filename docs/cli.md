@@ -75,7 +75,7 @@ explicit model uses the Claude Code default.
 
 `id`, `agentId`, `projectPath`, `prompt`, `modelRequested`/`modelUsed`, `status`
 (`pending → running → completed | failed | cancelled | timed_out`), timestamps and duration,
-`claudeSessionId`, `permissionMode`, the exact `command` (binary, argv, cwd), `exitCode`,
+`claudeSessionId`, `permissionMode`, the exact `command` (binary, argv, cwd; the prompt is sent on stdin, so it is not in argv), `exitCode`,
 `terminationReason`, `error`, `resultText`, `numTurns`, `toolCalls`, input/output/cache tokens,
 `usageByModel` (the same tokens per model id), `costUsd`, `billingType`, `permissionDenials`, `deniedTools`, `mcp` (mounted, used, allow-listed but missing),
 `humanIntervention`, `contextExhausted`, `errorCode`/`errorFamily`/`errorDetail`, `scheduleId`, `logPath`, `phases` (the main pass and,

@@ -169,6 +169,8 @@ lags until the script is run by hand.
 
 - The project path is passed as the child's **working directory**; nothing is ever built into a
   shell string (`spawn(binary, argv, { shell: false })`).
+- The prompt is written to the child's **stdin**, never passed as an argument: it does not show
+  up in `ps` output nor in the recorded command, only in the run's `prompt` column.
 - Project paths are validated before anything runs; `allowed_project_roots` fences them.
 - Permission mode is explicit per agent; `bypassPermissions` is off unless enabled in config.
 - Every run stores the full command it executed.
@@ -188,7 +190,7 @@ lags until the script is run by hand.
 
   | Flag | Purpose in DuskFleet |
   |---|---|
-  | `-p, --print` | Non-interactive execution |
+  | `-p, --print` | Non-interactive execution; with no positional prompt it reads the prompt from stdin (`--input-format` defaults to `text`), which is how the executor sends it |
   | `--output-format stream-json` + `--verbose` | Line-delimited JSON events (`stream-json` refuses to run without `--verbose`) |
   | `--session-id <uuid>` | The run knows its session id before the process starts |
   | `--model <model>` | Only passed when explicitly selected |

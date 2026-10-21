@@ -3,7 +3,7 @@
  * Fake Claude Code binary for smoke tests. Emits stream-json lines in the
  * shapes verified against Claude Code 2.1.285, without calling any API.
  *
- * Behaviour is chosen by the prompt (last argv element):
+ * Behaviour is chosen by the prompt, read from stdin as the executor sends it (never argv):
  *   "ok"       -> tool_use + text + successful result (default)
  *   "error"    -> result with is_error=true
  *   "hang"     -> emits init then sleeps forever (for cancel / timeout tests)
@@ -32,10 +32,9 @@
  * says where it stopped; "budget" = exhausts the reserve too; "hang" = never ends.
  */
 import { spawn } from "node:child_process";
-import { writeFileSync } from "node:fs";
+import { readFileSync, writeFileSync } from "node:fs";
 
 const args = process.argv.slice(2);
-const prompt = args[args.length - 1] ?? "ok";
 const sessionIdx = args.indexOf("--session-id");
 const resumeIdx = args.indexOf("--resume");
 const sessionId =
@@ -53,6 +52,9 @@ if (args[0] === "--version") {
   process.stdout.write("9.9.9 (fake)\n");
   process.exit(0);
 }
+
+// Read after --version: execFile leaves stdin open, so reading it there would block forever.
+const prompt = readFileSync(0, "utf8").trim() || "ok";
 
 const out = (o) => process.stdout.write(JSON.stringify(o) + "\n");
 

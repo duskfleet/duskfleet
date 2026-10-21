@@ -85,6 +85,9 @@ test("successful run is recorded with metrics", async () => {
     assert.deepEqual(started.command.argv.slice(0, 4), ["-p", "--output-format", "stream-json", "--verbose"]);
     assert.ok(started.command.argv.includes("--model") && started.command.argv.includes("haiku"));
     assert.ok(started.command.argv.includes("--append-system-prompt"));
+    assert.ok(!started.command.argv.includes("ok"), "the prompt goes on stdin: not in argv, not in command_json");
+    assert.ok(!started.command.argv.includes("--"), "no positional prompt left to guard");
+    assert.equal(started.prompt, "ok", "the prompt column keeps it");
 
     const run = await app.runs.waitForRun(started.id, 10_000);
     assert.equal(run.status, "completed");
@@ -791,7 +794,7 @@ test("the wrap-up pass runs claude --resume with the reserve budget and the fixe
     assert.equal(argv[r + 1], started.claudeSessionId);
     assert.ok(!argv.includes("--session-id"), "a resumed pass never passes --session-id");
     assert.equal(argv[argv.indexOf("--max-budget-usd") + 1], "0.5");
-    assert.equal(argv[argv.length - 1], WRAP_UP_PROMPT);
+    assert.ok(!argv.includes(WRAP_UP_PROMPT), "the wrap-up prompt goes on stdin, never argv");
   } finally {
     await app.cleanup();
   }
