@@ -74,6 +74,46 @@ test("cli run --project accepts a registered id or a path; unknown ids, relative
   }
 });
 
+test("doctor --probe makes one haiku run outside any project, says it costs money and reports failures", () => {
+  const { root, configDir } = makeRoot();
+  try {
+    const plain = cli(configDir, ["doctor"]);
+    assert.equal(plain.status, 0, plain.stderr);
+    assert.equal("probe" in JSON.parse(plain.stdout), false, "no probe without the flag");
+    assert.doesNotMatch(plain.stderr, /costs/);
+
+    const ok = cli(configDir, ["doctor", "--probe"]);
+    assert.equal(ok.status, 0, ok.stderr);
+    assert.match(ok.stderr, /one real Claude run on haiku \(costs a few cents/);
+    const report = JSON.parse(ok.stdout);
+    assert.equal(report.probe.ok, true);
+    assert.equal(report.probe.outcome, "completed");
+    assert.equal(report.probe.model, "haiku", "the probe always runs on haiku");
+    assert.equal(report.probe.costUsd, 0.0123);
+    assert.equal(report.probe.advice, null);
+    assert.match(report.probe.note, /costs/);
+    const runs = JSON.parse(cli(configDir, ["runs"]).stdout);
+    assert.equal(runs.length, 0, "the probe is a diagnostic, not a recorded run");
+
+    const auth = cli(configDir, ["doctor", "--probe"], { FAKE_CLAUDE_MODE: "auth" });
+    assert.equal(auth.status, 1);
+    const authProbe = JSON.parse(auth.stdout).probe;
+    assert.equal(authProbe.ok, false);
+    assert.equal(authProbe.outcome, "failed");
+    assert.match(authProbe.error, /Please run \/login/);
+    assert.match(authProbe.advice, /not authenticated/);
+
+    // default_timeout_minutes is 0.05 here, below the probe's 2 minute ceiling.
+    const hang = cli(configDir, ["doctor", "--probe"], { FAKE_CLAUDE_MODE: "hang" });
+    assert.equal(hang.status, 1);
+    const hangProbe = JSON.parse(hang.stdout).probe;
+    assert.equal(hangProbe.outcome, "timed_out");
+    assert.match(hangProbe.advice, /no result within 3 s: a hook or a prompt is likely blocking/);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("a CLAUDE_BIN that does not exist falls through to claude.binary and never reaches the run's child", () => {
   const { root, configDir } = makeRoot();
   try {

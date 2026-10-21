@@ -6,6 +6,7 @@
  * Behaviour is chosen by the prompt (last argv element):
  *   "ok"       -> tool_use + text + successful result (default)
  *   "error"    -> result with is_error=true
+ *   "auth"     -> like "error", with a logged-out result text (doctor --probe advice)
  *   "hang"     -> emits init then sleeps forever (for cancel / timeout tests)
  *   "crash"    -> exits 3 with no result line
  *   "subagent" -> delegates to a project agent "reviewer" (task_started, nested
@@ -32,7 +33,8 @@ import { spawn } from "node:child_process";
 import { writeFileSync } from "node:fs";
 
 const args = process.argv.slice(2);
-const prompt = args[args.length - 1] ?? "ok";
+// FAKE_CLAUDE_MODE picks the behaviour when the prompt is fixed by DuskFleet (doctor --probe).
+const prompt = process.env.FAKE_CLAUDE_MODE ?? args[args.length - 1] ?? "ok";
 const sessionIdx = args.indexOf("--session-id");
 const resumeIdx = args.indexOf("--resume");
 const sessionId =
@@ -391,9 +393,11 @@ if (resumeIdx >= 0) {
       usage: { input_tokens: 12, output_tokens: 8 },
     },
   });
-  const isError = prompt === "error";
+  const isError = prompt === "error" || prompt === "auth";
   const result = isError
-    ? "API Error: something went wrong"
+    ? prompt === "auth"
+      ? "Invalid API key · Please run /login"
+      : "API Error: something went wrong"
     : prompt === "env"
       ? `CLAUDE_BIN ${process.env.CLAUDE_BIN === undefined ? "unset" : "set"}`
       : prompt === "noop"
