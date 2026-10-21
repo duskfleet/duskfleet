@@ -1,0 +1,59 @@
+# Hands stale pull requests back to the developer agent (docs/development.md "Issue and review
+# flow by agents"): whenever main moves or a CI run ends, and once an hour as a safety net,
+# scripts/pr-gate.mjs relabels a `flow: needs-review` / `flow: ready-to-merge` PR that now
+# conflicts with its base, or whose required check failed, to `flow: changes-requested` with a
+# comment naming the reasons. A PR that is merely behind main is updated in place.
+#
+# Token: the default GITHUB_TOKEN can comment and relabel, but a push it makes (the
+# update-branch merge) starts no workflow, so the updated PR would sit without a CI run, and a
+# label it sets does not fire the project-sync workflow either (the hourly sync catches up).
+# Set the repository secret PR_GATE_TOKEN to a token of a user with write access (classic:
+# `repo`; fine-grained: "Contents: read and write", "Pull requests: read and write", "Issues:
+# read and write", "Metadata: read") and both work; without it the job still relabels but
+# never updates a branch.
+name: PR gate
+
+on:
+  push:
+    branches: [main]
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+  schedule:
+    - cron: "41 * * * *"
+  workflow_dispatch:
+
+# One gate at a time; a queued run sees whatever changed meanwhile.
+concurrency:
+  group: pr-gate
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  issues: write
+  pull-requests: write
+
+jobs:
+  gate:
+    name: gate
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+
+      - name: Hand stale PRs back to the developer
+        env:
+          PR_GATE_TOKEN: ${{ secrets.PR_GATE_TOKEN }}
+          GITHUB_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          if [ -n "$PR_GATE_TOKEN" ]; then
+            GH_TOKEN="$PR_GATE_TOKEN" node scripts/pr-gate.mjs --update-branch
+          else
+            echo "::notice::PR_GATE_TOKEN secret is not set: relabelling only, no update-branch (see the header of this workflow)"
+            GH_TOKEN="$GITHUB_TOKEN" node scripts/pr-gate.mjs
+          fi
