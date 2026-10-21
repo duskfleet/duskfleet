@@ -143,6 +143,25 @@ PR:     flow: needs-review ──► flow: in-review ──► flow: changes-req
   bounds → `flow: changes-requested`, and a wanted major → `flow: needs-human`. Still a
   review: grouped bumps have broken the web build before.
 
+- The PR gate keeps the labels true to the merge state, with no agent involved. A PR labelled
+  `flow: needs-review` or `flow: ready-to-merge` was fine when it got the label; once `main`
+  moves it can conflict, and the ruleset on `main` requires an up-to-date branch with a green
+  `checks` job. `node scripts/pr-gate.mjs [--dry-run] [--update-branch]` reads every open PR
+  in those two states (drafts and Dependabot excluded) and, when it conflicts with its base or
+  a check failed on its head, posts one comment starting with `[pr-gate]` (head SHA and the
+  reasons) and swaps the label to `flow: changes-requested`: the developer's next run merges
+  the base into the branch or fixes the check, and hands the PR back to the reviewer as after
+  any review. A PR that is merely behind its base is updated in place with `--update-branch`.
+  Idempotent: a head that already carries a `[pr-gate]` comment is left alone, so a human can
+  overrule the gate by relabelling. The workflow `.github/workflows/pr-gate.yml` runs it on
+  every push to `main`, after every CI run, once an hour and on demand. With the repository
+  secret `PR_GATE_TOKEN` (a user token with write access; scopes in the workflow header) it
+  also updates branches and its label changes fire the project sync; with the default token it
+  only relabels, since a push or a label set by `GITHUB_TOKEN` starts no other workflow. The
+  reviewer checks the same state before and after its passes (`gh pr view <n> --json
+  mergeable,statusCheckRollup`): a conflicting or red PR gets `VERDICT: changes` without a
+  review.
+
 The DuskFleet side is three user agents in `data/agents/` (developer, reviewer, planner) that
 link the local Claude Code agents (`claude_agent`) and add only the unattended envelope:
 permission mode, `gh` / `git` / `npm` allow-list, budget and timeout — plus one cron schedule
