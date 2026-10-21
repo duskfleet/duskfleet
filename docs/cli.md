@@ -35,7 +35,8 @@ and a timeout of `claude.default_timeout_minutes`, at most 2 minutes. It records
 result before the timeout (a hook or prompt blocking the headless child), or a process that kept
 running after its result (a user-level Stop hook). When `claude --version` already failed the
 probe is not attempted (outcome `skipped`, nothing spent); a local error before the run (for
-example no writable temp directory) gives outcome `error`. `doctor` exits 1 when the probe fails.
+example no writable temp directory) gives outcome `error`. `doctor` exits 1 when the probe fails. Ctrl-C (or SIGTERM) during the
+probe cancels the run, removes its temporary directory and exits 130 without a report.
 
 Each run writes a raw event log to `data/logs/<run_id>.jsonl` and a structured row to SQLite.
 

@@ -3,8 +3,8 @@
  * The id-vs-path decision is core's (RunManager.resolveProject), so MCP's project_path behaves the same.
  */
 import assert from "node:assert/strict";
-import { spawnSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { spawn, spawnSync } from "node:child_process";
+import { mkdirSync, mkdtempSync, readdirSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { test } from "node:test";
@@ -127,6 +127,50 @@ test("doctor --probe makes one haiku run outside any project, says it costs mone
     assert.equal(thrownReport.probe.ok, false);
     assert.equal(thrownReport.probe.outcome, "error");
     assert.match(thrownReport.probe.error, /ENOENT/);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("doctor --probe on Ctrl-C cancels the paid child, removes its temp dir and exits 130", async () => {
+  const { root, configDir } = makeRoot();
+  const probeTmp = path.join(root, "tmp");
+  mkdirSync(probeTmp);
+  try {
+    const child = spawn(process.execPath, [cliEntry, "doctor", "--probe"], {
+      env: testEnv({
+        DUSKFLEET_CONFIG: configDir,
+        DUSKFLEET_LOG_LEVEL: "warn",
+        FAKE_CLAUDE_MODE: "hang",
+        TMPDIR: probeTmp,
+      }),
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    let stderr = "";
+    let stdout = "";
+    child.stdout.on("data", (d) => {
+      stdout += d;
+    });
+    const exited = new Promise((resolve) => child.on("exit", (code, signal) => resolve({ code, signal })));
+    await new Promise((resolve) => {
+      child.stderr.on("data", (d) => {
+        stderr += d;
+        if (/costs a few cents/.test(stderr)) resolve();
+      });
+    });
+    // The note is written just before the probe spawns the fake child; give it a moment to start.
+    await new Promise((r) => setTimeout(r, 500));
+    assert.equal(readdirSync(probeTmp).filter((f) => f.startsWith("duskfleet-probe-")).length, 1);
+    child.kill("SIGINT");
+    const { code } = await exited;
+    assert.equal(code, 130, stderr);
+    assert.match(stderr, /doctor --probe interrupted: cancelling the probe run/);
+    assert.equal(stdout, "", "an interrupted doctor prints no report");
+    assert.deepEqual(
+      readdirSync(probeTmp).filter((f) => f.startsWith("duskfleet-probe-")),
+      [],
+      "the temp dir is removed",
+    );
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

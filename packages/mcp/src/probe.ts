@@ -46,6 +46,10 @@ export async function runProbe(
   const cwd = mkdtempSync(path.join(tmpdir(), "duskfleet-probe-"));
   const timeoutMs = Math.min(PROBE_MAX_TIMEOUT_MS, claude.defaultTimeoutMinutes * 60 * 1000);
   let lingered = false;
+  // The child is spawned detached and paid: on Ctrl-C (or a kill) cancel it, wait for it to
+  // end and remove the temp dir before exiting, or it would run on up to the budget cap.
+  let onSignal: (() => void) | null = null;
+  let interrupted = false;
   try {
     const handle = executor.execute(
       {
@@ -61,6 +65,15 @@ export async function runProbe(
         if (event.type === "grace_kill") lingered = true;
       },
     );
+    // Installing a listener replaces Node's default exit on these signals, so the await below
+    // still returns once the cancelled child is gone; the finally cleans up, then exit 130.
+    onSignal = (): void => {
+      interrupted = true;
+      process.stderr.write("doctor --probe interrupted: cancelling the probe run\n");
+      handle.cancel();
+    };
+    process.once("SIGINT", onSignal);
+    process.once("SIGTERM", onSignal);
     const r = await handle.done;
     const ok = r.outcome === "completed" && !lingered;
     return {
@@ -76,7 +89,12 @@ export async function runProbe(
       note: PROBE_COST_NOTE,
     };
   } finally {
+    if (onSignal) {
+      process.removeListener("SIGINT", onSignal);
+      process.removeListener("SIGTERM", onSignal);
+    }
     rmSync(cwd, { recursive: true, force: true });
+    if (interrupted) process.exit(130);
   }
 }
 
