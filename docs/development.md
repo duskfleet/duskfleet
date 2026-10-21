@@ -148,8 +148,11 @@ PR:     flow: needs-review ──► flow: in-review ──► flow: changes-req
   moves it can conflict, and the ruleset on `main` requires an up-to-date branch with a green
   `checks` job. `node scripts/pr-gate.mjs [--dry-run] [--update-branch]` reads every open PR
   in those two states (drafts and Dependabot excluded) and, when it conflicts with its base or
-  a check failed on its head, posts one comment starting with `[pr-gate]` (head SHA and the
-  reasons) and swaps the label to `flow: changes-requested`: the developer's next run merges
+  a required check (read from the rulesets on the base branch; a failed non-required job such
+  as `sync` does not count) failed on its head, swaps the label to `flow: changes-requested`
+  and then posts one comment starting with `[pr-gate]` (head SHA and the reasons; it is
+  written last, so a failed label call is retried on the next run). One failing PR does not
+  stop the others; the script exits non-zero at the end. The developer's next run merges
   the base into the branch or fixes the check, and hands the PR back to the reviewer as after
   any review. A PR that is merely behind its base is updated in place with `--update-branch`.
   Idempotent: a head that already carries a `[pr-gate]` comment is left alone, so a human can
