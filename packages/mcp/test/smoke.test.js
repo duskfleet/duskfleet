@@ -25,6 +25,7 @@ import {
   RunManager,
   RunRepository,
   reviewReasons,
+  runSilence,
   summarizeRun,
   WRAP_UP_PROMPT,
 } from "@duskfleet/core";
@@ -131,6 +132,33 @@ test("billing_type is recorded when the run spawns and survives the reload", asy
   } finally {
     await app.cleanup();
   }
+});
+
+test("last_event_at is stamped when the run produces output", async () => {
+  const app = makeApp();
+  try {
+    const before = new Date().toISOString();
+    const started = await app.runs.startRun({ prompt: "ok", projectPath: app.project });
+    const run = await app.runs.waitForRun(started.id, 10_000);
+    assert.ok(run.lastEventAt, "set by the first stream-json event");
+    assert.ok(run.lastEventAt >= before && run.lastEventAt <= run.endedAt);
+  } finally {
+    await app.cleanup();
+  }
+});
+
+test("runSilence: running rows only, 5 min suspicious, 15 min critical, start time before any event", () => {
+  const now = Date.parse("2026-10-21T12:00:00Z");
+  const ago = (min) => new Date(now - min * 60_000).toISOString();
+  const running = (lastEventAt, startedAt = ago(60)) => ({ status: "running", startedAt, lastEventAt });
+  assert.equal(runSilence(running(ago(4)), now), null);
+  assert.deepEqual(runSilence(running(ago(5)), now), { level: "suspicious", silentMs: 5 * 60_000 });
+  assert.equal(runSilence(running(ago(14)), now).level, "suspicious");
+  assert.equal(runSilence(running(ago(15)), now).level, "critical");
+  assert.equal(runSilence(running(null, ago(6)), now).level, "suspicious", "no event yet: silent since the start");
+  assert.equal(runSilence(running(null, ago(2)), now), null);
+  assert.equal(runSilence({ status: "completed", startedAt: ago(60), lastEventAt: ago(30) }, now), null);
+  assert.equal(runSilence({ status: "pending", startedAt: null, lastEventAt: null }, now), null);
 });
 
 test("error result marks the run failed", async () => {

@@ -242,6 +242,13 @@ const MIGRATIONS: ReadonlyArray<{ version: number; sql: string; backfill?: (db: 
       ALTER TABLE runs ADD COLUMN error_detail_json TEXT;
     `,
   },
+  {
+    // When the run last produced output (any stream-json event), written by RunManager at most
+    // every LAST_EVENT_WRITE_MS. The dashboard shows "no output for N min" on silent running rows.
+    // NULL for older rows and for runs that never emitted an event.
+    version: 16,
+    sql: `ALTER TABLE runs ADD COLUMN last_event_at TEXT;`,
+  },
 ];
 
 /**

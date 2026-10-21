@@ -14,7 +14,10 @@ in the nav); the other pages are static.
 
 - **Runs**: KPI cards (clean runs, needs review, spend) computed on the current filter; project /
   agent chips, prompt search (`?q=`), `?schedule=` and `?limit=` (load older). Runs are identified
-  by a short title (first line of the prompt); the whole row links to the detail.
+  by a short title (first line of the prompt); the whole row links to the detail. A running run
+  that produced no stream-json output for 5 minutes shows a "no output for N min" flag (amber,
+  red from 15 minutes; since the start when it never produced any). Informational only: nothing
+  kills the run. The timestamp is `last_event_at`, written at most every 15 seconds.
 - **Run detail**: short title, status line, duration / cost / turns / tool calls / tokens (a
   subscription run's cost is labelled "reported, not billed"; an API key run's is billed, see
   [`billingType`](cli.md#what-a-run-records); the list's cost cell says the same on hover), the

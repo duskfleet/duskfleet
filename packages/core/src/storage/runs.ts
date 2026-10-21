@@ -59,6 +59,7 @@ interface RunRow {
   error_code: string | null;
   error_family: string | null;
   error_detail_json: string | null;
+  last_event_at: string | null;
 }
 
 function rowToRun(r: RunRow): Run {
@@ -106,6 +107,7 @@ function rowToRun(r: RunRow): Run {
     resumedFromRunId: r.resumed_from_run_id ?? null,
     kind: r.kind === "gate" ? "gate" : "run",
     billingType: r.billing_type === "api" || r.billing_type === "subscription" ? r.billing_type : null,
+    lastEventAt: r.last_event_at ?? null,
   };
 }
 
@@ -203,6 +205,7 @@ export type RunPatch = Partial<
     | "phases"
     | "reviewReasons"
     | "billingType"
+    | "lastEventAt"
   >
 >;
 
@@ -240,6 +243,7 @@ const PATCH_COLUMNS: Record<keyof RunPatch, string> = {
   phases: "phases_json",
   reviewReasons: "review_reasons_json",
   billingType: "billing_type",
+  lastEventAt: "last_event_at",
 };
 
 /**
@@ -277,8 +281,8 @@ export class RunRepository {
            exit_code, termination_reason, error, result_text, num_turns, tool_calls, input_tokens, output_tokens,
            cache_read_tokens, cache_creation_tokens, cost_usd, permission_denials, denied_tools_json, mcp_json, human_intervention,
            context_exhausted, retries, log_path, raw_result_json, schedule_id, owner, phases_json, review_reasons_json, resumed_from_run_id, kind,
-           usage_by_model_json, billing_type, error_code, error_family, error_detail_json)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+           usage_by_model_json, billing_type, error_code, error_family, error_detail_json, last_event_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         run.id,
@@ -326,6 +330,7 @@ export class RunRepository {
         run.errorCode ?? null,
         run.errorFamily ?? null,
         run.errorDetail ? JSON.stringify(run.errorDetail) : null,
+        run.lastEventAt ?? null,
       );
   }
 
