@@ -55,6 +55,10 @@ in the nav); the other pages are static.
 - **Spent** (Runs page) splits into "on runs" and "on gates" once a gate agent has run; gate
   runs carry a `gate` flag in the run list and are left out of the run counts (total, clean,
   failed, needs review): a gate is a yes/no check, not work.
+- **Budgets** (Runs page): one banner per [monthly budget](agents.md#monthly-budgets) past its
+  `warn_percent` (amber) or spent (coral when `hard_stop` refuses runs and has paused the
+  scope's schedules; amber when it only warns). Nothing shows while every budget is `ok`. A
+  tick refused by a budget shows as "skipped, monthly budget spent" in the schedule's strip.
 - **MCP**: the tool catalogue (`packages/mcp/dist/tools.json`, generated at build time from the
   real server) with a sticky index, plus the registration snippets for Claude Desktop and
   Claude Code with your absolute paths.

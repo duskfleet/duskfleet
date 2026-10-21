@@ -36,9 +36,20 @@ import {
   type RunSummary,
   reviewReasons,
 } from "../observability/run.js";
-import { parseHolder, processIdentity } from "../scheduler/crud.js";
+import { parseHolder, processIdentity, scheduleProjectId } from "../scheduler/crud.js";
 import type { ListRunsFilter, RunRepository } from "../storage/runs.js";
 import { logger } from "../util/log.js";
+import {
+  type Budget,
+  BudgetError,
+  type BudgetInput,
+  type BudgetStatus,
+  budgetLabel,
+  budgetRefusal,
+  budgetStatuses,
+  budgetStatusOf,
+  validateBudgetInput,
+} from "./budget.js";
 import { BusyError } from "./busy.js";
 import { DailyCapError, dailyCapReason, utcDayStart } from "./daily-cap.js";
 import { validateProjectPath } from "./project-validation.js";
@@ -366,6 +377,8 @@ export class RunManager {
     if (busy) throw new BusyError(busy);
     const capped = this.dailyCapError(agent);
     if (capped) throw new DailyCapError(capped);
+    const overBudget = this.budgetError(agent, projectId, projectPath);
+    if (overBudget) throw new BudgetError(overBudget);
 
     const runId = randomUUID();
     const resume = input.resume ?? null;
@@ -664,6 +677,37 @@ export class RunManager {
   }
 
   /**
+   * Why a run of this agent (on this project) would be refused by a hard-stop budget right now,
+   * or null. Lets the scheduler skip a tick before it spends anything on a gate. Like startRun,
+   * a refusal pauses the schedules of the spent scope.
+   */
+  budgetReason(input: { agentId: string; projectId?: string | null }): string | null {
+    this.reloadConfig();
+    const target: StartRunInput = { prompt: "", agentId: input.agentId };
+    if (input.projectId) target.projectId = input.projectId;
+    const { agent, projectId, projectPath } = this.resolveTarget(target);
+    return this.budgetError(agent, projectId, projectPath);
+  }
+
+  /** Every budget with this month's spend and its state (ok / warn / over). A pure read. */
+  budgetStatuses(now: Date = new Date()): BudgetStatus[] {
+    return budgetStatuses(this.runs.budgets, this.config, now);
+  }
+
+  /** Create the budget of a scope or replace the one it has (validated first: unknown agent / project, amount, warn_percent). */
+  setBudget(input: BudgetInput): BudgetStatus {
+    this.reloadConfig();
+    const budget = this.runs.budgets.upsert(validateBudgetInput(this.config, input));
+    log.info("budget set", { scope: budgetLabel(budget), amountUsd: budget.amountUsd, hardStop: budget.hardStop });
+    return budgetStatusOf(this.runs.budgets, this.config, budget);
+  }
+
+  /** Delete a budget by id. Schedules it paused stay paused: resume them by hand. */
+  deleteBudget(id: string): boolean {
+    return this.runs.budgets.delete(id);
+  }
+
+  /**
    * The project directory a run of this agent would use, resolved exactly as startRun does
    * (schedule gates run their command there).
    */
@@ -739,6 +783,50 @@ export class RunManager {
   private dailyCapError(agent: AgentDefinition): string | null {
     if (agent.maxDailyRuns === undefined && agent.maxDailyCostUsd === undefined) return null;
     return dailyCapReason(agent, this.runs.agentUsageSince(agent.id, utcDayStart(new Date())));
+  }
+
+  /**
+   * The budgets that cover a run of `agent` on this project (global, the agent's, the
+   * project's): why one more run is refused (the first spent hard-stop budget), or null. A
+   * refusal pauses every enabled schedule of that scope; a budget past warn_percent is logged.
+   */
+  private budgetError(agent: AgentDefinition, projectId: string | null, projectPath: string): string | null {
+    const budgets = this.runs.budgets.list();
+    if (!budgets.length) return null;
+    const now = new Date();
+    for (const b of budgets) {
+      const covers =
+        b.scope === "global" ||
+        (b.scope === "agent" && b.scopeId === agent.id) ||
+        (b.scope === "project" &&
+          (b.scopeId === projectId || this.config.projects.get(b.scopeId ?? "")?.path === projectPath));
+      if (!covers) continue;
+      const status = budgetStatusOf(this.runs.budgets, this.config, b, now);
+      if (status.state === "over" && b.hardStop) {
+        const paused = this.pauseSchedulesOf(b);
+        log.warn("budget spent; run refused", { budget: budgetLabel(b), spentUsd: status.spentUsd, paused });
+        return budgetRefusal(status, paused, now);
+      }
+      if (status.state !== "ok") {
+        log.warn("budget past its warn threshold", {
+          budget: budgetLabel(b),
+          percent: status.percent,
+          hardStop: b.hardStop,
+        });
+      }
+    }
+    return null;
+  }
+
+  /** Pause the enabled schedules a budget covers; returns their names. */
+  private pauseSchedulesOf(b: Budget): string[] {
+    const hit = this.runs.budgets.enabledSchedules().filter((s) => {
+      if (b.scope === "global") return true;
+      if (b.scope === "agent") return s.agentId === b.scopeId;
+      return scheduleProjectId(s, this.config.agents.get(s.agentId)) === b.scopeId;
+    });
+    this.runs.budgets.pauseSchedules(hit.map((s) => s.id));
+    return hit.map((s) => s.name);
   }
 
   /**

@@ -34,6 +34,7 @@ type Verdict =
   | "running"
   | "busy"
   | "capped"
+  | "budget"
   | "gate"
   | "skipped"
   | "gone";
@@ -46,6 +47,7 @@ const VERDICT_LABEL: Record<Verdict, string> = {
   running: "running",
   busy: "skipped busy",
   capped: "skipped, daily cap",
+  budget: "skipped, monthly budget spent",
   gate: "skipped by the gate",
   skipped: "skipped, scheduler off",
   gone: "run no longer recorded",
@@ -55,6 +57,7 @@ const VERDICT_LABEL: Record<Verdict, string> = {
 function verdictOf(outcome: ScheduleOutcome, run: RunSummary | null): Verdict {
   if (outcome === "skipped_busy") return "busy";
   if (outcome === "skipped_daily_cap") return "capped";
+  if (outcome === "skipped_budget") return "budget";
   if (outcome === "skipped_gate") return "gate";
   if (outcome === "skipped_disabled") return "skipped";
   if (outcome === "error") return "failed";

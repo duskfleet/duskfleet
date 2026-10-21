@@ -15,6 +15,9 @@ npm run cli -- agents
 npm run cli -- projects
 npm run cli -- schedules
 npm run cli -- schedules run-now "pr review"              # schedule id or name; the lease holder fires it on its next tick
+npm run cli -- budgets                                    # monthly budgets with this month's spend and state
+npm run cli -- budgets set project my-app --amount 50 [--warn 80] [--no-hard-stop]   # or: global | agent <id>
+npm run cli -- budgets delete <budget id>
 npm run cli -- serve                                      # long-running scheduler process
 npm run cli -- install-service [--print]                  # register `serve` with launchd / systemd --user / Task Scheduler
 npm run cli -- uninstall-service
