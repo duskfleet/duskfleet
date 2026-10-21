@@ -9,6 +9,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
+import { loadConfig, openDatabase, RunRepository, ScheduleRepository } from "@duskfleet/core";
 import { testEnv } from "./helpers.js";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -109,6 +110,73 @@ test("doctor --probe makes one haiku run outside any project, says it costs mone
     const hangProbe = JSON.parse(hang.stdout).probe;
     assert.equal(hangProbe.outcome, "timed_out");
     assert.match(hangProbe.advice, /no result within 3 s: a hook or a prompt is likely blocking/);
+
+    const noVersion = cli(configDir, ["doctor", "--probe"], { FAKE_CLAUDE_MODE: "no-version" });
+    assert.equal(noVersion.status, 1);
+    assert.match(noVersion.stderr, /doctor --probe skipped: claude --version failed/);
+    assert.doesNotMatch(noVersion.stderr, /costs a few cents/, "nothing is spent when the probe is skipped");
+    const skipped = JSON.parse(noVersion.stdout).probe;
+    assert.equal(skipped.ok, false);
+    assert.equal(skipped.outcome, "skipped");
+
+    // mkdtempSync under a missing TMPDIR throws inside runProbe: doctor still prints its report.
+    const thrown = cli(configDir, ["doctor", "--probe"], { TMPDIR: path.join(root, "missing-tmp") });
+    assert.equal(thrown.status, 1);
+    const thrownReport = JSON.parse(thrown.stdout);
+    assert.equal(thrownReport.claudeVersion, "9.9.9 (fake)");
+    assert.equal(thrownReport.probe.ok, false);
+    assert.equal(thrownReport.probe.outcome, "error");
+    assert.match(thrownReport.probe.error, /ENOENT/);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("cli schedules run-now stamps run_requested_at by id or name and spawns nothing; unknown targets fail", () => {
+  const { root, configDir } = makeRoot();
+  try {
+    const config = loadConfig(configDir);
+    const db = openDatabase(config.dataDir);
+    const repo = new ScheduleRepository(db);
+    const s = repo.insert({
+      name: "pr review",
+      agentId: "coder",
+      projectId: "demo",
+      prompt: "ok",
+      cron: "0 9 * * *",
+      timeZone: "UTC",
+      enabled: false,
+      nextRunAt: null,
+    });
+    db.close();
+
+    const byName = cli(configDir, ["schedules", "run-now", "pr review"]);
+    assert.equal(byName.status, 0, byName.stderr);
+    assert.ok(JSON.parse(byName.stdout).runRequestedAt, "the request is stamped, even on a paused schedule");
+    assert.match(
+      byName.stderr,
+      /nothing is ticking/,
+      "a CLI process never ticks, so it tells the caller who will fire it",
+    );
+
+    const byId = cli(configDir, ["schedules", "run-now", s.id]);
+    assert.equal(byId.status, 0, byId.stderr);
+    assert.equal(
+      JSON.parse(byId.stdout).runRequestedAt,
+      JSON.parse(byName.stdout).runRequestedAt,
+      "idempotent: the first timestamp is kept",
+    );
+
+    const db2 = openDatabase(config.dataDir);
+    assert.equal(new RunRepository(db2).list({}).length, 0, "run-now does not start a run itself");
+    db2.close();
+
+    const unknown = cli(configDir, ["schedules", "run-now", "nope"]);
+    assert.notEqual(unknown.status, 0);
+    assert.match(unknown.stderr, /schedule not found: nope/);
+
+    const noTarget = cli(configDir, ["schedules", "run-now"]);
+    assert.equal(noTarget.status, 2, "usage error");
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

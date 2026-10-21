@@ -11,6 +11,7 @@ import { createWriteStream, existsSync, mkdirSync, type WriteStream } from "node
 import { homedir } from "node:os";
 import path from "node:path";
 import { createInterface } from "node:readline";
+import { classifyFailure } from "../observability/failure.js";
 import type { BillingType, RecordedCommand } from "../observability/run.js";
 import { logger } from "../util/log.js";
 import { createStreamState, ingestLine, looksLikeContextExhaustion } from "./stream-json.js";
@@ -338,6 +339,16 @@ function finalResult(input: {
     permissionDenials: r?.permissionDenials ?? 0,
     deniedTools: r?.deniedTools ?? [],
     contextExhausted: looksLikeContextExhaustion(r),
+    failure: classifyFailure({
+      outcome: input.outcome,
+      // A result line with is_error false carries the agent's prose even when the exit code is
+      // non-zero: never scan it ("the 503 retry test now passes" is not an outage).
+      error: !r || r.isError ? input.error : null,
+      terminalReason: r?.terminalReason ?? null,
+      subtype: r?.subtype ?? null,
+      stopReason: r?.stopReason ?? null,
+      endedAt: input.endedAt,
+    }),
     rawResult: r?.raw ?? null,
     subagents: [...input.state.subagents.values()],
   };

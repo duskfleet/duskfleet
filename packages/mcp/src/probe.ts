@@ -80,6 +80,25 @@ export async function runProbe(
   }
 }
 
+/**
+ * A probe that never got a result from Claude: `skipped` (claude --version already failed, so
+ * nothing was spent) or `error` (the probe itself threw before or around the run).
+ */
+export function probeNotRun(outcome: "skipped" | "error", error: string, advice: string): ProbeReport {
+  return {
+    ok: false,
+    outcome,
+    model: null,
+    durationMs: 0,
+    costUsd: null,
+    resultText: null,
+    error,
+    lingeredAfterResult: false,
+    advice,
+    note: PROBE_COST_NOTE,
+  };
+}
+
 export function probeAdvice(
   outcome: string,
   error: string | null,

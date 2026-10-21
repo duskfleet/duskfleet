@@ -446,6 +446,9 @@ export class RunManager {
       mcp: { mounted: [], used: [], allowListedMissing: [] },
       humanIntervention: false,
       contextExhausted: false,
+      errorCode: null,
+      errorFamily: null,
+      errorDetail: null,
       retries: resume ? resume.fromRun.retries + 1 : 0,
       logPath,
       rawResultJson: null,
@@ -881,6 +884,9 @@ export class RunManager {
         mcp,
         humanIntervention: result.permissionDenials > 0,
         contextExhausted: result.contextExhausted,
+        errorCode: result.failure?.code ?? null,
+        errorFamily: result.failure?.family ?? null,
+        errorDetail: result.failure?.detail ?? null,
         rawResultJson: result.rawResult === null ? null : JSON.stringify(result.rawResult),
         phases,
       });
@@ -1105,6 +1111,8 @@ export function mergeResults(main: ExecutionResult, wrapUp: ExecutionResult): Ex
     permissionDenials: main.permissionDenials + wrapUp.permissionDenials,
     deniedTools: [...main.deniedTools, ...wrapUp.deniedTools],
     contextExhausted: main.contextExhausted || wrapUp.contextExhausted,
+    // A run cancelled during its wrap-up is stored as cancelled: no failure code, as for any cancel.
+    failure: wrapUp.outcome === "cancelled" ? null : (main.failure ?? wrapUp.failure),
     subagents: [...main.subagents, ...wrapUp.subagents],
   };
 }

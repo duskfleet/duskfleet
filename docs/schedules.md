@@ -212,5 +212,7 @@ when they end with "nothing to do": they were blocked, not idle.
   and only then enabled.
 - Two ways to fire a schedule by hand, both outside its cron and even when paused:
   `run_schedule_now` over MCP starts the run immediately in the MCP server process;
-  **Run now** on the dashboard sets `run_requested_at` on the row and the lease holder fires it
-  on its next tick (the dashboard never spawns Claude). Both follow the busy rules of a tick.
+  **Run now** on the dashboard and `duskfleet schedules run-now <id or name>` on the CLI set
+  `run_requested_at` on the row and the lease holder fires it on its next tick (neither spawns
+  Claude, which makes the CLI form safe to call from a git hook, see [CLI](cli.md#firing-an-agent-from-a-script-or-a-git-hook)).
+  All follow the busy rules of a tick.

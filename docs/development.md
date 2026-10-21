@@ -112,7 +112,9 @@ PR:     flow: needs-review ──► flow: in-review ──► flow: changes-req
   parks issues that need a decision with `flow: needs-human`, and promotes candidates to
   `flow: ready` up to six, at most two units of work in flight per area, and none while eight
   PRs wait for a merge. It never promotes an issue without a `priority:` label, a `roadmap`
-  issue or one that already has an open PR.
+  issue, one that already has an open PR, or an `area: website` issue: the public site
+  (`duskfleet-website`) is the owner's work, and the developer agents of this repository
+  would build it into the dashboard.
 - Dependencies are lines in an issue's body or comments: `Blocked by #65` (or
   `Depends on #62, #61`). While one of them is open the issue carries the `blocked` label and
   stays out of the queue; the planner removes the label once all of them are closed. A

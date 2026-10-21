@@ -231,6 +231,17 @@ const MIGRATIONS: ReadonlyArray<{ version: number; sql: string; backfill?: (db: 
     version: 14,
     sql: `ALTER TABLE runs ADD COLUMN billing_type TEXT;`,
   },
+  {
+    // Why a run failed, as a code (classifyFailure): error_code (auth_required, provider_quota, ...),
+    // its family (setup / limit / transient / refusal) and the detail some codes carry (login URL,
+    // retry_not_before) as JSON. NULL for older rows and for failures that match no code.
+    version: 15,
+    sql: `
+      ALTER TABLE runs ADD COLUMN error_code TEXT;
+      ALTER TABLE runs ADD COLUMN error_family TEXT;
+      ALTER TABLE runs ADD COLUMN error_detail_json TEXT;
+    `,
+  },
 ];
 
 /**

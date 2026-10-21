@@ -56,6 +56,7 @@ export {
   type StreamState,
 } from "./execution/stream-json.js";
 export * from "./execution/types.js";
+export * from "./observability/failure.js";
 export * from "./observability/run.js";
 export { BusyError } from "./orchestration/busy.js";
 export { DailyCapError } from "./orchestration/daily-cap.js";
