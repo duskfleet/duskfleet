@@ -5,6 +5,7 @@ The CLI uses the same orchestration code as the MCP server and is the quickest w
 
 ```bash
 npm run cli -- doctor                                     # Claude binary, version, config and data paths
+npm run cli -- doctor --probe                             # plus one real hello run on haiku (costs cents)
 npm run cli -- run --project ~/Documents/Projects/my-app -- "Add a README section describing the build"
 npm run cli -- run --project my-app --agent my-reviewer --model sonnet -- "Review src/ for obvious bugs"   # registered id or path (--project-id is the explicit form)
 npm run cli -- run --no-wait --project /path -- "..."     # return immediately (see the note below)
@@ -15,6 +16,9 @@ npm run cli -- agents
 npm run cli -- projects
 npm run cli -- schedules
 npm run cli -- schedules run-now "pr review"              # schedule id or name; the lease holder fires it on its next tick
+npm run cli -- budgets                                    # monthly budgets with this month's spend and state
+npm run cli -- budgets set project my-app --amount 50 [--warn 80] [--no-hard-stop]   # or: global | agent <id>
+npm run cli -- budgets delete <budget id>
 npm run cli -- serve                                      # long-running scheduler process
 npm run cli -- install-service [--print]                  # register `serve` with launchd / systemd --user / Task Scheduler
 npm run cli -- uninstall-service
@@ -25,7 +29,22 @@ npm run cli -- tools                                      # the MCP tool catalog
 the lease (`serve`, `mcp`, `cli`) and whether the service is installed and running. See
 [Schedules](schedules.md#who-ticks) for the service.
 
+`doctor --probe` adds a live check that `claude --version` cannot do: one minimal real run
+(`--model haiku`, a few cents at most, capped by `--max-budget-usd 0.05`; the command says so on
+stderr before spending). It runs in an empty temporary directory with the same unattended
+envelope as every run (`setting_sources`, strict MCP, no permission prompts, no tools allowed)
+and a timeout of `claude.default_timeout_minutes`, at most 2 minutes. It records no run. The
+`probe` field reports the outcome, cost and an `advice` line: not logged in (expired auth), no
+result before the timeout (a hook or prompt blocking the headless child), or a process that kept
+running after its result (a user-level Stop hook). When `claude --version` already failed the
+probe is not attempted (outcome `skipped`, nothing spent); a local error before the run (for
+example no writable temp directory) gives outcome `error`. `doctor` exits 1 when the probe fails. Ctrl-C (or SIGTERM) during the
+probe cancels the run, removes its temporary directory and exits 130 without a report.
+
 Each run writes a raw event log to `data/logs/<run_id>.jsonl` and a structured row to SQLite.
+In a git checkout it also writes the patch of what it changed to `data/logs/<run_id>.diff`;
+`run-info` shows the summary as `diff` (base commit, files with lines added / deleted), the
+same field as `get_run` ([how it works](how-it-works.md#what-gets-recorded)).
 
 ## Firing an agent from a script or a git hook
 
@@ -79,7 +98,15 @@ explicit model uses the Claude Code default.
 `terminationReason`, `error`, `resultText`, `numTurns`, `toolCalls`, input/output/cache tokens,
 `usageByModel` (the same tokens per model id), `costUsd`, `billingType`, `permissionDenials`, `deniedTools`, `mcp` (mounted, used, allow-listed but missing),
 `humanIntervention`, `contextExhausted`, `errorCode`/`errorFamily`/`errorDetail`, `scheduleId`, `logPath`, `lastEventAt` (when the run last produced output, refreshed at most every 15 s; the dashboard's silent-run flag), `phases` (the main pass and,
-after a budget exhaustion, the [wrap-up pass](agents.md#budget-reserve-and-wrap-up-pass)), `resumedFromRunId` (the run whose session it resumed, see [resume once](schedules.md#resume-once-on-failure)).
+after a budget exhaustion, the [wrap-up pass](agents.md#budget-reserve-and-wrap-up-pass)), `resumedFromRunId` (the run whose session it resumed, see [resume once](schedules.md#resume-once-on-failure)),
+`agentHash` and `claudeCodeVersion` (the eval bundle, below).
+
+The eval bundle says exactly what ran, so runs can be compared like with like: `modelUsed`, `agentHash`
+and `claudeCodeVersion`. `agentHash` is a 12-character hash taken when the run starts: the agent's
+loaded spec (every frontmatter field and the system prompt, not the file's location) and, for a
+[link](agents.md) agent, the content of the project's `.claude/agents/<claude_agent>.md`. Two runs
+with the same hash ran the same agent; editing either file changes it. `claudeCodeVersion` comes
+from the child's `init` line. Both are null for runs recorded before they existed.
 
 Token totals come from the result line's `modelUsage`, summed over every model, so they include
 the tokens of subagents; the result's own `usage` counts the main session only and is used just

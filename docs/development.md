@@ -39,7 +39,8 @@ packages/core/src/index.ts       public API of @duskfleet/core
 packages/mcp/src/mcp             MCP server + tools (one file per tool group)
 packages/mcp/src/cli.ts          local CLI
 packages/mcp/src/index.ts        MCP server entry point
-packages/mcp/test                fake Claude binary + tests
+packages/core/test               unit tests of core modules (nothing spawned)
+packages/mcp/test                fake Claude binary + end-to-end tests
 apps/web/app                     Next.js routes: /, /agents, /runs/[id], /schedules, /mcp
 apps/web/lib/data.ts             server-only read access to config + SQLite
 ```
@@ -49,9 +50,16 @@ apps/web/lib/data.ts             server-only read access to config + SQLite
 ```bash
 npm run build          # core + mcp (tsc). The CLI, the MCP server and the dashboard import from dist/
 npm run typecheck      # core + mcp; dashboard: npm run typecheck -w @duskfleet/web
-npm test               # packages/mcp/test/*.test.js, node --test, ~25 s, no network, no cost
+npm test               # packages/core/test, then packages/mcp/test; node --test, ~25 s, no network, no cost
+npm test -w @duskfleet/core   # core unit tests alone, under a second
 npm run check          # everything CI runs, in the same order (hygiene, lint, build, typecheck, tests)
 ```
+
+One home per module: a test that only calls core functions (state machine, loader, parser, cron,
+tool summaries) lives in `packages/core/test` and imports `@duskfleet/core`; a test that needs the
+CLI, the MCP server or a spawned fake Claude lives in `packages/mcp/test`. Both import the built
+`dist/`, so run `npm run build` first. `npm run test:coverage` runs both suites in one process set,
+so the 80 % gate still counts the core tests.
 
 The tests use `packages/mcp/test/fake-claude.js`, a stand-in for the Claude binary that replays
 the real `stream-json` event shapes, so they never launch a real Claude. They cover the
@@ -79,7 +87,8 @@ login and spends nothing: the tests use the fake binary. In order:
 Two tests are gates in themselves: `test/migrations.test.js` pins the SHA-256 of every shipped
 migration (edit one and it fails; add one and it tells you the digest to append), and the layering of
 the three packages is a Biome rule, not just this page. Dependabot opens grouped weekly PRs for npm
-and GitHub Actions. Not built yet: a periodic `claude --help` flag-drift check (needs the CLI, so a
+and GitHub Actions. Workflows pin every action by full commit SHA with a version comment
+(`uses: actions/checkout@<sha> # v7.0.1`); Dependabot bumps the SHA and the comment together. Not built yet: a periodic `claude --help` flag-drift check (needs the CLI, so a
 local schedule rather than Actions), a manual-dispatch smoke run with `--model haiku`, and a docs
 sync check (every MCP tool in `docs/mcp-server.md`, every `docs/` page linked from `README.md`).
 
@@ -164,6 +173,22 @@ PR:     flow: needs-review ──► flow: in-review ──► flow: changes-req
   reviewer checks the same state before and after its passes (`gh pr view <n> --json
   mergeable,statusCheckRollup`): a conflicting or red PR gets `VERDICT: changes` without a
   review.
+- The gate also expires stale locks. `flow: in-progress` and `flow: in-review` are swapped in
+  first as a lock against a second run; a run that dies after that (timeout, killed child, an
+  ending such as "tests are running, I'll pick up when they finish") leaves the lock behind,
+  every later run skips the item as someone else's and nothing in the flow looks at it again
+  (PR #164 sat `in-progress` for 17 hours with no push). No run outlives its timeout, so a lock
+  older than `--stale-hours` (default 2, above the longest agent timeout) with no activity since
+  it was set is an orphan and goes back to the state it was taken from: a PR `in-progress` with
+  no commit on its head since the label to `flow: changes-requested`; a PR `in-review` with no
+  `VERDICT:` for its head since the label to `flow: needs-review` (a verdict posted but never
+  labelled gets its label instead, no second review, but only once the lock is that old too, so
+  a live reviewer between its comment and its label swap is never raced; the verdict counts
+  only at the start of a line); an issue `in-progress` with no open PR
+  closing it to `flow: ready`. Each gets a `[pr-gate]` comment naming the lock and its age. A
+  pickup is a new label event, so the clock restarts and a run still at work is never
+  interrupted. Agents keep their side of it: swap the label first, push or post before the
+  timeout, never end a run with work "still running in the background".
 
 The DuskFleet side is three user agents in `data/agents/` (developer, reviewer, planner) that
 link the local Claude Code agents (`claude_agent`) and add only the unattended envelope:
@@ -173,9 +198,11 @@ planner run lands just before a developer tick. A busy agent makes a tick skip
 (`skipped_busy`), never queue. See `docs/agents.md` and `docs/schedules.md`.
 
 The GitHub Project "DuskFleet Flow" (org project 2) is a read-only mirror of the labels:
-`node scripts/project-sync.mjs [--dry-run]` adds every open issue and PR to the project (the
-project's auto-add workflow covers issues only) and sets each item's Status from its `flow:`
-label (`Backlog` without one, `Done` when closed or merged). Labels stay the source of truth:
+`node scripts/project-sync.mjs [--repo <owner/name>]... [--dry-run]` adds every open issue and
+PR of the given repositories (the current one by default) to the project (the project's
+auto-add workflow covers the issues of this repository only) and sets each item's Status from
+its `flow:` label (`Backlog` without one, `Done` when closed or merged). The website repository
+shares the board, so the workflow passes both. Labels stay the source of truth:
 agents never touch the project, and a Status dragged on the board is overwritten on the next
 sync. Its views: *Board* (open items by Status, Backlog hidden), *Backlog* (open issues with no
 `flow:` label, to pick what to promote), *Needs me* (`Ready to merge` and `Needs human`, the two
@@ -185,7 +212,9 @@ runs it on every open / close / label change of an issue or PR, once an hour as 
 and on demand (*Actions → Project sync → Run workflow*); it needs the repository secret
 `PROJECT_SYNC_TOKEN` (the default token cannot touch an organization project; the scopes are
 listed in the workflow header). Without the secret the job fails loudly and the board simply
-lags until the script is run by hand.
+lags until the script is run by hand. The website repository carries a copy of the workflow
+that checks out this repository for the script, so its own label changes reach the board at
+once instead of on the next hourly run; it needs the same secret there.
 
 ## Security model
 
@@ -202,7 +231,8 @@ lags until the script is run by hand.
 ## Extending
 
 - **New MCP tool**: add a file in `packages/mcp/src/mcp/tools/`, register it in `packages/mcp/src/mcp/server.ts`.
-- **New builtin agent**: drop a Markdown file in `config/agents/`.
+- **New builtin agent**: drop a Markdown file in `config/agents/` and list it under "Builtin
+  agents" in `docs/agents.md`. Builtins are general-purpose (no `project:`, no personal paths).
 - **Schema change**: append a migration in `packages/core/src/storage/db.ts`; never edit an existing one. Then pin its digest in `packages/mcp/test/migrations.test.js` (the failing test prints it).
 - **Run status changes**: only `RunManager`, through `assertTransition`.
 - **New dashboard view**: add a route under `apps/web/app/` and a query in `apps/web/lib/data.ts`.

@@ -11,7 +11,9 @@ import { homedir } from "node:os";
 import path from "node:path";
 import type { DatabaseSync } from "node:sqlite";
 import {
+  type BudgetStatus,
   budgetPlan,
+  budgetStatuses,
   type DuskFleetConfig,
   describeCron,
   findRepoRoot,
@@ -57,6 +59,13 @@ export function services(): Services {
 /** Config is re-read on every request so edits under config/ show up immediately. */
 export function config(): DuskFleetConfig {
   return loadConfig(services().configDir);
+}
+
+/** Monthly budgets (UTC month) past their warn threshold or spent, most spent first. A pure read. */
+export function budgetAlerts(): BudgetStatus[] {
+  return budgetStatuses(services().runs.budgets, config())
+    .filter((b) => b.state !== "ok")
+    .sort((a, b) => b.percent - a.percent);
 }
 
 /**
@@ -257,7 +266,15 @@ export function getRun(id: string) {
   // Linked retry (on_failure: resume_once): the run this one resumed, and the one that resumed it.
   const resumedFrom = run.resumedFromRunId ? runs.get(run.resumedFromRunId) : null;
   const resumedBy = runs.resumedBy(id);
-  return { run, events: runs.events(id), resumedFrom, resumedBy };
+  // Read apart from the events: their limit may cut the diff event of a long run.
+  return { run, events: runs.events(id), diff: runs.diff(id), resumedFrom, resumedBy };
+}
+
+/** The run's patch (`<dataDir>/logs/<run id>.diff`, written by core with the diff event); null when the id would leave that directory. */
+export function runPatchPath(run: Run): string | null {
+  const logsDir = path.resolve(config().dataDir, "logs");
+  const resolved = path.resolve(logsDir, `${run.id}.diff`);
+  return resolved.startsWith(`${logsDir}${path.sep}`) ? resolved : null;
 }
 
 /** The run's JSONL log path, only when it resolves inside `<dataDir>/logs`; null otherwise. */

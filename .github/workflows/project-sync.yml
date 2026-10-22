@@ -1,7 +1,9 @@
 # Keeps the GitHub Project "DuskFleet Flow" in step with the flow labels (docs/development.md
 # "Issue and review flow by agents"): every label change on an issue or PR, and an hourly
 # safety net, run scripts/project-sync.mjs. Labels stay the source of truth; this only moves
-# the board.
+# the board. The website repository shares the board: this run syncs it too, and its own
+# project-sync workflow (which checks out this repository for the script) covers its label
+# events between the hourly runs.
 #
 # The default GITHUB_TOKEN cannot read or write an organization project, so the job uses the
 # PROJECT_SYNC_TOKEN secret: a token with the `project` and `repo` scopes (classic) or, if
@@ -35,9 +37,9 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - uses: actions/setup-node@v7
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 24
 
@@ -50,4 +52,6 @@ jobs:
             echo "::error::PROJECT_SYNC_TOKEN secret is not set (see the header of this workflow)"
             exit 1
           fi
-          node scripts/project-sync.mjs
+          node scripts/project-sync.mjs \
+            --repo "$GITHUB_REPOSITORY" \
+            --repo "${GITHUB_REPOSITORY_OWNER}/duskfleet-website"

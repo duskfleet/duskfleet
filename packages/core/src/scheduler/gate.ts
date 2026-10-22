@@ -14,6 +14,7 @@
  */
 import { spawn } from "node:child_process";
 import type { DuskFleetConfig } from "../config/types.js";
+import { BudgetError } from "../orchestration/budget.js";
 import { BusyError } from "../orchestration/busy.js";
 import { DailyCapError } from "../orchestration/daily-cap.js";
 import type { RunManager } from "../orchestration/run-manager.js";
@@ -37,6 +38,7 @@ export type GateVerdict =
   | { kind: "skip"; gateRunId: string | null; costUsd: number; reason: string }
   | { kind: "busy"; gateRunId: null; costUsd: 0; reason: string }
   | { kind: "daily_cap"; gateRunId: null; costUsd: 0; reason: string }
+  | { kind: "budget"; gateRunId: null; costUsd: 0; reason: string }
   | { kind: "error"; gateRunId: string | null; costUsd: number; reason: string };
 
 const REASON_LIMIT = 2_000;
@@ -197,6 +199,7 @@ export async function runAgentGate(
   } catch (err) {
     if (err instanceof BusyError) return { kind: "busy", gateRunId: null, costUsd: 0, reason: err.message };
     if (err instanceof DailyCapError) return { kind: "daily_cap", gateRunId: null, costUsd: 0, reason: err.message };
+    if (err instanceof BudgetError) return { kind: "budget", gateRunId: null, costUsd: 0, reason: err.message };
     return { kind: "error", gateRunId: null, costUsd: 0, reason: `gate run did not start: ${message(err)}` };
   }
   try {

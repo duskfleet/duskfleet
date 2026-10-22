@@ -6,19 +6,26 @@
 
 import { randomUUID } from "node:crypto";
 import type { DatabaseSync } from "node:sqlite";
-import type {
-  RunOutcomes,
-  Schedule,
-  ScheduleFiring,
-  ScheduleGate,
-  ScheduleInput,
-  ScheduleOutcome,
-  SchedulePatch,
+import {
+  type CatchUpPolicy,
+  type ConcurrencyPolicy,
+  DEFAULT_CATCH_UP_POLICY,
+  DEFAULT_CONCURRENCY_POLICY,
+  type RunOutcomes,
+  type Schedule,
+  type ScheduleFiring,
+  type ScheduleGate,
+  type ScheduleInput,
+  type ScheduleOutcome,
+  type SchedulePatch,
 } from "../scheduler/types.js";
 import { logger } from "../util/log.js";
 import { NEEDS_REVIEW_SQL } from "./runs.js";
 
 const log = logger("storage");
+
+/** No stored review reason other than `empty_run`: such a completed run may count as a no-op. */
+const NOOP_ELIGIBLE_SQL = `NOT EXISTS (SELECT 1 FROM json_each(COALESCE(review_reasons_json, '[]')) WHERE value <> 'empty_run')`;
 
 interface ScheduleRow {
   id: string;
@@ -44,6 +51,19 @@ interface ScheduleRow {
   resume_budget_usd: number | null;
   noop_pattern: string | null;
   gate_json: string | null;
+  concurrency_policy: string | null;
+  catch_up_policy: string | null;
+  paused_reason: string | null;
+  auto_paused_at: string | null;
+}
+
+/** One ended run of a schedule as the auto-pause streak reads it (`ScheduleRepository.recentEndedRuns`). */
+export interface EndedRunFacts {
+  id: string;
+  /** Completed with 0 tool calls. */
+  empty: boolean;
+  /** Stored review reasons are not empty. */
+  needsReview: boolean;
 }
 
 /**
@@ -98,6 +118,10 @@ function rowToSchedule(r: ScheduleRow): Schedule {
     resumeBudgetUsd: r.resume_budget_usd ?? null,
     noopPattern: r.noop_pattern ?? null,
     gate: parseGate(r.gate_json, r.name),
+    concurrencyPolicy: (r.concurrency_policy as ConcurrencyPolicy | null) ?? DEFAULT_CONCURRENCY_POLICY,
+    catchUpPolicy: (r.catch_up_policy as CatchUpPolicy | null) ?? DEFAULT_CATCH_UP_POLICY,
+    pausedReason: r.paused_reason ?? null,
+    autoPausedAt: r.auto_paused_at ?? null,
   };
 }
 
@@ -141,8 +165,9 @@ export class ScheduleRepository {
     this.db
       .prepare(
         `INSERT INTO schedules (id, name, agent_id, project_id, prompt, model, cron, time_zone, enabled, created_at, updated_at, next_run_at,
-           last_fired_at, last_outcome, last_error, last_run_id, fires, skips, on_failure, resume_budget_usd, noop_pattern, gate_json)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, NULL, NULL, 0, 0, ?, ?, ?, ?)`,
+           last_fired_at, last_outcome, last_error, last_run_id, fires, skips, on_failure, resume_budget_usd, noop_pattern, gate_json,
+           concurrency_policy, catch_up_policy)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, NULL, NULL, 0, 0, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         id,
@@ -161,11 +186,13 @@ export class ScheduleRepository {
         input.resumeBudgetUsd ?? null,
         input.noopPattern ?? null,
         input.gate ? JSON.stringify(input.gate) : null,
+        input.concurrencyPolicy ?? DEFAULT_CONCURRENCY_POLICY,
+        input.catchUpPolicy ?? DEFAULT_CATCH_UP_POLICY,
       );
     return this.get(id)!;
   }
 
-  update(id: string, patch: SchedulePatch & { nextRunAt?: string | null }): Schedule {
+  update(id: string, patch: SchedulePatch & { nextRunAt?: string | null; pausedReason?: string | null }): Schedule {
     const sets: string[] = ["updated_at = ?"];
     const values: Array<string | number | null> = [new Date().toISOString()];
     const map: Record<string, string> = {
@@ -182,6 +209,9 @@ export class ScheduleRepository {
       resumeBudgetUsd: "resume_budget_usd",
       noopPattern: "noop_pattern",
       gate: "gate_json",
+      concurrencyPolicy: "concurrency_policy",
+      catchUpPolicy: "catch_up_policy",
+      pausedReason: "paused_reason",
     };
     for (const [k, v] of Object.entries(patch)) {
       if (v === undefined || !(k in map)) continue;
@@ -281,6 +311,36 @@ export class ScheduleRepository {
       );
   }
 
+  /**
+   * Pause a schedule on the scheduler's own decision and say why. Compare-and-set on `enabled`:
+   * a schedule paused (or deleted) by someone else meanwhile is left alone. True when it paused.
+   */
+  autoPause(id: string, reason: string, nowIso: string = new Date().toISOString()): boolean {
+    const r = this.db
+      .prepare(
+        "UPDATE schedules SET enabled = 0, next_run_at = NULL, paused_reason = ?, auto_paused_at = ?, updated_at = ? WHERE id = ? AND enabled = 1",
+      )
+      .run(reason, nowIso, nowIso, id);
+    return Number(r.changes) > 0;
+  }
+
+  /**
+   * The last `limit` ended real runs (kind 'run'; gate runs are not the schedule's work) the
+   * schedule started, newest first, created after `sinceIso` when given. Running runs are left
+   * out: they have not ended yet.
+   */
+  recentEndedRuns(scheduleId: string, sinceIso: string | null, limit: number): EndedRunFacts[] {
+    const rows = this.db
+      .prepare(
+        `SELECT id, status = 'completed' AND COALESCE(tool_calls, 0) = 0 AS empty, ${NEEDS_REVIEW_SQL} AS needs_review
+         FROM runs WHERE schedule_id = ? AND kind = 'run' AND status IN ('completed', 'failed', 'cancelled', 'timed_out')
+           AND (? IS NULL OR created_at > ?)
+         ORDER BY created_at DESC, rowid DESC LIMIT ?`,
+      )
+      .all(scheduleId, sinceIso, sinceIso, limit) as Array<{ id: string; empty: number; needs_review: number }>;
+    return rows.map((r) => ({ id: r.id, empty: r.empty === 1, needsReview: r.needs_review === 1 }));
+  }
+
   /** Ticks considered since `sinceIso`, by outcome. */
   firingCountsSince(scheduleId: string, sinceIso: string): Record<string, number> {
     const rows = this.db
@@ -296,7 +356,8 @@ export class ScheduleRepository {
    * schedule started since `sinceIso`: count and cost of all of them from SQL, and the head
    * (`textLimit` chars) of the final message of the completed ones that do not need review
    * (stored `review_reasons_json`), since only those can be no-ops: a run that hit a denial and
-   * then says "nothing to do" was blocked, not idle.
+   * then says "nothing to do" was blocked, not idle. `empty_run` alone does not exclude a run:
+   * a text-only "nothing to do" answer is the typical no-op.
    */
   runOutcomesSince(scheduleId: string, sinceIso: string, textLimit: number): RunOutcomes {
     const totals = this.db
@@ -307,7 +368,7 @@ export class ScheduleRepository {
     const completed = (
       this.db
         .prepare(
-          `SELECT substr(result_text, 1, ?) AS text, cost_usd FROM runs WHERE schedule_id = ? AND created_at >= ? AND kind = 'run' AND status = 'completed' AND result_text IS NOT NULL AND NOT ${NEEDS_REVIEW_SQL}`,
+          `SELECT substr(result_text, 1, ?) AS text, cost_usd FROM runs WHERE schedule_id = ? AND created_at >= ? AND kind = 'run' AND status = 'completed' AND result_text IS NOT NULL AND ${NOOP_ELIGIBLE_SQL}`,
         )
         .all(textLimit, scheduleId, sinceIso) as Array<{ text: string; cost_usd: number | null }>
     ).map((r) => ({ resultText: r.text, costUsd: r.cost_usd }));

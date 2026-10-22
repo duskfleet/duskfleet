@@ -1,5 +1,6 @@
 import type { DatabaseSync } from "node:sqlite";
 import type { DeniedTool, RunMcpInfo, SubagentRecord, SubagentStatus, UsageByModel } from "../execution/types.js";
+import type { RunDiff } from "../git/diff.js";
 import { FAILURE_CODES, FAILURE_FAMILY, type FailureCode, type FailureDetail } from "../observability/failure.js";
 import type {
   ReviewReason,
@@ -11,6 +12,7 @@ import type {
   RunStatus,
   RunSummary,
 } from "../observability/run.js";
+import { BudgetRepository } from "./budgets.js";
 
 /** Row shape as SQLite returns it. */
 interface RunRow {
@@ -59,6 +61,8 @@ interface RunRow {
   error_code: string | null;
   error_family: string | null;
   error_detail_json: string | null;
+  agent_hash: string | null;
+  claude_code_version: string | null;
   last_event_at: string | null;
 }
 
@@ -107,6 +111,8 @@ function rowToRun(r: RunRow): Run {
     resumedFromRunId: r.resumed_from_run_id ?? null,
     kind: r.kind === "gate" ? "gate" : "run",
     billingType: r.billing_type === "api" || r.billing_type === "subscription" ? r.billing_type : null,
+    agentHash: r.agent_hash ?? null,
+    claudeCodeVersion: r.claude_code_version ?? null,
     lastEventAt: r.last_event_at ?? null,
   };
 }
@@ -205,6 +211,7 @@ export type RunPatch = Partial<
     | "phases"
     | "reviewReasons"
     | "billingType"
+    | "claudeCodeVersion"
     | "lastEventAt"
   >
 >;
@@ -243,6 +250,7 @@ const PATCH_COLUMNS: Record<keyof RunPatch, string> = {
   phases: "phases_json",
   reviewReasons: "review_reasons_json",
   billingType: "billing_type",
+  claudeCodeVersion: "claude_code_version",
   lastEventAt: "last_event_at",
 };
 
@@ -271,7 +279,12 @@ function rowToSummary(r: SummaryRow): RunSummary {
 }
 
 export class RunRepository {
-  constructor(private readonly db: DatabaseSync) {}
+  /** Budgets live in the same database; RunManager.startRun checks them before every spawn. */
+  readonly budgets: BudgetRepository;
+
+  constructor(private readonly db: DatabaseSync) {
+    this.budgets = new BudgetRepository(db);
+  }
 
   insert(run: Run): void {
     this.db
@@ -281,8 +294,9 @@ export class RunRepository {
            exit_code, termination_reason, error, result_text, num_turns, tool_calls, input_tokens, output_tokens,
            cache_read_tokens, cache_creation_tokens, cost_usd, permission_denials, denied_tools_json, mcp_json, human_intervention,
            context_exhausted, retries, log_path, raw_result_json, schedule_id, owner, phases_json, review_reasons_json, resumed_from_run_id, kind,
-           usage_by_model_json, billing_type, error_code, error_family, error_detail_json, last_event_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+           usage_by_model_json, billing_type, error_code, error_family, error_detail_json, agent_hash, claude_code_version,
+           last_event_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         run.id,
@@ -330,6 +344,8 @@ export class RunRepository {
         run.errorCode ?? null,
         run.errorFamily ?? null,
         run.errorDetail ? JSON.stringify(run.errorDetail) : null,
+        run.agentHash ?? null,
+        run.claudeCodeVersion ?? null,
         run.lastEventAt ?? null,
       );
   }
@@ -477,6 +493,14 @@ export class RunRepository {
       payload: r.payload === null ? null : JSON.parse(r.payload),
       agentId: r.agent_id ?? null,
     }));
+  }
+
+  /** The `diff` event's payload (what the run changed in git), or null; read apart from `events`, whose limit may cut it. */
+  diff(runId: string): RunDiff | null {
+    const row = this.db
+      .prepare("SELECT payload FROM run_events WHERE run_id = ? AND type = 'diff' ORDER BY id DESC LIMIT 1")
+      .get(runId) as { payload: string | null } | undefined;
+    return row?.payload ? (JSON.parse(row.payload) as RunDiff) : null;
   }
 
   /** Insert or refresh one subagent invocation. Idempotent on (run_id, agent_id). */

@@ -1,3 +1,21 @@
+import { allowListedMcpPrefixes, mcpToolPrefix } from "../execution/mcp.js";
+
+/**
+ * Allow-listed MCP server prefixes that never showed up in a run: an `mcp__` entry of
+ * `allowedTools` whose server prefix matches neither a mounted server nor a server actually
+ * called (`used`, as prefixes). Mounted lists can be empty while connectors are still
+ * connecting at init, so nothing is reported missing unless the run gave *some* MCP evidence.
+ */
+export function allowListedMcpMissing(
+  allowedTools: readonly string[],
+  mounted: readonly { name: string }[],
+  used: readonly string[],
+): string[] {
+  const mountedPrefixes = new Set(mounted.map((m) => mcpToolPrefix(m.name)));
+  if (mountedPrefixes.size === 0 && used.length === 0) return [];
+  return allowListedMcpPrefixes(allowedTools).filter((p) => !mountedPrefixes.has(p) && !used.includes(p));
+}
+
 /**
  * One short line describing a tool call for timelines: the shell command for
  * Bash, the file for Read/Edit/Write, the first string field otherwise.

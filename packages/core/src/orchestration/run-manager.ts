@@ -6,10 +6,11 @@
  */
 import { randomUUID } from "node:crypto";
 import path from "node:path";
-import { listProjectAgents, projectAgentDefinitionHash } from "../config/agent-files.js";
+import { agentDefinitionHash, listProjectAgents, projectAgentDefinitionHash } from "../config/agent-files.js";
 import { loadConfig } from "../config/loader.js";
 import type { AgentDefinition, DuskFleetConfig, ProjectDefinition } from "../config/types.js";
 import { mergeSubagent, needsRepair, sameSubagent, subagentsFromLog } from "../execution/log-replay.js";
+import { allowListedMcpPrefixes, mcpToolPrefix } from "../execution/mcp.js";
 import { mergeUsageByModel } from "../execution/stream-json.js";
 import {
   type ExecutionEvent,
@@ -23,6 +24,7 @@ import {
   type TokenUsage,
   type UsageByModel,
 } from "../execution/types.js";
+import { captureRunDiff, headSha } from "../git/diff.js";
 import {
   isBudgetExhausted,
   isResumable,
@@ -37,14 +39,25 @@ import {
   type RunSummary,
   reviewReasons,
 } from "../observability/run.js";
-import { parseHolder, processIdentity } from "../scheduler/crud.js";
-import type { ListRunsFilter, RunRepository } from "../storage/runs.js";
+import { parseHolder, processIdentity, scheduleProjectId } from "../scheduler/crud.js";
+import type { ListRunsFilter, RunPatch, RunRepository } from "../storage/runs.js";
 import { logger } from "../util/log.js";
+import {
+  type Budget,
+  BudgetError,
+  type BudgetInput,
+  type BudgetStatus,
+  budgetLabel,
+  budgetRefusal,
+  budgetStatuses,
+  budgetStatusOf,
+  validateBudgetInput,
+} from "./budget.js";
 import { BusyError } from "./busy.js";
 import { DailyCapError, dailyCapReason, utcDayStart } from "./daily-cap.js";
 import { validateProjectPath } from "./project-validation.js";
 import { assertTransition } from "./run-state.js";
-import { summarizeToolInput } from "./tool-summary.js";
+import { allowListedMcpMissing, summarizeToolInput } from "./tool-summary.js";
 
 const log = logger("orchestration");
 
@@ -110,6 +123,8 @@ interface ActiveRun {
   cancelRequested: boolean;
   /** When the main pass was launched; the wrap-up pass only gets what is left of the run's timeout. */
   startedAtMs: number;
+  /** HEAD of the project before the spawn; null when it is not a git checkout (no diff event then). */
+  gitBase: string | null;
   /** When `last_event_at` was last written (0 = never); throttled to LAST_EVENT_WRITE_MS. */
   lastEventWriteMs: number;
 }
@@ -160,11 +175,6 @@ function summarizeSubagent(s: SubagentRecord) {
 /** A path separator, a leading ~ or a drive letter: anything else given as a project path is a project id. */
 function looksLikePath(value: string): boolean {
   return /[\\/]/.test(value) || value.startsWith("~") || /^[A-Za-z]:/.test(value);
-}
-
-/** Claude Code derives MCP tool prefixes from the server name: "claude.ai Figma" → "mcp__claude_ai_Figma". */
-export function mcpToolPrefix(serverName: string): string {
-  return "mcp__" + serverName.replace(/[^A-Za-z0-9_-]/g, "_");
 }
 
 export class RunManager {
@@ -295,6 +305,11 @@ export class RunManager {
     return this.runs.events(runId);
   }
 
+  /** What the run changed in its git checkout (the `diff` event), or null. A pure read. */
+  diff(runId: string) {
+    return this.runs.diff(runId);
+  }
+
   /** Subagent invocations recorded for a run (see RunAgent). A pure read. */
   agents(runId: string): RunAgent[] {
     return this.runs.agents(runId);
@@ -369,6 +384,8 @@ export class RunManager {
     if (busy) throw new BusyError(busy);
     const capped = this.dailyCapError(agent);
     if (capped) throw new DailyCapError(capped);
+    const overBudget = this.budgetError(agent, projectId, projectPath);
+    if (overBudget) throw new BudgetError(overBudget);
 
     const runId = randomUUID();
     const resume = input.resume ?? null;
@@ -401,7 +418,12 @@ export class RunManager {
     if (agent.disallowedTools) request.disallowedTools = agent.disallowedTools;
     if (agent.effort) request.effort = agent.effort;
     if (agent.systemPrompt) request.appendSystemPrompt = agent.systemPrompt;
-    if (agent.inheritMcp || project?.inheritMcp) request.inheritMcp = true;
+    if (agent.inheritMcp || project?.inheritMcp) {
+      request.inheritMcp = true;
+      // Connectors load at start or not at all: a child whose init lacks one is restarted once.
+      const required = allowListedMcpPrefixes(agent.allowedTools ?? []);
+      if (required.length) request.requiredMcpServers = required;
+    }
     if (agent.claudeAgent) {
       // Only project-level agents load under --setting-sources project,local; fail early with the real list.
       const available = listProjectAgents(projectPath).map((a) => a.name);
@@ -462,6 +484,8 @@ export class RunManager {
       resumedFromRunId: resume?.fromRun.id ?? null,
       kind,
       billingType: null,
+      agentHash: agentDefinitionHash(agent, projectPath),
+      claudeCodeVersion: null,
       lastEventAt: null,
     };
 
@@ -487,6 +511,8 @@ export class RunManager {
       });
     }
 
+    // What the checkout looked like before the agent touched it; the diff event compares with it.
+    const gitBase = headSha(projectPath);
     let handle: ExecutionHandle;
     try {
       handle = this.executor.execute(request, (event) => this.onEvent(runId, event));
@@ -521,6 +547,7 @@ export class RunManager {
       mainResult: null,
       cancelRequested: false,
       startedAtMs: Date.now(),
+      gitBase,
       lastEventWriteMs: 0,
     });
     this.transition(run, "running", {
@@ -669,6 +696,37 @@ export class RunManager {
   }
 
   /**
+   * Why a run of this agent (on this project) would be refused by a hard-stop budget right now,
+   * or null. Lets the scheduler skip a tick before it spends anything on a gate. Like startRun,
+   * a refusal pauses the schedules of the spent scope.
+   */
+  budgetReason(input: { agentId: string; projectId?: string | null }): string | null {
+    this.reloadConfig();
+    const target: StartRunInput = { prompt: "", agentId: input.agentId };
+    if (input.projectId) target.projectId = input.projectId;
+    const { agent, projectId, projectPath } = this.resolveTarget(target);
+    return this.budgetError(agent, projectId, projectPath);
+  }
+
+  /** Every budget with this month's spend and its state (ok / warn / over). A pure read. */
+  budgetStatuses(now: Date = new Date()): BudgetStatus[] {
+    return budgetStatuses(this.runs.budgets, this.config, now);
+  }
+
+  /** Create the budget of a scope or replace the one it has (validated first: unknown agent / project, amount, warn_percent). */
+  setBudget(input: BudgetInput): BudgetStatus {
+    this.reloadConfig();
+    const budget = this.runs.budgets.upsert(validateBudgetInput(this.config, input));
+    log.info("budget set", { scope: budgetLabel(budget), amountUsd: budget.amountUsd, hardStop: budget.hardStop });
+    return budgetStatusOf(this.runs.budgets, this.config, budget);
+  }
+
+  /** Delete a budget by id. Schedules it paused stay paused: resume them by hand. */
+  deleteBudget(id: string): boolean {
+    return this.runs.budgets.delete(id);
+  }
+
+  /**
    * The project directory a run of this agent would use, resolved exactly as startRun does
    * (schedule gates run their command there).
    */
@@ -744,6 +802,50 @@ export class RunManager {
   private dailyCapError(agent: AgentDefinition): string | null {
     if (agent.maxDailyRuns === undefined && agent.maxDailyCostUsd === undefined) return null;
     return dailyCapReason(agent, this.runs.agentUsageSince(agent.id, utcDayStart(new Date())));
+  }
+
+  /**
+   * The budgets that cover a run of `agent` on this project (global, the agent's, the
+   * project's): why one more run is refused (the first spent hard-stop budget), or null. A
+   * refusal pauses every enabled schedule of that scope; a budget past warn_percent is logged.
+   */
+  private budgetError(agent: AgentDefinition, projectId: string | null, projectPath: string): string | null {
+    const budgets = this.runs.budgets.list();
+    if (!budgets.length) return null;
+    const now = new Date();
+    for (const b of budgets) {
+      const covers =
+        b.scope === "global" ||
+        (b.scope === "agent" && b.scopeId === agent.id) ||
+        (b.scope === "project" &&
+          (b.scopeId === projectId || this.config.projects.get(b.scopeId ?? "")?.path === projectPath));
+      if (!covers) continue;
+      const status = budgetStatusOf(this.runs.budgets, this.config, b, now);
+      if (status.state === "over" && b.hardStop) {
+        const paused = this.pauseSchedulesOf(b);
+        log.warn("budget spent; run refused", { budget: budgetLabel(b), spentUsd: status.spentUsd, paused });
+        return budgetRefusal(status, paused, now);
+      }
+      if (status.state !== "ok") {
+        log.warn("budget past its warn threshold", {
+          budget: budgetLabel(b),
+          percent: status.percent,
+          hardStop: b.hardStop,
+        });
+      }
+    }
+    return null;
+  }
+
+  /** Pause the enabled schedules a budget covers; returns their names. */
+  private pauseSchedulesOf(b: Budget): string[] {
+    const hit = this.runs.budgets.enabledSchedules().filter((s) => {
+      if (b.scope === "global") return true;
+      if (b.scope === "agent") return s.agentId === b.scopeId;
+      return scheduleProjectId(s, this.config.agents.get(s.agentId)) === b.scopeId;
+    });
+    this.runs.budgets.pauseSchedules(hit.map((s) => s.id));
+    return hit.map((s) => s.name);
   }
 
   /**
@@ -867,6 +969,7 @@ export class RunManager {
         });
         return;
       }
+      if (active?.gitBase) this.recordDiff(runId, active.projectPath, active.gitBase);
       this.transition(current, result.outcome, {
         endedAt: result.endedAt,
         durationMs: result.durationMs,
@@ -908,6 +1011,23 @@ export class RunManager {
   }
 
   /**
+   * The `diff` event: what the run changed since `base`, the patch next to the JSONL log.
+   * Written before the final status so a reader that sees the run ended also sees its diff.
+   * A git failure is a note, never a reason to lose the run's result.
+   */
+  private recordDiff(runId: string, projectPath: string, base: string): void {
+    try {
+      const diff = captureRunDiff(projectPath, base, path.join(this.config.dataDir, "logs", `${runId}.diff`));
+      if (diff) this.runs.addEvent(runId, "diff", diff);
+      else this.runs.addEvent(runId, "note", { message: "git diff of the run could not be read" });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      log.warn("diff capture failed", { runId, err: message });
+      this.runs.addEvent(runId, "note", { message: `git diff of the run could not be recorded: ${message}` });
+    }
+  }
+
+  /**
    * What MCP looked like in this run. "Missing" = an allow-listed mcp__ entry whose
    * server prefix matches neither a mounted server nor a server actually called.
    * Mounted lists can be empty while connectors are still connecting at init, so a
@@ -916,20 +1036,11 @@ export class RunManager {
   private summarizeMcp(active: ActiveRun | undefined): import("../execution/types.js").RunMcpInfo {
     if (!active) return { mounted: [], used: [], allowListedMissing: [] };
     const used = [...active.usedServers].sort();
-    const mountedPrefixes = new Set(active.mounted.map((m) => mcpToolPrefix(m.name)));
-    const evidence = mountedPrefixes.size > 0 || used.length > 0;
-    const allowListedPrefixes = new Set(
-      active.allowedTools
-        .filter((t) => t.startsWith("mcp__"))
-        .map((t) => {
-          const m = /^(mcp__[^_].*?)(?:__|$)/.exec(t);
-          return m ? m[1]! : t;
-        }),
-    );
-    const allowListedMissing = evidence
-      ? [...allowListedPrefixes].filter((p) => !mountedPrefixes.has(p) && !used.includes(p)).sort()
-      : [];
-    return { mounted: active.mounted, used, allowListedMissing };
+    return {
+      mounted: active.mounted,
+      used,
+      allowListedMissing: allowListedMcpMissing(active.allowedTools, active.mounted, used),
+    };
   }
 
   private resolveAgent(agentId: string | undefined): AgentDefinition {
@@ -1002,10 +1113,10 @@ export class RunManager {
     this.touchLastEvent(runId);
     switch (event.type) {
       case "init": {
-        this.runs.update(
-          runId,
-          event.sessionId ? { claudeSessionId: event.sessionId, modelUsed: event.model } : { modelUsed: event.model },
-        );
+        const patch: RunPatch = { modelUsed: event.model };
+        if (event.sessionId) patch.claudeSessionId = event.sessionId;
+        if (event.cliVersion) patch.claudeCodeVersion = event.cliVersion;
+        this.runs.update(runId, patch);
         const a = this.active.get(runId);
         if (a) a.mounted = event.mcpServers;
         this.runs.addEvent(runId, "init", {
@@ -1048,6 +1159,12 @@ export class RunManager {
         this.runs.addEvent(runId, "note", {
           message: `${event.childAlive ? "process" : "a descendant of the process"} still running ${event.afterMs / 1000} s after the result line: SIGTERM sent to its process group`,
           graceKill: { pid: event.pid, afterMs: event.afterMs, childAlive: event.childAlive },
+        });
+        break;
+      case "mcp_restart":
+        this.runs.addEvent(runId, "note", {
+          message: `init reported no server for ${event.missing.join(", ")} (mounted: ${event.mounted.join(", ") || "none"}): process restarted once with a new session (pid ${event.pid ?? "?"})`,
+          mcpRestart: { missing: event.missing, mounted: event.mounted, pid: event.pid, sessionId: event.sessionId },
         });
         break;
       default:

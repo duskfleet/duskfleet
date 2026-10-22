@@ -15,7 +15,7 @@
     "start": "node dist/index.js",
     "test": "node --test test/*.test.js",
     "tools": "node dist/tools-catalog.js",
-    "test:coverage": "node --test --experimental-test-coverage --test-coverage-exclude=\"test/**\" --test-coverage-lines=80 test/*.test.js"
+    "test:coverage": "node --test --experimental-test-coverage --test-coverage-exclude=\"test/**\" --test-coverage-exclude=\"../core/test/**\" --test-coverage-lines=80 test/*.test.js ../core/test/*.test.js"
   },
   "dependencies": {
     "@duskfleet/core": "0.1.0",

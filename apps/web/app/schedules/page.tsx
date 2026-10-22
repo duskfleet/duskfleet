@@ -34,8 +34,10 @@ type Verdict =
   | "running"
   | "busy"
   | "capped"
+  | "budget"
   | "gate"
   | "skipped"
+  | "paused"
   | "gone";
 
 const VERDICT_LABEL: Record<Verdict, string> = {
@@ -46,8 +48,10 @@ const VERDICT_LABEL: Record<Verdict, string> = {
   running: "running",
   busy: "skipped busy",
   capped: "skipped, daily cap",
+  budget: "skipped, monthly budget spent",
   gate: "skipped by the gate",
   skipped: "skipped, scheduler off",
+  paused: "auto-paused",
   gone: "run no longer recorded",
 };
 
@@ -55,8 +59,10 @@ const VERDICT_LABEL: Record<Verdict, string> = {
 function verdictOf(outcome: ScheduleOutcome, run: RunSummary | null): Verdict {
   if (outcome === "skipped_busy") return "busy";
   if (outcome === "skipped_daily_cap") return "capped";
+  if (outcome === "skipped_budget") return "budget";
   if (outcome === "skipped_gate") return "gate";
   if (outcome === "skipped_disabled") return "skipped";
+  if (outcome === "auto_paused") return "paused";
   if (outcome === "error") return "failed";
   if (!run) return "gone";
   if (run.status === "pending" || run.status === "running") return "running";
@@ -250,6 +256,14 @@ export default function SchedulesPage() {
                           >
                             {s.enabled ? "enabled" : "paused"}
                           </span>
+                          {!s.enabled && s.pausedReason && (
+                            <span
+                              className="badge attention"
+                              title={`${s.pausedReason}${s.autoPausedAt ? ` · ${fmtTime(s.autoPausedAt)}` : ""}. Resume to fire again; only runs after this pause count towards the next streak (scheduler.auto_pause_after).`}
+                            >
+                              auto-paused
+                            </span>
+                          )}
                           {s.runRequestedAt && (
                             <span
                               className="badge pending"
@@ -372,17 +386,28 @@ export default function SchedulesPage() {
                             ) : (
                               "never fired"
                             )}
-                            {!s.enabled && (
-                              <span
-                                title={`${fmtTime(s.updatedAt)}. Firings, run now and edits also update this time, so it is not the pause date.`}
-                              >
+                            {!s.enabled && s.pausedReason && s.autoPausedAt ? (
+                              <span title={`${s.pausedReason} · ${fmtTime(s.autoPausedAt)}`}>
                                 {" "}
-                                · paused, last changed{" "}
-                                {new Date(s.updatedAt).toLocaleDateString(undefined, {
+                                · auto-paused{" "}
+                                {new Date(s.autoPausedAt).toLocaleDateString(undefined, {
                                   day: "numeric",
                                   month: "short",
                                 })}
                               </span>
+                            ) : (
+                              !s.enabled && (
+                                <span
+                                  title={`${fmtTime(s.updatedAt)}. Firings, run now and edits also update this time, so it is not the pause date.`}
+                                >
+                                  {" "}
+                                  · paused, last changed{" "}
+                                  {new Date(s.updatedAt).toLocaleDateString(undefined, {
+                                    day: "numeric",
+                                    month: "short",
+                                  })}
+                                </span>
+                              )
                             )}
                           </span>
                           <Link href={`/?schedule=${encodeURIComponent(s.id)}`} title="Runs started by this schedule">
@@ -494,6 +519,10 @@ export default function SchedulesPage() {
             <span>
               <span className="sq gate" />
               skipped by the gate
+            </span>
+            <span>
+              <span className="sq paused" />
+              auto-paused
             </span>
             <span>
               <span className="sq none" />

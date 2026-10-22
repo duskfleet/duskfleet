@@ -243,10 +243,59 @@ const MIGRATIONS: ReadonlyArray<{ version: number; sql: string; backfill?: (db: 
     `,
   },
   {
+    // Auto-pause: the scheduler pauses a schedule whose last scheduler.auto_pause_after runs were
+    // all empty (0 tool calls) or needs review, and says why. auto_paused_at stays after a resume
+    // so the runs before it do not count again.
+    version: 16,
+    sql: `
+      ALTER TABLE schedules ADD COLUMN paused_reason TEXT;
+      ALTER TABLE schedules ADD COLUMN auto_paused_at TEXT;
+    `,
+  },
+  {
+    // Schedule policies made explicit: what a busy tick does (concurrency_policy, only
+    // skip_if_active) and what happens to ticks missed while nobody ticked (catch_up_policy,
+    // skip_missed; enqueue_missed_with_cap is reserved). Existing rows get today's behaviour.
+    version: 17,
+    sql: `
+      ALTER TABLE schedules ADD COLUMN concurrency_policy TEXT NOT NULL DEFAULT 'skip_if_active';
+      ALTER TABLE schedules ADD COLUMN catch_up_policy TEXT NOT NULL DEFAULT 'skip_missed';
+    `,
+  },
+  {
+    // Monthly budgets per scope (global / agent / project), calendar month in UTC, compared with
+    // the recorded cost of the scope's runs. One per scope: scope_id is NULL for global, so the
+    // unique index is on COALESCE(scope_id, '').
+    version: 18,
+    sql: `
+      CREATE TABLE IF NOT EXISTS budgets (
+        id           TEXT PRIMARY KEY,
+        scope        TEXT NOT NULL CHECK (scope IN ('global', 'agent', 'project')),
+        scope_id     TEXT,
+        amount_usd   REAL NOT NULL CHECK (amount_usd > 0),
+        warn_percent INTEGER NOT NULL DEFAULT 80,
+        hard_stop    INTEGER NOT NULL DEFAULT 1,
+        created_at   TEXT NOT NULL,
+        updated_at   TEXT NOT NULL
+      );
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_budgets_scope ON budgets(scope, COALESCE(scope_id, ''));
+    `,
+  },
+  {
+    // Eval bundle: what exactly ran, so runs compare like with like. agent_hash = agentDefinitionHash
+    // at start time (the agent spec, plus the project agent file of a link); claude_code_version from
+    // the init line. model_used was there from the start. NULL for older rows (unknown, not guessed).
+    version: 19,
+    sql: `
+      ALTER TABLE runs ADD COLUMN agent_hash TEXT;
+      ALTER TABLE runs ADD COLUMN claude_code_version TEXT;
+    `,
+  },
+  {
     // When the run last produced output (any stream-json event), written by RunManager at most
     // every LAST_EVENT_WRITE_MS. The dashboard shows "no output for N min" on silent running rows.
     // NULL for older rows and for runs that never emitted an event.
-    version: 16,
+    version: 20,
     sql: `ALTER TABLE runs ADD COLUMN last_event_at TEXT;`,
   },
 ];
