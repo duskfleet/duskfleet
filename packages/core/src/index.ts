@@ -46,6 +46,7 @@ export {
   resolveClaudeBinary,
 } from "./execution/claude-code.js";
 export { mergeSubagent, needsRepair, sameSubagent, subagentsFromLog } from "./execution/log-replay.js";
+export { allowListedMcpPrefixes, mcpToolPrefix, missingMcpServers } from "./execution/mcp.js";
 export {
   cleanHandBack,
   createStreamState,
@@ -92,7 +93,6 @@ export {
 export { BusyError } from "./orchestration/busy.js";
 export { DailyCapError } from "./orchestration/daily-cap.js";
 export { ProjectValidationError, validateProjectPath } from "./orchestration/project-validation.js";
-
 export {
   budgetPlan,
   mergeResults,
@@ -104,7 +104,7 @@ export {
   WRAP_UP_PROMPT,
 } from "./orchestration/run-manager.js";
 export { assertTransition, IllegalTransitionError } from "./orchestration/run-state.js";
-export { allowListedMcpMissing, mcpToolPrefix, summarizeToolInput } from "./orchestration/tool-summary.js";
+export { allowListedMcpMissing, summarizeToolInput } from "./orchestration/tool-summary.js";
 export {
   assertTimeZone,
   CronError,

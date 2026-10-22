@@ -275,6 +275,16 @@ actually called (`get_run` → `mcp`, dashboard → Technical details). An allow
 whose server never mounted is reported as `mcp.allowListedMissing`, flags the run as
 **needs review** and adds a note event, instead of failing silently.
 
+**Connectors load at start or not at all.** Now and then Claude Code comes up with no
+claude.ai connector (3 runs out of 12 on 2026-10-20: the init line listed only the project's
+`.mcp.json` server). With `inherit_mcp`, DuskFleet compares the init line against the agent's
+allow-listed servers and, when one is absent, ends the process and starts it again with a fresh
+session, once; the init line comes before the first model turn, so the restart costs seconds,
+not dollars. The run gets a note (`init reported no server for mcp__claude_ai_Figma ...
+restarted once`) and the log a `#restart` marker. If the second process lacks it too, the run
+goes on and is flagged `mcp_missing` as above. Entries that never mount because the name is
+wrong (`mcp__plugin_*`) trigger the same one restart on every run: fix the name.
+
 ## Subagents inside runs
 
 A project agent usually delegates: a coordinator spawns a designer, a reviewer, a tester
