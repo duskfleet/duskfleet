@@ -63,6 +63,7 @@ interface RunRow {
   error_detail_json: string | null;
   agent_hash: string | null;
   claude_code_version: string | null;
+  last_event_at: string | null;
 }
 
 function rowToRun(r: RunRow): Run {
@@ -112,6 +113,7 @@ function rowToRun(r: RunRow): Run {
     billingType: r.billing_type === "api" || r.billing_type === "subscription" ? r.billing_type : null,
     agentHash: r.agent_hash ?? null,
     claudeCodeVersion: r.claude_code_version ?? null,
+    lastEventAt: r.last_event_at ?? null,
   };
 }
 
@@ -210,6 +212,7 @@ export type RunPatch = Partial<
     | "reviewReasons"
     | "billingType"
     | "claudeCodeVersion"
+    | "lastEventAt"
   >
 >;
 
@@ -248,6 +251,7 @@ const PATCH_COLUMNS: Record<keyof RunPatch, string> = {
   reviewReasons: "review_reasons_json",
   billingType: "billing_type",
   claudeCodeVersion: "claude_code_version",
+  lastEventAt: "last_event_at",
 };
 
 /**
@@ -290,8 +294,9 @@ export class RunRepository {
            exit_code, termination_reason, error, result_text, num_turns, tool_calls, input_tokens, output_tokens,
            cache_read_tokens, cache_creation_tokens, cost_usd, permission_denials, denied_tools_json, mcp_json, human_intervention,
            context_exhausted, retries, log_path, raw_result_json, schedule_id, owner, phases_json, review_reasons_json, resumed_from_run_id, kind,
-           usage_by_model_json, billing_type, error_code, error_family, error_detail_json, agent_hash, claude_code_version)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+           usage_by_model_json, billing_type, error_code, error_family, error_detail_json, agent_hash, claude_code_version,
+           last_event_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         run.id,
@@ -341,6 +346,7 @@ export class RunRepository {
         run.errorDetail ? JSON.stringify(run.errorDetail) : null,
         run.agentHash ?? null,
         run.claudeCodeVersion ?? null,
+        run.lastEventAt ?? null,
       );
   }
 

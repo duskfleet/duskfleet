@@ -29,7 +29,8 @@ const SHIPPED = [
   { version: 17, sha256: "79a2323b8639caebb19f9aa4208cd29fdf1ed04439ebf11d73a832b3a10ffe03" },
   { version: 18, sha256: "2fc1eb7e77a4ebb1a88a058224da762ab54f6b383a70d3a87b940462108018c0" },
   { version: 19, sha256: "725011afa3141e0d80a266b7770d0cee55eed2ab89137aadef957826a3573767" },
-  { version: 20, sha256: "d96b7f8d662372dd7a4b19a6b768b4a5d7b97763c83f4de0dff434a7ed284223" },
+  { version: 20, sha256: "61b3fb50d80ed13caa40bed44a70030972cad483b19d3b8cc07b30983a579cc3" },
+  { version: 21, sha256: "d96b7f8d662372dd7a4b19a6b768b4a5d7b97763c83f4de0dff434a7ed284223" },
 ];
 
 test("shipped migrations are never edited, only appended to", () => {

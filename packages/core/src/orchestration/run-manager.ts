@@ -29,6 +29,7 @@ import {
   isBudgetExhausted,
   isResumable,
   isTerminal,
+  LAST_EVENT_WRITE_MS,
   orphanedError,
   type Run,
   type RunAgent,
@@ -124,6 +125,8 @@ interface ActiveRun {
   startedAtMs: number;
   /** HEAD of the project before the spawn; null when it is not a git checkout (no diff event then). */
   gitBase: string | null;
+  /** When `last_event_at` was last written (0 = never); throttled to LAST_EVENT_WRITE_MS. */
+  lastEventWriteMs: number;
 }
 
 /** What the wrap-up pass is told. It must not start new work; it must leave a trace of where the run stopped. */
@@ -483,6 +486,7 @@ export class RunManager {
       billingType: null,
       agentHash: agentDefinitionHash(agent, projectPath),
       claudeCodeVersion: null,
+      lastEventAt: null,
     };
 
     // Insert first so that events emitted by the executor always find the row. For a resume the
@@ -544,6 +548,7 @@ export class RunManager {
       cancelRequested: false,
       startedAtMs: Date.now(),
       gitBase,
+      lastEventWriteMs: 0,
     });
     this.transition(run, "running", {
       startedAt: new Date().toISOString(),
@@ -1095,7 +1100,17 @@ export class RunManager {
     run.status = to;
   }
 
+  /** Any output counts as a sign of life for the silent-run badge (`Run.lastEventAt`). */
+  private touchLastEvent(runId: string): void {
+    const a = this.active.get(runId);
+    const now = Date.now();
+    if (a && now - a.lastEventWriteMs < LAST_EVENT_WRITE_MS) return;
+    if (a) a.lastEventWriteMs = now;
+    this.runs.update(runId, { lastEventAt: new Date(now).toISOString() });
+  }
+
   private onEvent(runId: string, event: ExecutionEvent): void {
+    this.touchLastEvent(runId);
     switch (event.type) {
       case "init": {
         const patch: RunPatch = { modelUsed: event.model };

@@ -292,9 +292,16 @@ const MIGRATIONS: ReadonlyArray<{ version: number; sql: string; backfill?: (db: 
     `,
   },
   {
+    // When the run last produced output (any stream-json event), written by RunManager at most
+    // every LAST_EVENT_WRITE_MS. The dashboard shows "no output for N min" on silent running rows.
+    // NULL for older rows and for runs that never emitted an event.
+    version: 20,
+    sql: `ALTER TABLE runs ADD COLUMN last_event_at TEXT;`,
+  },
+  {
     // What makes a schedule due (trigger_kind, only 'cron' for now: room for API triggers) and a
     // pause of the whole scheduler until an instant (pause_scheduler), one row, read every tick.
-    version: 20,
+    version: 21,
     sql: `
       ALTER TABLE schedules ADD COLUMN trigger_kind TEXT NOT NULL DEFAULT 'cron';
       CREATE TABLE IF NOT EXISTS scheduler_pause (

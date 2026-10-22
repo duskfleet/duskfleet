@@ -134,6 +134,41 @@ export interface Run {
    */
   agentHash: string | null;
   claudeCodeVersion: string | null;
+  /**
+   * When the run last produced output (any stream-json event; migration 20), refreshed by
+   * `RunManager` at most every `LAST_EVENT_WRITE_MS`. Null before the first event and for
+   * older rows. Read through `runSilence`.
+   */
+  lastEventAt?: string | null;
+}
+
+/** Minimum gap between two writes of `last_event_at` for one run (one UPDATE per event would be wasteful). */
+export const LAST_EVENT_WRITE_MS = 15_000;
+/** A running run with no output for this long is flagged "suspicious" (amber). */
+export const SILENT_SUSPICIOUS_MS = 5 * 60_000;
+/** ... and "critical" (red) after this long. Informational only: nothing kills the run. */
+export const SILENT_CRITICAL_MS = 15 * 60_000;
+
+export interface RunSilence {
+  level: "suspicious" | "critical";
+  /** Time since the last output (or since the start, before the first event). */
+  silentMs: number;
+}
+
+/**
+ * How long a running run has been silent, when that is long enough to flag; null otherwise
+ * and for every run that is not running. Before the first event the start time counts.
+ */
+export function runSilence(
+  run: Pick<Run, "status" | "startedAt" | "lastEventAt">,
+  nowMs: number = Date.now(),
+): RunSilence | null {
+  if (run.status !== "running") return null;
+  const since = run.lastEventAt ?? run.startedAt;
+  if (!since) return null;
+  const silentMs = nowMs - new Date(since).getTime();
+  if (!(silentMs >= SILENT_SUSPICIOUS_MS)) return null;
+  return { level: silentMs >= SILENT_CRITICAL_MS ? "critical" : "suspicious", silentMs };
 }
 
 export type RunKind = "run" | "gate";
