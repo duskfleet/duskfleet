@@ -29,6 +29,16 @@ anything. Code never writes into `config/agents`. Because a user agent may later
 field, and store `add_dirs` inside your home directory as `~/...`
 ([MCP server](mcp-server.md)).
 
+## Builtin agents
+
+General-purpose patterns shipped in `config/agents/`, not bound to any project. Point them at a
+project with `run_agent` or a schedule; to change their envelope (model, allow-list, budget),
+copy the file into `data/agents/` with the same id and edit the copy.
+
+| Id | What it does |
+|---|---|
+| `why-work-stopped` | Read-only diagnosis of work that stopped: repeated `skipped_busy`, needs-review runs, auto-paused schedules, daily caps, gate skips. It queries `duskfleet.db` with `sqlite3 -readonly` (SELECT only) and greps `logs/<run id>.jsonl`, finds the pattern (the run holding the agent or project busy, the same denied tool every run, an orphan stuck as `running`), and ends with a verdict (`diagnosed:` / `healthy:` / `no data`), the evidence by run id, the cause and a numbered plan for a human. It proposes changes, never writes them. Sonnet, `dontAsk` with `Edit` / `Write` / `NotebookEdit` disallowed, `isolated: true` (it may run beside the agent it diagnoses), $1, 15 min. It needs the DuskFleet data directory in reach: run it on the DuskFleet checkout registered as a project (then `data/` is in its working directory), or on any project whose entry in `data/projects.yaml` has `add_dirs` pointing at the data directory (relative paths resolve from that file's folder, so `add_dirs: [.]` there is the data directory). Needs the `sqlite3` command-line shell on `PATH` |
+
 ## Frontmatter
 
 ```markdown
