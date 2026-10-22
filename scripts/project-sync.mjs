@@ -1,13 +1,17 @@
 #!/usr/bin/env node
 // Mirrors the label flow (docs/development.md "Issue and review flow by agents") into the
-// GitHub Project "DuskFleet Flow": every open issue and PR of the repository is an item, and
-// the item's Status is derived from its `flow:` label. Labels stay the source of truth: the
-// agents move labels, this script moves the board. Run from the repository (gh resolves
-// {owner}/{repo}); needs `gh auth refresh -s project` once.
+// GitHub Project "DuskFleet Flow": every open issue and PR of each synced repository is an
+// item, and the item's Status is derived from its `flow:` label. Labels stay the source of
+// truth: the agents move labels, this script moves the board. Without `--repo` it syncs the
+// repository it runs in (gh resolves {owner}/{repo}); `--repo` can be repeated to sync several
+// repositories of the organization into the one project (the website repository shares the
+// board). Needs `gh auth refresh -s project` once.
 //
-//   node scripts/project-sync.mjs [--project <number>] [--dry-run]
+//   node scripts/project-sync.mjs [--project <number>] [--repo <owner/name>]... [--dry-run]
 //
 // Status is set only when it differs; a closed or merged item is "Done" whatever its labels.
+// Items already on the board are corrected whatever their repository; only the listed
+// repositories get their missing open issues and PRs added.
 // The Status options must exist with these exact names (the board was set up by hand once):
 import { execFileSync } from "node:child_process";
 
@@ -28,6 +32,7 @@ const args = process.argv.slice(2);
 const dryRun = args.includes("--dry-run");
 const projectFlag = args.indexOf("--project");
 const projectNumber = projectFlag === -1 ? 2 : Number(args[projectFlag + 1]);
+const repos = args.flatMap((arg, i) => (arg === "--repo" && args[i + 1] ? [args[i + 1]] : []));
 
 function gh(args) {
   return execFileSync("gh", args, { encoding: "utf8", maxBuffer: 64 * 1024 * 1024 });
@@ -39,7 +44,13 @@ function graphql(query, variables = {}) {
   return out.data;
 }
 
-const owner = JSON.parse(gh(["repo", "view", "--json", "owner"])).owner.login;
+if (repos.length === 0) repos.push(JSON.parse(gh(["repo", "view", "--json", "nameWithOwner"])).nameWithOwner);
+for (const repo of repos) {
+  if (!/^[\w.-]+\/[\w.-]+$/.test(repo)) throw new Error(`--repo expects owner/name, got "${repo}"`);
+}
+const owner = repos[0].split("/")[0];
+// Log lines name the repository only when more than one is synced.
+const label = (repo, number) => (repos.length > 1 ? `${repo}#${number}` : `#${number}`);
 
 // Project, its Status field and the options by name.
 const project = graphql(
@@ -56,7 +67,7 @@ for (const name of [...Object.values(STATUS_BY_LABEL), STATUS_NONE, STATUS_DONE]
 }
 
 // Every item of the project: content node id, state, labels and current Status.
-const items = new Map(); // content node id -> { itemId, number, kind, state, labels, status }
+const items = new Map(); // content node id -> { itemId, repo, number, kind, state, labels, status }
 let cursor = null;
 do {
   const page = graphql(
@@ -66,8 +77,8 @@ do {
         status: fieldValueByName(name: "Status") { ... on ProjectV2ItemFieldSingleSelectValue { name } }
         content {
           __typename
-          ... on Issue { id number state labels(first: 20) { nodes { name } } }
-          ... on PullRequest { id number state labels(first: 20) { nodes { name } } } } } } } } }`,
+          ... on Issue { id number state repository { nameWithOwner } labels(first: 20) { nodes { name } } }
+          ... on PullRequest { id number state repository { nameWithOwner } labels(first: 20) { nodes { name } } } } } } } } }`,
     cursor ? { id: project.id, after: cursor } : { id: project.id },
   ).node.items;
   for (const node of page.nodes) {
@@ -75,6 +86,7 @@ do {
     if (!content?.id) continue; // draft issue or redacted
     items.set(content.id, {
       itemId: node.id,
+      repo: content.repository.nameWithOwner,
       number: content.number,
       kind: content.__typename === "PullRequest" ? "PR" : "issue",
       state: content.state,
@@ -86,20 +98,20 @@ do {
 } while (cursor);
 
 // Open issues and PRs missing from the project are added (the project's auto-add workflow
-// covers issues only; a PR opened by an agent would otherwise never reach the board).
-const open = [
-  ...JSON.parse(gh(["issue", "list", "--state", "open", "--limit", "500", "--json", "id,number,labels"])).map(
-    (issue) => ({ ...issue, kind: "issue" }),
+// covers the issues of one repository only; a PR opened by an agent, or anything in another
+// repository, would otherwise never reach the board).
+const open = repos.flatMap((repo) => [
+  ...JSON.parse(
+    gh(["issue", "list", "-R", repo, "--state", "open", "--limit", "500", "--json", "id,number,labels"]),
+  ).map((issue) => ({ ...issue, repo, kind: "issue" })),
+  ...JSON.parse(gh(["pr", "list", "-R", repo, "--state", "open", "--limit", "200", "--json", "id,number,labels"])).map(
+    (pr) => ({ ...pr, repo, kind: "PR" }),
   ),
-  ...JSON.parse(gh(["pr", "list", "--state", "open", "--limit", "200", "--json", "id,number,labels"])).map((pr) => ({
-    ...pr,
-    kind: "PR",
-  })),
-];
+]);
 const summary = { added: 0, moved: 0, unchanged: 0 };
 for (const content of open) {
   if (items.has(content.id)) continue;
-  console.log(`add    ${content.kind} #${content.number}`);
+  console.log(`add    ${content.kind} ${label(content.repo, content.number)}`);
   summary.added++;
   if (dryRun) continue;
   const itemId = graphql(
@@ -108,6 +120,7 @@ for (const content of open) {
   ).addProjectV2ItemById.item.id;
   items.set(content.id, {
     itemId,
+    repo: content.repo,
     number: content.number,
     kind: content.kind,
     state: "OPEN",
@@ -128,7 +141,7 @@ for (const item of items.values()) {
     summary.unchanged++;
     continue;
   }
-  console.log(`status ${item.kind} #${item.number}: ${item.status ?? "(none)"} -> ${wanted}`);
+  console.log(`status ${item.kind} ${label(item.repo, item.number)}: ${item.status ?? "(none)"} -> ${wanted}`);
   summary.moved++;
   if (dryRun) continue;
   graphql(
