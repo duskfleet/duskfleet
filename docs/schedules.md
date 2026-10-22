@@ -192,7 +192,9 @@ default applies. `noop_pattern` and `clear_noop_pattern` in one `update_schedule
 refused. Make the agent start its final message with a recognisable sentence when it finds no
 work. Failed runs, and completed runs that [need review](dashboard.md#needs-review) (a
 permission denial, a budget or context limit, an MCP mismatch), never count as no-op, even
-when they end with "nothing to do": they were blocked, not idle.
+when they end with "nothing to do": they were blocked, not idle. The one exception is a run
+whose only reason is `empty_run` (no tool call at all): a text-only "nothing to do" answer is
+exactly what a no-op looks like, so it still counts.
 
 ## Auto-pause
 
