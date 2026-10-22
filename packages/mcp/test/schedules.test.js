@@ -936,6 +936,35 @@ test("auto-pause: N ended runs in a row that were empty or needs review pause th
     assert.equal(autoPauseReason(stub([bad, bad]), sched, 3), null, "fewer ended runs than the threshold");
     assert.equal(autoPauseReason(stub([bad, bad, bad]), sched, 0), null);
     assert.match(autoPauseReason(stub([bad, bad, bad]), sched, 3), /3 needed review/);
+    // An empty run is needs review too (empty_run): it counts as empty, never twice.
+    const emptyReview = { id: "z", empty: true, needsReview: true };
+    assert.match(
+      autoPauseReason(stub([emptyReview, bad, emptyReview]), sched, 3),
+      /\(2 completed with 0 tool calls, 1 needed review\)/,
+    );
+  } finally {
+    await t.close(root);
+  }
+});
+
+test("auto-pause: three real empty runs (empty_run) pause as 'completed with 0 tool calls', not 'needed review'", async () => {
+  const { root, configDir } = makeRoot();
+  writeFileSync(
+    path.join(configDir, "duskfleet.yaml"),
+    `data_dir: ../data\ndefault_agent: coder\nscheduler:\n  auto_pause_after: 3\nclaude:\n  binary: "${fakeBinary}"\n  default_timeout_minutes: 0.05\n`,
+  );
+  const t = makeScheduler(configDir);
+  try {
+    const s = t.scheduler.create({ name: "silent", agentId: "coder", prompt: "empty", cron: "* * * * *" });
+    for (let i = 0; i < 3; i++) {
+      const run = await t.fireAndWait(s.id);
+      assert.deepEqual(run.reviewReasons, ["empty_run"]);
+    }
+    t.due(s.id);
+    await t.tickAll();
+    const paused = t.repo.get(s.id);
+    assert.equal(paused.lastOutcome, "auto_paused");
+    assert.match(paused.pausedReason, /the last 3 runs did no useful work \(3 completed with 0 tool calls\)/);
   } finally {
     await t.close(root);
   }
@@ -984,6 +1013,11 @@ test("idle cost: 7-day ticks, fires, no-op runs by marker and what they cost, pe
     // A completed run that needs review is blocked, not idle, even when it says "Nothing to do".
     t.scheduler.update(s.id, { noopPattern: null });
     const noop = t.runs.listRuns({ status: "completed" }).find((r) => r.resultText?.startsWith("Nothing to do"));
+    // empty_run alone does not exclude it: a text-only "nothing to do" is the typical no-op.
+    t.db.prepare("UPDATE runs SET review_reasons_json = ? WHERE id = ?").run('["empty_run"]', noop.id);
+    assert.equal(t.scheduler.idleStats(t.repo.get(s.id)).noopRuns, 2, "an empty_run-only run is still a no-op");
+    t.db.prepare("UPDATE runs SET review_reasons_json = ? WHERE id = ?").run('["empty_run","mcp_missing"]', noop.id);
+    assert.equal(t.scheduler.idleStats(t.repo.get(s.id)).noopRuns, 1, "empty_run with another reason is blocked");
     t.db.prepare("UPDATE runs SET review_reasons_json = ? WHERE id = ?").run('["permission_denial"]', noop.id);
     assert.equal(t.scheduler.idleStats(t.repo.get(s.id)).noopRuns, 1, "the run that needs review is not a no-op");
     // A stored pattern that no longer parses degrades that row only, never the whole list.
