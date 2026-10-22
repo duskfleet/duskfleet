@@ -39,6 +39,7 @@ copy the file into `data/agents/` with the same id and edit the copy.
 |---|---|
 | `pr-check-loop` | Gets the checks of one pull request green. It takes the PR named in the task, or the oldest open PR whose head commit has a failing check (none: `nothing to do`). Each iteration reads the latest head SHA, waits for its checks (`gh pr checks --watch --interval 30`), classifies every failing job and applies a fixed action: **regression** = fix the code and push, **lint** = run the lint command locally and push, **flake** = one `gh run rerun --failed` per job, **external / secret** = stop with a blocker report. At most 5 iterations; it never force-pushes or touches workflow files, and stops on a dirty checkout. It leaves a PR comment unless the checks went green without any change from it. Sonnet, `acceptEdits`, $3, 60 min; the allow-list covers `gh pr` / `gh run`, `git` and `npm` (copy it into `data/agents/` for another toolchain). Meant to be scheduled every 30 minutes: `create_schedule` with cron `*/30 * * * *` on the project |
 
+## Frontmatter
 
 ```markdown
 ---
