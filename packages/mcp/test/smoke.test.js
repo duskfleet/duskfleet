@@ -22,6 +22,7 @@ import {
   mergeResults,
   needsReview,
   openDatabase,
+  REVIEW_REASON_LABELS,
   RunManager,
   RunRepository,
   reviewReasons,
@@ -1076,6 +1077,18 @@ test("needs review: every run that ended before the agent chose to stop, from on
   assert.deepEqual(reviewReasons({ ...base, permissionDenials: 2, humanIntervention: true }), ["permission_denied"]);
   assert.deepEqual(reviewReasons({ ...base, contextExhausted: true }), ["context_exhausted"]);
   assert.deepEqual(reviewReasons({ ...base, mcp: { allowListedMissing: ["mcp__x"] } }), ["mcp_missing"]);
+  assert.deepEqual(reviewReasons({ ...base, toolCalls: 0 }), ["empty_run"], "completed with no tool call");
+  assert.deepEqual(reviewReasons({ ...base, toolCalls: 1 }), [], "one tool call is work");
+  assert.deepEqual(reviewReasons({ ...base, toolCalls: null }), [], "unknown tool calls are not empty");
+  assert.deepEqual(
+    reviewReasons({ ...base, status: "failed", exitCode: 1, terminationReason: "api_error", toolCalls: 0 }),
+    ["nonzero_exit"],
+    "only a completed run can be empty",
+  );
+  assert.deepEqual(
+    reviewReasons({ ...base, status: "cancelled", terminationReason: null, exitCode: null, toolCalls: 0 }),
+    [],
+  );
   assert.deepEqual(
     reviewReasons({ ...base, status: "cancelled", terminationReason: null, exitCode: null }),
     [],
@@ -1086,6 +1099,31 @@ test("needs review: every run that ended before the agent chose to stop, from on
     reviewReasons({ ...base, status: "failed", exitCode: 1, terminationReason: "api_error", error: "API Error" }),
     ["nonzero_exit"],
   );
+});
+
+test("a completed run with no tool call is stored as needs review (empty_run), a run with one is green", async () => {
+  const app = makeApp();
+  try {
+    const empty = await app.runs.waitForRun(
+      (await app.runs.startRun({ prompt: "empty", projectPath: app.project })).id,
+      15_000,
+    );
+    assert.equal(empty.status, "completed");
+    assert.equal(empty.toolCalls, 0);
+    assert.deepEqual(empty.reviewReasons, ["empty_run"], "stored on the row at the terminal transition");
+    assert.equal(summarizeRun(empty).needsReview, true);
+    assert.equal(REVIEW_REASON_LABELS.empty_run, "no work done");
+
+    const ok = await app.runs.waitForRun(
+      (await app.runs.startRun({ prompt: "ok", projectPath: app.project })).id,
+      15_000,
+    );
+    assert.equal(ok.status, "completed");
+    assert.ok(ok.toolCalls > 0);
+    assert.deepEqual(ok.reviewReasons, []);
+  } finally {
+    await app.cleanup();
+  }
 });
 
 test("needs review is true for budget, timeout, crash and orphan runs, and false for a cancelled one", async () => {

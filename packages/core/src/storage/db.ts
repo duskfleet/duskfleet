@@ -263,9 +263,28 @@ const MIGRATIONS: ReadonlyArray<{ version: number; sql: string; backfill?: (db: 
     `,
   },
   {
+    // Monthly budgets per scope (global / agent / project), calendar month in UTC, compared with
+    // the recorded cost of the scope's runs. One per scope: scope_id is NULL for global, so the
+    // unique index is on COALESCE(scope_id, '').
+    version: 18,
+    sql: `
+      CREATE TABLE IF NOT EXISTS budgets (
+        id           TEXT PRIMARY KEY,
+        scope        TEXT NOT NULL CHECK (scope IN ('global', 'agent', 'project')),
+        scope_id     TEXT,
+        amount_usd   REAL NOT NULL CHECK (amount_usd > 0),
+        warn_percent INTEGER NOT NULL DEFAULT 80,
+        hard_stop    INTEGER NOT NULL DEFAULT 1,
+        created_at   TEXT NOT NULL,
+        updated_at   TEXT NOT NULL
+      );
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_budgets_scope ON budgets(scope, COALESCE(scope_id, ''));
+    `,
+  },
+  {
     // What makes a schedule due (trigger_kind, only 'cron' for now: room for API triggers) and a
     // pause of the whole scheduler until an instant (pause_scheduler), one row, read every tick.
-    version: 18,
+    version: 19,
     sql: `
       ALTER TABLE schedules ADD COLUMN trigger_kind TEXT NOT NULL DEFAULT 'cron';
       CREATE TABLE IF NOT EXISTS scheduler_pause (

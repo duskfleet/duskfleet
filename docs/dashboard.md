@@ -57,6 +57,10 @@ in the nav); the other pages are static.
 - **Spent** (Runs page) splits into "on runs" and "on gates" once a gate agent has run; gate
   runs carry a `gate` flag in the run list and are left out of the run counts (total, clean,
   failed, needs review): a gate is a yes/no check, not work.
+- **Budgets** (Runs page): one banner per [monthly budget](agents.md#monthly-budgets) past its
+  `warn_percent` (amber) or spent (coral when `hard_stop` refuses runs and has paused the
+  scope's schedules; amber when it only warns). Nothing shows while every budget is `ok`. A
+  tick refused by a budget shows as "skipped, monthly budget spent" in the schedule's strip.
 - **MCP**: the tool catalogue (`packages/mcp/dist/tools.json`, generated at build time from the
   real server) with a sticky index, plus the registration snippets for Claude Desktop and
   Claude Code with your absolute paths.
@@ -81,6 +85,10 @@ the agent chose to stop, or when something silently narrowed what it could do:
 | `permission_denied` | a tool call was refused: the allow-list is incomplete |
 | `context_exhausted` | structured signal that the context window ran out |
 | `mcp_missing` | an allow-listed MCP server never mounted |
+| `empty_run` | the run completed with zero tool calls ("no work done"; the same signal the schedule auto-pause counts as empty). Structured only: the result text is never read |
+
+A run that used tools but never edited a file (a read-only reviewer, a planner) is not empty
+and stays green. Rows finished before `empty_run` existed keep the reasons they were stored with.
 
 A completed run with a reason is **needs review** (amber), never plain green; a failed or
 timed-out run is red and its badge title names the reasons. `cancelled` is not a reason: a

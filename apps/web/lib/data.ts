@@ -11,7 +11,9 @@ import { homedir } from "node:os";
 import path from "node:path";
 import type { DatabaseSync } from "node:sqlite";
 import {
+  type BudgetStatus,
   budgetPlan,
+  budgetStatuses,
   type DuskFleetConfig,
   describeCron,
   findRepoRoot,
@@ -57,6 +59,13 @@ export function services(): Services {
 /** Config is re-read on every request so edits under config/ show up immediately. */
 export function config(): DuskFleetConfig {
   return loadConfig(services().configDir);
+}
+
+/** Monthly budgets (UTC month) past their warn threshold or spent, most spent first. A pure read. */
+export function budgetAlerts(): BudgetStatus[] {
+  return budgetStatuses(services().runs.budgets, config())
+    .filter((b) => b.state !== "ok")
+    .sort((a, b) => b.percent - a.percent);
 }
 
 /**

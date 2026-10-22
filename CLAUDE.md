@@ -70,7 +70,7 @@ npm workspaces, one `config/` and one SQLite database shared by three deliverabl
   candidate minute). Only the SQLite lease holder ticks; the holder is `<role>@host:pid`
   (`serve` / `mcp` / `cli`, `parseHolder`). Busy = `skipped_busy`, never a queue;
   no catch-up of missed ticks; `scheduler.enabled` is the kill switch read every tick, and
-  `pause_scheduler` (one `scheduler_pause` row, migration 18) stops all firing until an instant,
+  `pause_scheduler` (one `scheduler_pause` row, migration 19) stops all firing until an instant,
   also read every tick (the holder keeps the lease and the sweep). `trigger_kind` is only `cron`.
   Create/update validation is `scheduler/crud.ts`, shared by MCP, CLI and dashboard.
   Auto-pause (`autoPauseReason`, migration 16): before a scheduled fire, the last
@@ -99,7 +99,8 @@ npm workspaces, one `config/` and one SQLite database shared by three deliverabl
   `app/layout.tsx`). A completed run that hit a permission denial is "needs review"
   (amber), never plain green. One rule decides needs-review (`reviewReasons` in
   `core/src/observability/run.ts`: budget exhausted, timed out, orphaned, non-zero exit,
-  failed, denial, context, MCP mismatch; never for cancelled or running). `RunManager.transition`
+  failed, denial, context, MCP mismatch, empty run = completed with 0 tool calls; never for
+  cancelled or running). `RunManager.transition`
   is its only caller: it stores the result in `review_reasons_json` (migration 9) and every
   reader (`summarizeRun`, badges, `NEEDS_REVIEW_SQL`, `attachLastRun` for schedule rows) uses
   the stored `run.reviewReasons`, never the rule. Orphans are detected with `isOrphaned`, not by
@@ -147,6 +148,9 @@ npm workspaces, one `config/` and one SQLite database shared by three deliverabl
   `skipped_busy` on `instanceof BusyError`, never by matching text; busy means "skip this tick".
   Daily caps (`max_daily_runs`, `max_daily_cost_usd`, UTC day, counted from `runs`) are checked
   there too but throw `DailyCapError` (`orchestration/daily-cap.ts`, not a BusyError): `skipped_daily_cap`.
+  Monthly budgets (`budgets` table, migration 18; scope global / agent / project, UTC month) come
+  last: a spent `hard_stop` one throws `BudgetError` (`orchestration/budget.ts`), pauses the
+  scope's schedules and the tick is `skipped_budget`; nothing resumes them automatically.
 - **Subagents are rows, not prose** (`run_agents`, migration 5): the parser folds Claude Code's
   `task_started` / `task_notification` lines and the `agent_id` of nested messages into one
   `SubagentRecord` per Agent call; `RunManager` writes them on `subagent_start` / `subagent_end`

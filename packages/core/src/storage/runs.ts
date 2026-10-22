@@ -12,6 +12,7 @@ import type {
   RunStatus,
   RunSummary,
 } from "../observability/run.js";
+import { BudgetRepository } from "./budgets.js";
 
 /** Row shape as SQLite returns it. */
 interface RunRow {
@@ -268,7 +269,12 @@ function rowToSummary(r: SummaryRow): RunSummary {
 }
 
 export class RunRepository {
-  constructor(private readonly db: DatabaseSync) {}
+  /** Budgets live in the same database; RunManager.startRun checks them before every spawn. */
+  readonly budgets: BudgetRepository;
+
+  constructor(private readonly db: DatabaseSync) {
+    this.budgets = new BudgetRepository(db);
+  }
 
   insert(run: Run): void {
     this.db
