@@ -87,7 +87,8 @@ login and spends nothing: the tests use the fake binary. In order:
 Two tests are gates in themselves: `test/migrations.test.js` pins the SHA-256 of every shipped
 migration (edit one and it fails; add one and it tells you the digest to append), and the layering of
 the three packages is a Biome rule, not just this page. Dependabot opens grouped weekly PRs for npm
-and GitHub Actions. Not built yet: a periodic `claude --help` flag-drift check (needs the CLI, so a
+and GitHub Actions. Workflows pin every action by full commit SHA with a version comment
+(`uses: actions/checkout@<sha> # v7.0.1`); Dependabot bumps the SHA and the comment together. Not built yet: a periodic `claude --help` flag-drift check (needs the CLI, so a
 local schedule rather than Actions), a manual-dispatch smoke run with `--model haiku`, and a docs
 sync check (every MCP tool in `docs/mcp-server.md`, every `docs/` page linked from `README.md`).
 
@@ -172,6 +173,22 @@ PR:     flow: needs-review ──► flow: in-review ──► flow: changes-req
   reviewer checks the same state before and after its passes (`gh pr view <n> --json
   mergeable,statusCheckRollup`): a conflicting or red PR gets `VERDICT: changes` without a
   review.
+- The gate also expires stale locks. `flow: in-progress` and `flow: in-review` are swapped in
+  first as a lock against a second run; a run that dies after that (timeout, killed child, an
+  ending such as "tests are running, I'll pick up when they finish") leaves the lock behind,
+  every later run skips the item as someone else's and nothing in the flow looks at it again
+  (PR #164 sat `in-progress` for 17 hours with no push). No run outlives its timeout, so a lock
+  older than `--stale-hours` (default 2, above the longest agent timeout) with no activity since
+  it was set is an orphan and goes back to the state it was taken from: a PR `in-progress` with
+  no commit on its head since the label to `flow: changes-requested`; a PR `in-review` with no
+  `VERDICT:` for its head since the label to `flow: needs-review` (a verdict posted but never
+  labelled gets its label instead, no second review, but only once the lock is that old too, so
+  a live reviewer between its comment and its label swap is never raced; the verdict counts
+  only at the start of a line); an issue `in-progress` with no open PR
+  closing it to `flow: ready`. Each gets a `[pr-gate]` comment naming the lock and its age. A
+  pickup is a new label event, so the clock restarts and a run still at work is never
+  interrupted. Agents keep their side of it: swap the label first, push or post before the
+  timeout, never end a run with work "still running in the background".
 
 The DuskFleet side is three user agents in `data/agents/` (developer, reviewer, planner) that
 link the local Claude Code agents (`claude_agent`) and add only the unattended envelope:

@@ -14,6 +14,7 @@ import { fileURLToPath } from "node:url";
 import "./helpers.js"; // before @duskfleet/core: drops an inherited CLAUDE_BIN
 
 import {
+  agentDefinitionHash,
   billingTypeOf,
   budgetPlan,
   ClaudeCodeExecutor,
@@ -22,9 +23,11 @@ import {
   mergeResults,
   needsReview,
   openDatabase,
+  REVIEW_REASON_LABELS,
   RunManager,
   RunRepository,
   reviewReasons,
+  runSilence,
   summarizeRun,
   WRAP_UP_PROMPT,
 } from "@duskfleet/core";
@@ -130,6 +133,90 @@ test("billing_type is recorded when the run spawns and survives the reload", asy
     assert.equal(raw.billing_type, expected);
   } finally {
     await app.cleanup();
+  }
+});
+
+test("last_event_at is stamped when the run produces output", async () => {
+  const app = makeApp();
+  try {
+    const before = new Date().toISOString();
+    const started = await app.runs.startRun({ prompt: "ok", projectPath: app.project });
+    const run = await app.runs.waitForRun(started.id, 10_000);
+    assert.ok(run.lastEventAt, "set by the first stream-json event");
+    assert.ok(run.lastEventAt >= before && run.lastEventAt <= run.endedAt);
+  } finally {
+    await app.cleanup();
+  }
+});
+
+test("runSilence: running rows only, 5 min suspicious, 15 min critical, start time before any event", () => {
+  const now = Date.parse("2026-10-21T12:00:00Z");
+  const ago = (min) => new Date(now - min * 60_000).toISOString();
+  const running = (lastEventAt, startedAt = ago(60)) => ({ status: "running", startedAt, lastEventAt });
+  assert.equal(runSilence(running(ago(4)), now), null);
+  assert.deepEqual(runSilence(running(ago(5)), now), { level: "suspicious", silentMs: 5 * 60_000 });
+  assert.equal(runSilence(running(ago(14)), now).level, "suspicious");
+  assert.equal(runSilence(running(ago(15)), now).level, "critical");
+  assert.equal(runSilence(running(null, ago(6)), now).level, "suspicious", "no event yet: silent since the start");
+  assert.equal(runSilence(running(null, ago(2)), now), null);
+  assert.equal(runSilence({ status: "completed", startedAt: ago(60), lastEventAt: ago(30) }, now), null);
+  assert.equal(runSilence({ status: "pending", startedAt: null, lastEventAt: null }, now), null);
+});
+
+test("eval bundle: agent_hash, model_used and claude_code_version are stored on the run", async () => {
+  const app = makeApp();
+  try {
+    const started = await app.runs.startRun({ prompt: "ok", projectPath: app.project, model: "haiku" });
+    assert.match(started.agentHash, /^[0-9a-f]{12}$/, "hashed at start, before the child runs");
+    assert.equal(started.claudeCodeVersion, null, "unknown until the init line");
+    const run = await app.runs.waitForRun(started.id, 10_000);
+    assert.equal(run.agentHash, started.agentHash);
+    assert.equal(run.modelUsed, "haiku");
+    assert.equal(run.claudeCodeVersion, "9.9.9", "from the init line of fake-claude.js");
+    const summary = summarizeRun(run);
+    assert.equal(summary.agentHash, run.agentHash);
+    assert.equal(summary.claudeCodeVersion, "9.9.9");
+    const raw = app.db.prepare("SELECT agent_hash, claude_code_version FROM runs WHERE id = ?").get(run.id);
+    assert.deepEqual({ ...raw }, { agent_hash: run.agentHash, claude_code_version: "9.9.9" });
+
+    // Same agent, same hash; an edit to the agent file changes it.
+    const again = await app.runs.startRun({ prompt: "ok", projectPath: app.project });
+    await app.runs.waitForRun(again.id, 10_000);
+    assert.equal(again.agentHash, run.agentHash);
+    writeFileSync(
+      path.join(app.root, "config", "agents", "coder.md"),
+      `---\npermission_mode: acceptEdits\n---\nBe briefer.\n`,
+    );
+    const edited = await app.runs.startRun({ prompt: "ok", projectPath: app.project });
+    await app.runs.waitForRun(edited.id, 10_000);
+    assert.notEqual(edited.agentHash, run.agentHash);
+  } finally {
+    await app.cleanup();
+  }
+});
+
+test("agentDefinitionHash ignores where the agent was loaded from and covers a link's project agent file", () => {
+  const root = mkdtempSync(path.join(tmpdir(), "duskfleet-hash-"));
+  try {
+    mkdirSync(path.join(root, ".claude", "agents"), { recursive: true });
+    const file = path.join(root, ".claude", "agents", "worker.md");
+    writeFileSync(file, "---\nname: worker\n---\nv1\n");
+    const base = {
+      id: "w",
+      name: "w",
+      description: "",
+      permissionMode: "dontAsk",
+      systemPrompt: "",
+      claudeAgent: "worker",
+    };
+    const a = agentDefinitionHash({ ...base, source: "builtin", sourcePath: "/a/w.md" }, root);
+    const b = agentDefinitionHash({ ...base, source: "user", sourcePath: "/b/w.md", model: undefined }, root);
+    assert.equal(a, b, "source, sourcePath and undefined fields do not count");
+    assert.notEqual(agentDefinitionHash({ ...base, source: "user", sourcePath: "", model: "haiku" }, root), a);
+    writeFileSync(file, "---\nname: worker\n---\nv2\n");
+    assert.notEqual(agentDefinitionHash({ ...base, source: "builtin", sourcePath: "/a/w.md" }, root), a);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
   }
 });
 
@@ -1076,6 +1163,18 @@ test("needs review: every run that ended before the agent chose to stop, from on
   assert.deepEqual(reviewReasons({ ...base, permissionDenials: 2, humanIntervention: true }), ["permission_denied"]);
   assert.deepEqual(reviewReasons({ ...base, contextExhausted: true }), ["context_exhausted"]);
   assert.deepEqual(reviewReasons({ ...base, mcp: { allowListedMissing: ["mcp__x"] } }), ["mcp_missing"]);
+  assert.deepEqual(reviewReasons({ ...base, toolCalls: 0 }), ["empty_run"], "completed with no tool call");
+  assert.deepEqual(reviewReasons({ ...base, toolCalls: 1 }), [], "one tool call is work");
+  assert.deepEqual(reviewReasons({ ...base, toolCalls: null }), [], "unknown tool calls are not empty");
+  assert.deepEqual(
+    reviewReasons({ ...base, status: "failed", exitCode: 1, terminationReason: "api_error", toolCalls: 0 }),
+    ["nonzero_exit"],
+    "only a completed run can be empty",
+  );
+  assert.deepEqual(
+    reviewReasons({ ...base, status: "cancelled", terminationReason: null, exitCode: null, toolCalls: 0 }),
+    [],
+  );
   assert.deepEqual(
     reviewReasons({ ...base, status: "cancelled", terminationReason: null, exitCode: null }),
     [],
@@ -1086,6 +1185,31 @@ test("needs review: every run that ended before the agent chose to stop, from on
     reviewReasons({ ...base, status: "failed", exitCode: 1, terminationReason: "api_error", error: "API Error" }),
     ["nonzero_exit"],
   );
+});
+
+test("a completed run with no tool call is stored as needs review (empty_run), a run with one is green", async () => {
+  const app = makeApp();
+  try {
+    const empty = await app.runs.waitForRun(
+      (await app.runs.startRun({ prompt: "empty", projectPath: app.project })).id,
+      15_000,
+    );
+    assert.equal(empty.status, "completed");
+    assert.equal(empty.toolCalls, 0);
+    assert.deepEqual(empty.reviewReasons, ["empty_run"], "stored on the row at the terminal transition");
+    assert.equal(summarizeRun(empty).needsReview, true);
+    assert.equal(REVIEW_REASON_LABELS.empty_run, "no work done");
+
+    const ok = await app.runs.waitForRun(
+      (await app.runs.startRun({ prompt: "ok", projectPath: app.project })).id,
+      15_000,
+    );
+    assert.equal(ok.status, "completed");
+    assert.ok(ok.toolCalls > 0);
+    assert.deepEqual(ok.reviewReasons, []);
+  } finally {
+    await app.cleanup();
+  }
 });
 
 test("needs review is true for budget, timeout, crash and orphan runs, and false for a cancelled one", async () => {

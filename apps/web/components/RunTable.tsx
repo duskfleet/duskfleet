@@ -1,4 +1,4 @@
-import { wrapUpPhase } from "@duskfleet/core";
+import { runSilence, wrapUpPhase } from "@duskfleet/core";
 import Link from "next/link";
 import type { RunWithProject } from "@/lib/data";
 import {
@@ -61,6 +61,7 @@ export function RunTable({
           const budget = reasons.includes("budget_exhausted");
           const orphaned = reasons.includes("orphaned");
           const wrapUp = budget ? wrapUpPhase(r) : null;
+          const silence = runSilence(r);
           return (
             <RunRow key={r.id} href={href}>
               <td className="status">
@@ -74,6 +75,16 @@ export function RunTable({
                   <Link href={`/?agent=${encodeURIComponent(r.agentId)}`}>{r.agentId}</Link>
                   <span className="sep">·</span>
                   <span title={r.projectPath}>{r.projectLabel}</span>
+                  {silence && (
+                    <span className="flags">
+                      <span
+                        className={`flag ${silence.level === "critical" ? "bad" : "warn"}`}
+                        title={`No stream-json output since ${fmtTime(r.lastEventAt ?? started)}. Informational: the run is not killed.`}
+                      >
+                        no output for {Math.floor(silence.silentMs / 60_000)} min
+                      </span>
+                    </span>
+                  )}
                   {r.scheduleId && (
                     <span className="flags">
                       <Link href={`/schedules#${r.scheduleId}`} className="flag quiet badge-link" title={r.scheduleId}>
