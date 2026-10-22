@@ -173,6 +173,20 @@ PR:     flow: needs-review ──► flow: in-review ──► flow: changes-req
   reviewer checks the same state before and after its passes (`gh pr view <n> --json
   mergeable,statusCheckRollup`): a conflicting or red PR gets `VERDICT: changes` without a
   review.
+- The gate also expires stale locks. `flow: in-progress` and `flow: in-review` are swapped in
+  first as a lock against a second run; a run that dies after that (timeout, killed child, an
+  ending such as "tests are running, I'll pick up when they finish") leaves the lock behind,
+  every later run skips the item as someone else's and nothing in the flow looks at it again
+  (PR #164 sat `in-progress` for 17 hours with no push). No run outlives its timeout, so a lock
+  older than `--stale-hours` (default 2, above the longest agent timeout) with no activity since
+  it was set is an orphan and goes back to the state it was taken from: a PR `in-progress` with
+  no commit on its head since the label to `flow: changes-requested`; a PR `in-review` with no
+  `VERDICT:` for its head since the label to `flow: needs-review` (a verdict posted but never
+  labelled gets its label instead, no second review); an issue `in-progress` with no open PR
+  closing it to `flow: ready`. Each gets a `[pr-gate]` comment naming the lock and its age. A
+  pickup is a new label event, so the clock restarts and a run still at work is never
+  interrupted. Agents keep their side of it: swap the label first, push or post before the
+  timeout, never end a run with work "still running in the background".
 
 The DuskFleet side is three user agents in `data/agents/` (developer, reviewer, planner) that
 link the local Claude Code agents (`claude_agent`) and add only the unattended envelope:

@@ -2,7 +2,10 @@
 # flow by agents"): whenever main moves or a CI run ends, and once an hour as a safety net,
 # scripts/pr-gate.mjs relabels a `flow: needs-review` / `flow: ready-to-merge` PR that now
 # conflicts with its base, or whose required check failed, to `flow: changes-requested` with a
-# comment naming the reasons. A PR that is merely behind main is updated in place.
+# comment naming the reasons. A PR that is merely behind main is updated in place. It also
+# expires stale locks: a `flow: in-progress` / `flow: in-review` PR, or a `flow: in-progress`
+# issue without a PR, idle for more than two hours (the run that took it is gone) goes back to
+# the state it was taken from.
 #
 # Token: the default GITHUB_TOKEN can comment and relabel, but a push it makes (the
 # update-branch merge) starts no workflow, so the updated PR would sit without a CI run, and a
