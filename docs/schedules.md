@@ -191,7 +191,7 @@ tested against the first 2000 characters of the final message only. An invalid
 default applies. `noop_pattern` and `clear_noop_pattern` in one `update_schedule` call are
 refused. Make the agent start its final message with a recognisable sentence when it finds no
 work. Failed runs, and completed runs that [need review](dashboard.md#needs-review) (a
-permission denial, a budget or context limit, an MCP mismatch), never count as no-op, even
+permission denial, a budget or context limit, an MCP mismatch, no tool call at all), never count as no-op, even
 when they end with "nothing to do": they were blocked, not idle.
 
 ## Auto-pause

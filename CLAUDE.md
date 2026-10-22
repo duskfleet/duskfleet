@@ -97,7 +97,8 @@ npm workspaces, one `config/` and one SQLite database shared by three deliverabl
   `app/layout.tsx`). A completed run that hit a permission denial is "needs review"
   (amber), never plain green. One rule decides needs-review (`reviewReasons` in
   `core/src/observability/run.ts`: budget exhausted, timed out, orphaned, non-zero exit,
-  failed, denial, context, MCP mismatch; never for cancelled or running). `RunManager.transition`
+  failed, denial, context, MCP mismatch, empty run = completed with 0 tool calls; never for
+  cancelled or running). `RunManager.transition`
   is its only caller: it stores the result in `review_reasons_json` (migration 9) and every
   reader (`summarizeRun`, badges, `NEEDS_REVIEW_SQL`, `attachLastRun` for schedule rows) uses
   the stored `run.reviewReasons`, never the rule. Orphans are detected with `isOrphaned`, not by
