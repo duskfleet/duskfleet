@@ -1,6 +1,6 @@
 # How it works
 
-DuskFleet is a local orchestrator for unattended Claude Code runs. Three deliverables — the
+Duskfleet is a local orchestrator for unattended Claude Code runs. Three deliverables — the
 MCP server, the CLI and the dashboard — share one `config/` directory and one SQLite
 database. This page follows a run end to end; the other pages go deeper on each part.
 
@@ -51,7 +51,7 @@ The [agent](agents.md) decides the rest of the command line: its permission mode
 allow-list, its model and budget, and — for a *link* agent — the `--agent <name>` of a
 persona the project itself defines in `.claude/agents/`. Runs are unattended: there are no
 permission prompts, so anything not allow-listed is denied and recorded. Children get
-`--strict-mcp-config` and never see the caller's MCP servers (DuskFleet cannot recurse into
+`--strict-mcp-config` and never see the caller's MCP servers (Duskfleet cannot recurse into
 itself) unless the agent or project opts into `inherit_mcp`.
 
 ## What gets recorded
@@ -80,7 +80,7 @@ they arrive and keeps the raw stream in `data/logs/<run_id>.jsonl`:
 
 `RunManager` is the only writer of a run's status, and every change goes through a checked
 transition. Each run records its owner process; orphan recovery closes a `running` row as
-failed only when that owner is gone, so several DuskFleet processes can share the database
+failed only when that owner is gone, so several Duskfleet processes can share the database
 safely.
 
 ## Run lifecycle

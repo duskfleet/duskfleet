@@ -1,4 +1,4 @@
-/* DuskFleet brand: night ground, sunset accent. Dark only. */
+/* Duskfleet brand: night ground, sunset accent. Dark only. */
 :root {
   /* brand */
   --amber: #f6b24a;
@@ -1345,7 +1345,7 @@ h2 .h2-id {
   white-space: nowrap;
 }
 
-/* project agents without a DuskFleet link */
+/* project agents without a Duskfleet link */
 .unlinked {
   background: var(--panel);
   border: 1px solid var(--border);

@@ -27,8 +27,8 @@ const plexMono = IBM_Plex_Mono({
 export const dynamic = "force-dynamic";
 
 export const metadata: Metadata = {
-  title: "DuskFleet",
-  description: "Agents and runs dashboard",
+  title: "Duskfleet",
+  description: "A fleet of agents for your own machine.",
 };
 
 /** Who ticks the scheduler right now: "off", "this process", a holder role, or "none". */
@@ -36,7 +36,7 @@ function schedulerStatus(): { label: string; title: string } {
   if (!schedulerEnabled()) return { label: "off", title: "scheduler.enabled: false in config/duskfleet.yaml" };
   const lease = schedulerLease();
   if (!lease || new Date(lease.expiresAt).getTime() <= Date.now()) {
-    return { label: "none", title: "No DuskFleet process holds the scheduler lease right now" };
+    return { label: "none", title: "No Duskfleet process holds the scheduler lease right now" };
   }
   const holder = parseHolder(lease.holder);
   const self = holder.host === hostname() && holder.pid === process.pid;

@@ -68,7 +68,7 @@ export async function requestScheduleRunAction(id: string): Promise<ActionResult
     if (!live) {
       return {
         ok: true,
-        message: `Run of "${s.name}" requested; it starts as soon as a DuskFleet process ticks (duskfleet serve or the MCP server).`,
+        message: `Run of "${s.name}" requested; it starts as soon as a Duskfleet process ticks (duskfleet serve or the MCP server).`,
       };
     }
     return {

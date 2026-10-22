@@ -17,7 +17,7 @@ candidate minute, so a schedule at 08:00 fires at 08:00 on both sides of a clock
 
 ## Who ticks
 
-Any DuskFleet process can: the MCP server that Claude Desktop or Claude Code keeps alive, or
+Any Duskfleet process can: the MCP server that Claude Desktop or Claude Code keeps alive, or
 `duskfleet serve`, a plain long-running process:
 
 ```bash
@@ -49,7 +49,7 @@ npm run cli -- doctor                     # "scheduler.service" says whether it 
 |---|---|---|
 | macOS | launchd LaunchAgent (`RunAtLoad`, `KeepAlive`) | `~/Library/LaunchAgents/com.duskfleet.scheduler.plist` |
 | Linux | systemd user unit (`Restart=always`) | `~/.config/systemd/user/duskfleet.service` |
-| Windows | Task Scheduler logon task, no time limit, restart on failure | task "DuskFleet Scheduler", XML kept under `%LOCALAPPDATA%\DuskFleet` |
+| Windows | Task Scheduler logon task, no time limit, restart on failure | task "Duskfleet Scheduler", XML kept under `%LOCALAPPDATA%\Duskfleet` |
 
 All three run as the logged-in user, so the service sees the same `claude` login as your
 terminal, start at login and restart the process if it dies. They append the process output to

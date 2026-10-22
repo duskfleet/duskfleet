@@ -75,7 +75,7 @@ test("Task Scheduler XML: logon trigger, no time limit, restart on failure, cmd 
     repoRoot: "C:\\dusk",
     user: "PC\\me",
   });
-  assert.equal(u.label, "DuskFleet Scheduler");
+  assert.equal(u.label, "Duskfleet Scheduler");
   assert.match(u.content, /<LogonTrigger>/);
   assert.match(u.content, /<UserId>PC\\me<\/UserId>/);
   assert.match(u.content, /<ExecutionTimeLimit>PT0S<\/ExecutionTimeLimit>/);
@@ -172,7 +172,7 @@ test("install writes the unit and drives the service manager; uninstall removes 
       "win32",
       () => ({
         status: 0,
-        stdout: "HostName: PC\r\nTaskName: \\DuskFleet Scheduler\r\nStatus: Running\r\n",
+        stdout: "HostName: PC\r\nTaskName: \\Duskfleet Scheduler\r\nStatus: Running\r\n",
         stderr: "",
       }),
       home,

@@ -9,7 +9,7 @@
 #
 # Per-project options:
 #   inherit_mcp: true   runs on this project see the MCP servers of the user running
-#                       DuskFleet (claude.ai connectors such as Atlassian and Figma).
+#                       Duskfleet (claude.ai connectors such as Atlassian and Figma).
 #                       Default false = --strict-mcp-config, no MCP at all. The agent
 #                       still needs allowed_tools entries like "mcp__claude_ai_Figma".
 #   add_dirs: [...]     extra directories the run may read/write (--add-dir). Runs are
@@ -17,4 +17,4 @@
 projects:
   duskfleet:
     path: ..
-    description: DuskFleet itself
+    description: Duskfleet itself

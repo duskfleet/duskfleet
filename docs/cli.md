@@ -67,7 +67,7 @@ executable; `.git/` is never versioned):
 
 ```sh
 #!/bin/sh
-# Ask DuskFleet to review the PR of the branch being pushed. The run starts on the
+# Ask Duskfleet to review the PR of the branch being pushed. The run starts on the
 # service's next tick, i.e. after this push has landed. Pushes of main are skipped.
 want=
 while read -r _local_ref _local_sha remote_ref _remote_sha; do

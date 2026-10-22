@@ -34,7 +34,7 @@
  *                 (only the project's "duskfleet" server); later spawns list Figma
  *   "mcp-missing" -> like "ok", every spawn's init lists no claude.ai connector
  *
- * With `--resume <id>` (the wrap-up pass) the prompt is DuskFleet's fixed text, so the
+ * With `--resume <id>` (the wrap-up pass) the prompt is Duskfleet's fixed text, so the
  * behaviour comes from FAKE_CLAUDE_RESUME instead: unset = a short successful pass that
  * says where it stopped; "budget" = exhausts the reserve too; "hang" = never ends.
  */
@@ -65,7 +65,7 @@ if (args[0] === "--version") {
 }
 
 // Read after --version: execFile leaves stdin open, so reading it there would block forever.
-// FAKE_CLAUDE_MODE picks the behaviour when the prompt is fixed by DuskFleet (doctor --probe).
+// FAKE_CLAUDE_MODE picks the behaviour when the prompt is fixed by Duskfleet (doctor --probe).
 // stdin is read either way so the executor's write never hits a closed pipe.
 const stdinPrompt = readFileSync(0, "utf8").trim() || "ok";
 const prompt = process.env.FAKE_CLAUDE_MODE ?? stdinPrompt;
