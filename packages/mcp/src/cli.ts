@@ -162,6 +162,8 @@ async function main(): Promise<void> {
         process.stderr.write(`${PROBE_COST_NOTE}...\n`);
         try {
           probe = await runProbe(app.executor, app.config.claude);
+          // Ctrl-C / kill: the paid child is cancelled and the temp dir gone; no report.
+          if (probe.outcome === "interrupted") return done(130);
         } catch (err) {
           probe = probeNotRun(
             "error",

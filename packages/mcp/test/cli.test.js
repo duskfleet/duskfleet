@@ -161,10 +161,13 @@ test("doctor --probe on Ctrl-C cancels the paid child, removes its temp dir and 
     // The note is written just before the probe spawns the fake child; give it a moment to start.
     await new Promise((r) => setTimeout(r, 500));
     assert.equal(readdirSync(probeTmp).filter((f) => f.startsWith("duskfleet-probe-")).length, 1);
+    // A second Ctrl-C right after the first must not kill doctor before its cleanup.
     child.kill("SIGINT");
-    const { code } = await exited;
+    child.kill("SIGINT");
+    const { code, signal } = await exited;
+    assert.equal(signal, null, stderr);
     assert.equal(code, 130, stderr);
-    assert.match(stderr, /doctor --probe interrupted: cancelling the probe run/);
+    assert.equal(stderr.match(/doctor --probe interrupted: cancelling the probe run/g)?.length, 1, stderr);
     assert.equal(stdout, "", "an interrupted doctor prints no report");
     assert.deepEqual(
       readdirSync(probeTmp).filter((f) => f.startsWith("duskfleet-probe-")),

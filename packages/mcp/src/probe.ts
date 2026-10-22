@@ -66,15 +66,26 @@ export async function runProbe(
       },
     );
     // Installing a listener replaces Node's default exit on these signals, so the await below
-    // still returns once the cancelled child is gone; the finally cleans up, then exit 130.
+    // still returns once the cancelled child is gone; the finally cleans up and the caller
+    // exits 130 (after closing the app). `on`, not `once`, with an idempotent handler: a second
+    // Ctrl-C must not find Node's default handler, which would kill doctor before the cleanup.
     onSignal = (): void => {
+      if (interrupted) return;
       interrupted = true;
       process.stderr.write("doctor --probe interrupted: cancelling the probe run\n");
       handle.cancel();
     };
-    process.once("SIGINT", onSignal);
-    process.once("SIGTERM", onSignal);
+    process.on("SIGINT", onSignal);
+    process.on("SIGTERM", onSignal);
     const r = await handle.done;
+    if (interrupted) {
+      return {
+        ...probeNotRun("interrupted", "interrupted by a signal; the probe run was cancelled", null),
+        model: r.model,
+        durationMs: r.durationMs,
+        costUsd: r.costUsd,
+      };
+    }
     const ok = r.outcome === "completed" && !lingered;
     return {
       ok,
@@ -94,15 +105,19 @@ export async function runProbe(
       process.removeListener("SIGTERM", onSignal);
     }
     rmSync(cwd, { recursive: true, force: true });
-    if (interrupted) process.exit(130);
   }
 }
 
 /**
  * A probe that never got a result from Claude: `skipped` (claude --version already failed, so
- * nothing was spent) or `error` (the probe itself threw before or around the run).
+ * nothing was spent), `error` (the probe itself threw before or around the run) or
+ * `interrupted` (SIGINT/SIGTERM cancelled it; doctor prints no report and exits 130).
  */
-export function probeNotRun(outcome: "skipped" | "error", error: string, advice: string): ProbeReport {
+export function probeNotRun(
+  outcome: "skipped" | "error" | "interrupted",
+  error: string,
+  advice: string | null,
+): ProbeReport {
   return {
     ok: false,
     outcome,
