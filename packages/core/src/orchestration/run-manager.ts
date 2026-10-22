@@ -6,7 +6,7 @@
  */
 import { randomUUID } from "node:crypto";
 import path from "node:path";
-import { listProjectAgents, projectAgentDefinitionHash } from "../config/agent-files.js";
+import { agentDefinitionHash, listProjectAgents, projectAgentDefinitionHash } from "../config/agent-files.js";
 import { loadConfig } from "../config/loader.js";
 import type { AgentDefinition, DuskFleetConfig, ProjectDefinition } from "../config/types.js";
 import { mergeSubagent, needsRepair, sameSubagent, subagentsFromLog } from "../execution/log-replay.js";
@@ -39,7 +39,7 @@ import {
   reviewReasons,
 } from "../observability/run.js";
 import { parseHolder, processIdentity, scheduleProjectId } from "../scheduler/crud.js";
-import type { ListRunsFilter, RunRepository } from "../storage/runs.js";
+import type { ListRunsFilter, RunPatch, RunRepository } from "../storage/runs.js";
 import { logger } from "../util/log.js";
 import {
   type Budget,
@@ -481,6 +481,8 @@ export class RunManager {
       resumedFromRunId: resume?.fromRun.id ?? null,
       kind,
       billingType: null,
+      agentHash: agentDefinitionHash(agent, projectPath),
+      claudeCodeVersion: null,
     };
 
     // Insert first so that events emitted by the executor always find the row. For a resume the
@@ -1096,10 +1098,10 @@ export class RunManager {
   private onEvent(runId: string, event: ExecutionEvent): void {
     switch (event.type) {
       case "init": {
-        this.runs.update(
-          runId,
-          event.sessionId ? { claudeSessionId: event.sessionId, modelUsed: event.model } : { modelUsed: event.model },
-        );
+        const patch: RunPatch = { modelUsed: event.model };
+        if (event.sessionId) patch.claudeSessionId = event.sessionId;
+        if (event.cliVersion) patch.claudeCodeVersion = event.cliVersion;
+        this.runs.update(runId, patch);
         const a = this.active.get(runId);
         if (a) a.mounted = event.mcpServers;
         this.runs.addEvent(runId, "init", {

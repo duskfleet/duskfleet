@@ -126,6 +126,14 @@ export interface Run {
    * cost is what Claude Code reports, not billed). Null until the run spawns, and for older rows.
    */
   billingType: BillingType | null;
+  /**
+   * Eval bundle (migration 19), with `modelUsed`: what exactly ran, so runs compare like with like.
+   * `agentHash` is `agentDefinitionHash` at start time (spec + project agent file of a link);
+   * `claudeCodeVersion` is the `claude_code_version` of the init line, null until it arrives.
+   * Both null for older rows.
+   */
+  agentHash: string | null;
+  claudeCodeVersion: string | null;
 }
 
 export type RunKind = "run" | "gate";
@@ -295,6 +303,9 @@ export function summarizeRun(run: Run) {
     projectId: run.projectId,
     prompt: run.prompt.length > 140 ? run.prompt.slice(0, 137) + "..." : run.prompt,
     model: run.modelUsed ?? run.modelRequested,
+    /** Eval bundle: the agent definition and Claude Code version this run used; null when unknown. */
+    agentHash: run.agentHash,
+    claudeCodeVersion: run.claudeCodeVersion,
     claudeSessionId: run.claudeSessionId,
     createdAt: run.createdAt,
     durationMs: run.durationMs,

@@ -98,7 +98,15 @@ explicit model uses the Claude Code default.
 `terminationReason`, `error`, `resultText`, `numTurns`, `toolCalls`, input/output/cache tokens,
 `usageByModel` (the same tokens per model id), `costUsd`, `billingType`, `permissionDenials`, `deniedTools`, `mcp` (mounted, used, allow-listed but missing),
 `humanIntervention`, `contextExhausted`, `errorCode`/`errorFamily`/`errorDetail`, `scheduleId`, `logPath`, `phases` (the main pass and,
-after a budget exhaustion, the [wrap-up pass](agents.md#budget-reserve-and-wrap-up-pass)), `resumedFromRunId` (the run whose session it resumed, see [resume once](schedules.md#resume-once-on-failure)).
+after a budget exhaustion, the [wrap-up pass](agents.md#budget-reserve-and-wrap-up-pass)), `resumedFromRunId` (the run whose session it resumed, see [resume once](schedules.md#resume-once-on-failure)),
+`agentHash` and `claudeCodeVersion` (the eval bundle, below).
+
+The eval bundle says exactly what ran, so runs can be compared like with like: `modelUsed`, `agentHash`
+and `claudeCodeVersion`. `agentHash` is a 12-character hash taken when the run starts: the agent's
+loaded spec (every frontmatter field and the system prompt, not the file's location) and, for a
+[link](agents.md) agent, the content of the project's `.claude/agents/<claude_agent>.md`. Two runs
+with the same hash ran the same agent; editing either file changes it. `claudeCodeVersion` comes
+from the child's `init` line. Both are null for runs recorded before they existed.
 
 Token totals come from the result line's `modelUsage`, summed over every model, so they include
 the tokens of subagents; the result's own `usage` counts the main session only and is used just

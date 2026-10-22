@@ -70,7 +70,7 @@ npm workspaces, one `config/` and one SQLite database shared by three deliverabl
   candidate minute). Only the SQLite lease holder ticks; the holder is `<role>@host:pid`
   (`serve` / `mcp` / `cli`, `parseHolder`). Busy = `skipped_busy`, never a queue;
   no catch-up of missed ticks; `scheduler.enabled` is the kill switch read every tick, and
-  `pause_scheduler` (one `scheduler_pause` row, migration 19) stops all firing until an instant,
+  `pause_scheduler` (one `scheduler_pause` row, migration 20) stops all firing until an instant,
   also read every tick (the holder keeps the lease and the sweep). `trigger_kind` is only `cron`.
   Create/update validation is `scheduler/crud.ts`, shared by MCP, CLI and dashboard.
   Auto-pause (`autoPauseReason`, migration 16): before a scheduled fire, the last

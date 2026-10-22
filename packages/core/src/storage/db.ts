@@ -282,9 +282,19 @@ const MIGRATIONS: ReadonlyArray<{ version: number; sql: string; backfill?: (db: 
     `,
   },
   {
+    // Eval bundle: what exactly ran, so runs compare like with like. agent_hash = agentDefinitionHash
+    // at start time (the agent spec, plus the project agent file of a link); claude_code_version from
+    // the init line. model_used was there from the start. NULL for older rows (unknown, not guessed).
+    version: 19,
+    sql: `
+      ALTER TABLE runs ADD COLUMN agent_hash TEXT;
+      ALTER TABLE runs ADD COLUMN claude_code_version TEXT;
+    `,
+  },
+  {
     // What makes a schedule due (trigger_kind, only 'cron' for now: room for API triggers) and a
     // pause of the whole scheduler until an instant (pause_scheduler), one row, read every tick.
-    version: 19,
+    version: 20,
     sql: `
       ALTER TABLE schedules ADD COLUMN trigger_kind TEXT NOT NULL DEFAULT 'cron';
       CREATE TABLE IF NOT EXISTS scheduler_pause (

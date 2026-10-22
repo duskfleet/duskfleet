@@ -7,6 +7,7 @@ export {
   AGENT_ID_PATTERN,
   type AgentKind,
   type AgentSpec,
+  agentDefinitionHash,
   agentFilePath,
   agentKind,
   agentSpecSchema,
