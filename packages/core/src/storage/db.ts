@@ -281,6 +281,16 @@ const MIGRATIONS: ReadonlyArray<{ version: number; sql: string; backfill?: (db: 
       CREATE UNIQUE INDEX IF NOT EXISTS idx_budgets_scope ON budgets(scope, COALESCE(scope_id, ''));
     `,
   },
+  {
+    // Eval bundle: what exactly ran, so runs compare like with like. agent_hash = agentDefinitionHash
+    // at start time (the agent spec, plus the project agent file of a link); claude_code_version from
+    // the init line. model_used was there from the start. NULL for older rows (unknown, not guessed).
+    version: 19,
+    sql: `
+      ALTER TABLE runs ADD COLUMN agent_hash TEXT;
+      ALTER TABLE runs ADD COLUMN claude_code_version TEXT;
+    `,
+  },
 ];
 
 /**

@@ -14,6 +14,7 @@ import { fileURLToPath } from "node:url";
 import "./helpers.js"; // before @duskfleet/core: drops an inherited CLAUDE_BIN
 
 import {
+  agentDefinitionHash,
   billingTypeOf,
   budgetPlan,
   ClaudeCodeExecutor,
@@ -131,6 +132,63 @@ test("billing_type is recorded when the run spawns and survives the reload", asy
     assert.equal(raw.billing_type, expected);
   } finally {
     await app.cleanup();
+  }
+});
+
+test("eval bundle: agent_hash, model_used and claude_code_version are stored on the run", async () => {
+  const app = makeApp();
+  try {
+    const started = await app.runs.startRun({ prompt: "ok", projectPath: app.project, model: "haiku" });
+    assert.match(started.agentHash, /^[0-9a-f]{12}$/, "hashed at start, before the child runs");
+    assert.equal(started.claudeCodeVersion, null, "unknown until the init line");
+    const run = await app.runs.waitForRun(started.id, 10_000);
+    assert.equal(run.agentHash, started.agentHash);
+    assert.equal(run.modelUsed, "haiku");
+    assert.equal(run.claudeCodeVersion, "9.9.9", "from the init line of fake-claude.js");
+    const summary = summarizeRun(run);
+    assert.equal(summary.agentHash, run.agentHash);
+    assert.equal(summary.claudeCodeVersion, "9.9.9");
+    const raw = app.db.prepare("SELECT agent_hash, claude_code_version FROM runs WHERE id = ?").get(run.id);
+    assert.deepEqual({ ...raw }, { agent_hash: run.agentHash, claude_code_version: "9.9.9" });
+
+    // Same agent, same hash; an edit to the agent file changes it.
+    const again = await app.runs.startRun({ prompt: "ok", projectPath: app.project });
+    await app.runs.waitForRun(again.id, 10_000);
+    assert.equal(again.agentHash, run.agentHash);
+    writeFileSync(
+      path.join(app.root, "config", "agents", "coder.md"),
+      `---\npermission_mode: acceptEdits\n---\nBe briefer.\n`,
+    );
+    const edited = await app.runs.startRun({ prompt: "ok", projectPath: app.project });
+    await app.runs.waitForRun(edited.id, 10_000);
+    assert.notEqual(edited.agentHash, run.agentHash);
+  } finally {
+    await app.cleanup();
+  }
+});
+
+test("agentDefinitionHash ignores where the agent was loaded from and covers a link's project agent file", () => {
+  const root = mkdtempSync(path.join(tmpdir(), "duskfleet-hash-"));
+  try {
+    mkdirSync(path.join(root, ".claude", "agents"), { recursive: true });
+    const file = path.join(root, ".claude", "agents", "worker.md");
+    writeFileSync(file, "---\nname: worker\n---\nv1\n");
+    const base = {
+      id: "w",
+      name: "w",
+      description: "",
+      permissionMode: "dontAsk",
+      systemPrompt: "",
+      claudeAgent: "worker",
+    };
+    const a = agentDefinitionHash({ ...base, source: "builtin", sourcePath: "/a/w.md" }, root);
+    const b = agentDefinitionHash({ ...base, source: "user", sourcePath: "/b/w.md", model: undefined }, root);
+    assert.equal(a, b, "source, sourcePath and undefined fields do not count");
+    assert.notEqual(agentDefinitionHash({ ...base, source: "user", sourcePath: "", model: "haiku" }, root), a);
+    writeFileSync(file, "---\nname: worker\n---\nv2\n");
+    assert.notEqual(agentDefinitionHash({ ...base, source: "builtin", sourcePath: "/a/w.md" }, root), a);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
   }
 });
 
