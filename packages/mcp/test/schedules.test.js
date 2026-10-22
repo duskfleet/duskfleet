@@ -128,6 +128,21 @@ test("schedules over MCP: create, list, update, run now, delete; validation erro
     assert.equal(created.schedule.enabled, true);
     assert.equal(created.schedule.concurrencyPolicy, "skip_if_active");
     assert.equal(created.schedule.catchUpPolicy, "skip_missed");
+    assert.equal(created.schedule.triggerKind, "cron");
+
+    const schedulerPaused = ok(
+      await client.callTool({ name: "pause_scheduler", arguments: { minutes: 30, reason: "maintenance" } }),
+    );
+    assert.equal(schedulerPaused.paused, true);
+    assert.equal(schedulerPaused.pause.reason, "maintenance");
+    assert.equal(schedulerPaused.scheduler.pause.pausedUntil, schedulerPaused.pause.pausedUntil);
+    const listedPaused = ok(await client.callTool({ name: "list_schedules", arguments: {} }));
+    assert.equal(listedPaused.scheduler.pause.reason, "maintenance");
+    const schedulerResumed = ok(await client.callTool({ name: "pause_scheduler", arguments: { minutes: 0 } }));
+    assert.equal(schedulerResumed.paused, false);
+    assert.equal(schedulerResumed.scheduler.pause, null);
+    fails(await client.callTool({ name: "pause_scheduler", arguments: { minutes: 20_000 } }), /10080/);
+
     fails(
       await client.callTool({
         name: "create_schedule",
@@ -1041,6 +1056,89 @@ test("policy enums: stored defaults, explicit values kept by edits, the reserved
     assert.equal(t.scheduler.firings(s.id).length, 1);
     assert.ok(Date.parse(after.nextRunAt) > Date.now(), "next_run_at moved past now");
     await t.runs.waitForRun(after.lastRunId, 15_000);
+  } finally {
+    await t.close(root);
+  }
+});
+
+test("trigger_kind: stored default cron, kept by edits, unknown values refused; due() only picks cron schedules", async () => {
+  const { root, configDir } = makeRoot();
+  const t = makeScheduler(configDir);
+  try {
+    const s = t.scheduler.create({ name: "trigger", agentId: "coder", prompt: "ok", cron: "0 * * * *" });
+    assert.equal(s.triggerKind, "cron");
+    assert.equal(t.db.prepare("SELECT trigger_kind FROM schedules WHERE id = ?").get(s.id).trigger_kind, "cron");
+    assert.equal(t.scheduler.update(s.id, { prompt: "ok again" }).triggerKind, "cron", "an edit keeps it");
+    assert.throws(
+      () => t.scheduler.create({ name: "api", agentId: "coder", prompt: "ok", cron: "0 * * * *", triggerKind: "api" }),
+      /trigger_kind must be one of cron/,
+    );
+    assert.throws(() => t.scheduler.update(s.id, { triggerKind: "api" }), /trigger_kind must be one of cron/);
+
+    // A row with another kind (a future trigger) is never fired by the cron tick.
+    const past = new Date(Date.now() - 1000).toISOString();
+    t.repo.update(s.id, { nextRunAt: past });
+    assert.equal(t.repo.due(new Date().toISOString()).length, 1);
+    t.db.prepare("UPDATE schedules SET trigger_kind = 'api' WHERE id = ?").run(s.id);
+    assert.equal(t.repo.due(new Date().toISOString()).length, 0);
+    await t.tickAll();
+    const after = t.repo.get(s.id);
+    assert.equal(after.fires, 0);
+    assert.equal(after.nextRunAt, past);
+  } finally {
+    await t.close(root);
+  }
+});
+
+test("pause_scheduler: stored pause stops every fire until it ends, keeps the lease, lifts with 0; due ticks fire once after", async () => {
+  const { root, configDir } = makeRoot();
+  const t = makeScheduler(configDir);
+  try {
+    const s = t.scheduler.create({ name: "paused", agentId: "coder", prompt: "ok", cron: "0 * * * *" });
+    assert.equal(t.scheduler.status().pause, null);
+    assert.throws(() => t.scheduler.pause(-1), /minutes must be an integer from 0/);
+    assert.throws(() => t.scheduler.pause(1.5), /minutes must be an integer from 0/);
+    assert.throws(() => t.scheduler.pause(10_081), /scheduler.enabled: false/);
+
+    const pause = t.scheduler.pause(15, "  deploy  ");
+    assert.equal(pause.reason, "deploy");
+    assert.equal(pause.pausedBy, "A");
+    assert.ok(Math.abs(Date.parse(pause.pausedUntil) - (Date.now() + 15 * 60_000)) < 5000);
+    // Read by every process from the database: a second scheduler (another holder) sees it.
+    const other = new Scheduler(t.repo, t.runs, { tickMs: 1000, holder: "B" });
+    assert.equal(other.status().pause.pausedUntil, pause.pausedUntil);
+
+    t.due(s.id);
+    t.repo.requestRun(s.id);
+    await t.tickAll();
+    await t.tickAll();
+    let row = t.repo.get(s.id);
+    assert.equal(row.fires, 0, "nothing fires while paused");
+    assert.equal(t.scheduler.firings(s.id).length, 0, "and nothing is recorded");
+    assert.ok(row.runRequestedAt, "a run-now request waits");
+    assert.equal(t.repo.leaseInfo().holder, "A", "the lease is kept");
+
+    // An expired pause no longer counts.
+    t.db.prepare("UPDATE scheduler_pause SET paused_until = ?").run(new Date(Date.now() - 1000).toISOString());
+    assert.equal(t.scheduler.status().pause, null);
+    t.scheduler.pause(15);
+    assert.equal(t.scheduler.pause(0), null, "0 lifts it");
+    assert.equal(t.scheduler.status().pause, null);
+    assert.equal(t.db.prepare("SELECT COUNT(*) AS n FROM scheduler_pause").get().n, 0);
+
+    // Lifted: the waiting request fires once and moves next_run_at past now, so the tick missed
+    // during the pause is not replayed on top of it (no catch-up).
+    await t.tickAll();
+    await t.tickAll();
+    row = t.repo.get(s.id);
+    assert.equal(row.runRequestedAt, null);
+    const firings = t.scheduler.firings(s.id);
+    assert.deepEqual(
+      firings.map((f) => f.outcome),
+      ["started"],
+    );
+    assert.ok(Date.parse(row.nextRunAt) > Date.now());
+    for (const r of t.runs.listRuns({ status: "running" })) t.runs.cancelRun(r.id);
   } finally {
     await t.close(root);
   }

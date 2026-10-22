@@ -214,14 +214,15 @@ Run now still fires a paused schedule.
 
 ## Policies
 
-Every schedule stores its two policies, so the behaviour below is explicit on the row
-(`concurrencyPolicy`, `catchUpPolicy` in `list_schedules`; set with `concurrency_policy` /
-`catch_up_policy` on `create_schedule` / `update_schedule`):
+Every schedule stores its two policies and its trigger kind, so the behaviour below is explicit
+on the row (`concurrencyPolicy`, `catchUpPolicy`, `triggerKind` in `list_schedules`; set with
+`concurrency_policy` / `catch_up_policy` / `trigger_kind` on `create_schedule` / `update_schedule`):
 
 | Field | Values | Default |
 |---|---|---|
 | `concurrency_policy` | `skip_if_active` (the only one) | `skip_if_active` |
 | `catch_up_policy` | `skip_missed`; `enqueue_missed_with_cap` is reserved and refused for now (planned: replay up to 3 missed ticks, never for sub-hourly schedules) | `skip_missed` |
+| `trigger_kind` | `cron` (the only one for now; the field leaves room for other triggers, such as an API call, and the tick only fires `cron` schedules) | `cron` |
 
 - A tick whose agent or project is still busy is recorded as `skipped_busy`, never queued (checked before any [gate](#gates-skip-cheaply-when-there-is-no-work)).
 - A tick whose agent reached its [daily cap](agents.md#daily-caps) (`max_daily_runs`,
@@ -229,7 +230,8 @@ Every schedule stores its two policies, so the behaviour below is explicit on th
   pending resume is not tried either. The cap lifts at 00:00 UTC.
 - Missed ticks (nobody running) are not caught up (`skip_missed`): the schedule fires once when
   it is next considered and its next tick is computed from then.
-- `scheduler.enabled: false` in `duskfleet.yaml` is the kill switch, re-read every tick.
+- `scheduler.enabled: false` in `duskfleet.yaml` is the kill switch, re-read every tick. For a
+  stop that ends on its own, [pause the whole scheduler](#pausing-the-whole-scheduler) instead.
 - A schedule whose last `scheduler.auto_pause_after` runs were all empty or needs review is
   [auto-paused](#auto-pause) instead of fired.
 - Every run started by a schedule carries its `scheduleId`, and the schedule carries the
@@ -246,3 +248,21 @@ Every schedule stores its two policies, so the behaviour below is explicit on th
   `run_requested_at` on the row and the lease holder fires it on its next tick (neither spawns
   Claude, which makes the CLI form safe to call from a git hook, see [CLI](cli.md#firing-an-agent-from-a-script-or-a-git-hook)).
   All follow the busy rules of a tick.
+
+## Pausing the whole scheduler
+
+`pause_scheduler { "minutes": 60, "reason": "deploy" }` stops every schedule for an hour without
+editing `duskfleet.yaml`. The pause is a row in the database, read on every tick by whichever
+process holds the lease, so it holds for a `serve` service and an MCP server alike, and it ends
+on its own. `list_schedules` shows it as `scheduler.pause` (`pausedUntil`, `pausedAt`, `reason`,
+`pausedBy`), null when none is in force.
+
+- While paused nothing fires and nothing is recorded: due ticks wait, and so do **Run now**
+  requests from the dashboard or the CLI. When the pause ends they fire once, as after any
+  missed ticks (no catch-up). `run_schedule_now` over MCP still fires at once.
+- The lease holder keeps its lease and its orphan sweep during the pause.
+- A new call replaces the previous pause (shorter or longer); `minutes: 0` lifts it now.
+- `minutes` goes up to 10080 (7 days). For an open-ended stop, use the kill switch
+  `scheduler.enabled: false`.
+- Paused schedules (`enabled: false`) stay paused when the scheduler pause ends: the two are
+  independent.

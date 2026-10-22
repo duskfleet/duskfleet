@@ -58,6 +58,7 @@ test("MCP client can run an agent and inspect the run", async () => {
       "list_projects",
       "list_runs",
       "list_schedules",
+      "pause_scheduler",
       "run_agent",
       "run_schedule_now",
       "update_agent",

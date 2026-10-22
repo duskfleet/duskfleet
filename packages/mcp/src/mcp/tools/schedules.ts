@@ -3,11 +3,13 @@ import {
   CONCURRENCY_POLICIES,
   describeCron,
   type IdleStats,
+  MAX_SCHEDULER_PAUSE_MINUTES,
   ON_FAILURE_POLICIES,
   parseCron,
   type Schedule,
   type ScheduleGate,
   type ScheduleRunState,
+  TRIGGER_KINDS,
 } from "@duskfleet/core";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
@@ -133,6 +135,10 @@ const scheduleFields = {
     .describe(
       "Ticks missed while no process ticked. skip_missed (default): fire once when next considered, drop the rest. enqueue_missed_with_cap is reserved (replay up to 3, never sub-hourly) and refused until implemented",
     ),
+  trigger_kind: z
+    .enum(TRIGGER_KINDS)
+    .optional()
+    .describe("What makes the schedule due. cron (default, only value for now): its cron in time_zone"),
 };
 
 export function registerScheduleTools(server: McpServer, ctx: ToolContext): void {
@@ -143,7 +149,7 @@ export function registerScheduleTools(server: McpServer, ctx: ToolContext): void
       description:
         "List cron schedules with next/last firing, outcome of the last tick (started | resumed | skipped_busy | skipped_daily_cap | skipped_gate | skipped_disabled | auto_paused | error), pausedReason (why the scheduler paused it on its own after scheduler.auto_pause_after empty or needs-review runs in a row; null otherwise, cleared on resume), gate (the cheap check before each run, or null), lastRun (status, needsReview and reviewReasons of the run it last started: a schedule whose run failed or ran out of budget shows it here), " +
         "effectiveOnFailure (none | resume_once: the schedule's own on_failure, else the agent's) with onFailureSource, willResumeRunId (the budget_exhausted / timed_out run the next fire resumes instead of starting fresh, or null), effectiveProjectId (the project it runs on: projectId, else the agent's project; projectId stays the stored value) and scheduler status " +
-        "(kill switch, which process holds the lease). A busy agent or project makes a tick skip, never queue.",
+        "(kill switch, which process holds the lease, pause: the pause_scheduler pause in force or null). A busy agent or project makes a tick skip, never queue.",
       inputSchema: {},
     },
     async () =>
@@ -181,6 +187,7 @@ export function registerScheduleTools(server: McpServer, ctx: ToolContext): void
         if (args.gate !== undefined) input.gate = toGate(args.gate);
         if (args.concurrency_policy !== undefined) input.concurrencyPolicy = args.concurrency_policy;
         if (args.catch_up_policy !== undefined) input.catchUpPolicy = args.catch_up_policy;
+        if (args.trigger_kind !== undefined) input.triggerKind = args.trigger_kind;
         return jsonResult({ created: true, schedule: present(ctx.scheduler.withLastRun(ctx.scheduler.create(input))) });
       } catch (err) {
         return errorResult(err);
@@ -215,6 +222,7 @@ export function registerScheduleTools(server: McpServer, ctx: ToolContext): void
         clear_gate: z.boolean().optional().describe("Remove the gate: every tick starts the real run again"),
         concurrency_policy: scheduleFields.concurrency_policy,
         catch_up_policy: scheduleFields.catch_up_policy,
+        trigger_kind: scheduleFields.trigger_kind,
         clear_model: z.boolean().optional().describe("Remove the model override"),
         clear_on_failure: z
           .boolean()
@@ -252,6 +260,7 @@ export function registerScheduleTools(server: McpServer, ctx: ToolContext): void
         if (args.enabled !== undefined) patch.enabled = args.enabled;
         if (args.concurrency_policy !== undefined) patch.concurrencyPolicy = args.concurrency_policy;
         if (args.catch_up_policy !== undefined) patch.catchUpPolicy = args.catch_up_policy;
+        if (args.trigger_kind !== undefined) patch.triggerKind = args.trigger_kind;
         return jsonResult({
           updated: true,
           schedule: present(ctx.scheduler.withLastRun(ctx.scheduler.update(args.id, patch))),
@@ -274,6 +283,34 @@ export function registerScheduleTools(server: McpServer, ctx: ToolContext): void
     async (args) => {
       const deleted = ctx.scheduler.delete(args.id);
       return deleted ? jsonResult({ deleted: true }) : errorResult(new Error(`schedule not found: ${args.id}`));
+    },
+  );
+
+  server.registerTool(
+    "pause_scheduler",
+    {
+      title: "Pause scheduler",
+      description:
+        "Pause every schedule for a number of minutes, stored in the DuskFleet database and read every tick by whichever process holds the lease; it ends on its own. " +
+        "While paused nothing fires: due ticks and dashboard run-now requests wait and fire once after the pause (no catch-up). run_schedule_now still fires. " +
+        "A new call replaces the previous pause; minutes 0 lifts it. For an open-ended stop use scheduler.enabled: false in config.",
+      inputSchema: {
+        minutes: z
+          .number()
+          .int()
+          .min(0)
+          .max(MAX_SCHEDULER_PAUSE_MINUTES)
+          .describe(`How long to pause, 1 to ${MAX_SCHEDULER_PAUSE_MINUTES} (7 days); 0 resumes now`),
+        reason: z.string().min(1).optional().describe("Why, shown in list_schedules' scheduler.pause"),
+      },
+    },
+    async (args) => {
+      try {
+        const pause = ctx.scheduler.pause(args.minutes, args.reason ?? null);
+        return jsonResult({ paused: pause !== null, pause, scheduler: ctx.scheduler.status() });
+      } catch (err) {
+        return errorResult(err);
+      }
     },
   );
 
