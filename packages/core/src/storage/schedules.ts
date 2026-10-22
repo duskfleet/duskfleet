@@ -6,14 +6,18 @@
 
 import { randomUUID } from "node:crypto";
 import type { DatabaseSync } from "node:sqlite";
-import type {
-  RunOutcomes,
-  Schedule,
-  ScheduleFiring,
-  ScheduleGate,
-  ScheduleInput,
-  ScheduleOutcome,
-  SchedulePatch,
+import {
+  type CatchUpPolicy,
+  type ConcurrencyPolicy,
+  DEFAULT_CATCH_UP_POLICY,
+  DEFAULT_CONCURRENCY_POLICY,
+  type RunOutcomes,
+  type Schedule,
+  type ScheduleFiring,
+  type ScheduleGate,
+  type ScheduleInput,
+  type ScheduleOutcome,
+  type SchedulePatch,
 } from "../scheduler/types.js";
 import { logger } from "../util/log.js";
 import { NEEDS_REVIEW_SQL } from "./runs.js";
@@ -47,6 +51,8 @@ interface ScheduleRow {
   resume_budget_usd: number | null;
   noop_pattern: string | null;
   gate_json: string | null;
+  concurrency_policy: string | null;
+  catch_up_policy: string | null;
   paused_reason: string | null;
   auto_paused_at: string | null;
 }
@@ -112,6 +118,8 @@ function rowToSchedule(r: ScheduleRow): Schedule {
     resumeBudgetUsd: r.resume_budget_usd ?? null,
     noopPattern: r.noop_pattern ?? null,
     gate: parseGate(r.gate_json, r.name),
+    concurrencyPolicy: (r.concurrency_policy as ConcurrencyPolicy | null) ?? DEFAULT_CONCURRENCY_POLICY,
+    catchUpPolicy: (r.catch_up_policy as CatchUpPolicy | null) ?? DEFAULT_CATCH_UP_POLICY,
     pausedReason: r.paused_reason ?? null,
     autoPausedAt: r.auto_paused_at ?? null,
   };
@@ -157,8 +165,9 @@ export class ScheduleRepository {
     this.db
       .prepare(
         `INSERT INTO schedules (id, name, agent_id, project_id, prompt, model, cron, time_zone, enabled, created_at, updated_at, next_run_at,
-           last_fired_at, last_outcome, last_error, last_run_id, fires, skips, on_failure, resume_budget_usd, noop_pattern, gate_json)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, NULL, NULL, 0, 0, ?, ?, ?, ?)`,
+           last_fired_at, last_outcome, last_error, last_run_id, fires, skips, on_failure, resume_budget_usd, noop_pattern, gate_json,
+           concurrency_policy, catch_up_policy)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, NULL, NULL, 0, 0, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         id,
@@ -177,6 +186,8 @@ export class ScheduleRepository {
         input.resumeBudgetUsd ?? null,
         input.noopPattern ?? null,
         input.gate ? JSON.stringify(input.gate) : null,
+        input.concurrencyPolicy ?? DEFAULT_CONCURRENCY_POLICY,
+        input.catchUpPolicy ?? DEFAULT_CATCH_UP_POLICY,
       );
     return this.get(id)!;
   }
@@ -198,6 +209,8 @@ export class ScheduleRepository {
       resumeBudgetUsd: "resume_budget_usd",
       noopPattern: "noop_pattern",
       gate: "gate_json",
+      concurrencyPolicy: "concurrency_policy",
+      catchUpPolicy: "catch_up_policy",
       pausedReason: "paused_reason",
     };
     for (const [k, v] of Object.entries(patch)) {
