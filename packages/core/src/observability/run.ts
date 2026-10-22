@@ -189,7 +189,8 @@ export type ReviewReason =
   | "failed"
   | "permission_denied"
   | "context_exhausted"
-  | "mcp_missing";
+  | "mcp_missing"
+  | "empty_run";
 
 export const REVIEW_REASON_LABELS: Record<ReviewReason, string> = {
   budget_exhausted: "budget exhausted",
@@ -200,6 +201,7 @@ export const REVIEW_REASON_LABELS: Record<ReviewReason, string> = {
   permission_denied: "permission denied",
   context_exhausted: "context exhausted",
   mcp_missing: "allow-listed MCP server not mounted",
+  empty_run: "no work done",
 };
 
 /** The run stopped because `--max-budget-usd` was reached (`terminal_reason: budget_exhausted`, `subtype: error_max_budget_usd`; verified 2026-10-14 on CLI 2.1.299). */
@@ -224,7 +226,11 @@ export function isOrphaned(run: Pick<Run, "error">): boolean {
 type ReviewInput = Pick<
   Run,
   "status" | "terminationReason" | "error" | "exitCode" | "humanIntervention" | "permissionDenials" | "contextExhausted"
-> & { mcp?: Pick<RunMcpInfo, "allowListedMissing"> | null };
+> & {
+  mcp?: Pick<RunMcpInfo, "allowListedMissing"> | null;
+  /** Main session plus wrap-up. Absent or null = unknown (rows backfilled before `empty_run`): never empty. */
+  toolCalls?: number | null;
+};
 
 /** The rule. Call it on a terminal run; the stored `Run.reviewReasons` is what readers use. */
 export function reviewReasons(run: ReviewInput): ReviewReason[] {
@@ -240,6 +246,9 @@ export function reviewReasons(run: ReviewInput): ReviewReason[] {
   if (run.humanIntervention || (run.permissionDenials ?? 0) > 0) reasons.push("permission_denied");
   if (run.contextExhausted) reasons.push("context_exhausted");
   if ((run.mcp?.allowListedMissing ?? []).length > 0) reasons.push("mcp_missing");
+  // Completed without a single tool call: the same "empty run" signal as the schedule auto-pause.
+  // Structured only; the result prose is never read (it may claim work it did not do, or the reverse).
+  if (run.status === "completed" && run.toolCalls === 0) reasons.push("empty_run");
   return reasons;
 }
 

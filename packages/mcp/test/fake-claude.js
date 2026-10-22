@@ -9,6 +9,7 @@
  *   "auth"     -> like "error", with a logged-out result text (doctor --probe advice)
  *   "hang"     -> emits init then sleeps forever (for cancel / timeout tests)
  *   "crash"    -> exits 3 with no result line
+ *   "empty"    -> text only, no tool_use, then a successful result (a run that did no work)
  *   "subagent" -> delegates to a project agent "reviewer" (task_started, nested
  *                 messages with agent_id/parent_tool_use_id, task_notification,
  *                 hand-back tool_result), shapes from a real run of 2026-10-12; its result
@@ -231,6 +232,34 @@ if (resumeIdx >= 0) {
   setInterval(() => {}, 1000); // keep alive until killed
 } else if (prompt === "crash") {
   process.exit(3);
+} else if (prompt === "empty") {
+  // Answers in text alone: no tool_use at all, then a normal successful result.
+  out({
+    type: "assistant",
+    message: {
+      model,
+      role: "assistant",
+      content: [{ type: "text", text: "I cannot proceed without more information." }],
+      usage: { input_tokens: 10, output_tokens: 9 },
+    },
+  });
+  out({
+    type: "result",
+    subtype: "success",
+    is_error: false,
+    duration_ms: 600,
+    duration_api_ms: 500,
+    num_turns: 1,
+    result: "I cannot proceed without more information.",
+    session_id: sessionId,
+    total_cost_usd: 0.004,
+    usage: { input_tokens: 10, output_tokens: 9, cache_creation_input_tokens: 0, cache_read_input_tokens: 1000 },
+    modelUsage: { [model]: modelUsageEntry(10, 9, 1000, 0, 0.004) },
+    permission_denials: [],
+    terminal_reason: "completed",
+    stop_reason: "end_turn",
+  });
+  process.exit(0);
 } else if (prompt === "subagent" || prompt === "subagent-hang") {
   const agentId = "a6b73b2ad14bf09f8";
   const agentCall = "toolu_agent_1";
