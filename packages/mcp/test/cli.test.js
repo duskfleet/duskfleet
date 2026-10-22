@@ -3,8 +3,8 @@
  * The id-vs-path decision is core's (RunManager.resolveProject), so MCP's project_path behaves the same.
  */
 import assert from "node:assert/strict";
-import { spawnSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { spawn, spawnSync } from "node:child_process";
+import { mkdirSync, mkdtempSync, readdirSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { test } from "node:test";
@@ -70,6 +70,110 @@ test("cli run --project accepts a registered id or a path; unknown ids, relative
     const both = cli(configDir, ["run", "--project", "demo", "--project-id", "demo", "--", "hello"]);
     assert.notEqual(both.status, 0);
     assert.match(both.stderr, /mutually exclusive/);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("doctor --probe makes one haiku run outside any project, says it costs money and reports failures", () => {
+  const { root, configDir } = makeRoot();
+  try {
+    const plain = cli(configDir, ["doctor"]);
+    assert.equal(plain.status, 0, plain.stderr);
+    assert.equal("probe" in JSON.parse(plain.stdout), false, "no probe without the flag");
+    assert.doesNotMatch(plain.stderr, /costs/);
+
+    const ok = cli(configDir, ["doctor", "--probe"]);
+    assert.equal(ok.status, 0, ok.stderr);
+    assert.match(ok.stderr, /one real Claude run on haiku \(costs a few cents/);
+    const report = JSON.parse(ok.stdout);
+    assert.equal(report.probe.ok, true);
+    assert.equal(report.probe.outcome, "completed");
+    assert.equal(report.probe.model, "haiku", "the probe always runs on haiku");
+    assert.equal(report.probe.costUsd, 0.0123);
+    assert.equal(report.probe.advice, null);
+    assert.match(report.probe.note, /costs/);
+    const runs = JSON.parse(cli(configDir, ["runs"]).stdout);
+    assert.equal(runs.length, 0, "the probe is a diagnostic, not a recorded run");
+
+    const auth = cli(configDir, ["doctor", "--probe"], { FAKE_CLAUDE_MODE: "auth" });
+    assert.equal(auth.status, 1);
+    const authProbe = JSON.parse(auth.stdout).probe;
+    assert.equal(authProbe.ok, false);
+    assert.equal(authProbe.outcome, "failed");
+    assert.match(authProbe.error, /Please run \/login/);
+    assert.match(authProbe.advice, /not authenticated/);
+
+    // default_timeout_minutes is 0.05 here, below the probe's 2 minute ceiling.
+    const hang = cli(configDir, ["doctor", "--probe"], { FAKE_CLAUDE_MODE: "hang" });
+    assert.equal(hang.status, 1);
+    const hangProbe = JSON.parse(hang.stdout).probe;
+    assert.equal(hangProbe.outcome, "timed_out");
+    assert.match(hangProbe.advice, /no result within 3 s: a hook or a prompt is likely blocking/);
+
+    const noVersion = cli(configDir, ["doctor", "--probe"], { FAKE_CLAUDE_MODE: "no-version" });
+    assert.equal(noVersion.status, 1);
+    assert.match(noVersion.stderr, /doctor --probe skipped: claude --version failed/);
+    assert.doesNotMatch(noVersion.stderr, /costs a few cents/, "nothing is spent when the probe is skipped");
+    const skipped = JSON.parse(noVersion.stdout).probe;
+    assert.equal(skipped.ok, false);
+    assert.equal(skipped.outcome, "skipped");
+
+    // mkdtempSync under a missing TMPDIR throws inside runProbe: doctor still prints its report.
+    const thrown = cli(configDir, ["doctor", "--probe"], { TMPDIR: path.join(root, "missing-tmp") });
+    assert.equal(thrown.status, 1);
+    const thrownReport = JSON.parse(thrown.stdout);
+    assert.equal(thrownReport.claudeVersion, "9.9.9 (fake)");
+    assert.equal(thrownReport.probe.ok, false);
+    assert.equal(thrownReport.probe.outcome, "error");
+    assert.match(thrownReport.probe.error, /ENOENT/);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("doctor --probe on Ctrl-C cancels the paid child, removes its temp dir and exits 130", async () => {
+  const { root, configDir } = makeRoot();
+  const probeTmp = path.join(root, "tmp");
+  mkdirSync(probeTmp);
+  try {
+    const child = spawn(process.execPath, [cliEntry, "doctor", "--probe"], {
+      env: testEnv({
+        DUSKFLEET_CONFIG: configDir,
+        DUSKFLEET_LOG_LEVEL: "warn",
+        FAKE_CLAUDE_MODE: "hang",
+        TMPDIR: probeTmp,
+      }),
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    let stderr = "";
+    let stdout = "";
+    child.stdout.on("data", (d) => {
+      stdout += d;
+    });
+    const exited = new Promise((resolve) => child.on("exit", (code, signal) => resolve({ code, signal })));
+    await new Promise((resolve) => {
+      child.stderr.on("data", (d) => {
+        stderr += d;
+        if (/costs a few cents/.test(stderr)) resolve();
+      });
+    });
+    // The note is written just before the probe spawns the fake child; give it a moment to start.
+    await new Promise((r) => setTimeout(r, 500));
+    assert.equal(readdirSync(probeTmp).filter((f) => f.startsWith("duskfleet-probe-")).length, 1);
+    // A second Ctrl-C right after the first must not kill doctor before its cleanup.
+    child.kill("SIGINT");
+    child.kill("SIGINT");
+    const { code, signal } = await exited;
+    assert.equal(signal, null, stderr);
+    assert.equal(code, 130, stderr);
+    assert.equal(stderr.match(/doctor --probe interrupted: cancelling the probe run/g)?.length, 1, stderr);
+    assert.equal(stdout, "", "an interrupted doctor prints no report");
+    assert.deepEqual(
+      readdirSync(probeTmp).filter((f) => f.startsWith("duskfleet-probe-")),
+      [],
+      "the temp dir is removed",
+    );
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

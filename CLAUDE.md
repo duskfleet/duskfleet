@@ -157,6 +157,10 @@ npm workspaces, one `config/` and one SQLite database shared by three deliverabl
   `inherit_mcp: true`; then they get the user's claude.ai connectors with tool prefixes
   `mcp__claude_ai_Atlassian_Rovo__*`, `mcp__claude_ai_Figma__*` (not the `mcp__plugin_*`
   names interactive sessions may show). Allow-list by server: `mcp__claude_ai_Figma`.
+  Connectors load at start or not at all (seen missing in 3 runs out of 12 on 2026-10-20): the
+  executor compares the `init` line with the allow-listed prefixes (`requiredMcpServers`,
+  `execution/mcp.ts`) and restarts the child once, with a new session id, before the first
+  model turn (`mcp_restart` event, `#restart` log marker). Never more than once.
 
 - **Unattended runs get no permission prompts.** `permission_mode: acceptEdits` does
   not allow Bash; an agent that must run tests needs `allowed_tools` such as
