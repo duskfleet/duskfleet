@@ -210,7 +210,8 @@ lags until the script is run by hand.
 ## Extending
 
 - **New MCP tool**: add a file in `packages/mcp/src/mcp/tools/`, register it in `packages/mcp/src/mcp/server.ts`.
-- **New builtin agent**: drop a Markdown file in `config/agents/`.
+- **New builtin agent**: drop a Markdown file in `config/agents/` and list it under "Builtin
+  agents" in `docs/agents.md`. Builtins are general-purpose (no `project:`, no personal paths).
 - **Schema change**: append a migration in `packages/core/src/storage/db.ts`; never edit an existing one. Then pin its digest in `packages/mcp/test/migrations.test.js` (the failing test prints it).
 - **Run status changes**: only `RunManager`, through `assertTransition`.
 - **New dashboard view**: add a route under `apps/web/app/` and a query in `apps/web/lib/data.ts`.
