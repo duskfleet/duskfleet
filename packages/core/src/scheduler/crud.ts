@@ -190,7 +190,10 @@ export function createSchedule(
   return repo.insert({ ...input, timeZone, nextRunAt });
 }
 
-/** Merge a patch into an existing schedule. Resuming (`enabled: true`) recomputes next_run_at from `now`. */
+/**
+ * Merge a patch into an existing schedule. Resuming (`enabled: true`) recomputes next_run_at from
+ * `now` and clears an auto-pause reason (auto_paused_at stays: older runs do not count again).
+ */
 export function updateSchedule(
   repo: ScheduleRepository,
   config: DuskFleetConfig,
@@ -220,7 +223,30 @@ export function updateSchedule(
   if (merged.name !== existing.name && repo.findByName(merged.name))
     throw new Error(`a schedule named "${merged.name}" already exists`);
   const nextRunAt = merged.enabled ? nextRunAtFor(merged.cron, merged.timeZone!, now) : null;
-  return repo.update(id, { ...merged, nextRunAt });
+  return repo.update(id, { ...merged, nextRunAt, ...(merged.enabled ? { pausedReason: null } : {}) });
+}
+
+/**
+ * The reason to auto-pause a schedule before its next scheduled fire, or null to fire: its last
+ * `limit` ended runs (created after its previous auto-pause) all completed with 0 tool calls or
+ * ended needs review. Fewer ended runs than `limit`, or `limit` 0, never pauses. A cancelled or
+ * clean run breaks the streak.
+ */
+export function autoPauseReason(
+  repo: Pick<ScheduleRepository, "recentEndedRuns">,
+  schedule: Pick<Schedule, "id" | "autoPausedAt">,
+  limit: number,
+): string | null {
+  if (!(limit > 0)) return null;
+  const runs = repo.recentEndedRuns(schedule.id, schedule.autoPausedAt, limit);
+  if (runs.length < limit || !runs.every((r) => r.empty || r.needsReview)) return null;
+  const review = runs.filter((r) => r.needsReview).length;
+  const empty = runs.filter((r) => r.empty && !r.needsReview).length;
+  const parts = [
+    ...(empty > 0 ? [`${empty} completed with 0 tool calls`] : []),
+    ...(review > 0 ? [`${review} needed review`] : []),
+  ];
+  return `auto-paused: the last ${limit} runs did no useful work (${parts.join(", ")}); last run ${runs[0]!.id}`;
 }
 
 /**

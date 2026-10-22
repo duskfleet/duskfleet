@@ -23,6 +23,7 @@ import {
   type TokenUsage,
   type UsageByModel,
 } from "../execution/types.js";
+import { captureRunDiff, headSha } from "../git/diff.js";
 import {
   isBudgetExhausted,
   isResumable,
@@ -43,7 +44,7 @@ import { BusyError } from "./busy.js";
 import { DailyCapError, dailyCapReason, utcDayStart } from "./daily-cap.js";
 import { validateProjectPath } from "./project-validation.js";
 import { assertTransition } from "./run-state.js";
-import { summarizeToolInput } from "./tool-summary.js";
+import { allowListedMcpMissing, mcpToolPrefix, summarizeToolInput } from "./tool-summary.js";
 
 const log = logger("orchestration");
 
@@ -109,6 +110,8 @@ interface ActiveRun {
   cancelRequested: boolean;
   /** When the main pass was launched; the wrap-up pass only gets what is left of the run's timeout. */
   startedAtMs: number;
+  /** HEAD of the project before the spawn; null when it is not a git checkout (no diff event then). */
+  gitBase: string | null;
 }
 
 /** What the wrap-up pass is told. It must not start new work; it must leave a trace of where the run stopped. */
@@ -157,11 +160,6 @@ function summarizeSubagent(s: SubagentRecord) {
 /** A path separator, a leading ~ or a drive letter: anything else given as a project path is a project id. */
 function looksLikePath(value: string): boolean {
   return /[\\/]/.test(value) || value.startsWith("~") || /^[A-Za-z]:/.test(value);
-}
-
-/** Claude Code derives MCP tool prefixes from the server name: "claude.ai Figma" → "mcp__claude_ai_Figma". */
-export function mcpToolPrefix(serverName: string): string {
-  return "mcp__" + serverName.replace(/[^A-Za-z0-9_-]/g, "_");
 }
 
 export class RunManager {
@@ -290,6 +288,11 @@ export class RunManager {
 
   events(runId: string) {
     return this.runs.events(runId);
+  }
+
+  /** What the run changed in its git checkout (the `diff` event), or null. A pure read. */
+  diff(runId: string) {
+    return this.runs.diff(runId);
   }
 
   /** Subagent invocations recorded for a run (see RunAgent). A pure read. */
@@ -483,6 +486,8 @@ export class RunManager {
       });
     }
 
+    // What the checkout looked like before the agent touched it; the diff event compares with it.
+    const gitBase = headSha(projectPath);
     let handle: ExecutionHandle;
     try {
       handle = this.executor.execute(request, (event) => this.onEvent(runId, event));
@@ -517,6 +522,7 @@ export class RunManager {
       mainResult: null,
       cancelRequested: false,
       startedAtMs: Date.now(),
+      gitBase,
     });
     this.transition(run, "running", {
       startedAt: new Date().toISOString(),
@@ -862,6 +868,7 @@ export class RunManager {
         });
         return;
       }
+      if (active?.gitBase) this.recordDiff(runId, active.projectPath, active.gitBase);
       this.transition(current, result.outcome, {
         endedAt: result.endedAt,
         durationMs: result.durationMs,
@@ -903,6 +910,23 @@ export class RunManager {
   }
 
   /**
+   * The `diff` event: what the run changed since `base`, the patch next to the JSONL log.
+   * Written before the final status so a reader that sees the run ended also sees its diff.
+   * A git failure is a note, never a reason to lose the run's result.
+   */
+  private recordDiff(runId: string, projectPath: string, base: string): void {
+    try {
+      const diff = captureRunDiff(projectPath, base, path.join(this.config.dataDir, "logs", `${runId}.diff`));
+      if (diff) this.runs.addEvent(runId, "diff", diff);
+      else this.runs.addEvent(runId, "note", { message: "git diff of the run could not be read" });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      log.warn("diff capture failed", { runId, err: message });
+      this.runs.addEvent(runId, "note", { message: `git diff of the run could not be recorded: ${message}` });
+    }
+  }
+
+  /**
    * What MCP looked like in this run. "Missing" = an allow-listed mcp__ entry whose
    * server prefix matches neither a mounted server nor a server actually called.
    * Mounted lists can be empty while connectors are still connecting at init, so a
@@ -911,20 +935,11 @@ export class RunManager {
   private summarizeMcp(active: ActiveRun | undefined): import("../execution/types.js").RunMcpInfo {
     if (!active) return { mounted: [], used: [], allowListedMissing: [] };
     const used = [...active.usedServers].sort();
-    const mountedPrefixes = new Set(active.mounted.map((m) => mcpToolPrefix(m.name)));
-    const evidence = mountedPrefixes.size > 0 || used.length > 0;
-    const allowListedPrefixes = new Set(
-      active.allowedTools
-        .filter((t) => t.startsWith("mcp__"))
-        .map((t) => {
-          const m = /^(mcp__[^_].*?)(?:__|$)/.exec(t);
-          return m ? m[1]! : t;
-        }),
-    );
-    const allowListedMissing = evidence
-      ? [...allowListedPrefixes].filter((p) => !mountedPrefixes.has(p) && !used.includes(p)).sort()
-      : [];
-    return { mounted: active.mounted, used, allowListedMissing };
+    return {
+      mounted: active.mounted,
+      used,
+      allowListedMissing: allowListedMcpMissing(active.allowedTools, active.mounted, used),
+    };
   }
 
   private resolveAgent(agentId: string | undefined): AgentDefinition {

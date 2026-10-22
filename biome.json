@@ -4,7 +4,7 @@
   "files": {
     "includes": [
       "packages/*/src/**",
-      "packages/mcp/test/**",
+      "packages/*/test/**",
       "apps/web/app/**",
       "apps/web/lib/**",
       "apps/web/components/**",

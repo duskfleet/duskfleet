@@ -26,7 +26,9 @@ in the nav); the other pages are static.
   final message (long results collapse), a callout when a budget exhaustion was followed by a
   wrap-up pass (what the main pass spent, what the wrap-up cost and whether it recorded where
   it stopped; the wrap-up's own tool calls sit between `wrap-up started` / `wrap-up ended`
-  rows of the timeline), event timeline with legend and grouped repeats,
+  rows of the timeline), a **Changes** section when the project is a git checkout (files the
+  run changed with lines added / deleted, the base commit, a link to the patch at
+  `/runs/<id>/diff`), event timeline with legend and grouped repeats,
   previous / next run of the same agent, a "run again" CLI command, the `claude --resume`
   command and the exact command executed. Home paths print as `~/…`; Copy buttons give the
   full value.

@@ -19,6 +19,9 @@
  *    fires a due tick, so a lease handover in the middle of a tick cannot fire it twice.
  *  - A process without a RunManager (the dashboard) triggers a schedule by setting
  *    `run_requested_at`; the lease holder fires it on its next tick, paused or not.
+ *  - Auto-pause: before a scheduled (not manual) fire, a schedule whose last
+ *    `scheduler.auto_pause_after` ended runs were all empty (0 tool calls) or needs review
+ *    is paused instead, with the reason stored on the row (`auto_paused` firing).
  *  - The lease holder also sweeps orphaned runs (owner process gone) at most once a
  *    minute, so a crashed process's runs close without waiting for the next start.
  */
@@ -30,6 +33,7 @@ import type { RunManager } from "../orchestration/run-manager.js";
 import type { ScheduleRepository } from "../storage/schedules.js";
 import { logger } from "../util/log.js";
 import {
+  autoPauseReason,
   createSchedule,
   nextRunAtFor,
   parseHolder,
@@ -295,6 +299,14 @@ export class Scheduler {
     if (!s.enabled && !manual) {
       this.repo.recordFiring(s.id, "skipped_disabled", null, null, nextRunAt);
       return { outcome: "skipped_disabled", runId: null, error: null };
+    }
+    if (!manual) {
+      const reason = autoPauseReason(this.repo, s, this.runs.config.scheduler.autoPauseAfter);
+      if (reason && this.repo.autoPause(s.id, reason, this.now().toISOString())) {
+        this.repo.recordFiring(s.id, "auto_paused", null, reason, null);
+        log.warn("schedule auto-paused", { schedule: s.name, reason });
+        return { outcome: "auto_paused", runId: null, error: reason };
+      }
     }
     let gateSpend: { runId: string | null; costUsd: number | null } | null = null;
     try {

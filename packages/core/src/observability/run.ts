@@ -141,7 +141,8 @@ export interface RunEvent {
   id: number;
   runId: string;
   ts: string;
-  type: "status_change" | "init" | "tool_use" | "error" | "note" | "subagent_start" | "subagent_end" | "phase";
+  /** `diff`: what the run changed in the project checkout (payload `RunDiff`), once, before the final status. */
+  type: "status_change" | "init" | "tool_use" | "error" | "note" | "subagent_start" | "subagent_end" | "phase" | "diff";
   payload: unknown;
   /** Subagent (Claude Code task id) the event belongs to; null for the main session. */
   agentId: string | null;

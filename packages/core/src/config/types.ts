@@ -123,6 +123,11 @@ export interface SchedulerConfig {
   defaultTimeZone: string;
   /** Default no-op marker for idle-cost stats: `/regex/flags` or a plain case-insensitive regex. */
   noopPattern: string;
+  /**
+   * Pause a schedule after this many consecutive runs that completed with 0 tool calls or
+   * ended needs review (checked before each scheduled fire). 0 = never.
+   */
+  autoPauseAfter: number;
 }
 
 export interface DuskFleetConfig {

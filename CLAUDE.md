@@ -13,7 +13,7 @@ npm install --cache "$TMPDIR/npm-cache"   # ~/.npm has root-owned files on this 
 npm run build        # core + mcp (tsc). Run after every change under packages/: the CLI,
                      # the MCP server and the dashboard all import from dist/
 npm run typecheck    # core + mcp;  web: npm run typecheck -w @duskfleet/web
-npm test             # packages/mcp/test/*.test.js, node --test, ~25 s, no network, no cost
+npm test             # packages/core/test then packages/mcp/test, node --test, ~25 s, no network, no cost
 npm run cli -- doctor | agents | projects | run | runs | run-info | schedules
 npm run cli -- schedules run-now <id or name>   # stamps run_requested_at; the lease holder fires it next tick.
                      # The command for git hooks / scripts: `run --no-wait` leaves the run unread once the CLI exits
@@ -71,6 +71,9 @@ npm workspaces, one `config/` and one SQLite database shared by three deliverabl
   (`serve` / `mcp` / `cli`, `parseHolder`). Busy = `skipped_busy`, never a queue;
   no catch-up of missed ticks; `scheduler.enabled` is the kill switch read every tick.
   Create/update validation is `scheduler/crud.ts`, shared by MCP, CLI and dashboard.
+  Auto-pause (`autoPauseReason`, migration 16): before a scheduled fire, the last
+  `scheduler.auto_pause_after` ended runs all empty (0 tool calls) or needs review = pause with
+  `paused_reason`, outcome `auto_paused`; resume clears it, `auto_paused_at` bounds the next streak.
   `install-service` (`packages/mcp/src/service.ts`) renders a per-user unit (launchd,
   systemd --user, Task Scheduler XML) from machine paths: never version a unit, re-run it
   after every build (it restarts the service). Not the OS crontab.

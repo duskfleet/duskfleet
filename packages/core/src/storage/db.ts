@@ -243,10 +243,20 @@ const MIGRATIONS: ReadonlyArray<{ version: number; sql: string; backfill?: (db: 
     `,
   },
   {
+    // Auto-pause: the scheduler pauses a schedule whose last scheduler.auto_pause_after runs were
+    // all empty (0 tool calls) or needs review, and says why. auto_paused_at stays after a resume
+    // so the runs before it do not count again.
+    version: 16,
+    sql: `
+      ALTER TABLE schedules ADD COLUMN paused_reason TEXT;
+      ALTER TABLE schedules ADD COLUMN auto_paused_at TEXT;
+    `,
+  },
+  {
     // Schedule policies made explicit: what a busy tick does (concurrency_policy, only
     // skip_if_active) and what happens to ticks missed while nobody ticked (catch_up_policy,
     // skip_missed; enqueue_missed_with_cap is reserved). Existing rows get today's behaviour.
-    version: 16,
+    version: 17,
     sql: `
       ALTER TABLE schedules ADD COLUMN concurrency_policy TEXT NOT NULL DEFAULT 'skip_if_active';
       ALTER TABLE schedules ADD COLUMN catch_up_policy TEXT NOT NULL DEFAULT 'skip_missed';

@@ -10,6 +10,7 @@ import path from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 import {
+  autoPauseReason,
   BusyError,
   ClaudeCodeExecutor,
   DailyCapError,
@@ -886,6 +887,60 @@ test("no-op marker: anchored default, trimmed, bounded, bad config pattern falls
   }
 });
 
+test("auto-pause: N ended runs in a row that were empty or needs review pause the schedule with a reason; resume starts a new streak", async () => {
+  const { root, configDir } = makeRoot();
+  writeFileSync(
+    path.join(configDir, "duskfleet.yaml"),
+    `data_dir: ../data\ndefault_agent: coder\nscheduler:\n  auto_pause_after: 3\nclaude:\n  binary: "${fakeBinary}"\n  default_timeout_minutes: 0.05\n`,
+  );
+  const t = makeScheduler(configDir);
+  try {
+    assert.equal(t.config.scheduler.autoPauseAfter, 3);
+    const s = t.scheduler.create({ name: "stuck", agentId: "coder", prompt: "denied", cron: "* * * * *" });
+    const first = await t.fireAndWait(s.id);
+    assert.deepEqual(first.reviewReasons, ["permission_denied"]);
+    // An empty run: completed, no tool calls, nothing to review.
+    t.db.prepare("UPDATE runs SET tool_calls = 0, review_reasons_json = '[]' WHERE id = ?").run(first.id);
+    await t.fireAndWait(s.id);
+    // Two ended runs: below the threshold, the third fire starts a run.
+    await t.fireAndWait(s.id);
+    assert.equal(t.repo.get(s.id).enabled, true);
+    assert.equal(t.runs.listRuns({}).length, 3);
+
+    t.due(s.id);
+    await t.tickAll();
+    const paused = t.repo.get(s.id);
+    assert.equal(paused.enabled, false);
+    assert.equal(paused.nextRunAt, null);
+    assert.equal(paused.lastOutcome, "auto_paused");
+    assert.match(paused.pausedReason, /last 3 runs .*1 completed with 0 tool calls, 2 needed review/);
+    assert.equal(paused.lastError, paused.pausedReason);
+    assert.ok(paused.autoPausedAt);
+    assert.equal(t.runs.listRuns({}).length, 3, "no fourth run");
+    assert.equal(t.scheduler.firings(s.id, 1)[0].outcome, "auto_paused");
+
+    // Resume: reason cleared, the runs before the pause no longer count, so it fires again.
+    const resumed = t.scheduler.update(s.id, { enabled: true });
+    assert.equal(resumed.pausedReason, null);
+    assert.equal(resumed.autoPausedAt, paused.autoPausedAt);
+    await t.fireAndWait(s.id);
+    assert.equal(t.repo.get(s.id).lastOutcome, "started");
+    assert.equal(t.runs.listRuns({}).length, 4);
+
+    // A clean run breaks the streak; 0 disables the check.
+    const stub = (rows) => ({ recentEndedRuns: (_id, _since, limit) => rows.slice(0, limit) });
+    const bad = { id: "x", empty: false, needsReview: true };
+    const clean = { id: "y", empty: false, needsReview: false };
+    const sched = { id: "s", autoPausedAt: null };
+    assert.equal(autoPauseReason(stub([bad, clean, bad]), sched, 3), null);
+    assert.equal(autoPauseReason(stub([bad, bad]), sched, 3), null, "fewer ended runs than the threshold");
+    assert.equal(autoPauseReason(stub([bad, bad, bad]), sched, 0), null);
+    assert.match(autoPauseReason(stub([bad, bad, bad]), sched, 3), /3 needed review/);
+  } finally {
+    await t.close(root);
+  }
+});
+
 test("idle cost: 7-day ticks, fires, no-op runs by marker and what they cost, per schedule", async () => {
   const { root, configDir } = makeRoot();
   const t = makeScheduler(configDir);
@@ -1235,6 +1290,9 @@ test("a timed-out run is resumed too; a schedule's on_failure overrides the agen
     assert.equal(t.scheduler.resumeCandidate(t.repo.get(off.id)), null);
     const offSecond = await t.fireAndWait(off.id);
     assert.equal(offSecond.resumedFromRunId, null);
+    // Done with it: a real minute boundary would make it due again and its run would hold the
+    // project during the next schedule's fires (skipped_busy, flaky on CI).
+    t.scheduler.delete(off.id);
 
     // agent says nothing, schedule says resume_once with its own budget → resumed after a timeout
     const on = t.scheduler.create({

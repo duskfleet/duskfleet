@@ -194,6 +194,24 @@ work. Failed runs, and completed runs that [need review](dashboard.md#needs-revi
 permission denial, a budget or context limit, an MCP mismatch), never count as no-op, even
 when they end with "nothing to do": they were blocked, not idle.
 
+## Auto-pause
+
+A schedule that keeps producing nothing is paused by the scheduler itself. Before every
+scheduled fire (not a manual run now), it reads the schedule's last
+`scheduler.auto_pause_after` ended runs (default 5; `0` turns the check off; gate runs are not
+counted). When every one of them either completed with 0 tool calls or ended
+[needs review](dashboard.md#needs-review), the tick does not fire: the schedule is set
+`enabled: false`, the firing is recorded as `auto_paused`, and the reason (how many runs were
+empty, how many needed review, the last run's id) is stored as `pausedReason`. It shows in
+`list_schedules` and `duskfleet schedules`, and as an **auto-paused** badge on the
+**Schedules** page. A cancelled or clean run breaks the streak; a run still going is not
+counted yet.
+
+Resume it as any paused schedule (`update_schedule` with `enabled: true`, or **Resume** on the
+dashboard): the reason is cleared, and only runs created after the pause count towards the
+next streak, so the schedule gets `auto_pause_after` fresh runs before it can be paused again.
+Run now still fires a paused schedule.
+
 ## Policies
 
 Every schedule stores its two policies, so the behaviour below is explicit on the row
@@ -212,6 +230,8 @@ Every schedule stores its two policies, so the behaviour below is explicit on th
 - Missed ticks (nobody running) are not caught up (`skip_missed`): the schedule fires once when
   it is next considered and its next tick is computed from then.
 - `scheduler.enabled: false` in `duskfleet.yaml` is the kill switch, re-read every tick.
+- A schedule whose last `scheduler.auto_pause_after` runs were all empty or needs review is
+  [auto-paused](#auto-pause) instead of fired.
 - Every run started by a schedule carries its `scheduleId`, and the schedule carries the
   state of the run it last started (`lastRun` in `list_schedules` and `duskfleet schedules`,
   a badge on the dashboard row): `started` is only the outcome of the tick; a run that then
