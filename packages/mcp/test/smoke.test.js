@@ -658,12 +658,87 @@ test("MCP servers mounted and allow-list mismatches are recorded on the run", as
       .events(run.id)
       .filter((e) => e.type === "note")
       .map((e) => e.payload.message);
-    assert.equal(notes.length, 1);
-    assert.match(notes[0], /never mounted.*mcp__plugin_productivity_atlassian.*mounted: mcp__claude_ai_Figma/);
+    // The plugin-named server is absent from the very first init, so the process was restarted once
+    // (for nothing: a name mismatch is the same on every start) before the mismatch was recorded.
+    assert.equal(notes.length, 2);
+    assert.match(notes[0], /init reported no server for mcp__plugin_productivity_atlassian.*restarted once/);
+    assert.match(notes[1], /never mounted.*mcp__plugin_productivity_atlassian.*mounted: mcp__claude_ai_Figma/);
     const summary = summarizeRun(app.runs.listRuns({ limit: 1 })[0]);
     assert.equal(summary.id, run.id);
     assert.equal(summary.needsReview, true);
     assert.deepEqual(summary.mcpAllowListedMissing, ["mcp__plugin_productivity_atlassian"]);
+  } finally {
+    await app.cleanup();
+  }
+});
+
+test("a child whose init lacks an allow-listed connector is restarted once, before any model turn", async () => {
+  const app = makeApp({
+    agents: {
+      figma: `---\npermission_mode: dontAsk\ninherit_mcp: true\nallowed_tools: ["mcp__claude_ai_Figma__get_metadata"]\n---\nUse Figma.\n`,
+      strict: `---\npermission_mode: dontAsk\nallowed_tools: ["mcp__claude_ai_Figma"]\n---\nNo MCP inherited.\n`,
+    },
+  });
+  const spawns = () => Number(readFileSync(path.join(app.project, "fake-claude-spawns"), "utf8"));
+  try {
+    // First init: only the project's own server. Second: the connector is there; the run goes on with it.
+    const started = await app.runs.startRun({ prompt: "mcp-missing-once", projectPath: app.project, agentId: "figma" });
+    const run = await app.runs.waitForRun(started.id, 10_000);
+    assert.equal(run.status, "completed");
+    assert.equal(spawns(), 2);
+    assert.deepEqual(run.mcp.mounted, [{ name: "claude.ai Figma", status: "connected" }]);
+    assert.deepEqual(run.mcp.allowListedMissing, []);
+    assert.deepEqual(run.reviewReasons, []);
+    assert.notEqual(run.claudeSessionId, started.claudeSessionId, "the second process gets a fresh session id");
+    const notes = app.runs.events(run.id).filter((e) => e.type === "note");
+    assert.equal(notes.length, 1);
+    assert.match(notes[0].payload.message, /init reported no server for mcp__claude_ai_Figma \(mounted: duskfleet\)/);
+    assert.deepEqual(notes[0].payload.mcpRestart.missing, ["mcp__claude_ai_Figma"]);
+    assert.equal(notes[0].payload.mcpRestart.sessionId, run.claudeSessionId);
+    assert.equal(app.runs.events(run.id).filter((e) => e.type === "init").length, 2);
+    const log = readFileSync(run.logPath, "utf8");
+    assert.match(log, /^#restart mcp__claude_ai_Figma /m);
+    assert.equal(log.match(/"subtype":"init"/g).length, 2);
+    assert.equal(run.costUsd, 0.0123, "only the second process's result counts");
+    rmSync(path.join(app.project, "fake-claude-spawns"));
+
+    // Still missing after the restart: the second process is kept and the run is flagged as before.
+    const again = await app.runs.startRun({ prompt: "mcp-missing", projectPath: app.project, agentId: "figma" });
+    const flagged = await app.runs.waitForRun(again.id, 10_000);
+    assert.equal(flagged.status, "completed");
+    assert.equal(spawns(), 2, "one restart, never a loop");
+    assert.deepEqual(flagged.mcp.allowListedMissing, ["mcp__claude_ai_Figma"]);
+    assert.deepEqual(flagged.reviewReasons, ["mcp_missing"]);
+    assert.equal(app.runs.events(flagged.id).filter((e) => e.type === "note").length, 2);
+    rmSync(path.join(app.project, "fake-claude-spawns"));
+
+    // Without inherit_mcp nothing could mount anyway: no restart.
+    const strict = await app.runs.startRun({ prompt: "mcp-missing", projectPath: app.project, agentId: "strict" });
+    const plain = await app.runs.waitForRun(strict.id, 10_000);
+    assert.equal(plain.status, "completed");
+    assert.equal(spawns(), 1);
+    assert.deepEqual(plain.mcp.allowListedMissing, ["mcp__claude_ai_Figma"]);
+  } finally {
+    await app.cleanup();
+  }
+});
+
+test("a cancel during the restart wins: no second process", async () => {
+  const app = makeApp({
+    agents: {
+      figma: `---\npermission_mode: dontAsk\ninherit_mcp: true\nallowed_tools: ["mcp__claude_ai_Figma"]\n---\nUse Figma.\n`,
+    },
+  });
+  try {
+    const started = await app.runs.startRun({ prompt: "mcp-missing-once", projectPath: app.project, agentId: "figma" });
+    // Cancel as soon as the first init is in (the restart is decided there): whichever process is
+    // alive by then, the first on its way down or the second just started, the cancel is the verdict.
+    while (!app.runs.events(started.id).some((e) => e.type === "init")) await new Promise((r) => setTimeout(r, 1));
+    app.runs.cancelRun(started.id);
+    const run = await app.runs.waitForRun(started.id, 10_000);
+    assert.equal(run.status, "cancelled");
+    assert.deepEqual(run.reviewReasons, []);
+    assert.ok(Number(readFileSync(path.join(app.project, "fake-claude-spawns"), "utf8")) <= 2);
   } finally {
     await app.cleanup();
   }

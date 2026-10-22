@@ -28,6 +28,9 @@
  *   "linger"  -> like "ok", but keeps running after the result line (grace kill tests)
  *   "linger-hook" -> like "ok", then exits while a spawned descendant keeps stdout open
  *                 (a user-level Stop hook); the descendant's pid is written to ./hook.pid
+ *   "mcp-missing-once" -> like "ok", but the first spawn's init lists no claude.ai connector
+ *                 (only the project's "duskfleet" server); later spawns list Figma
+ *   "mcp-missing" -> like "ok", every spawn's init lists no claude.ai connector
  *
  * With `--resume <id>` (the wrap-up pass) the prompt is DuskFleet's fixed text, so the
  * behaviour comes from FAKE_CLAUDE_RESUME instead: unset = a short successful pass that
@@ -80,13 +83,31 @@ const modelUsageEntry = (input, output, cacheRead, cacheCreation, costUSD) => ({
   maxOutputTokens: 128000,
 });
 
+/**
+ * "mcp-missing-once" / "mcp-missing": the init line lists no claude.ai connector (what Claude Code
+ * printed in 3 runs out of 12 on 2026-10-20), on the first spawn in this cwd only or on every spawn.
+ * `fake-claude-spawns` in the cwd counts the spawns so a test can see how many there were.
+ */
+let spawnNo = 1;
+if (prompt.startsWith("mcp-missing")) {
+  try {
+    spawnNo = Number(readFileSync("fake-claude-spawns", "utf8")) + 1;
+  } catch {
+    spawnNo = 1;
+  }
+  writeFileSync("fake-claude-spawns", String(spawnNo));
+}
+const connectorsLoaded = prompt === "mcp-missing" ? false : prompt === "mcp-missing-once" ? spawnNo > 1 : true;
+
 out({
   type: "system",
   subtype: "init",
   cwd: process.cwd(),
   session_id: sessionId,
   tools: ["Bash", "Edit", "Read"],
-  mcp_servers: [{ name: "claude.ai Figma", status: "connected" }],
+  mcp_servers: connectorsLoaded
+    ? [{ name: "claude.ai Figma", status: "connected" }]
+    : [{ name: "duskfleet", status: "connected", source: "project" }],
   model,
   permissionMode: "acceptEdits",
   claude_code_version: "9.9.9",
