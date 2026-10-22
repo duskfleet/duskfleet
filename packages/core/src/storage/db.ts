@@ -262,6 +262,25 @@ const MIGRATIONS: ReadonlyArray<{ version: number; sql: string; backfill?: (db: 
       ALTER TABLE schedules ADD COLUMN catch_up_policy TEXT NOT NULL DEFAULT 'skip_missed';
     `,
   },
+  {
+    // Monthly budgets per scope (global / agent / project), calendar month in UTC, compared with
+    // the recorded cost of the scope's runs. One per scope: scope_id is NULL for global, so the
+    // unique index is on COALESCE(scope_id, '').
+    version: 18,
+    sql: `
+      CREATE TABLE IF NOT EXISTS budgets (
+        id           TEXT PRIMARY KEY,
+        scope        TEXT NOT NULL CHECK (scope IN ('global', 'agent', 'project')),
+        scope_id     TEXT,
+        amount_usd   REAL NOT NULL CHECK (amount_usd > 0),
+        warn_percent INTEGER NOT NULL DEFAULT 80,
+        hard_stop    INTEGER NOT NULL DEFAULT 1,
+        created_at   TEXT NOT NULL,
+        updated_at   TEXT NOT NULL
+      );
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_budgets_scope ON budgets(scope, COALESCE(scope_id, ''));
+    `,
+  },
 ];
 
 /**

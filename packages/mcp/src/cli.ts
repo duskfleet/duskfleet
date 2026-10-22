@@ -13,6 +13,7 @@ import { fileURLToPath } from "node:url";
  *   duskfleet repair-subagents # backfill subagent rows of finished runs from their logs
  *   duskfleet schedules
  *   duskfleet schedules run-now <id or name>   # stamp run_requested_at; the lease holder fires it next tick
+ *   duskfleet budgets [set <global | agent <id> | project <id>> --amount <usd> [--warn <pct>] [--no-hard-stop] | delete <id>]
  *   duskfleet tools           # MCP tool catalogue (names, descriptions, input schemas)
  *   duskfleet serve            # long-running scheduler process (what the service runs)
  *   duskfleet install-service [--print]   # register `serve` with launchd / systemd --user / Task Scheduler
@@ -21,7 +22,15 @@ import { fileURLToPath } from "node:url";
  *   duskfleet doctor --probe   # plus one real hello run on haiku (costs cents): auth, blocking hooks
  */
 import { parseArgs } from "node:util";
-import { findRepoRoot, parseHolder, RUN_STATUSES, type RunStatus, subagentView, summarizeRun } from "@duskfleet/core";
+import {
+  type BudgetInput,
+  findRepoRoot,
+  parseHolder,
+  RUN_STATUSES,
+  type RunStatus,
+  subagentView,
+  summarizeRun,
+} from "@duskfleet/core";
 import { bootstrap } from "./bootstrap.js";
 import { PROBE_COST_NOTE, type ProbeReport, probeNotRun, runProbe } from "./probe.js";
 import { installService, renderService, type ServiceTarget, serviceStatus, uninstallService } from "./service.js";
@@ -43,6 +52,9 @@ function usage(): never {
       "  duskfleet repair-subagents",
       "  duskfleet schedules",
       "  duskfleet schedules run-now <schedule id or name>",
+      "  duskfleet budgets",
+      "  duskfleet budgets set <global | agent <id> | project <id>> --amount <usd> [--warn <percent>] [--no-hard-stop]",
+      "  duskfleet budgets delete <budget id>",
       "  duskfleet tools",
       "  duskfleet serve",
       "  duskfleet install-service [--print]",
@@ -255,6 +267,40 @@ async function main(): Promise<void> {
       }
       if (sub) usage();
       print({ scheduler: app.scheduler.status(), schedules: app.scheduler.listWithLastRun() });
+      return done();
+    }
+    case "budgets": {
+      const [sub, ...args] = rest;
+      if (sub === "set") {
+        const { values, positionals } = parseArgs({
+          args,
+          allowPositionals: true,
+          options: {
+            amount: { type: "string" },
+            warn: { type: "string" },
+            "no-hard-stop": { type: "boolean", default: false },
+          },
+        });
+        const [scope, scopeId] = positionals;
+        if (!scope || !values.amount) usage();
+        const input: BudgetInput = { scope: scope as BudgetInput["scope"], amountUsd: Number(values.amount) };
+        if (scopeId) input.scopeId = scopeId;
+        if (values.warn) input.warnPercent = Number(values.warn);
+        if (values["no-hard-stop"]) input.hardStop = false;
+        print(app.runs.setBudget(input));
+        return done();
+      }
+      if (sub === "delete") {
+        if (!args[0]) usage();
+        if (!app.runs.deleteBudget(args[0])) {
+          process.stderr.write(`budget not found: ${args[0]}\n`);
+          return done(1);
+        }
+        print({ deleted: true });
+        return done();
+      }
+      if (sub) usage();
+      print(app.runs.budgetStatuses());
       return done();
     }
     case "serve": {

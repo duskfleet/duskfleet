@@ -149,6 +149,40 @@ non-positive `max_daily_cost_usd`, is a config error naming the file. `list_agen
 `maxDailyRuns` / `maxDailyCostUsd` (`null` = no cap); `update_agent` removes one with
 `clear: ["max_daily_runs"]`.
 
+## Monthly budgets
+
+Daily caps bound one agent per day. A budget bounds a **scope** per **calendar month (UTC)**:
+`global` (every run), `agent <id>` (the runs of one agent) or `project <id>` (the runs on one
+project, whichever agent: counted by project id, and by the project's path for runs started
+with a path). Budgets are rows in the database (`budgets` table), one per scope, managed with
+`set_budget` / `list_budgets` / `delete_budget` over MCP or `duskfleet budgets` on the CLI:
+
+```bash
+npm run cli -- budgets set global --amount 200
+npm run cli -- budgets set project my-app --amount 50 --warn 70
+npm run cli -- budgets set agent pr-reviewer --amount 20 --no-hard-stop
+npm run cli -- budgets
+```
+
+| Field | Meaning |
+|---|---|
+| `amount_usd` | spend allowed per UTC month, compared with the recorded `cost_usd` of the scope's runs created since the 1st at 00:00 UTC (gate runs included) |
+| `warn_percent` | default 80: from this share of `amount_usd` the budget is `warn` |
+| `hard_stop` | default true: once the spend reaches `amount_usd` (`over`), new runs in the scope are refused and its schedules paused. `false` = warn only, runs still start |
+
+Every budget covering a run (global, the agent's, the project's) is checked in `startRun`,
+after the busy guards and the daily caps, before anything is spawned. A spent hard-stop budget
+throws a `BudgetError` (message `budget: the <scope> budget is spent ...`) and pauses every
+enabled schedule of the scope (global: all of them; agent: that agent's; project: the schedules
+that run on it, by their own `project_id` or their agent's binding). A schedule tick refused
+this way is `skipped_budget`. Paused schedules stay paused when the month turns or the budget
+is raised or deleted: resume them by hand. A run in progress is not stopped, so a month can end
+above the amount by at most one run's `max_budget_usd` per active run.
+
+The dashboard's **Runs** page shows a banner for each budget at `warn` (amber) or `over`
+(coral when it stops runs); `list_budgets` and `duskfleet budgets` report `spentUsd`,
+`percent`, `state` (`ok` \| `warn` \| `over`) and `periodStart` for every budget.
+
 ## Resume once on failure
 
 The wrap-up pass leaves a trace; it does not finish the job. `on_failure: resume_once` lets a
