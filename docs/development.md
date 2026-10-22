@@ -181,9 +181,11 @@ planner run lands just before a developer tick. A busy agent makes a tick skip
 (`skipped_busy`), never queue. See `docs/agents.md` and `docs/schedules.md`.
 
 The GitHub Project "DuskFleet Flow" (org project 2) is a read-only mirror of the labels:
-`node scripts/project-sync.mjs [--dry-run]` adds every open issue and PR to the project (the
-project's auto-add workflow covers issues only) and sets each item's Status from its `flow:`
-label (`Backlog` without one, `Done` when closed or merged). Labels stay the source of truth:
+`node scripts/project-sync.mjs [--repo <owner/name>]... [--dry-run]` adds every open issue and
+PR of the given repositories (the current one by default) to the project (the project's
+auto-add workflow covers the issues of this repository only) and sets each item's Status from
+its `flow:` label (`Backlog` without one, `Done` when closed or merged). The website repository
+shares the board, so the workflow passes both. Labels stay the source of truth:
 agents never touch the project, and a Status dragged on the board is overwritten on the next
 sync. Its views: *Board* (open items by Status, Backlog hidden), *Backlog* (open issues with no
 `flow:` label, to pick what to promote), *Needs me* (`Ready to merge` and `Needs human`, the two
@@ -193,7 +195,9 @@ runs it on every open / close / label change of an issue or PR, once an hour as 
 and on demand (*Actions → Project sync → Run workflow*); it needs the repository secret
 `PROJECT_SYNC_TOKEN` (the default token cannot touch an organization project; the scopes are
 listed in the workflow header). Without the secret the job fails loudly and the board simply
-lags until the script is run by hand.
+lags until the script is run by hand. The website repository carries a copy of the workflow
+that checks out this repository for the script, so its own label changes reach the board at
+once instead of on the next hourly run; it needs the same secret there.
 
 ## Security model
 
