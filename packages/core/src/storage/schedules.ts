@@ -20,6 +20,9 @@ import { NEEDS_REVIEW_SQL } from "./runs.js";
 
 const log = logger("storage");
 
+/** No stored review reason other than `empty_run`: such a completed run may count as a no-op. */
+const NOOP_ELIGIBLE_SQL = `NOT EXISTS (SELECT 1 FROM json_each(COALESCE(review_reasons_json, '[]')) WHERE value <> 'empty_run')`;
+
 interface ScheduleRow {
   id: string;
   name: string;
@@ -340,7 +343,8 @@ export class ScheduleRepository {
    * schedule started since `sinceIso`: count and cost of all of them from SQL, and the head
    * (`textLimit` chars) of the final message of the completed ones that do not need review
    * (stored `review_reasons_json`), since only those can be no-ops: a run that hit a denial and
-   * then says "nothing to do" was blocked, not idle.
+   * then says "nothing to do" was blocked, not idle. `empty_run` alone does not exclude a run:
+   * a text-only "nothing to do" answer is the typical no-op.
    */
   runOutcomesSince(scheduleId: string, sinceIso: string, textLimit: number): RunOutcomes {
     const totals = this.db
@@ -351,7 +355,7 @@ export class ScheduleRepository {
     const completed = (
       this.db
         .prepare(
-          `SELECT substr(result_text, 1, ?) AS text, cost_usd FROM runs WHERE schedule_id = ? AND created_at >= ? AND kind = 'run' AND status = 'completed' AND result_text IS NOT NULL AND NOT ${NEEDS_REVIEW_SQL}`,
+          `SELECT substr(result_text, 1, ?) AS text, cost_usd FROM runs WHERE schedule_id = ? AND created_at >= ? AND kind = 'run' AND status = 'completed' AND result_text IS NOT NULL AND ${NOOP_ELIGIBLE_SQL}`,
         )
         .all(textLimit, scheduleId, sinceIso) as Array<{ text: string; cost_usd: number | null }>
     ).map((r) => ({ resultText: r.text, costUsd: r.cost_usd }));
