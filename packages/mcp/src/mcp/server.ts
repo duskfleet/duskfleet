@@ -7,6 +7,7 @@
 import type { DuskFleetConfig, RunManager, Scheduler } from "@duskfleet/core";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { registerAgentTools } from "./tools/agents.js";
+import { registerBudgetTools } from "./tools/budgets.js";
 import { registerRunTools } from "./tools/runs.js";
 import { registerScheduleTools } from "./tools/schedules.js";
 
@@ -25,13 +26,14 @@ export const SERVER_INSTRUCTIONS =
   "(returns immediately with a run_id unless wait_seconds is set), and get_run / list_runs to inspect results. " +
   "create_agent / update_agent manage agent definitions: an agent is either kind 'own' (new persona written in DuskFleet) " +
   "or kind 'link' (reuses an agent the project defines in .claude/agents/, see list_project_agents) — always choose explicitly. " +
-  "create_schedule / list_schedules manage cron schedules.";
+  "create_schedule / list_schedules manage cron schedules. set_budget / list_budgets manage monthly budgets (global, agent, project).";
 
 export function createMcpServer(ctx: ToolContext): McpServer {
   const server = new McpServer({ name: "duskfleet", version: SERVER_VERSION }, { instructions: SERVER_INSTRUCTIONS });
   registerAgentTools(server, ctx);
   registerRunTools(server, ctx);
   registerScheduleTools(server, ctx);
+  registerBudgetTools(server, ctx);
   return server;
 }
 
