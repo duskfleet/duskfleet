@@ -87,7 +87,8 @@ login and spends nothing: the tests use the fake binary. In order:
 Two tests are gates in themselves: `test/migrations.test.js` pins the SHA-256 of every shipped
 migration (edit one and it fails; add one and it tells you the digest to append), and the layering of
 the three packages is a Biome rule, not just this page. Dependabot opens grouped weekly PRs for npm
-and GitHub Actions. Not built yet: a periodic `claude --help` flag-drift check (needs the CLI, so a
+and GitHub Actions. Workflows pin every action by full commit SHA with a version comment
+(`uses: actions/checkout@<sha> # v7.0.1`); Dependabot bumps the SHA and the comment together. Not built yet: a periodic `claude --help` flag-drift check (needs the CLI, so a
 local schedule rather than Actions), a manual-dispatch smoke run with `--model haiku`, and a docs
 sync check (every MCP tool in `docs/mcp-server.md`, every `docs/` page linked from `README.md`).
 
