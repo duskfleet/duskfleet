@@ -6,6 +6,7 @@
  * Behaviour is chosen by the prompt, read from stdin as the executor sends it (never argv):
  *   "ok"       -> tool_use + text + successful result (default)
  *   "error"    -> result with is_error=true
+ *   "auth"     -> like "error", with a logged-out result text (doctor --probe advice)
  *   "hang"     -> emits init then sleeps forever (for cancel / timeout tests)
  *   "crash"    -> exits 3 with no result line
  *   "subagent" -> delegates to a project agent "reviewer" (task_started, nested
@@ -54,12 +55,19 @@ const budgetIdx = args.indexOf("--max-budget-usd");
 const maxBudget = budgetIdx >= 0 ? Number(args[budgetIdx + 1]) : 5;
 
 if (args[0] === "--version") {
+  if (process.env.FAKE_CLAUDE_MODE === "no-version") {
+    process.stderr.write("fake: --version broken\n");
+    process.exit(1);
+  }
   process.stdout.write("9.9.9 (fake)\n");
   process.exit(0);
 }
 
 // Read after --version: execFile leaves stdin open, so reading it there would block forever.
-const prompt = readFileSync(0, "utf8").trim() || "ok";
+// FAKE_CLAUDE_MODE picks the behaviour when the prompt is fixed by DuskFleet (doctor --probe).
+// stdin is read either way so the executor's write never hits a closed pipe.
+const stdinPrompt = readFileSync(0, "utf8").trim() || "ok";
+const prompt = process.env.FAKE_CLAUDE_MODE ?? stdinPrompt;
 
 const out = (o) => process.stdout.write(JSON.stringify(o) + "\n");
 
@@ -444,9 +452,11 @@ if (resumeIdx >= 0) {
       usage: { input_tokens: 12, output_tokens: 8 },
     },
   });
-  const isError = prompt === "error";
+  const isError = prompt === "error" || prompt === "auth";
   const result = isError
-    ? "API Error: something went wrong"
+    ? prompt === "auth"
+      ? "Invalid API key · Please run /login"
+      : "API Error: something went wrong"
     : prompt === "env"
       ? `CLAUDE_BIN ${process.env.CLAUDE_BIN === undefined ? "unset" : "set"}`
       : prompt === "noop"

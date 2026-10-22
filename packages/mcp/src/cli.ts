@@ -19,6 +19,7 @@ import { fileURLToPath } from "node:url";
  *   duskfleet install-service [--print]   # register `serve` with launchd / systemd --user / Task Scheduler
  *   duskfleet uninstall-service
  *   duskfleet doctor           # also reports the service and who holds the scheduler lease
+ *   duskfleet doctor --probe   # plus one real hello run on haiku (costs cents): auth, blocking hooks
  */
 import { parseArgs } from "node:util";
 import {
@@ -31,6 +32,7 @@ import {
   summarizeRun,
 } from "@duskfleet/core";
 import { bootstrap } from "./bootstrap.js";
+import { PROBE_COST_NOTE, type ProbeReport, probeNotRun, runProbe } from "./probe.js";
 import { installService, renderService, type ServiceTarget, serviceStatus, uninstallService } from "./service.js";
 import { buildToolCatalog } from "./tools-catalog.js";
 
@@ -57,7 +59,7 @@ function usage(): never {
       "  duskfleet serve",
       "  duskfleet install-service [--print]",
       "  duskfleet uninstall-service",
-      "  duskfleet doctor",
+      "  duskfleet doctor [--probe]",
       "",
     ].join("\n"),
   );
@@ -131,6 +133,10 @@ async function main(): Promise<void> {
       return done();
     }
     case "doctor": {
+      const { values: doctorFlags } = parseArgs({
+        args: rest,
+        options: { probe: { type: "boolean", default: false } },
+      });
       let version: string | null = null;
       let error: string | null = null;
       try {
@@ -155,6 +161,29 @@ async function main(): Promise<void> {
               ? `schedules fire only while an MCP host keeps the server alive${leaseLive ? "" : " (nothing is ticking right now)"}; run "duskfleet install-service" to run them unattended`
               : service.detail,
       };
+      // Opt-in live run: the only part of doctor that costs money, so say so before spending it.
+      let probe: ProbeReport | null = null;
+      if (doctorFlags.probe && error) {
+        process.stderr.write("doctor --probe skipped: claude --version failed, fix that first (nothing was spent)\n");
+        probe = probeNotRun(
+          "skipped",
+          "claude --version failed",
+          "the probe did not run because claude --version failed; fix the binary (see error) and probe again",
+        );
+      } else if (doctorFlags.probe) {
+        process.stderr.write(`${PROBE_COST_NOTE}...\n`);
+        try {
+          probe = await runProbe(app.executor, app.config.claude);
+          // Ctrl-C / kill: the paid child is cancelled and the temp dir gone; no report.
+          if (probe.outcome === "interrupted") return done(130);
+        } catch (err) {
+          probe = probeNotRun(
+            "error",
+            String(err),
+            "the probe could not run (see probe.error); this is a local problem, not a Claude result",
+          );
+        }
+      }
       print({
         node: process.version,
         claudeBinary: app.executor.binary,
@@ -164,8 +193,9 @@ async function main(): Promise<void> {
         dataDir: app.config.dataDir,
         agents: [...app.config.agents.keys()],
         scheduler,
+        ...(doctorFlags.probe ? { probe } : {}),
       });
-      return done(error ? 1 : 0);
+      return done(error || (probe && !probe.ok) ? 1 : 0);
     }
     case "run": {
       const { values, positionals } = parseArgs({

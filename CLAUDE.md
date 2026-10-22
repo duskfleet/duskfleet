@@ -145,7 +145,7 @@ npm workspaces, one `config/` and one SQLite database shared by three deliverabl
   `skipped_busy` on `instanceof BusyError`, never by matching text; busy means "skip this tick".
   Daily caps (`max_daily_runs`, `max_daily_cost_usd`, UTC day, counted from `runs`) are checked
   there too but throw `DailyCapError` (`orchestration/daily-cap.ts`, not a BusyError): `skipped_daily_cap`.
-  Monthly budgets (`budgets` table, migration 17; scope global / agent / project, UTC month) come
+  Monthly budgets (`budgets` table, migration 18; scope global / agent / project, UTC month) come
   last: a spent `hard_stop` one throws `BudgetError` (`orchestration/budget.ts`), pauses the
   scope's schedules and the tick is `skipped_budget`; nothing resumes them automatically.
 - **Subagents are rows, not prose** (`run_agents`, migration 5): the parser folds Claude Code's

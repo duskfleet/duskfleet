@@ -1,7 +1,7 @@
 import type { DuskFleetConfig } from "../config/types.js";
 
 /**
- * Monthly spending budgets (`budgets` table, migration 17), one per scope: `global` (every
+ * Monthly spending budgets (`budgets` table, migration 18), one per scope: `global` (every
  * run), `agent` (the runs of one agent) or `project` (the runs on one project). The month is
  * the calendar month in UTC, like the daily caps' UTC day; spend is the recorded `cost_usd`
  * of every run created since its first instant (gate runs included: they are spend too).

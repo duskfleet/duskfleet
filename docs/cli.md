@@ -5,6 +5,7 @@ The CLI uses the same orchestration code as the MCP server and is the quickest w
 
 ```bash
 npm run cli -- doctor                                     # Claude binary, version, config and data paths
+npm run cli -- doctor --probe                             # plus one real hello run on haiku (costs cents)
 npm run cli -- run --project ~/Documents/Projects/my-app -- "Add a README section describing the build"
 npm run cli -- run --project my-app --agent my-reviewer --model sonnet -- "Review src/ for obvious bugs"   # registered id or path (--project-id is the explicit form)
 npm run cli -- run --no-wait --project /path -- "..."     # return immediately (see the note below)
@@ -27,6 +28,18 @@ npm run cli -- tools                                      # the MCP tool catalog
 `doctor` also reports the scheduler: whether something is ticking, which kind of process holds
 the lease (`serve`, `mcp`, `cli`) and whether the service is installed and running. See
 [Schedules](schedules.md#who-ticks) for the service.
+
+`doctor --probe` adds a live check that `claude --version` cannot do: one minimal real run
+(`--model haiku`, a few cents at most, capped by `--max-budget-usd 0.05`; the command says so on
+stderr before spending). It runs in an empty temporary directory with the same unattended
+envelope as every run (`setting_sources`, strict MCP, no permission prompts, no tools allowed)
+and a timeout of `claude.default_timeout_minutes`, at most 2 minutes. It records no run. The
+`probe` field reports the outcome, cost and an `advice` line: not logged in (expired auth), no
+result before the timeout (a hook or prompt blocking the headless child), or a process that kept
+running after its result (a user-level Stop hook). When `claude --version` already failed the
+probe is not attempted (outcome `skipped`, nothing spent); a local error before the run (for
+example no writable temp directory) gives outcome `error`. `doctor` exits 1 when the probe fails. Ctrl-C (or SIGTERM) during the
+probe cancels the run, removes its temporary directory and exits 130 without a report.
 
 Each run writes a raw event log to `data/logs/<run_id>.jsonl` and a structured row to SQLite.
 In a git checkout it also writes the patch of what it changed to `data/logs/<run_id>.diff`;

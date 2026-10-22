@@ -3,10 +3,11 @@
  * (kill switch), fire every due schedule through RunManager, advance next_run_at.
  *
  * Policies, deliberately simple:
- *  - No catch-up. A schedule that was due while nobody was running is not fired
- *    late; its next_run_at is recomputed from now. Hourly jobs do not want a burst.
- *  - Busy is a skip, never a queue. RunManager's per-agent / per-project guards
- *    throw; the firing is recorded as `skipped_busy`.
+ *  - No catch-up (`catch_up_policy: skip_missed`, the only implemented value). Ticks
+ *    missed while nobody was running are not replayed: the schedule fires once when
+ *    next considered and its next_run_at is recomputed from now. Hourly jobs do not want a burst.
+ *  - Busy is a skip, never a queue (`concurrency_policy: skip_if_active`, the only value).
+ *    RunManager's per-agent / per-project guards throw; the firing is recorded as `skipped_busy`.
  *  - An agent over its daily cap (max_daily_runs / max_daily_cost_usd, UTC day) is a
  *    skip too, recorded as `skipped_daily_cap`.
  *  - A spent hard-stop budget (global / agent / project, UTC month) is `skipped_budget`; the

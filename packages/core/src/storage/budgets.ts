@@ -1,5 +1,5 @@
 /**
- * SQLite persistence for monthly budgets (migration 17): the rows, the spend they are compared
+ * SQLite persistence for monthly budgets (migration 18): the rows, the spend they are compared
  * with (from `runs`) and the pause of the schedules of a scope whose hard stop was reached.
  */
 

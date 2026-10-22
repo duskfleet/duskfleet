@@ -215,6 +215,15 @@ Run now still fires a paused schedule.
 
 ## Policies
 
+Every schedule stores its two policies, so the behaviour below is explicit on the row
+(`concurrencyPolicy`, `catchUpPolicy` in `list_schedules`; set with `concurrency_policy` /
+`catch_up_policy` on `create_schedule` / `update_schedule`):
+
+| Field | Values | Default |
+|---|---|---|
+| `concurrency_policy` | `skip_if_active` (the only one) | `skip_if_active` |
+| `catch_up_policy` | `skip_missed`; `enqueue_missed_with_cap` is reserved and refused for now (planned: replay up to 3 missed ticks, never for sub-hourly schedules) | `skip_missed` |
+
 - A tick whose agent or project is still busy is recorded as `skipped_busy`, never queued (checked before any [gate](#gates-skip-cheaply-when-there-is-no-work)).
 - A tick whose agent reached its [daily cap](agents.md#daily-caps) (`max_daily_runs`,
   `max_daily_cost_usd`, UTC day) is recorded as `skipped_daily_cap`, also before any gate; a
@@ -223,7 +232,8 @@ Run now still fires a paused schedule.
   agent's or its project's) is recorded as `skipped_budget`, also before any gate, and every
   schedule of that budget's scope is paused: it stays paused after the month turns, until you
   resume it (`update_schedule enabled: true` or the dashboard).
-- Missed ticks (nobody running) are not caught up.
+- Missed ticks (nobody running) are not caught up (`skip_missed`): the schedule fires once when
+  it is next considered and its next tick is computed from then.
 - `scheduler.enabled: false` in `duskfleet.yaml` is the kill switch, re-read every tick.
 - A schedule whose last `scheduler.auto_pause_after` runs were all empty or needs review is
   [auto-paused](#auto-pause) instead of fired.

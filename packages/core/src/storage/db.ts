@@ -253,10 +253,20 @@ const MIGRATIONS: ReadonlyArray<{ version: number; sql: string; backfill?: (db: 
     `,
   },
   {
+    // Schedule policies made explicit: what a busy tick does (concurrency_policy, only
+    // skip_if_active) and what happens to ticks missed while nobody ticked (catch_up_policy,
+    // skip_missed; enqueue_missed_with_cap is reserved). Existing rows get today's behaviour.
+    version: 17,
+    sql: `
+      ALTER TABLE schedules ADD COLUMN concurrency_policy TEXT NOT NULL DEFAULT 'skip_if_active';
+      ALTER TABLE schedules ADD COLUMN catch_up_policy TEXT NOT NULL DEFAULT 'skip_missed';
+    `,
+  },
+  {
     // Monthly budgets per scope (global / agent / project), calendar month in UTC, compared with
     // the recorded cost of the scope's runs. One per scope: scope_id is NULL for global, so the
     // unique index is on COALESCE(scope_id, '').
-    version: 17,
+    version: 18,
     sql: `
       CREATE TABLE IF NOT EXISTS budgets (
         id           TEXT PRIMARY KEY,
