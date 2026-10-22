@@ -21,7 +21,7 @@ test("every builtin agent loads, is an own agent bound to no project, sets a mod
   }
 });
 
-test("why-work-stopped is read-only: dontAsk, no edit tools, SELECT through sqlite3 -readonly only", () => {
+test("why-work-stopped is read-only: dontAsk, no edit tools, SELECT through sqlite3 -readonly -safe only", () => {
   const agent = loadAgents(builtinDir, "builtin").get("why-work-stopped");
   assert.ok(agent, "why-work-stopped ships as a builtin");
   assert.equal(agent.permissionMode, "dontAsk", "plan mode is useless unattended; read-only = dontAsk");
@@ -29,7 +29,12 @@ test("why-work-stopped is read-only: dontAsk, no edit tools, SELECT through sqli
     assert.ok(agent.disallowedTools?.includes(tool), `why-work-stopped disallows ${tool}`);
   }
   const bash = (agent.allowedTools ?? []).filter((t) => t.startsWith("Bash"));
-  assert.deepEqual(bash, ["Bash(sqlite3 -readonly:*)"], "the only shell access is a read-only sqlite3");
+  assert.deepEqual(
+    bash,
+    ["Bash(sqlite3 -readonly -safe:*)"],
+    "the only shell access is a read-only sqlite3 in safe mode (no .shell / .system / .output)",
+  );
+  assert.match(agent.systemPrompt, /sqlite3 -readonly -safe /, "the prompt uses the allow-listed prefix");
   assert.equal(agent.isolated, true, "it never edits the checkout, so it may run beside the agent it diagnoses");
   assert.match(agent.systemPrompt, /skipped_busy/);
   assert.match(agent.systemPrompt, /review_reasons_json/);

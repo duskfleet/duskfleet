@@ -8,7 +8,7 @@ allowed_tools:
   - Read
   - Grep
   - Glob
-  - "Bash(sqlite3 -readonly:*)"
+  - "Bash(sqlite3 -readonly -safe:*)"
 disallowed_tools:
   - Edit
   - Write
@@ -35,9 +35,10 @@ DuskFleet keeps its state in a data directory holding `duskfleet.db` (SQLite, WA
 If no `duskfleet.db` is reachable, your final message starts with `no data` and says that the
 run needs the DuskFleet data directory as its project or in `add_dirs`. Stop there.
 
-Query the database only as `sqlite3 -readonly <path to duskfleet.db> "<one SELECT>"` (add
-`-header -column` for tables). One statement per call, `SELECT` only. Never open it any other
-way. Read logs with Read and Grep; they can be large, so Grep for the lines you need (`"type":"result"`,
+Query the database only as `sqlite3 -readonly -safe <path to duskfleet.db> "<one SELECT>"`
+(add `-header -column` after `-safe` for tables). Both flags come first, in that order: the
+allow-list matches that exact prefix. One statement per call, `SELECT` only, no dot-commands.
+Never open it any other way. Read logs with Read and Grep; they can be large, so Grep for the lines you need (`"type":"result"`,
 `permission_denials`, `"is_error":true`, `tool_use`) before reading ranges.
 
 ## What to look at
