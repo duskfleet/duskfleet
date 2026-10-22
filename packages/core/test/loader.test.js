@@ -7,7 +7,15 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { after, test } from "node:test";
-import { assertAgentKind, loadConfig, RunManager } from "@duskfleet/core";
+import { fileURLToPath } from "node:url";
+import {
+  agentToSpec,
+  assertAgentKind,
+  assertAgentSpecClean,
+  loadAgents,
+  loadConfig,
+  RunManager,
+} from "@duskfleet/core";
 
 const roots = [];
 after(() => {
@@ -78,6 +86,26 @@ test("a malformed agent file fails loadConfig by name, and a reload keeps the pr
   rmSync(bad);
   writeFileSync(path.join(dataDir, "agents", "added.md"), agentFile("new"));
   assert.deepEqual([...runs.reloadConfig().agents.keys()].sort(), ["added", "good"], "a fixed file loads again");
+});
+
+test("the builtin agents shipped in config/agents load, are general-purpose and fit for a public repo", () => {
+  const builtinDir = fileURLToPath(new URL("../../../config/agents", import.meta.url));
+  const agents = loadAgents(builtinDir, "builtin");
+  for (const agent of agents.values()) {
+    assert.equal(agent.project, undefined, `${agent.id}: builtins are not bound to a project`);
+    assert.equal(agent.claudeAgent, undefined, `${agent.id}: builtins are own agents`);
+    assert.ok(agent.model, `${agent.id}: builtins set a model (the CLI default can cost far more)`);
+    assert.ok(agent.systemPrompt.length > 0, `${agent.id}: own agents need a prompt`);
+    assert.doesNotThrow(() => assertAgentSpecClean(agentToSpec(agent)), agent.id);
+  }
+
+  const loop = agents.get("pr-check-loop");
+  assert.ok(loop, "pr-check-loop ships as a builtin");
+  for (const tool of ["Bash(gh pr checks:*)", "Bash(gh run view:*)", "Bash(gh run rerun:*)", "Bash(git push:*)"]) {
+    assert.ok(loop.allowedTools.includes(tool), `pr-check-loop allow-lists ${tool}`);
+  }
+  assert.match(loop.systemPrompt, /at most 5 iterations/);
+  assert.match(loop.systemPrompt, /--interval 30/);
 });
 
 test("assertAgentKind: own vs link combinations", () => {
