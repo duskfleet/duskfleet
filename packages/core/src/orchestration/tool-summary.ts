@@ -1,7 +1,4 @@
-/** Claude Code derives MCP tool prefixes from the server name: "claude.ai Figma" → "mcp__claude_ai_Figma". */
-export function mcpToolPrefix(serverName: string): string {
-  return "mcp__" + serverName.replace(/[^A-Za-z0-9_-]/g, "_");
-}
+import { allowListedMcpPrefixes, mcpToolPrefix } from "../execution/mcp.js";
 
 /**
  * Allow-listed MCP server prefixes that never showed up in a run: an `mcp__` entry of
@@ -18,15 +15,7 @@ export function allowListedMcpMissing(
 ): string[] {
   const mountedPrefixes = new Set(mounted.map((m) => mcpToolPrefix(m.name)));
   if (mountedPrefixes.size === 0) return [];
-  const allowListedPrefixes = new Set(
-    allowedTools
-      .filter((t) => t.startsWith("mcp__"))
-      .map((t) => {
-        const m = /^(mcp__[^_].*?)(?:__|$)/.exec(t);
-        return m ? m[1]! : t;
-      }),
-  );
-  return [...allowListedPrefixes].filter((p) => !mountedPrefixes.has(p) && !used.includes(p)).sort();
+  return allowListedMcpPrefixes(allowedTools).filter((p) => !mountedPrefixes.has(p) && !used.includes(p));
 }
 
 /**

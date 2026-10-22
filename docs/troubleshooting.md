@@ -3,6 +3,9 @@
 - **`doctor` cannot find `claude`**: set `claude.binary` in `duskfleet.yaml` or `CLAUDE_BIN`.
   GUI-launched hosts (Claude Desktop) start with a minimal `PATH` and do not expand `~` in
   `claude_desktop_config.json` ("No executable file at ~/..."): use absolute paths.
+- **Is `claude` logged in, will a hook block scheduled runs?** `npm run cli -- doctor --probe`
+  makes one real hello run on haiku (cents) and says which of the two it hit
+  ([CLI](cli.md)).
 - **A run never finishes although the agent already answered**: a user-level hook in
   `~/.claude/settings.json` (for example a `Stop` hook that shows a desktop notification) may be
   blocking in a headless context. Set `claude.setting_sources: [project, local]` so runs skip
@@ -16,7 +19,10 @@
 - **A completed run is "needs review"**: it hit a permission denial or an allow-listed MCP
   server never mounted. Open the run detail: the denied calls are listed with the command or
   file, and `mcp.allowListedMissing` names the server. Fix the agent's `allowed_tools` (or
-  `inherit_mcp`), not the prompt.
+  `inherit_mcp`), not the prompt. One exception: when the mounted list has no claude.ai
+  connector at all, Claude Code came up without them and the allow-list is fine. DuskFleet
+  restarts the process once when it sees that at init (note "restarted once" on the run); a run
+  flagged anyway had no luck twice. Run it again.
 - **The agent cannot run tests or use Bash**: `permission_mode: acceptEdits` does not allow
   Bash. Add entries such as `Bash(npm test:*)` to `allowed_tools`. The target project's own
   `.claude/settings` allow-lists are ignored in unattended runs.

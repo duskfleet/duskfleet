@@ -6,8 +6,10 @@
  * Behaviour is chosen by the prompt, read from stdin as the executor sends it (never argv):
  *   "ok"       -> tool_use + text + successful result (default)
  *   "error"    -> result with is_error=true
+ *   "auth"     -> like "error", with a logged-out result text (doctor --probe advice)
  *   "hang"     -> emits init then sleeps forever (for cancel / timeout tests)
  *   "crash"    -> exits 3 with no result line
+ *   "empty"    -> text only, no tool_use, then a successful result (a run that did no work)
  *   "subagent" -> delegates to a project agent "reviewer" (task_started, nested
  *                 messages with agent_id/parent_tool_use_id, task_notification,
  *                 hand-back tool_result), shapes from a real run of 2026-10-12; its result
@@ -31,6 +33,9 @@
  *   "deferred-mcp" -> like "ok", but the init reports `mcp_servers: []` and no mcp__ tool
  *                 (Claude Code 2.1.306 loads connectors as deferred tools, verified
  *                 2026-10-21) and one tool of one MCP server is still called
+ *   "mcp-missing-once" -> like "ok", but the first spawn's init lists no claude.ai connector
+ *                 (only the project's "duskfleet" server); later spawns list Figma
+ *   "mcp-missing" -> like "ok", every spawn's init lists no claude.ai connector
  *
  * With `--resume <id>` (the wrap-up pass) the prompt is DuskFleet's fixed text, so the
  * behaviour comes from FAKE_CLAUDE_RESUME instead: unset = a short successful pass that
@@ -54,12 +59,19 @@ const budgetIdx = args.indexOf("--max-budget-usd");
 const maxBudget = budgetIdx >= 0 ? Number(args[budgetIdx + 1]) : 5;
 
 if (args[0] === "--version") {
+  if (process.env.FAKE_CLAUDE_MODE === "no-version") {
+    process.stderr.write("fake: --version broken\n");
+    process.exit(1);
+  }
   process.stdout.write("9.9.9 (fake)\n");
   process.exit(0);
 }
 
 // Read after --version: execFile leaves stdin open, so reading it there would block forever.
-const prompt = readFileSync(0, "utf8").trim() || "ok";
+// FAKE_CLAUDE_MODE picks the behaviour when the prompt is fixed by DuskFleet (doctor --probe).
+// stdin is read either way so the executor's write never hits a closed pipe.
+const stdinPrompt = readFileSync(0, "utf8").trim() || "ok";
+const prompt = process.env.FAKE_CLAUDE_MODE ?? stdinPrompt;
 
 const out = (o) => process.stdout.write(JSON.stringify(o) + "\n");
 
@@ -83,13 +95,34 @@ const modelUsageEntry = (input, output, cacheRead, cacheCreation, costUSD) => ({
   maxOutputTokens: 128000,
 });
 
+/**
+ * "mcp-missing-once" / "mcp-missing": the init line lists no claude.ai connector (what Claude Code
+ * printed in 3 runs out of 12 on 2026-10-20), on the first spawn in this cwd only or on every spawn.
+ * `fake-claude-spawns` in the cwd counts the spawns so a test can see how many there were.
+ */
+let spawnNo = 1;
+if (prompt.startsWith("mcp-missing")) {
+  try {
+    spawnNo = Number(readFileSync("fake-claude-spawns", "utf8")) + 1;
+  } catch {
+    spawnNo = 1;
+  }
+  writeFileSync("fake-claude-spawns", String(spawnNo));
+}
+const connectorsLoaded = prompt === "mcp-missing" ? false : prompt === "mcp-missing-once" ? spawnNo > 1 : true;
+
 out({
   type: "system",
   subtype: "init",
   cwd: process.cwd(),
   session_id: sessionId,
   tools: ["Bash", "Edit", "Read"],
-  mcp_servers: prompt === "deferred-mcp" ? [] : [{ name: "claude.ai Figma", status: "connected" }],
+  mcp_servers:
+    prompt === "deferred-mcp"
+      ? []
+      : connectorsLoaded
+        ? [{ name: "claude.ai Figma", status: "connected" }]
+        : [{ name: "duskfleet", status: "connected", source: "project" }],
   model,
   permissionMode: "acceptEdits",
   claude_code_version: "9.9.9",
@@ -205,6 +238,34 @@ if (resumeIdx >= 0) {
   setInterval(() => {}, 1000); // keep alive until killed
 } else if (prompt === "crash") {
   process.exit(3);
+} else if (prompt === "empty") {
+  // Answers in text alone: no tool_use at all, then a normal successful result.
+  out({
+    type: "assistant",
+    message: {
+      model,
+      role: "assistant",
+      content: [{ type: "text", text: "I cannot proceed without more information." }],
+      usage: { input_tokens: 10, output_tokens: 9 },
+    },
+  });
+  out({
+    type: "result",
+    subtype: "success",
+    is_error: false,
+    duration_ms: 600,
+    duration_api_ms: 500,
+    num_turns: 1,
+    result: "I cannot proceed without more information.",
+    session_id: sessionId,
+    total_cost_usd: 0.004,
+    usage: { input_tokens: 10, output_tokens: 9, cache_creation_input_tokens: 0, cache_read_input_tokens: 1000 },
+    modelUsage: { [model]: modelUsageEntry(10, 9, 1000, 0, 0.004) },
+    permission_denials: [],
+    terminal_reason: "completed",
+    stop_reason: "end_turn",
+  });
+  process.exit(0);
 } else if (prompt === "subagent" || prompt === "subagent-hang") {
   const agentId = "a6b73b2ad14bf09f8";
   const agentCall = "toolu_agent_1";
@@ -448,9 +509,11 @@ if (resumeIdx >= 0) {
       usage: { input_tokens: 12, output_tokens: 8 },
     },
   });
-  const isError = prompt === "error";
+  const isError = prompt === "error" || prompt === "auth";
   const result = isError
-    ? "API Error: something went wrong"
+    ? prompt === "auth"
+      ? "Invalid API key · Please run /login"
+      : "API Error: something went wrong"
     : prompt === "env"
       ? `CLAUDE_BIN ${process.env.CLAUDE_BIN === undefined ? "unset" : "set"}`
       : prompt === "noop"

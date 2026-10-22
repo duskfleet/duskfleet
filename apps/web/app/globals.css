@@ -11,11 +11,13 @@
   --bg: #0b0d1a;
   --panel: #141729;
   --panel-2: #1b1f36;
+  --inverse: #f7f3ec; /* light surface: the cream tile behind the mark */
   --border: #2a2f4a;
   --border-strong: #3b4166;
   --text: #f3ede2;
   --muted: #a39db3;
   --faint: #6e6a85;
+  --on-accent: #1b1a2e; /* text and ink on brand fills (amber, sunset; not small text on coral) */
 
   /* semantic: accent = sunset; status = running sky, clean green, review amber, failed coral */
   --accent: var(--sunset);
@@ -1862,6 +1864,7 @@ summary:focus-visible {
 }
 .sq.busy,
 .sq.capped,
+.sq.budget,
 .sq.skipped {
   border-color: var(--faint);
 }

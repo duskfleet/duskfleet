@@ -126,6 +126,21 @@ test("schedules over MCP: create, list, update, run now, delete; validation erro
     assert.equal(created.schedule.effectiveProjectId, "demo", "effective project = the agent's");
     assert.ok(created.schedule.nextRunAt, "next_run_at computed");
     assert.equal(created.schedule.enabled, true);
+    assert.equal(created.schedule.concurrencyPolicy, "skip_if_active");
+    assert.equal(created.schedule.catchUpPolicy, "skip_missed");
+    fails(
+      await client.callTool({
+        name: "create_schedule",
+        arguments: {
+          name: "catch up",
+          agent_id: "coder",
+          prompt: "ok",
+          cron: "0 * * * *",
+          catch_up_policy: "enqueue_missed_with_cap",
+        },
+      }),
+      /not implemented yet/,
+    );
 
     fails(
       await client.callTool({
@@ -921,6 +936,35 @@ test("auto-pause: N ended runs in a row that were empty or needs review pause th
     assert.equal(autoPauseReason(stub([bad, bad]), sched, 3), null, "fewer ended runs than the threshold");
     assert.equal(autoPauseReason(stub([bad, bad, bad]), sched, 0), null);
     assert.match(autoPauseReason(stub([bad, bad, bad]), sched, 3), /3 needed review/);
+    // An empty run is needs review too (empty_run): it counts as empty, never twice.
+    const emptyReview = { id: "z", empty: true, needsReview: true };
+    assert.match(
+      autoPauseReason(stub([emptyReview, bad, emptyReview]), sched, 3),
+      /\(2 completed with 0 tool calls, 1 needed review\)/,
+    );
+  } finally {
+    await t.close(root);
+  }
+});
+
+test("auto-pause: three real empty runs (empty_run) pause as 'completed with 0 tool calls', not 'needed review'", async () => {
+  const { root, configDir } = makeRoot();
+  writeFileSync(
+    path.join(configDir, "duskfleet.yaml"),
+    `data_dir: ../data\ndefault_agent: coder\nscheduler:\n  auto_pause_after: 3\nclaude:\n  binary: "${fakeBinary}"\n  default_timeout_minutes: 0.05\n`,
+  );
+  const t = makeScheduler(configDir);
+  try {
+    const s = t.scheduler.create({ name: "silent", agentId: "coder", prompt: "empty", cron: "* * * * *" });
+    for (let i = 0; i < 3; i++) {
+      const run = await t.fireAndWait(s.id);
+      assert.deepEqual(run.reviewReasons, ["empty_run"]);
+    }
+    t.due(s.id);
+    await t.tickAll();
+    const paused = t.repo.get(s.id);
+    assert.equal(paused.lastOutcome, "auto_paused");
+    assert.match(paused.pausedReason, /the last 3 runs did no useful work \(3 completed with 0 tool calls\)/);
   } finally {
     await t.close(root);
   }
@@ -969,6 +1013,11 @@ test("idle cost: 7-day ticks, fires, no-op runs by marker and what they cost, pe
     // A completed run that needs review is blocked, not idle, even when it says "Nothing to do".
     t.scheduler.update(s.id, { noopPattern: null });
     const noop = t.runs.listRuns({ status: "completed" }).find((r) => r.resultText?.startsWith("Nothing to do"));
+    // empty_run alone does not exclude it: a text-only "nothing to do" is the typical no-op.
+    t.db.prepare("UPDATE runs SET review_reasons_json = ? WHERE id = ?").run('["empty_run"]', noop.id);
+    assert.equal(t.scheduler.idleStats(t.repo.get(s.id)).noopRuns, 2, "an empty_run-only run is still a no-op");
+    t.db.prepare("UPDATE runs SET review_reasons_json = ? WHERE id = ?").run('["empty_run","mcp_missing"]', noop.id);
+    assert.equal(t.scheduler.idleStats(t.repo.get(s.id)).noopRuns, 1, "empty_run with another reason is blocked");
     t.db.prepare("UPDATE runs SET review_reasons_json = ? WHERE id = ?").run('["permission_denial"]', noop.id);
     assert.equal(t.scheduler.idleStats(t.repo.get(s.id)).noopRuns, 1, "the run that needs review is not a no-op");
     // A stored pattern that no longer parses degrades that row only, never the whole list.
@@ -982,6 +1031,50 @@ test("idle cost: 7-day ticks, fires, no-op runs by marker and what they cost, pe
     assert.equal(t.scheduler.idleStats(t.repo.get(s.id), 0).runs, 0);
     const hung = t.runs.listRuns({ status: "running" })[0];
     if (hung) t.runs.cancelRun(hung.id);
+  } finally {
+    await t.close(root);
+  }
+});
+
+test("policy enums: stored defaults, explicit values kept by edits, the reserved catch-up value and unknowns refused; missed ticks fire once", async () => {
+  const { root, configDir } = makeRoot();
+  const t = makeScheduler(configDir);
+  try {
+    const s = t.scheduler.create({ name: "policies", agentId: "coder", prompt: "ok", cron: "0 * * * *" });
+    assert.equal(s.concurrencyPolicy, "skip_if_active");
+    assert.equal(s.catchUpPolicy, "skip_missed");
+    const row = t.db.prepare("SELECT concurrency_policy, catch_up_policy FROM schedules WHERE id = ?").get(s.id);
+    assert.deepEqual({ ...row }, { concurrency_policy: "skip_if_active", catch_up_policy: "skip_missed" });
+
+    const explicit = t.scheduler.update(s.id, { concurrencyPolicy: "skip_if_active", catchUpPolicy: "skip_missed" });
+    assert.equal(explicit.catchUpPolicy, "skip_missed");
+    assert.equal(t.scheduler.update(s.id, { prompt: "ok again" }).catchUpPolicy, "skip_missed", "an edit keeps it");
+
+    assert.throws(
+      () => t.scheduler.update(s.id, { catchUpPolicy: "enqueue_missed_with_cap" }),
+      /enqueue_missed_with_cap is not implemented yet .*up to 3 missed ticks, never for sub-hourly/,
+    );
+    assert.throws(
+      () =>
+        t.scheduler.create({ name: "bad", agentId: "coder", prompt: "ok", cron: "0 * * * *", catchUpPolicy: "replay" }),
+      /catch_up_policy must be one of skip_missed, enqueue_missed_with_cap/,
+    );
+    assert.throws(
+      () => t.scheduler.update(s.id, { concurrencyPolicy: "queue" }),
+      /concurrency_policy must be one of skip_if_active/,
+    );
+    assert.equal(t.repo.get(s.id).catchUpPolicy, "skip_missed", "a refused edit writes nothing");
+
+    // skip_missed: three hourly ticks missed while nobody ticked give one fire, and the next
+    // tick is computed from now, not from the missed ones.
+    t.repo.update(s.id, { nextRunAt: new Date(Date.now() - 3 * 3600_000 - 1000).toISOString() });
+    await t.tickAll();
+    await t.tickAll();
+    const after = t.repo.get(s.id);
+    assert.equal(after.fires, 1);
+    assert.equal(t.scheduler.firings(s.id).length, 1);
+    assert.ok(Date.parse(after.nextRunAt) > Date.now(), "next_run_at moved past now");
+    await t.runs.waitForRun(after.lastRunId, 15_000);
   } finally {
     await t.close(root);
   }

@@ -126,6 +126,49 @@ export interface Run {
    * cost is what Claude Code reports, not billed). Null until the run spawns, and for older rows.
    */
   billingType: BillingType | null;
+  /**
+   * Eval bundle (migration 19), with `modelUsed`: what exactly ran, so runs compare like with like.
+   * `agentHash` is `agentDefinitionHash` at start time (spec + project agent file of a link);
+   * `claudeCodeVersion` is the `claude_code_version` of the init line, null until it arrives.
+   * Both null for older rows.
+   */
+  agentHash: string | null;
+  claudeCodeVersion: string | null;
+  /**
+   * When the run last produced output (any stream-json event; migration 20), refreshed by
+   * `RunManager` at most every `LAST_EVENT_WRITE_MS`. Null before the first event and for
+   * older rows. Read through `runSilence`.
+   */
+  lastEventAt?: string | null;
+}
+
+/** Minimum gap between two writes of `last_event_at` for one run (one UPDATE per event would be wasteful). */
+export const LAST_EVENT_WRITE_MS = 15_000;
+/** A running run with no output for this long is flagged "suspicious" (amber). */
+export const SILENT_SUSPICIOUS_MS = 5 * 60_000;
+/** ... and "critical" (red) after this long. Informational only: nothing kills the run. */
+export const SILENT_CRITICAL_MS = 15 * 60_000;
+
+export interface RunSilence {
+  level: "suspicious" | "critical";
+  /** Time since the last output (or since the start, before the first event). */
+  silentMs: number;
+}
+
+/**
+ * How long a running run has been silent, when that is long enough to flag; null otherwise
+ * and for every run that is not running. Before the first event the start time counts.
+ */
+export function runSilence(
+  run: Pick<Run, "status" | "startedAt" | "lastEventAt">,
+  nowMs: number = Date.now(),
+): RunSilence | null {
+  if (run.status !== "running") return null;
+  const since = run.lastEventAt ?? run.startedAt;
+  if (!since) return null;
+  const silentMs = nowMs - new Date(since).getTime();
+  if (!(silentMs >= SILENT_SUSPICIOUS_MS)) return null;
+  return { level: silentMs >= SILENT_CRITICAL_MS ? "critical" : "suspicious", silentMs };
 }
 
 export type RunKind = "run" | "gate";
@@ -189,7 +232,8 @@ export type ReviewReason =
   | "failed"
   | "permission_denied"
   | "context_exhausted"
-  | "mcp_missing";
+  | "mcp_missing"
+  | "empty_run";
 
 export const REVIEW_REASON_LABELS: Record<ReviewReason, string> = {
   budget_exhausted: "budget exhausted",
@@ -200,6 +244,7 @@ export const REVIEW_REASON_LABELS: Record<ReviewReason, string> = {
   permission_denied: "permission denied",
   context_exhausted: "context exhausted",
   mcp_missing: "allow-listed MCP server not mounted",
+  empty_run: "no work done",
 };
 
 /** The run stopped because `--max-budget-usd` was reached (`terminal_reason: budget_exhausted`, `subtype: error_max_budget_usd`; verified 2026-10-14 on CLI 2.1.299). */
@@ -224,7 +269,11 @@ export function isOrphaned(run: Pick<Run, "error">): boolean {
 type ReviewInput = Pick<
   Run,
   "status" | "terminationReason" | "error" | "exitCode" | "humanIntervention" | "permissionDenials" | "contextExhausted"
-> & { mcp?: Pick<RunMcpInfo, "allowListedMissing"> | null };
+> & {
+  mcp?: Pick<RunMcpInfo, "allowListedMissing"> | null;
+  /** Main session plus wrap-up. Absent or null = unknown (rows backfilled before `empty_run`): never empty. */
+  toolCalls?: number | null;
+};
 
 /** The rule. Call it on a terminal run; the stored `Run.reviewReasons` is what readers use. */
 export function reviewReasons(run: ReviewInput): ReviewReason[] {
@@ -240,6 +289,9 @@ export function reviewReasons(run: ReviewInput): ReviewReason[] {
   if (run.humanIntervention || (run.permissionDenials ?? 0) > 0) reasons.push("permission_denied");
   if (run.contextExhausted) reasons.push("context_exhausted");
   if ((run.mcp?.allowListedMissing ?? []).length > 0) reasons.push("mcp_missing");
+  // Completed without a single tool call: the same "empty run" signal as the schedule auto-pause.
+  // Structured only; the result prose is never read (it may claim work it did not do, or the reverse).
+  if (run.status === "completed" && run.toolCalls === 0) reasons.push("empty_run");
   return reasons;
 }
 
@@ -286,6 +338,9 @@ export function summarizeRun(run: Run) {
     projectId: run.projectId,
     prompt: run.prompt.length > 140 ? run.prompt.slice(0, 137) + "..." : run.prompt,
     model: run.modelUsed ?? run.modelRequested,
+    /** Eval bundle: the agent definition and Claude Code version this run used; null when unknown. */
+    agentHash: run.agentHash,
+    claudeCodeVersion: run.claudeCodeVersion,
     claudeSessionId: run.claudeSessionId,
     createdAt: run.createdAt,
     durationMs: run.durationMs,

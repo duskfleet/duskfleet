@@ -27,6 +27,13 @@ export interface ExecutionRequest {
   maxBudgetUsd?: number;
   /** Drop --strict-mcp-config so the run sees the user's MCP servers (claude.ai connectors, .mcp.json). */
   inheritMcp?: boolean;
+  /**
+   * Server prefixes (`mcp__claude_ai_Figma`) the run needs. When the child's `init` line reports
+   * no server of a prefix, the process is ended and started again, once: Claude Code sometimes
+   * comes up without any claude.ai connector (3 runs out of 12 on 2026-10-20), and `init` is
+   * printed before the first model turn, so the restart costs seconds, not dollars.
+   */
+  requiredMcpServers?: string[];
   /** Passed as --add-dir. */
   addDirs?: string[];
   /** Passed as --agent: adopt a project-defined Claude Code agent. */
@@ -61,6 +68,12 @@ export type ExecutionEvent =
    * after the kill grace). `childAlive` is false when only descendants were left.
    */
   | { type: "grace_kill"; pid: number | null; afterMs: number; childAlive: boolean }
+  /**
+   * The first process reported `init` without a required MCP server (`missing`, prefixes;
+   * `mounted`, the names it did report) and was replaced by a fresh one (`pid`, `sessionId`).
+   * At most once per run; the second process is kept whatever its init says.
+   */
+  | { type: "mcp_restart"; missing: string[]; mounted: string[]; pid: number | null; sessionId: string }
   | { type: "parse_error"; line: string };
 
 export type SubagentStatus = "running" | "completed" | "failed" | "interrupted";

@@ -97,7 +97,8 @@ npm workspaces, one `config/` and one SQLite database shared by three deliverabl
   `app/layout.tsx`). A completed run that hit a permission denial is "needs review"
   (amber), never plain green. One rule decides needs-review (`reviewReasons` in
   `core/src/observability/run.ts`: budget exhausted, timed out, orphaned, non-zero exit,
-  failed, denial, context, MCP mismatch; never for cancelled or running). `RunManager.transition`
+  failed, denial, context, MCP mismatch, empty run = completed with 0 tool calls; never for
+  cancelled or running). `RunManager.transition`
   is its only caller: it stores the result in `review_reasons_json` (migration 9) and every
   reader (`summarizeRun`, badges, `NEEDS_REVIEW_SQL`, `attachLastRun` for schedule rows) uses
   the stored `run.reviewReasons`, never the rule. Orphans are detected with `isOrphaned`, not by
@@ -145,6 +146,9 @@ npm workspaces, one `config/` and one SQLite database shared by three deliverabl
   `skipped_busy` on `instanceof BusyError`, never by matching text; busy means "skip this tick".
   Daily caps (`max_daily_runs`, `max_daily_cost_usd`, UTC day, counted from `runs`) are checked
   there too but throw `DailyCapError` (`orchestration/daily-cap.ts`, not a BusyError): `skipped_daily_cap`.
+  Monthly budgets (`budgets` table, migration 18; scope global / agent / project, UTC month) come
+  last: a spent `hard_stop` one throws `BudgetError` (`orchestration/budget.ts`), pauses the
+  scope's schedules and the tick is `skipped_budget`; nothing resumes them automatically.
 - **Subagents are rows, not prose** (`run_agents`, migration 5): the parser folds Claude Code's
   `task_started` / `task_notification` lines and the `agent_id` of nested messages into one
   `SubagentRecord` per Agent call; `RunManager` writes them on `subagent_start` / `subagent_end`
@@ -157,6 +161,10 @@ npm workspaces, one `config/` and one SQLite database shared by three deliverabl
   `inherit_mcp: true`; then they get the user's claude.ai connectors with tool prefixes
   `mcp__claude_ai_Atlassian_Rovo__*`, `mcp__claude_ai_Figma__*` (not the `mcp__plugin_*`
   names interactive sessions may show). Allow-list by server: `mcp__claude_ai_Figma`.
+  Connectors load at start or not at all (seen missing in 3 runs out of 12 on 2026-10-20): the
+  executor compares the `init` line with the allow-listed prefixes (`requiredMcpServers`,
+  `execution/mcp.ts`) and restarts the child once, with a new session id, before the first
+  model turn (`mcp_restart` event, `#restart` log marker). Never more than once.
 
 - **Unattended runs get no permission prompts.** `permission_mode: acceptEdits` does
   not allow Bash; an agent that must run tests needs `allowed_tools` such as

@@ -3,12 +3,15 @@
  * (kill switch), fire every due schedule through RunManager, advance next_run_at.
  *
  * Policies, deliberately simple:
- *  - No catch-up. A schedule that was due while nobody was running is not fired
- *    late; its next_run_at is recomputed from now. Hourly jobs do not want a burst.
- *  - Busy is a skip, never a queue. RunManager's per-agent / per-project guards
- *    throw; the firing is recorded as `skipped_busy`.
+ *  - No catch-up (`catch_up_policy: skip_missed`, the only implemented value). Ticks
+ *    missed while nobody was running are not replayed: the schedule fires once when
+ *    next considered and its next_run_at is recomputed from now. Hourly jobs do not want a burst.
+ *  - Busy is a skip, never a queue (`concurrency_policy: skip_if_active`, the only value).
+ *    RunManager's per-agent / per-project guards throw; the firing is recorded as `skipped_busy`.
  *  - An agent over its daily cap (max_daily_runs / max_daily_cost_usd, UTC day) is a
  *    skip too, recorded as `skipped_daily_cap`.
+ *  - A spent hard-stop budget (global / agent / project, UTC month) is `skipped_budget`; the
+ *    refusal pauses every schedule of that scope (RunManager), so they stay off until resumed.
  *  - Only one process ticks: the SQLite lease (see ScheduleRepository) is renewed
  *    every tick and expires after 3 ticks without renewal. The `serve` role takes
  *    it from any other holder (`mcp`, `cli`, role-less) on its first tick: the
@@ -26,6 +29,7 @@
  */
 
 import type { Run } from "../observability/run.js";
+import { BudgetError } from "../orchestration/budget.js";
 import { BusyError } from "../orchestration/busy.js";
 import { DailyCapError } from "../orchestration/daily-cap.js";
 import type { RunManager } from "../orchestration/run-manager.js";
@@ -329,7 +333,7 @@ export class Scheduler {
           // deleted, project gone, already resumed by another process) would come back on every
           // tick, so this fire starts fresh instead and last_run_id moves past the failed run.
           // A daily cap is a skip too: starting fresh would hit the same cap.
-          if (err instanceof BusyError || err instanceof DailyCapError) throw err;
+          if (err instanceof BusyError || err instanceof DailyCapError || err instanceof BudgetError) throw err;
           const message = err instanceof Error ? err.message : String(err);
           resumeError = message;
           log.warn("resume refused; starting fresh", { schedule: s.name, resumedFrom: resumable.id, message });
@@ -343,6 +347,8 @@ export class Scheduler {
         if (busy) throw new BusyError(busy);
         const capped = this.runs.dailyCapReason(s.agentId);
         if (capped) throw new DailyCapError(capped);
+        const overBudget = this.runs.budgetReason({ agentId: s.agentId, projectId: s.projectId });
+        if (overBudget) throw new BudgetError(overBudget);
         // Claim the tick before the gate runs: next_run_at moves on now, so neither a later tick
         // nor another process that takes the lease during a long gate sees it as still due.
         // A scheduled fire was already claimed by dispatch (claimDue); a manual one is claimed here.
@@ -372,6 +378,7 @@ export class Scheduler {
         }
         if (verdict.kind === "busy") throw new BusyError(verdict.reason);
         if (verdict.kind === "daily_cap") throw new DailyCapError(verdict.reason);
+        if (verdict.kind === "budget") throw new BudgetError(verdict.reason);
         if (verdict.kind === "error") throw new Error(`gate: ${verdict.reason}`);
       }
       const input: Parameters<RunManager["startRun"]>[0] = { prompt: s.prompt, agentId: s.agentId, scheduleId: s.id };
@@ -392,8 +399,16 @@ export class Scheduler {
       const message = err instanceof Error ? err.message : String(err);
       // Structured, never matched on the text: a gate's stderr may well say "project busy".
       const outcome: ScheduleOutcome =
-        err instanceof BusyError ? "skipped_busy" : err instanceof DailyCapError ? "skipped_daily_cap" : "error";
-      this.repo.recordFiring(s.id, outcome, null, message, nextRunAt, gateSpend);
+        err instanceof BusyError
+          ? "skipped_busy"
+          : err instanceof DailyCapError
+            ? "skipped_daily_cap"
+            : err instanceof BudgetError
+              ? "skipped_budget"
+              : "error";
+      // A budget refusal has just paused the schedule: keep next_run_at cleared, as a pause does.
+      const next = outcome === "skipped_budget" && !this.repo.get(s.id)?.enabled ? null : nextRunAt;
+      this.repo.recordFiring(s.id, outcome, null, message, next, gateSpend);
       (outcome === "error" ? log.warn : log.info)("schedule not started", { schedule: s.name, outcome, message });
       return { outcome, runId: null, error: message };
     }

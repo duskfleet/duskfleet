@@ -1,4 +1,6 @@
 import {
+  CATCH_UP_POLICIES,
+  CONCURRENCY_POLICIES,
   describeCron,
   type IdleStats,
   ON_FAILURE_POLICIES,
@@ -119,6 +121,18 @@ const scheduleFields = {
       'What this schedule\'s agent says when it finds no work, for the idle-cost stats (idle7d): a regex literal "/.../flags" or a plain case-insensitive regex. Tested against the start of the final message (first 2000 chars). Default scheduler.noop_pattern ("/^\\s*(nothing to do|no .* in ready)/i")',
     ),
   gate: gateSchema.optional(),
+  concurrency_policy: z
+    .enum(CONCURRENCY_POLICIES)
+    .optional()
+    .describe(
+      "What a tick does while the agent or project is busy. skip_if_active (default, only value): record skipped_busy, never queue",
+    ),
+  catch_up_policy: z
+    .enum(CATCH_UP_POLICIES)
+    .optional()
+    .describe(
+      "Ticks missed while no process ticked. skip_missed (default): fire once when next considered, drop the rest. enqueue_missed_with_cap is reserved (replay up to 3, never sub-hourly) and refused until implemented",
+    ),
 };
 
 export function registerScheduleTools(server: McpServer, ctx: ToolContext): void {
@@ -127,7 +141,7 @@ export function registerScheduleTools(server: McpServer, ctx: ToolContext): void
     {
       title: "List schedules",
       description:
-        "List cron schedules with next/last firing, outcome of the last tick (started | resumed | skipped_busy | skipped_daily_cap | skipped_gate | skipped_disabled | auto_paused | error), pausedReason (why the scheduler paused it on its own after scheduler.auto_pause_after empty or needs-review runs in a row; null otherwise, cleared on resume), gate (the cheap check before each run, or null), lastRun (status, needsReview and reviewReasons of the run it last started: a schedule whose run failed or ran out of budget shows it here), " +
+        "List cron schedules with next/last firing, outcome of the last tick (started | resumed | skipped_busy | skipped_daily_cap | skipped_budget | skipped_gate | skipped_disabled | auto_paused | error), pausedReason (why the scheduler paused it on its own after scheduler.auto_pause_after empty or needs-review runs in a row; null otherwise, cleared on resume), gate (the cheap check before each run, or null), lastRun (status, needsReview and reviewReasons of the run it last started: a schedule whose run failed or ran out of budget shows it here), " +
         "effectiveOnFailure (none | resume_once: the schedule's own on_failure, else the agent's) with onFailureSource, willResumeRunId (the budget_exhausted / timed_out run the next fire resumes instead of starting fresh, or null), effectiveProjectId (the project it runs on: projectId, else the agent's project; projectId stays the stored value) and scheduler status " +
         "(kill switch, which process holds the lease). A busy agent or project makes a tick skip, never queue.",
       inputSchema: {},
@@ -165,6 +179,8 @@ export function registerScheduleTools(server: McpServer, ctx: ToolContext): void
         if (args.resume_budget_usd !== undefined) input.resumeBudgetUsd = args.resume_budget_usd;
         if (args.noop_pattern !== undefined) input.noopPattern = args.noop_pattern;
         if (args.gate !== undefined) input.gate = toGate(args.gate);
+        if (args.concurrency_policy !== undefined) input.concurrencyPolicy = args.concurrency_policy;
+        if (args.catch_up_policy !== undefined) input.catchUpPolicy = args.catch_up_policy;
         return jsonResult({ created: true, schedule: present(ctx.scheduler.withLastRun(ctx.scheduler.create(input))) });
       } catch (err) {
         return errorResult(err);
@@ -197,6 +213,8 @@ export function registerScheduleTools(server: McpServer, ctx: ToolContext): void
           .describe("Remove the schedule's noop_pattern: scheduler.noop_pattern applies again"),
         gate: scheduleFields.gate,
         clear_gate: z.boolean().optional().describe("Remove the gate: every tick starts the real run again"),
+        concurrency_policy: scheduleFields.concurrency_policy,
+        catch_up_policy: scheduleFields.catch_up_policy,
         clear_model: z.boolean().optional().describe("Remove the model override"),
         clear_on_failure: z
           .boolean()
@@ -232,6 +250,8 @@ export function registerScheduleTools(server: McpServer, ctx: ToolContext): void
         if (args.model !== undefined) patch.model = args.model;
         if (args.clear_model) patch.model = null;
         if (args.enabled !== undefined) patch.enabled = args.enabled;
+        if (args.concurrency_policy !== undefined) patch.concurrencyPolicy = args.concurrency_policy;
+        if (args.catch_up_policy !== undefined) patch.catchUpPolicy = args.catch_up_policy;
         return jsonResult({
           updated: true,
           schedule: present(ctx.scheduler.withLastRun(ctx.scheduler.update(args.id, patch))),
