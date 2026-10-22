@@ -16,7 +16,10 @@
 - **A completed run is "needs review"**: it hit a permission denial or an allow-listed MCP
   server never mounted. Open the run detail: the denied calls are listed with the command or
   file, and `mcp.allowListedMissing` names the server. Fix the agent's `allowed_tools` (or
-  `inherit_mcp`), not the prompt.
+  `inherit_mcp`), not the prompt. One exception: when the mounted list has no claude.ai
+  connector at all, Claude Code came up without them and the allow-list is fine. DuskFleet
+  restarts the process once when it sees that at init (note "restarted once" on the run); a run
+  flagged anyway had no luck twice. Run it again.
 - **The agent cannot run tests or use Bash**: `permission_mode: acceptEdits` does not allow
   Bash. Add entries such as `Bash(npm test:*)` to `allowed_tools`. The target project's own
   `.claude/settings` allow-lists are ignored in unattended runs.
