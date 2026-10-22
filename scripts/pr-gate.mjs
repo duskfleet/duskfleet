@@ -31,7 +31,7 @@
 //
 //   - PR `flow: in-progress`, no commit on the head since the label  → `flow: changes-requested`
 //   - PR `flow: in-review`, no `VERDICT:` for its head since the label → `flow: needs-review`
-//     (a verdict that was posted but never labelled gets its label instead)
+//     (a verdict that was posted but never labelled gets its label instead, once stale too)
 //   - issue `flow: in-progress` with no open PR closing it            → `flow: ready`
 //
 // each with a `[pr-gate]` comment naming the lock and its age. A new pickup is a new label
@@ -198,17 +198,20 @@ function expirePrLock(pr, labels) {
     if (!isStale(activity)) return "locked";
     why = `no commit on ${pr.headRefName} for ${hours(activity)} h`;
   } else {
+    // Age first: a live reviewer posts its VERDICT comment seconds before its own label swap,
+    // and the gate must not race it.
+    if (!isStale(since)) return "locked";
     // A VERDICT for the current head posted after the label: the review ended, only the
-    // hand-off label is missing. Finish it instead of asking for a second review.
+    // hand-off label is missing. Finish it instead of asking for a second review. The
+    // VERDICT line must start a line, so a comment quoting it mid-sentence does not count.
     const verdict = issueComments(pr.number)
       .filter((c) => Date.parse(c.created_at) >= since && c.body?.includes(pr.headRefOid))
-      .map((c) => /VERDICT:\s*(approve|changes)\b/i.exec(c.body)?.[1]?.toLowerCase())
+      .map((c) => /^VERDICT:\s*(approve|changes)\b/im.exec(c.body)?.[1]?.toLowerCase())
       .findLast(Boolean);
     if (verdict) {
       target = VERDICT_LABELS[verdict];
       why = `VERDICT: ${verdict} for head ${pr.headRefOid.slice(0, 7)} was posted but never labelled`;
     } else {
-      if (!isStale(since)) return "locked";
       why = `no verdict for ${hours(since)} h`;
     }
   }

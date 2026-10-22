@@ -182,7 +182,9 @@ PR:     flow: needs-review ──► flow: in-review ──► flow: changes-req
   it was set is an orphan and goes back to the state it was taken from: a PR `in-progress` with
   no commit on its head since the label to `flow: changes-requested`; a PR `in-review` with no
   `VERDICT:` for its head since the label to `flow: needs-review` (a verdict posted but never
-  labelled gets its label instead, no second review); an issue `in-progress` with no open PR
+  labelled gets its label instead, no second review, but only once the lock is that old too, so
+  a live reviewer between its comment and its label swap is never raced; the verdict counts
+  only at the start of a line); an issue `in-progress` with no open PR
   closing it to `flow: ready`. Each gets a `[pr-gate]` comment naming the lock and its age. A
   pickup is a new label event, so the clock restarts and a run still at work is never
   interrupted. Agents keep their side of it: swap the label first, push or post before the
