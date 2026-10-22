@@ -59,6 +59,11 @@ export default async function RunPage({
   const duration = live ? elapsedSince(run.startedAt) : run.durationMs;
   const denials = run.permissionDenials ?? 0;
   const mcpMissing = run.mcp?.allowListedMissing ?? [];
+  // Every missing entry is a claude.ai connector and none mounted: the connectors did not load, not a wrong name.
+  const connectorsNeverLoaded =
+    mcpMissing.length > 0 &&
+    mcpMissing.every((p) => p.startsWith("mcp__claude_ai_")) &&
+    !(run.mcp?.mounted ?? []).some((m) => m.name.startsWith("claude.ai "));
   const wrapUp = wrapUpPhase(run);
   const mainPhase = run.phases.find((p) => p.phase === "main") ?? null;
   const reasons = run.reviewReasons; // stored by RunManager when the run ended
@@ -277,8 +282,19 @@ export default async function RunPage({
               ))}
               . Mounted in this run:{" "}
               {run.mcp.mounted.length ? run.mcp.mounted.map((m) => m.name).join(", ") : "none reported"}
-              {run.mcp.used.length ? <>; used: {run.mcp.used.join(", ")}</> : null}. The names differ (e.g.{" "}
-              <code>mcp__plugin_*</code> vs <code>mcp__claude_ai_*</code>); fix the agent's <code>allowed_tools</code>.
+              {run.mcp.used.length ? <>; used: {run.mcp.used.join(", ")}</> : null}.{" "}
+              {connectorsNeverLoaded ? (
+                <>
+                  No claude.ai connector mounted at all: Claude Code came up without them (it happens; DuskFleet
+                  restarts the process once when the init line shows it, and this run still had none). The allow-list is
+                  fine; run it again.
+                </>
+              ) : (
+                <>
+                  The names differ (e.g. <code>mcp__plugin_*</code> vs <code>mcp__claude_ai_*</code>); fix the agent's{" "}
+                  <code>allowed_tools</code>.
+                </>
+              )}
             </div>
           </div>
         )}
