@@ -1,4 +1,12 @@
-import { FAILURE_LABELS, REVIEW_REASON_LABELS, type Run, type RunEvent, wrapUpPhase } from "@duskfleet/core";
+import {
+  type DiffFileStatus,
+  FAILURE_LABELS,
+  REVIEW_REASON_LABELS,
+  type Run,
+  type RunDiff,
+  type RunEvent,
+  wrapUpPhase,
+} from "@duskfleet/core";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { AutoRefresh } from "@/components/AutoRefresh";
@@ -45,7 +53,7 @@ export default async function RunPage({
   const showAll = (await searchParams).events === "all";
   const data = getRun(id);
   if (!data) notFound();
-  const { run, events, resumedFrom, resumedBy } = data;
+  const { run, events, diff, resumedFrom, resumedBy } = data;
   const home = homeDir();
   const live = run.status === "running" || run.status === "pending";
   const duration = live ? elapsedSince(run.startedAt) : run.durationMs;
@@ -360,6 +368,8 @@ export default async function RunPage({
             </div>
           )}
 
+          {diff && <Changes run={run} diff={diff} />}
+
           <h2 id="timeline">
             Timeline <span className="count">{fmtInt(rows.length)} events</span>
           </h2>
@@ -468,6 +478,87 @@ function Fact({ label, value, title, tone }: { label: string; value: string; tit
 }
 
 type Tone = "ok" | "warn" | "bad";
+
+// ---- changes ------------------------------------------------------------------
+
+const DIFF_STATUS_MARK: Record<DiffFileStatus, string> = {
+  added: "A",
+  modified: "M",
+  deleted: "D",
+  renamed: "R",
+  copied: "C",
+  type_changed: "T",
+  untracked: "?",
+};
+
+/** What the run changed in its git checkout: one line per file, totals, a link to the patch. */
+function Changes({ run, diff }: { run: Run; diff: RunDiff }) {
+  const n = diff.filesChanged;
+  return (
+    <>
+      <h2 id="changes">
+        Changes{" "}
+        <span className="count">
+          {n === 0
+            ? "no files changed"
+            : `${fmtInt(n)} file${n === 1 ? "" : "s"} · +${fmtInt(diff.additions)}${diff.totalsPartial ? "+" : ""} −${fmtInt(diff.deletions)}`}
+        </span>
+      </h2>
+      {n > 0 && (
+        <ul className="changes">
+          {diff.changedFiles.map((f) => (
+            <li key={`${f.status}:${f.path}`}>
+              <span className="st" title={f.status.replace("_", " ")}>
+                {DIFF_STATUS_MARK[f.status] ?? "M"}
+              </span>
+              <span className="file">{f.oldPath ? `${f.oldPath} → ${f.path}` : f.path}</span>
+              <span className="lines">
+                {f.uncounted ? (
+                  <span className="muted" title="past the line-counting caps">
+                    not counted
+                  </span>
+                ) : f.additions === null ? (
+                  <span className="muted">binary</span>
+                ) : (
+                  <>
+                    <span className="add">+{fmtInt(f.additions)}</span>{" "}
+                    <span className="del">−{fmtInt(f.deletions ?? 0)}</span>
+                  </>
+                )}
+              </span>
+            </li>
+          ))}
+        </ul>
+      )}
+      <div className="timeline-foot">
+        <span className="muted" title={diff.base}>
+          since {diff.base.slice(0, 8)}
+          {diff.head && diff.head !== diff.base ? ` (now ${diff.head.slice(0, 8)}, the run committed)` : ""}
+        </span>
+        {diff.filesTruncated && (
+          <>
+            <span className="sep">·</span>
+            <span className="muted">first {fmtInt(diff.changedFiles.length)} files listed</span>
+          </>
+        )}
+        {diff.totalsPartial && (
+          <>
+            <span className="sep">·</span>
+            <span className="muted">totals leave out the untracked entries marked "not counted"</span>
+          </>
+        )}
+        {diff.patchPath && (
+          <>
+            <span className="sep">·</span>
+            <a href={`/runs/${run.id}/diff`} target="_blank" rel="noreferrer">
+              open the patch{diff.patchTruncated ? " (incomplete)" : ""}
+            </a>
+          </>
+        )}
+      </div>
+    </>
+  );
+}
 
 // ---- timeline ---------------------------------------------------------------
 
@@ -765,6 +856,14 @@ function toRow(run: Run, t0: number, home: string) {
               .filter(Boolean)
               .join(" · ");
         return { ...base, name: String(p["phase"] ?? "phase").replace("_", "-"), detail, mono: false };
+      }
+      case "diff": {
+        const n = Number(p["filesChanged"] ?? 0);
+        const detail =
+          n === 0
+            ? "no files changed"
+            : `${fmtInt(n)} file${n === 1 ? "" : "s"} changed · +${fmtInt(Number(p["additions"] ?? 0))} −${fmtInt(Number(p["deletions"] ?? 0))}`;
+        return { ...base, name: "git", detail, mono: false };
       }
       default:
         return { ...base, name: String(e.type), detail: JSON.stringify(p) };

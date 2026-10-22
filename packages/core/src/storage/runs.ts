@@ -1,5 +1,6 @@
 import type { DatabaseSync } from "node:sqlite";
 import type { DeniedTool, RunMcpInfo, SubagentRecord, SubagentStatus, UsageByModel } from "../execution/types.js";
+import type { RunDiff } from "../git/diff.js";
 import { FAILURE_CODES, FAILURE_FAMILY, type FailureCode, type FailureDetail } from "../observability/failure.js";
 import type {
   ReviewReason,
@@ -478,6 +479,14 @@ export class RunRepository {
       payload: r.payload === null ? null : JSON.parse(r.payload),
       agentId: r.agent_id ?? null,
     }));
+  }
+
+  /** The `diff` event's payload (what the run changed in git), or null; read apart from `events`, whose limit may cut it. */
+  diff(runId: string): RunDiff | null {
+    const row = this.db
+      .prepare("SELECT payload FROM run_events WHERE run_id = ? AND type = 'diff' ORDER BY id DESC LIMIT 1")
+      .get(runId) as { payload: string | null } | undefined;
+    return row?.payload ? (JSON.parse(row.payload) as RunDiff) : null;
   }
 
   /** Insert or refresh one subagent invocation. Idempotent on (run_id, agent_id). */

@@ -266,7 +266,15 @@ export function getRun(id: string) {
   // Linked retry (on_failure: resume_once): the run this one resumed, and the one that resumed it.
   const resumedFrom = run.resumedFromRunId ? runs.get(run.resumedFromRunId) : null;
   const resumedBy = runs.resumedBy(id);
-  return { run, events: runs.events(id), resumedFrom, resumedBy };
+  // Read apart from the events: their limit may cut the diff event of a long run.
+  return { run, events: runs.events(id), diff: runs.diff(id), resumedFrom, resumedBy };
+}
+
+/** The run's patch (`<dataDir>/logs/<run id>.diff`, written by core with the diff event); null when the id would leave that directory. */
+export function runPatchPath(run: Run): string | null {
+  const logsDir = path.resolve(config().dataDir, "logs");
+  const resolved = path.resolve(logsDir, `${run.id}.diff`);
+  return resolved.startsWith(`${logsDir}${path.sep}`) ? resolved : null;
 }
 
 /** The run's JSONL log path, only when it resolves inside `<dataDir>/logs`; null otherwise. */

@@ -44,6 +44,9 @@ scheduler:
   # Anchored at the start: a run that did work and mentions "nothing to do" later is not idle.
   # An invalid pattern is ignored with a warning (the default applies).
   noop_pattern: '/^\s*(nothing to do|no .* in ready)/i'
+  # Pause a schedule after this many consecutive runs that completed with 0 tool calls or
+  # ended needs review; the reason shows on /schedules until it is resumed. 0 = never.
+  auto_pause_after: 5
 
 claude:
   # Path to the Claude Code binary. Resolution order: CLAUDE_BIN env var, this

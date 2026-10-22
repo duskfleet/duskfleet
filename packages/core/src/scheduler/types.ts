@@ -13,6 +13,8 @@ import type { OnFailurePolicy } from "../config/types.js";
  * `skipped_daily_cap` = the agent (or its gate agent) reached `max_daily_runs` / `max_daily_cost_usd` for the UTC day.
  * `skipped_budget` = a hard-stop budget covering the run (global, agent or project) is spent this UTC month;
  * the schedules of that scope were paused.
+ * `auto_paused` = its last `scheduler.auto_pause_after` runs were all empty or needs review: the
+ *   scheduler paused it instead of firing; the reason is kept as the firing's error text.
  */
 export type ScheduleOutcome =
   | "started"
@@ -22,6 +24,7 @@ export type ScheduleOutcome =
   | "skipped_budget"
   | "skipped_gate"
   | "skipped_disabled"
+  | "auto_paused"
   | "error";
 
 /**
@@ -97,6 +100,16 @@ export interface Schedule {
   noopPattern: string | null;
   /** Checked before every fresh run; null = no gate. */
   gate: ScheduleGate | null;
+  /**
+   * Why the scheduler paused it on its own (see `scheduler.auto_pause_after`); null when it is
+   * enabled or was paused by hand. Cleared when the schedule is resumed.
+   */
+  pausedReason: string | null;
+  /**
+   * When the scheduler last auto-paused it. Kept after a resume: only runs created after it count
+   * towards the next streak, so a resumed schedule gets `auto_pause_after` fresh runs.
+   */
+  autoPausedAt: string | null;
 }
 
 export interface ScheduleInput {

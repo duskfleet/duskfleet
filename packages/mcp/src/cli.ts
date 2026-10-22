@@ -310,7 +310,8 @@ async function main(): Promise<void> {
         return done(1);
       }
       const subagents = app.runs.agents(id).map((s) => subagentView(s)); // same names as get_run
-      print(values.events ? { ...run, subagents, events: app.runs.events(id) } : { ...run, subagents });
+      const diff = app.runs.diff(id); // same field as get_run
+      print(values.events ? { ...run, diff, subagents, events: app.runs.events(id) } : { ...run, diff, subagents });
       return done();
     }
     case "repair-subagents": {

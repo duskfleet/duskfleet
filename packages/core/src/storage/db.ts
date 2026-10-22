@@ -243,10 +243,20 @@ const MIGRATIONS: ReadonlyArray<{ version: number; sql: string; backfill?: (db: 
     `,
   },
   {
+    // Auto-pause: the scheduler pauses a schedule whose last scheduler.auto_pause_after runs were
+    // all empty (0 tool calls) or needs review, and says why. auto_paused_at stays after a resume
+    // so the runs before it do not count again.
+    version: 16,
+    sql: `
+      ALTER TABLE schedules ADD COLUMN paused_reason TEXT;
+      ALTER TABLE schedules ADD COLUMN auto_paused_at TEXT;
+    `,
+  },
+  {
     // Monthly budgets per scope (global / agent / project), calendar month in UTC, compared with
     // the recorded cost of the scope's runs. One per scope: scope_id is NULL for global, so the
     // unique index is on COALESCE(scope_id, '').
-    version: 16,
+    version: 17,
     sql: `
       CREATE TABLE IF NOT EXISTS budgets (
         id           TEXT PRIMARY KEY,
