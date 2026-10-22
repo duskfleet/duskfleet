@@ -1,3 +1,34 @@
+/** Claude Code derives MCP tool prefixes from the server name: "claude.ai Figma" → "mcp__claude_ai_Figma". */
+export function mcpToolPrefix(serverName: string): string {
+  return "mcp__" + serverName.replace(/[^A-Za-z0-9_-]/g, "_");
+}
+
+/**
+ * Allow-listed MCP server prefixes that never showed up in a run: an `mcp__` entry of
+ * `allowedTools` whose server prefix matches neither a mounted server nor a server actually
+ * called (`used`, as prefixes). Only a non-empty mounted list from the init line is evidence:
+ * Claude Code reports `mcp_servers: []` when connectors load as deferred tools, and a call on
+ * one server never proves that another allow-listed server was absent (one not called leaves
+ * no trace). With nothing mounted, nothing is reported missing.
+ */
+export function allowListedMcpMissing(
+  allowedTools: readonly string[],
+  mounted: readonly { name: string }[],
+  used: readonly string[],
+): string[] {
+  const mountedPrefixes = new Set(mounted.map((m) => mcpToolPrefix(m.name)));
+  if (mountedPrefixes.size === 0) return [];
+  const allowListedPrefixes = new Set(
+    allowedTools
+      .filter((t) => t.startsWith("mcp__"))
+      .map((t) => {
+        const m = /^(mcp__[^_].*?)(?:__|$)/.exec(t);
+        return m ? m[1]! : t;
+      }),
+  );
+  return [...allowListedPrefixes].filter((p) => !mountedPrefixes.has(p) && !used.includes(p)).sort();
+}
+
 /**
  * One short line describing a tool call for timelines: the shell command for
  * Bash, the file for Read/Edit/Write, the first string field otherwise.

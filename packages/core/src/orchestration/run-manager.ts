@@ -44,7 +44,7 @@ import { BusyError } from "./busy.js";
 import { DailyCapError, dailyCapReason, utcDayStart } from "./daily-cap.js";
 import { validateProjectPath } from "./project-validation.js";
 import { assertTransition } from "./run-state.js";
-import { summarizeToolInput } from "./tool-summary.js";
+import { allowListedMcpMissing, mcpToolPrefix, summarizeToolInput } from "./tool-summary.js";
 
 const log = logger("orchestration");
 
@@ -160,11 +160,6 @@ function summarizeSubagent(s: SubagentRecord) {
 /** A path separator, a leading ~ or a drive letter: anything else given as a project path is a project id. */
 function looksLikePath(value: string): boolean {
   return /[\\/]/.test(value) || value.startsWith("~") || /^[A-Za-z]:/.test(value);
-}
-
-/** Claude Code derives MCP tool prefixes from the server name: "claude.ai Figma" → "mcp__claude_ai_Figma". */
-export function mcpToolPrefix(serverName: string): string {
-  return "mcp__" + serverName.replace(/[^A-Za-z0-9_-]/g, "_");
 }
 
 export class RunManager {
@@ -943,20 +938,11 @@ export class RunManager {
   private summarizeMcp(active: ActiveRun | undefined): import("../execution/types.js").RunMcpInfo {
     if (!active) return { mounted: [], used: [], allowListedMissing: [] };
     const used = [...active.usedServers].sort();
-    const mountedPrefixes = new Set(active.mounted.map((m) => mcpToolPrefix(m.name)));
-    const evidence = mountedPrefixes.size > 0;
-    const allowListedPrefixes = new Set(
-      active.allowedTools
-        .filter((t) => t.startsWith("mcp__"))
-        .map((t) => {
-          const m = /^(mcp__[^_].*?)(?:__|$)/.exec(t);
-          return m ? m[1]! : t;
-        }),
-    );
-    const allowListedMissing = evidence
-      ? [...allowListedPrefixes].filter((p) => !mountedPrefixes.has(p) && !used.includes(p)).sort()
-      : [];
-    return { mounted: active.mounted, used, allowListedMissing };
+    return {
+      mounted: active.mounted,
+      used,
+      allowListedMissing: allowListedMcpMissing(active.allowedTools, active.mounted, used),
+    };
   }
 
   private resolveAgent(agentId: string | undefined): AgentDefinition {
