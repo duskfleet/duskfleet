@@ -22,6 +22,10 @@ npm run cli -- uninstall-service
 npm run cli -- tools                                      # the MCP tool catalogue
 ```
 
+`doctor` prints the effective `path` used to find `claude` and passed to runs; `pathDefaulted`
+is true when the inherited `PATH` was missing or minimal (a GUI-launched host) and the usual
+install directories were put in front ([Troubleshooting](troubleshooting.md)).
+
 `doctor` also reports the scheduler: whether something is ticking, which kind of process holds
 the lease (`serve`, `mcp`, `cli`) and whether the service is installed and running. See
 [Schedules](schedules.md#who-ticks) for the service.

@@ -21,7 +21,16 @@ import { fileURLToPath } from "node:url";
  *   duskfleet doctor --probe   # plus one real hello run on haiku (costs cents): auth, blocking hooks
  */
 import { parseArgs } from "node:util";
-import { findRepoRoot, parseHolder, RUN_STATUSES, type RunStatus, subagentView, summarizeRun } from "@duskfleet/core";
+import {
+  effectivePath,
+  findRepoRoot,
+  isMinimalPath,
+  parseHolder,
+  RUN_STATUSES,
+  type RunStatus,
+  subagentView,
+  summarizeRun,
+} from "@duskfleet/core";
 import { bootstrap } from "./bootstrap.js";
 import { PROBE_COST_NOTE, type ProbeReport, probeNotRun, runProbe } from "./probe.js";
 import { installService, renderService, type ServiceTarget, serviceStatus, uninstallService } from "./service.js";
@@ -176,6 +185,10 @@ async function main(): Promise<void> {
         node: process.version,
         claudeBinary: app.executor.binary,
         claudeVersion: version,
+        // What the claude lookup and every run use; defaulted = the inherited PATH was missing or
+        // minimal (GUI-launched host) and the usual install directories were put in front.
+        path: effectivePath(),
+        pathDefaulted: process.platform !== "win32" && isMinimalPath(process.env["PATH"]),
         error,
         configDir: app.config.configDir,
         dataDir: app.config.dataDir,
