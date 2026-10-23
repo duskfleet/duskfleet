@@ -128,6 +128,12 @@ export interface SchedulerConfig {
    * ended needs review (checked before each scheduled fire). 0 = never.
    */
   autoPauseAfter: number;
+  /**
+   * A scheduled fire refused by a concurrency guard (BusyError) is kept as one pending fire,
+   * retried every tick until it starts or the next cron occurrence arrives (outcome `deferred`).
+   * false = the tick is lost as `skipped_busy`.
+   */
+  deferBusy: boolean;
 }
 
 export interface DuskFleetConfig {

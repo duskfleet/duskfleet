@@ -298,6 +298,17 @@ const MIGRATIONS: ReadonlyArray<{ version: number; sql: string; backfill?: (db: 
     version: 20,
     sql: `ALTER TABLE runs ADD COLUMN last_event_at TEXT;`,
   },
+  {
+    // Deferred busy fire (scheduler.defer_busy): a scheduled fire refused by a concurrency guard
+    // stays pending, one per schedule, retried every tick until it starts or deferred_until (the
+    // next cron occurrence) passes; deferred_reason is the busy message of the original tick.
+    // Apart from run_requested_at, which is a manual "run now" and fires even when paused.
+    version: 21,
+    sql: `
+      ALTER TABLE schedules ADD COLUMN deferred_until TEXT;
+      ALTER TABLE schedules ADD COLUMN deferred_reason TEXT;
+    `,
+  },
 ];
 
 /**

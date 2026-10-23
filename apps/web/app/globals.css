@@ -1875,6 +1875,10 @@ summary:focus-visible {
   border-color: var(--faint);
   border-style: dotted;
 }
+/* busy tick kept as one pending fire (scheduler.defer_busy): hollow, accent border */
+.sq.deferred {
+  border-color: var(--accent);
+}
 .sq.paused {
   border-color: var(--warn);
   border-style: dashed;

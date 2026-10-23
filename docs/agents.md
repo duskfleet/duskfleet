@@ -116,7 +116,8 @@ Two frontmatter fields lift the limits per agent:
 
 - `max_concurrent: <n>`: up to `n` runs of this agent may be active at once. The `n + 1`-th
   `run_agent` is refused with `agent busy: agent <id> already has n of n runs (...)`; a schedule
-  of the agent fires while fewer than `n` runs are active and records `skipped_busy` otherwise.
+  of the agent fires while fewer than `n` runs are active and is
+  [deferred](schedules.md#busy-ticks-one-deferred-fire) (or `skipped_busy`) otherwise.
 - `isolated: true`: the agent never edits the project checkout. Its runs do not count against
   `max_concurrent_per_project` and are not blocked by it, so an isolated reviewer and a normal
   coder can work on the same project at the same time (two normal agents still cannot). This

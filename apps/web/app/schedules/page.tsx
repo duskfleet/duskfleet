@@ -32,6 +32,7 @@ type Verdict =
   | "failed"
   | "cancelled"
   | "running"
+  | "deferred"
   | "busy"
   | "capped"
   | "budget"
@@ -46,6 +47,7 @@ const VERDICT_LABEL: Record<Verdict, string> = {
   failed: "failed",
   cancelled: "cancelled",
   running: "running",
+  deferred: "deferred, busy",
   busy: "skipped busy",
   capped: "skipped, daily cap",
   budget: "skipped, monthly budget spent",
@@ -57,6 +59,7 @@ const VERDICT_LABEL: Record<Verdict, string> = {
 
 /** The run's stored review reasons decide amber, as everywhere else (RunManager wrote them when it ended). */
 function verdictOf(outcome: ScheduleOutcome, run: RunSummary | null): Verdict {
+  if (outcome === "deferred") return "deferred";
   if (outcome === "skipped_busy") return "busy";
   if (outcome === "skipped_daily_cap") return "capped";
   if (outcome === "skipped_budget") return "budget";
@@ -270,6 +273,14 @@ export default function SchedulesPage() {
                               title={`Run requested ${fmtTime(s.runRequestedAt)}; the ticking process fires it on its next tick`}
                             >
                               run requested
+                            </span>
+                          )}
+                          {s.deferredUntil && (
+                            <span
+                              className="badge pending"
+                              title={`A busy tick is pending (${s.deferredReason ?? "busy"}). Retried every tick until it starts; dropped as skipped busy at ${fmtTime(s.deferredUntil)} (next cron occurrence) or on pause (scheduler.defer_busy).`}
+                            >
+                              deferred
                             </span>
                           )}
                           {s.willResumeRunId && (
@@ -511,6 +522,10 @@ export default function SchedulesPage() {
             <span>
               <span className="sq running" />
               running
+            </span>
+            <span>
+              <span className="sq deferred" />
+              deferred, busy
             </span>
             <span>
               <span className="sq busy" />

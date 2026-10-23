@@ -39,7 +39,9 @@ tool `run_agent`), from `duskfleet run` on the CLI, or from a cron
 [schedule](schedules.md) firing. The run manager applies the concurrency guards first — one
 run per project directory and one per agent by default, see
 [Configuration](configuration.md) — and **refuses** when something is busy; nothing is ever
-queued. A schedule treats that refusal as "skip this tick" (`skipped_busy`).
+queued. A schedule keeps that tick as its one pending fire, retried every tick until it starts
+or the next cron occurrence comes (`deferred`, then `skipped_busy` if it never started; see
+[busy ticks](schedules.md#busy-ticks-one-deferred-fire)).
 
 The executor then spawns the Claude Code CLI:
 

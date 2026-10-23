@@ -34,7 +34,11 @@ const here = path.dirname(fileURLToPath(import.meta.url));
 const fakeBinary = path.join(here, "fake-claude.js");
 const serverEntry = path.join(here, "..", "dist", "index.js");
 
-function makeRoot() {
+/**
+ * `deferBusy` defaults to false here: the tests written before scheduler.defer_busy pin the
+ * skipped_busy behaviour, which `defer_busy: false` must keep exactly. The deferral tests pass true.
+ */
+function makeRoot({ deferBusy = false } = {}) {
   const root = mkdtempSync(path.join(tmpdir(), "duskfleet-sched-"));
   const configDir = path.join(root, "config");
   mkdirSync(path.join(configDir, "agents"), { recursive: true });
@@ -42,7 +46,7 @@ function makeRoot() {
   mkdirSync(project);
   writeFileSync(
     path.join(configDir, "duskfleet.yaml"),
-    `data_dir: ../data\ndefault_agent: coder\nscheduler:\n  enabled: true\n  tick_seconds: 5\nclaude:\n  binary: "${fakeBinary}"\n  default_timeout_minutes: 0.05\n`,
+    `data_dir: ../data\ndefault_agent: coder\nscheduler:\n  enabled: true\n  tick_seconds: 5\n  defer_busy: ${deferBusy}\nclaude:\n  binary: "${fakeBinary}"\n  default_timeout_minutes: 0.05\n`,
   );
   writeFileSync(path.join(configDir, "projects.yaml"), `projects:\n  demo:\n    path: ${project}\n`);
   writeFileSync(path.join(configDir, "agents", "coder.md"), `---\nproject: demo\n---\nBe brief.\n`);
@@ -444,7 +448,7 @@ test("a schedule of a max_concurrent: 2 agent fires while one run is active and 
   const { root, configDir } = makeRoot();
   writeFileSync(
     path.join(configDir, "duskfleet.yaml"),
-    `data_dir: ../data\ndefault_agent: coder\nmax_concurrent_runs: 10\nscheduler:\n  enabled: true\n  tick_seconds: 5\nclaude:\n  binary: "${fakeBinary}"\n  default_timeout_minutes: 0.05\n`,
+    `data_dir: ../data\ndefault_agent: coder\nmax_concurrent_runs: 10\nscheduler:\n  enabled: true\n  tick_seconds: 5\n  defer_busy: false\nclaude:\n  binary: "${fakeBinary}"\n  default_timeout_minutes: 0.05\n`,
   );
   writeFileSync(
     path.join(configDir, "agents", "pair.md"),
@@ -1369,6 +1373,292 @@ test("a timed-out run is resumed too; a schedule's on_failure overrides the agen
       /resume_budget_usd must be/,
     );
   } finally {
+    await t.close(root);
+  }
+});
+
+// ---- scheduler.defer_busy -----------------------------------------------------------------
+// Daily crons, made due by hand: the next occurrence (the pending's deadline) is hours away, so
+// a test that crosses a minute boundary cannot see a pending expire on its own.
+
+/** makeRoot with defer_busy on and a `blocker` agent whose hanging run outlives the test (1 min timeout). */
+function makeDeferRoot() {
+  const r = makeRoot({ deferBusy: true });
+  writeFileSync(path.join(r.configDir, "agents", "blocker.md"), `---\nproject: demo\ntimeout_minutes: 1\n---\nHold.\n`);
+  return r;
+}
+
+/** A schedule on the demo project whose run hangs until cancelled, started now. */
+async function occupyProject(t) {
+  const blocker = t.scheduler.create({ name: "blocker", agentId: "blocker", prompt: "hang", cron: "0 3 * * *" });
+  t.due(blocker.id);
+  await t.tickAll();
+  const runId = t.repo.get(blocker.id).lastRunId;
+  assert.ok(runId, "the blocker started");
+  return runId;
+}
+
+test("defer_busy is on by default in the config", () => {
+  const { root, configDir } = makeRoot();
+  try {
+    writeFileSync(
+      path.join(configDir, "duskfleet.yaml"),
+      `data_dir: ../data\ndefault_agent: coder\nclaude:\n  binary: "${fakeBinary}"\n`,
+    );
+    assert.equal(loadConfig(configDir).scheduler.deferBusy, true);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("defer_busy: a busy scheduled fire is deferred once, retried every tick without new rows, and starts when the guard clears", async () => {
+  const { root, configDir } = makeDeferRoot();
+  const t = makeScheduler(configDir);
+  let blockerRun = null;
+  try {
+    blockerRun = await occupyProject(t);
+    const s = t.scheduler.create({ name: "waiter", agentId: "gatekeeper", prompt: "ok", cron: "0 3 * * *" });
+    t.due(s.id);
+    await t.tickAll();
+    let after = t.repo.get(s.id);
+    assert.equal(after.lastOutcome, "deferred");
+    assert.match(after.lastError, /project busy/);
+    assert.ok(after.nextRunAt > new Date().toISOString(), "the tick is claimed: next_run_at moved on");
+    assert.equal(after.deferredUntil, after.nextRunAt, "pending until the next cron occurrence");
+    assert.equal(after.deferredReason, after.lastError);
+    assert.equal(after.fires, 0);
+    assert.equal(after.skips, 0, "a deferred tick is neither a fire nor a skip yet");
+
+    // Still busy: retried, but no second row and the same deadline.
+    await t.tickAll();
+    await t.tickAll();
+    after = t.repo.get(s.id);
+    assert.deepEqual(
+      t.repo.firings(s.id).map((f) => f.outcome),
+      ["deferred"],
+    );
+    assert.equal(after.deferredUntil, after.nextRunAt);
+
+    // Manual triggers are not deferred: the caller is there to retry.
+    const manual = await t.scheduler.fireNow(s.id);
+    assert.equal(manual.outcome, "skipped_busy");
+    await assert.rejects(t.runs.startRun({ prompt: "ok", agentId: "gatekeeper" }), BusyError);
+    assert.ok(t.repo.get(s.id).deferredUntil, "a manual skip leaves the pending in place");
+
+    // The guard clears: the next tick starts the pending, as `started`, with the schedule's id.
+    const nextRunAt = t.repo.get(s.id).nextRunAt;
+    t.runs.cancelRun(blockerRun);
+    await t.runs.waitForRun(blockerRun, 10_000);
+    blockerRun = null;
+    await t.tickAll();
+    after = t.repo.get(s.id);
+    assert.equal(after.lastOutcome, "started");
+    assert.equal(after.deferredUntil, null, "settled");
+    assert.equal(after.deferredReason, null);
+    assert.equal(after.nextRunAt, nextRunAt, "a retry keeps next_run_at");
+    assert.equal(after.fires, 1);
+    assert.equal(t.runs.getRun(after.lastRunId).scheduleId, s.id);
+    assert.deepEqual(
+      t.repo.firings(s.id).map((f) => f.outcome),
+      ["started", "skipped_busy", "deferred"],
+    );
+    await t.runs.waitForRun(after.lastRunId, 15_000);
+
+    // Nothing pending any more: further ticks fire nothing.
+    await t.tickAll();
+    assert.equal(t.repo.firings(s.id).length, 3);
+  } finally {
+    if (blockerRun) t.runs.cancelRun(blockerRun);
+    await t.close(root);
+  }
+});
+
+test("defer_busy: a pending past the next cron occurrence is recorded skipped_busy and that occurrence fires normally", async () => {
+  const { root, configDir } = makeDeferRoot();
+  const t = makeScheduler(configDir);
+  let blockerRun = null;
+  try {
+    blockerRun = await occupyProject(t);
+    const s = t.scheduler.create({ name: "late", agentId: "gatekeeper", prompt: "ok", cron: "0 3 * * *" });
+    t.due(s.id);
+    await t.tickAll();
+    const deferred = t.repo.get(s.id);
+    assert.equal(deferred.lastOutcome, "deferred");
+    const busyMessage = deferred.lastError;
+
+    // The next occurrence arrives while still busy: the lost trigger is recorded as lost, and
+    // the occurrence itself is fired (busy again, so it is the new pending).
+    const past = new Date(Date.now() - 1000).toISOString();
+    t.db.prepare("UPDATE schedules SET next_run_at = ?, deferred_until = ? WHERE id = ?").run(past, past, s.id);
+    await t.tickAll();
+    let after = t.repo.get(s.id);
+    const firings = t.repo.firings(s.id);
+    assert.deepEqual(
+      firings.map((f) => f.outcome),
+      ["deferred", "skipped_busy", "deferred"],
+    );
+    assert.equal(firings[1].error, busyMessage, "the expired pending keeps the original tick's message");
+    assert.equal(after.skips, 1);
+    assert.ok(after.deferredUntil > new Date().toISOString(), "one pending again, for the new occurrence");
+
+    // The occurrence comes once the guard has cleared: the stale pending expires, the due fire starts.
+    t.runs.cancelRun(blockerRun);
+    await t.runs.waitForRun(blockerRun, 10_000);
+    blockerRun = null;
+    t.db.prepare("UPDATE schedules SET next_run_at = ?, deferred_until = ? WHERE id = ?").run(past, past, s.id);
+    await t.tickAll();
+    after = t.repo.get(s.id);
+    assert.deepEqual(
+      t.repo.firings(s.id).map((f) => f.outcome),
+      ["started", "skipped_busy", "deferred", "skipped_busy", "deferred"],
+    );
+    assert.equal(after.deferredUntil, null);
+    assert.ok(after.nextRunAt > new Date().toISOString());
+    await t.runs.waitForRun(after.lastRunId, 15_000);
+  } finally {
+    if (blockerRun) t.runs.cancelRun(blockerRun);
+    await t.close(root);
+  }
+});
+
+test("defer_busy: a paused or auto-paused schedule never starts from a pending", async () => {
+  const { root, configDir } = makeDeferRoot();
+  const t = makeScheduler(configDir);
+  let blockerRun = null;
+  try {
+    blockerRun = await occupyProject(t);
+    const paused = t.scheduler.create({ name: "paused", agentId: "gatekeeper", prompt: "ok", cron: "0 3 * * *" });
+    const auto = t.scheduler.create({ name: "auto", agentId: "gatekeeper", prompt: "ok", cron: "0 4 * * *" });
+    const raced = t.scheduler.create({ name: "raced", agentId: "gatekeeper", prompt: "ok", cron: "0 5 * * *" });
+    for (const s of [paused, auto, raced]) {
+      t.due(s.id);
+      await t.tickAll();
+      assert.equal(t.repo.get(s.id).lastOutcome, "deferred", s.name);
+    }
+
+    t.scheduler.update(paused.id, { enabled: false });
+    assert.equal(t.repo.get(paused.id).deferredUntil, null, "a pause drops the pending");
+    assert.equal(t.repo.autoPause(auto.id, "test streak"), true);
+    assert.equal(t.repo.get(auto.id).deferredUntil, null, "an auto-pause drops the pending");
+    // Paused by a writer that does not clear the pending (an older build): the tick drops it.
+    t.db.prepare("UPDATE schedules SET enabled = 0, next_run_at = NULL WHERE id = ?").run(raced.id);
+    assert.ok(t.repo.get(raced.id).deferredUntil);
+
+    t.runs.cancelRun(blockerRun);
+    await t.runs.waitForRun(blockerRun, 10_000);
+    blockerRun = null;
+    await t.tickAll();
+    for (const s of [paused, auto, raced]) {
+      const after = t.repo.get(s.id);
+      assert.equal(after.fires, 0, `${s.name} did not start`);
+      assert.equal(after.deferredUntil, null, `${s.name} has nothing pending`);
+      assert.equal(after.enabled, false);
+    }
+    assert.equal(t.runs.activeCount(), 0);
+  } finally {
+    if (blockerRun) t.runs.cancelRun(blockerRun);
+    await t.close(root);
+  }
+});
+
+test("defer_busy: a gated retry that outlasts its occurrence never writes a stale next_run_at or a stale pending back", async () => {
+  const { root, configDir } = makeDeferRoot();
+  const t = makeScheduler(configDir);
+  let blockerRun = null;
+  try {
+    const s = t.scheduler.create({
+      name: "slow retry",
+      agentId: "gatekeeper",
+      prompt: "ok",
+      cron: "0 3 * * *",
+      gate: { command: "sleep 1; exit 1", timeoutSeconds: 10 },
+    });
+    const staleUntil = new Date(Date.now() + 3_600_000).toISOString();
+    const pend = () =>
+      t.db
+        .prepare("UPDATE schedules SET next_run_at = ?, deferred_until = ?, deferred_reason = ? WHERE id = ?")
+        .run(new Date(Date.now() - 1000).toISOString(), staleUntil, "project busy: an earlier tick", s.id);
+
+    // A pending whose occurrence is already due: the retry's gate is still running when the due
+    // loop claims that occurrence (deferred: the gate is busy) and moves next_run_at on.
+    pend();
+    await t.tickAll();
+    let row = t.repo.get(s.id);
+    assert.deepEqual(
+      t.repo.firings(s.id).map((f) => f.outcome),
+      ["skipped_gate", "deferred"],
+    );
+    assert.ok(row.nextRunAt > new Date().toISOString(), "the gated retry did not write the claimed occurrence back");
+    assert.equal(
+      t.repo.due(new Date().toISOString()).some((d) => d.id === s.id),
+      false,
+      "the claimed occurrence does not fire a second time",
+    );
+    assert.equal(row.deferredUntil, row.nextRunAt, "the due loop's pending stands");
+
+    // Same race, but the gate lets the run through and the project is busy by then: the retry
+    // does not overwrite the fresher pending, and its gate's spend gets a row of its own.
+    t.scheduler.update(s.id, { gate: { command: "sleep 1; exit 0", timeoutSeconds: 10 } });
+    pend();
+    await t.scheduler.tick();
+    const fresh = t.repo.get(s.id);
+    assert.ok(fresh.deferredUntil && fresh.deferredUntil !== staleUntil, "the due loop deferred the new occurrence");
+    blockerRun = (await t.runs.startRun({ prompt: "hang", agentId: "blocker" })).id;
+    await t.scheduler.settled();
+    row = t.repo.get(s.id);
+    assert.equal(row.deferredUntil, fresh.deferredUntil, "the stale pending did not replace the fresh one");
+    assert.equal(row.deferredReason, fresh.deferredReason);
+    assert.equal(row.nextRunAt, fresh.nextRunAt);
+    const [spend, deferred] = t.repo.firings(s.id);
+    assert.equal(spend.outcome, "deferred");
+    assert.match(spend.error, /project busy/);
+    assert.equal(spend.gateCostUsd, 0, "the gate's check is counted");
+    assert.equal(deferred.outcome, "deferred");
+    assert.equal(t.scheduler.idleStats(row).gateChecks, 2);
+  } finally {
+    if (blockerRun) t.runs.cancelRun(blockerRun);
+    await t.close(root);
+  }
+});
+
+test("defer_busy: daily cap skips are not deferred; turning defer_busy off settles a pending as skipped_busy", async () => {
+  const { root, configDir } = makeDeferRoot();
+  writeFileSync(path.join(configDir, "agents", "once.md"), `---\nproject: demo\nmax_daily_runs: 1\n---\nOnce.\n`);
+  const t = makeScheduler(configDir);
+  let blockerRun = null;
+  try {
+    const first = await t.runs.startRun({ prompt: "ok", agentId: "once" });
+    await t.runs.waitForRun(first.id, 15_000);
+    const capped = t.scheduler.create({ name: "capped", agentId: "once", prompt: "ok", cron: "0 3 * * *" });
+    t.due(capped.id);
+    await t.tickAll();
+    assert.equal(t.repo.get(capped.id).lastOutcome, "skipped_daily_cap");
+    assert.equal(t.repo.get(capped.id).deferredUntil, null, "a cap is never deferred");
+
+    blockerRun = await occupyProject(t);
+    const s = t.scheduler.create({ name: "waiter", agentId: "gatekeeper", prompt: "ok", cron: "0 3 * * *" });
+    t.due(s.id);
+    await t.tickAll();
+    assert.equal(t.repo.get(s.id).lastOutcome, "deferred");
+
+    writeFileSync(
+      path.join(configDir, "duskfleet.yaml"),
+      `data_dir: ../data\ndefault_agent: coder\nscheduler:\n  enabled: true\n  defer_busy: false\nclaude:\n  binary: "${fakeBinary}"\n  default_timeout_minutes: 0.05\n`,
+    );
+    await t.tickAll();
+    const after = t.repo.get(s.id);
+    assert.equal(after.lastOutcome, "skipped_busy");
+    assert.equal(after.deferredUntil, null);
+    // And a new busy tick is skipped_busy, as before defer_busy existed.
+    t.due(s.id);
+    await t.tickAll();
+    assert.deepEqual(
+      t.repo.firings(s.id).map((f) => f.outcome),
+      ["skipped_busy", "skipped_busy", "deferred"],
+    );
+    assert.equal(t.repo.get(s.id).deferredUntil, null);
+  } finally {
+    if (blockerRun) t.runs.cancelRun(blockerRun);
     await t.close(root);
   }
 });

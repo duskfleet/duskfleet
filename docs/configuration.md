@@ -24,6 +24,7 @@ scheduler:
   default_time_zone: Europe/London
   noop_pattern: '/^\s*(nothing to do|no .* in ready)/i'   # final message of a run that found no work (idle-cost stats)
   auto_pause_after: 5           # pause a schedule after this many empty / needs-review runs in a row; 0 = never
+  defer_busy: true              # a busy scheduled tick waits as one pending fire until the next cron occurrence; false = skipped_busy
 ```
 
 Config is re-read on every run and every `list_*` tool call: edits apply without restarting

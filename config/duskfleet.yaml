@@ -47,6 +47,10 @@ scheduler:
   # Pause a schedule after this many consecutive runs that completed with 0 tool calls or
   # ended needs review; the reason shows on /schedules until it is resumed. 0 = never.
   auto_pause_after: 5
+  # A scheduled tick whose agent or project is busy is kept as ONE pending fire (outcome
+  # `deferred`), retried every tick until it starts; it is dropped as skipped_busy at the next
+  # cron occurrence, and dropped on pause. Never a queue. false = the tick is just skipped_busy.
+  defer_busy: true
 
 claude:
   # Path to the Claude Code binary. Resolution order: CLAUDE_BIN env var, this
