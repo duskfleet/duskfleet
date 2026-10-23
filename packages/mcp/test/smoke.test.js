@@ -1130,7 +1130,7 @@ test("needs review: every run that ended before the agent chose to stop, from on
       status: "failed",
       terminationReason: null,
       exitCode: null,
-      error: "orphaned: DuskFleet restarted while this run was in progress",
+      error: "orphaned: Duskfleet restarted while this run was in progress",
     }),
     ["orphaned"],
   );

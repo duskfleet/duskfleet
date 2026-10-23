@@ -148,7 +148,7 @@ export function probeAdvice(
     return "the probe run failed (see probe.error); scheduled runs would likely fail the same way";
   }
   if (lingered) {
-    return "the process kept running after its result (a Stop hook?); DuskFleet ends it after a grace period, but set claude.setting_sources: [project, local] in duskfleet.yaml to skip user-level hooks";
+    return "the process kept running after its result (a Stop hook?); Duskfleet ends it after a grace period, but set claude.setting_sources: [project, local] in duskfleet.yaml to skip user-level hooks";
   }
   return null;
 }

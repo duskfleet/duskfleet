@@ -1,5 +1,5 @@
 /**
- * Orphan recovery with several DuskFleet processes on one database: a run is failed
+ * Orphan recovery with several Duskfleet processes on one database: a run is failed
  * only when its owning process is gone (dead pid on this host, or no owner recorded and
  * older than the longest timeout),
  * at startup and by the scheduler lease holder's periodic sweep.
@@ -161,7 +161,7 @@ test("another live process's run counts for the busy guards and cannot be cancel
     // A live owner that is not this RunManager: the parent of this test process.
     const other = await runningRow(app, formatHolder("serve", hostname(), process.ppid));
     await assert.rejects(app.a.startRun({ prompt: "ok", projectPath: app.project }), /project busy: run /);
-    assert.throws(() => app.a.cancelRun(other), /owned by .*another live DuskFleet process/);
+    assert.throws(() => app.a.cancelRun(other), /owned by .*another live Duskfleet process/);
     assert.equal(app.a.getRun(other).status, "running");
   } finally {
     await app.cleanup();

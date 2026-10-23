@@ -2,7 +2,7 @@
   "name": "@duskfleet/core",
   "version": "0.1.0",
   "private": true,
-  "description": "DuskFleet domain: config, storage (SQLite), execution (Claude Code), orchestration, observability, evals",
+  "description": "Duskfleet domain: config, storage (SQLite), execution (Claude Code), orchestration, observability, evals",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",

@@ -161,7 +161,7 @@ export function registerScheduleTools(server: McpServer, ctx: ToolContext): void
     {
       title: "Create schedule",
       description:
-        "Create a cron schedule that runs an agent unattended. Stored in the DuskFleet database and picked up on the next tick " +
+        "Create a cron schedule that runs an agent unattended. Stored in the Duskfleet database and picked up on the next tick " +
         "(≤ tick_seconds). Fails on an unknown agent/project, an invalid cron or time zone, or a duplicate name.",
       inputSchema: {
         name: z.string().min(1).describe("Unique, human name, e.g. 'app main hourly'"),

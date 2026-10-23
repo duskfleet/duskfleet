@@ -220,7 +220,7 @@ function stableJson(value: unknown): string {
 }
 
 /**
- * The two kinds of DuskFleet agent. The distinction is explicit in the MCP
+ * The two kinds of Duskfleet agent. The distinction is explicit in the MCP
  * tools because mixing them up produces agents that look fine and do nothing:
  *
  *  - "own":  the persona is defined here (the Markdown body is the system prompt).
