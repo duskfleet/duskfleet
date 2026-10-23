@@ -1,5 +1,10 @@
 # Troubleshooting
 
+- **`Duskfleet needs Node 24 or newer; you have vX.Y.Z`** (exit code 1, from the CLI and the MCP
+  server alike): Duskfleet uses the built-in `node:sqlite`, so it refuses older runtimes before
+  loading anything. Switch to Node 24 (`nvm use` reads `.nvmrc`; `fnm` and others read
+  `.node-version`) and run `npm run build` again. An MCP host started with an absolute `node`
+  path keeps using that binary: point it at a Node 24 one.
 - **`doctor` cannot find `claude`**: set `claude.binary` in `duskfleet.yaml` or `CLAUDE_BIN`.
   On macOS, GUI-launched hosts (Claude Desktop, launchd) start with a minimal `PATH` (only
   `/usr/bin`, `/bin`, `/usr/sbin`, `/sbin`, or none): DuskFleet then puts
