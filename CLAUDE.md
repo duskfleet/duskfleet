@@ -71,6 +71,8 @@ npm workspaces, one `config/` and one SQLite database shared by three deliverabl
   (`serve` / `mcp` / `cli`, `parseHolder`). Busy = `skipped_busy`, never a queue;
   no catch-up of missed ticks; `scheduler.enabled` is the kill switch read every tick.
   Create/update validation is `scheduler/crud.ts`, shared by MCP, CLI and dashboard.
+  Command gates (`sh -c`, full env) are opt-in: `scheduler.allow_command_gates` (default false)
+  is checked on create/update (`assertCommandGateAllowed`) and again in `evaluateGate` per tick.
   Auto-pause (`autoPauseReason`, migration 16): before a scheduled fire, the last
   `scheduler.auto_pause_after` ended runs all empty (0 tool calls) or needs review = pause with
   `paused_reason`, outcome `auto_paused`; resume clears it, `auto_paused_at` bounds the next streak.

@@ -86,6 +86,20 @@ function validatePolicies(input: Pick<ScheduleInput, "concurrencyPolicy" | "catc
   }
 }
 
+export const COMMAND_GATES_OFF =
+  "command gates are disabled: a gate.command runs `/bin/sh -c` with the scheduler's full environment, " +
+  "outside every Claude Code allow-list. Set scheduler.allow_command_gates: true in config/duskfleet.yaml " +
+  "to allow them, or use an agent gate";
+
+/**
+ * Refuse a command gate unless `scheduler.allow_command_gates` is on. Checked on create and on an
+ * update that sets the gate, so pausing or editing an older row that already has one still works
+ * (its tick records `error` instead of running the command, see evaluateGate).
+ */
+export function assertCommandGateAllowed(config: DuskFleetConfig, gate: ScheduleInput["gate"]): void {
+  if (gate?.command !== undefined && !config.scheduler.allowCommandGates) throw new Error(COMMAND_GATES_OFF);
+}
+
 /**
  * The project a schedule runs on: its own project_id when set, else the project its agent is
  * bound to, else null (an unbound agent without a schedule project, or a deleted agent).
@@ -184,6 +198,7 @@ export function createSchedule(
   now: Date = new Date(),
 ): Schedule {
   validateScheduleInput(config, input);
+  assertCommandGateAllowed(config, input.gate);
   if (repo.findByName(input.name)) throw new Error(`a schedule named "${input.name}" already exists`);
   const timeZone = input.timeZone ?? DEFAULT_TIME_ZONE;
   const nextRunAt = input.enabled === false ? null : nextRunAtFor(input.cron, timeZone, now);
@@ -220,6 +235,7 @@ export function updateSchedule(
     catchUpPolicy: patch.catchUpPolicy ?? existing.catchUpPolicy,
   };
   validateScheduleInput(config, merged);
+  assertCommandGateAllowed(config, patch.gate);
   if (merged.name !== existing.name && repo.findByName(merged.name))
     throw new Error(`a schedule named "${merged.name}" already exists`);
   const nextRunAt = merged.enabled ? nextRunAtFor(merged.cron, merged.timeZone!, now) : null;

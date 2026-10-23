@@ -113,7 +113,8 @@ export class Scheduler {
   // ---- CRUD (validation lives in crud.ts so MCP, CLI, dashboard and tests share it) ----
 
   create(input: ScheduleInput): Schedule {
-    const created = createSchedule(this.repo, this.runs.config, input, this.now());
+    // Fresh config: agent / project edits and scheduler.allow_command_gates apply without restart.
+    const created = createSchedule(this.repo, this.runs.reloadConfig(), input, this.now());
     log.info("schedule created", {
       id: created.id,
       name: created.name,
@@ -125,7 +126,7 @@ export class Scheduler {
   }
 
   update(id: string, patch: SchedulePatch): Schedule {
-    const updated = updateSchedule(this.repo, this.runs.config, id, patch, this.now());
+    const updated = updateSchedule(this.repo, this.runs.reloadConfig(), id, patch, this.now());
     log.info("schedule updated", { id, name: updated.name, enabled: updated.enabled, next: updated.nextRunAt });
     return updated;
   }
