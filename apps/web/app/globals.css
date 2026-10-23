@@ -295,6 +295,55 @@ h2 .count {
   color: var(--muted);
   margin-top: 4px;
 }
+/* a tile that filters the runs list (?outcome=): active like the toolbar chips */
+.stat.filter:hover {
+  border-color: var(--border-strong);
+}
+.stat.filter.on {
+  background: var(--warn-bg);
+  border-color: transparent;
+}
+.stat .stat-hit {
+  display: block;
+  color: inherit;
+}
+.stat .stat-hit:hover {
+  text-decoration: none;
+}
+.stat .value .today {
+  font-family: inherit;
+  font-size: 12.5px;
+  font-weight: 500;
+  letter-spacing: 0;
+  color: var(--muted);
+  margin-left: 6px;
+}
+.stat .sub a {
+  color: var(--muted);
+  text-decoration: underline;
+  text-decoration-color: var(--border-strong);
+  text-underline-offset: 2px;
+}
+.stat .sub a:hover {
+  color: var(--text);
+}
+.stat .sub a.on {
+  color: var(--warn);
+  text-decoration-color: currentColor;
+  font-weight: 500;
+}
+.stat .sub.filters {
+  gap: 6px;
+}
+.stat .sub.filters a.chip {
+  padding: 1px 9px;
+  font-size: 12px;
+  line-height: 17.5px;
+  text-decoration: none;
+}
+.stat .sub.filters a.chip.on {
+  border-color: var(--warn);
+}
 
 /* ---- badges & pills ------------------------------------------------------ */
 /* status badge: dot + label on a tint of the status colour */

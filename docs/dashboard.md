@@ -12,8 +12,20 @@ has no authentication and answers on localhost only (see [Remote access](#remote
 Five views. The runs list and a running run's detail auto-refresh every 3 seconds (pause button
 in the nav); the other pages are static.
 
-- **Runs**: KPI cards (clean runs, needs review, spend) computed on the current filter; project /
-  agent chips, prompt search (`?q=`), `?schedule=` and `?limit=` (load older). Runs are identified
+- **Runs**: KPI cards (clean runs, needs review, spend) computed on the current project / agent
+  filter; project / agent chips, prompt search (`?q=`), `?schedule=` and `?limit=` (load older).
+  The KPI cards filter the list by how runs ended, `?outcome=` (real runs only, gate runs left
+  out, by the stored review verdict):
+  - `needs_review`: every run with a review reason (click the **Needs review** card; it also shows
+    how many of them started today, UTC day like the daily caps);
+  - `clean`: completed with nothing to review;
+  - `completed_review`: completed, but with a review reason;
+  - `failed`: failed, timed out or cancelled.
+
+  `clean` + `completed_review` + `failed` are the finished runs (the three links of the **Clean
+  runs** card). With `needs_review` on, the card lists one chip per review reason with its count;
+  a chip adds `?reason=<id>` (`permission_denied`, `empty_run`, `timed_out`, ...). `outcome` and
+  `reason` combine with the other parameters, and "× clear filters" drops them all. Runs are identified
   by a short title (first line of the prompt); the whole row links to the detail. A running run
   that produced no stream-json output for 5 minutes shows a "no output for N min" flag (amber,
   red from 15 minutes; since the start when it never produced any). Informational only: nothing
