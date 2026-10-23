@@ -8,6 +8,8 @@ npm run web            # dev server on http://localhost:4777
 A Next.js app that reads the database the MCP server writes (SQLite WAL mode). It can run
 while the MCP server is running or not; it only needs `config/` and `data/duskfleet.db`. It
 has no authentication and answers on localhost only (see [Remote access](#remote-access)).
+It sends no telemetry: the `dev`, `build` and `start` scripts set `NEXT_TELEMETRY_DISABLED=1`
+(on Windows, set it in your shell before starting the dashboard).
 
 Five views. The runs list and a running run's detail auto-refresh every 3 seconds (pause button
 in the nav); the other pages are static.
