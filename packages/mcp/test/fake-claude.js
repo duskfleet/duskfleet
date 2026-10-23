@@ -30,6 +30,9 @@
  *   "linger"  -> like "ok", but keeps running after the result line (grace kill tests)
  *   "linger-hook" -> like "ok", then exits while a spawned descendant keeps stdout open
  *                 (a user-level Stop hook); the descendant's pid is written to ./hook.pid
+ *   "deferred-mcp" -> like "ok", but the init reports `mcp_servers: []` and no mcp__ tool
+ *                 (Claude Code 2.1.306 loads connectors as deferred tools, verified
+ *                 2026-10-21) and one tool of one MCP server is still called
  *   "mcp-missing-once" -> like "ok", but the first spawn's init lists no claude.ai connector
  *                 (only the project's "duskfleet" server); later spawns list Figma
  *   "mcp-missing" -> like "ok", every spawn's init lists no claude.ai connector
@@ -114,9 +117,12 @@ out({
   cwd: process.cwd(),
   session_id: sessionId,
   tools: ["Bash", "Edit", "Read"],
-  mcp_servers: connectorsLoaded
-    ? [{ name: "claude.ai Figma", status: "connected" }]
-    : [{ name: "duskfleet", status: "connected", source: "project" }],
+  mcp_servers:
+    prompt === "deferred-mcp"
+      ? []
+      : connectorsLoaded
+        ? [{ name: "claude.ai Figma", status: "connected" }]
+        : [{ name: "duskfleet", status: "connected", source: "project" }],
   model,
   permissionMode: "acceptEdits",
   claude_code_version: "9.9.9",
@@ -459,6 +465,28 @@ if (resumeIdx >= 0) {
     process.exit(0);
   }
 } else {
+  if (prompt === "deferred-mcp") {
+    out({
+      type: "assistant",
+      message: {
+        model,
+        role: "assistant",
+        content: [
+          {
+            type: "tool_use",
+            id: "toolu_m1",
+            name: "mcp__example_tracker__search",
+            input: { query: "open" },
+          },
+        ],
+        usage: { input_tokens: 10, output_tokens: 5 },
+      },
+    });
+    out({
+      type: "user",
+      message: { role: "user", content: [{ tool_use_id: "toolu_m1", type: "tool_result", content: "[]" }] },
+    });
+  }
   out({
     type: "assistant",
     message: {
