@@ -1,6 +1,6 @@
 /**
  * The pre-rename database (gabfactory.db) is adopted on first open so an existing
- * installation keeps its runs after the DuskFleet rename.
+ * installation keeps its runs after the Duskfleet rename.
  */
 import assert from "node:assert/strict";
 import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
@@ -58,7 +58,7 @@ test("migration 9 backfills review reasons for finished runs recorded before it"
     "failed",
     null,
     null,
-    "orphaned: DuskFleet restarted while this run was in progress",
+    "orphaned: Duskfleet restarted while this run was in progress",
     0,
     0,
     null,

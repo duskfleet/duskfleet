@@ -298,6 +298,21 @@ const MIGRATIONS: ReadonlyArray<{ version: number; sql: string; backfill?: (db: 
     version: 20,
     sql: `ALTER TABLE runs ADD COLUMN last_event_at TEXT;`,
   },
+  {
+    // What makes a schedule due (trigger_kind, only 'cron' for now: room for API triggers) and a
+    // pause of the whole scheduler until an instant (pause_scheduler), one row, read every tick.
+    version: 21,
+    sql: `
+      ALTER TABLE schedules ADD COLUMN trigger_kind TEXT NOT NULL DEFAULT 'cron';
+      CREATE TABLE IF NOT EXISTS scheduler_pause (
+        id           INTEGER PRIMARY KEY CHECK (id = 1),
+        paused_until TEXT NOT NULL,
+        paused_at    TEXT NOT NULL,
+        reason       TEXT,
+        paused_by    TEXT
+      );
+    `,
+  },
 ];
 
 /**
@@ -390,7 +405,7 @@ export function openDatabase(dataDir: string): DatabaseSync {
 }
 
 /**
- * One-time rename of the pre-DuskFleet database (`gabfactory.db`, with its WAL and shm
+ * One-time rename of the pre-Duskfleet database (`gabfactory.db`, with its WAL and shm
  * files) to the new name, so an existing installation keeps its runs. No-op once the
  * new file exists.
  */

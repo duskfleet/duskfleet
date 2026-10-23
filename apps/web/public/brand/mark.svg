@@ -6,5 +6,6 @@
       <stop offset="1" stop-color="#E24B5A"/>
     </linearGradient>
   </defs>
-  <path fill="url(#sunset)" fill-rule="evenodd" d="M22 14.67H55A40.33 40.33 0 0 1 55 95.33H22ZM36.67 31.17V78.83H75.17Z"/>
+  <path fill="url(#sunset)" d="M22 14.67H55A40.33 40.33 0 0 1 55 95.33H22Z"/>
+  <path fill="#0B0D1A" d="M36.67 31.17V78.83H75.17Z"/>
 </svg>

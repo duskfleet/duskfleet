@@ -110,7 +110,7 @@ function presentAgent(a: AgentDefinition, config: DuskFleetConfig) {
     name: a.name,
     description: a.description,
     source: a.source,
-    /** "own" = persona defined in DuskFleet; "link" = reuses the project's .claude/agents/<claudeAgent>.md */
+    /** "own" = persona defined in Duskfleet; "link" = reuses the project's .claude/agents/<claudeAgent>.md */
     kind: agentKind(a),
     model: a.model ?? null,
     permissionMode: a.permissionMode,
@@ -192,7 +192,7 @@ const agentFields = {
     .boolean()
     .optional()
     .describe(
-      'Let runs use the MCP servers of the DuskFleet user (claude.ai connectors like Atlassian/Figma). Default false. Each server still needs an allowed_tools entry such as "mcp__claude_ai_Atlassian_Rovo"',
+      'Let runs use the MCP servers of the Duskfleet user (claude.ai connectors like Atlassian/Figma). Default false. Each server still needs an allowed_tools entry such as "mcp__claude_ai_Atlassian_Rovo"',
     ),
   add_dirs: z
     .array(z.string().min(1))
@@ -217,7 +217,7 @@ const agentFields = {
     .min(1)
     .optional()
     .describe(
-      "Reuse an agent the target project already defines in .claude/agents/<name>.md (see list_project_agents): the run adopts its prompt, tools and model via `claude --agent`. This DuskFleet agent then only supplies the unattended envelope: permissions, allow-list, budget, MCP",
+      "Reuse an agent the target project already defines in .claude/agents/<name>.md (see list_project_agents): the run adopts its prompt, tools and model via `claude --agent`. This Duskfleet agent then only supplies the unattended envelope: permissions, allow-list, budget, MCP",
     ),
   max_concurrent: z
     .number()
@@ -231,7 +231,7 @@ const agentFields = {
     .boolean()
     .optional()
     .describe(
-      "true = the agent never edits the project checkout (read-only, or works in its own git worktree): its runs neither count against nor wait for max_concurrent_per_project. A promise the prompt must keep; DuskFleet does not check it. Default false",
+      "true = the agent never edits the project checkout (read-only, or works in its own git worktree): its runs neither count against nor wait for max_concurrent_per_project. A promise the prompt must keep; Duskfleet does not check it. Default false",
     ),
   max_daily_runs: z
     .number()

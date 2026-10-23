@@ -224,7 +224,7 @@ export class RunManager {
 
   /**
    * Mark `running` runs whose owning process is gone as failed. Called at startup and
-   * by the scheduler lease holder. Several DuskFleet processes share the database
+   * by the scheduler lease holder. Several Duskfleet processes share the database
    * (serve, one MCP server per host session, CLI), so a run owned by a live process,
    * or by another host, is left alone.
    */
@@ -629,11 +629,11 @@ export class RunManager {
       this.runs.addEvent(id, "note", { message: "cancel requested" });
       return run;
     }
-    // Another live DuskFleet process owns the claude child; writing `cancelled` here would
+    // Another live Duskfleet process owns the claude child; writing `cancelled` here would
     // leave it running. It has to be cancelled through that process.
     if (!this.ownerIsGone(run)) {
       throw new Error(
-        `run ${id} is owned by ${run.owner ?? "(unrecorded: an older DuskFleet build)"}, another live DuskFleet process; cancel it from there (or stop that process).`,
+        `run ${id} is owned by ${run.owner ?? "(unrecorded: an older Duskfleet build)"}, another live Duskfleet process; cancel it from there (or stop that process).`,
       );
     }
     // Not active and its owner is gone (orphan) – close it out directly
@@ -764,7 +764,7 @@ export class RunManager {
     if (this.active.size >= this.config.maxConcurrentRuns) {
       return `max_concurrent_runs (${this.config.maxConcurrentRuns}) reached; wait for a run to finish`;
     }
-    // Count this process's runs plus the live runs of other DuskFleet processes on the same database.
+    // Count this process's runs plus the live runs of other Duskfleet processes on the same database.
     const busy: Array<[string, { projectPath: string; agentId: string; isolated: boolean }]> = [
       ...this.active.entries(),
     ];

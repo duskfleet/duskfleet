@@ -25,6 +25,10 @@ npm run cli -- uninstall-service
 npm run cli -- tools                                      # the MCP tool catalogue
 ```
 
+`doctor` prints the effective `path` used to find `claude` and passed to runs; `pathDefaulted`
+is true on macOS when the inherited `PATH` was missing or minimal (a GUI-launched host) and the usual
+install directories were put in front ([Troubleshooting](troubleshooting.md)).
+
 `doctor` also reports the scheduler: whether something is ticking, which kind of process holds
 the lease (`serve`, `mcp`, `cli`) and whether the service is installed and running. See
 [Schedules](schedules.md#who-ticks) for the service.
@@ -67,7 +71,7 @@ executable; `.git/` is never versioned):
 
 ```sh
 #!/bin/sh
-# Ask DuskFleet to review the PR of the branch being pushed. The run starts on the
+# Ask Duskfleet to review the PR of the branch being pushed. The run starts on the
 # service's next tick, i.e. after this push has landed. Pushes of main are skipped.
 want=
 while read -r _local_ref _local_sha remote_ref _remote_sha; do

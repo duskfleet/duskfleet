@@ -4,7 +4,7 @@
  *
  *   macOS    launchd LaunchAgent   ~/Library/LaunchAgents/com.duskfleet.scheduler.plist
  *   Linux    systemd user unit     ~/.config/systemd/user/duskfleet.service
- *   Windows  Task Scheduler task   "DuskFleet Scheduler" (logon trigger, imported from XML)
+ *   Windows  Task Scheduler task   "Duskfleet Scheduler" (logon trigger, imported from XML)
  *
  * All three run as the logged-in user (so `claude` finds its login), restart the
  * process when it dies and append its stderr to data/logs/serve.log. Nothing in
@@ -66,7 +66,7 @@ export interface ServiceStatus {
 
 const LAUNCHD_LABEL = "com.duskfleet.scheduler";
 const SYSTEMD_UNIT = "duskfleet.service";
-const WINDOWS_TASK = "DuskFleet Scheduler";
+const WINDOWS_TASK = "Duskfleet Scheduler";
 
 export function isSupportedPlatform(p: NodeJS.Platform): p is ServicePlatform {
   return p === "darwin" || p === "linux" || p === "win32";
@@ -82,7 +82,7 @@ export function serviceLabel(platform: NodeJS.Platform): string | null {
 export function serviceUnitPath(platform: NodeJS.Platform, home = homedir()): string | null {
   if (platform === "darwin") return path.join(home, "Library", "LaunchAgents", `${LAUNCHD_LABEL}.plist`);
   if (platform === "linux") return path.join(home, ".config", "systemd", "user", SYSTEMD_UNIT);
-  if (platform === "win32") return path.join(home, "AppData", "Local", "DuskFleet", "scheduler-task.xml");
+  if (platform === "win32") return path.join(home, "AppData", "Local", "Duskfleet", "scheduler-task.xml");
   return null;
 }
 
@@ -163,7 +163,7 @@ export function renderService(t: ServiceTarget): ServiceUnit {
     const pathEnv = searchPath(t, ["/usr/local/bin", "/usr/bin", "/bin"]);
     const content = [
       "[Unit]",
-      "Description=DuskFleet scheduler (duskfleet serve)",
+      "Description=Duskfleet scheduler (duskfleet serve)",
       "After=network-online.target",
       "",
       "[Service]",
@@ -213,7 +213,7 @@ export function renderService(t: ServiceTarget): ServiceUnit {
     '<?xml version="1.0" encoding="UTF-16"?>',
     '<Task version="1.4" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">',
     "  <RegistrationInfo>",
-    "    <Description>DuskFleet scheduler (duskfleet serve). Keeps cron schedules firing while no MCP host is open.</Description>",
+    "    <Description>Duskfleet scheduler (duskfleet serve). Keeps cron schedules firing while no MCP host is open.</Description>",
     "  </RegistrationInfo>",
     "  <Triggers>",
     "    <LogonTrigger>",
