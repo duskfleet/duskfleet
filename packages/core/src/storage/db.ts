@@ -390,7 +390,7 @@ export function openDatabase(dataDir: string): DatabaseSync {
 }
 
 /**
- * One-time rename of the pre-DuskFleet database (`gabfactory.db`, with its WAL and shm
+ * One-time rename of the pre-Duskfleet database (`gabfactory.db`, with its WAL and shm
  * files) to the new name, so an existing installation keeps its runs. No-op once the
  * new file exists.
  */

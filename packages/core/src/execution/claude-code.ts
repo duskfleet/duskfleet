@@ -2,7 +2,7 @@
  * Claude Code CLI executor.
  *
  * Everything CLI-specific lives here: flag names, output parsing, process
- * lifecycle. The rest of DuskFleet only sees `Executor` / `ExecutionResult`.
+ * lifecycle. The rest of Duskfleet only sees `Executor` / `ExecutionResult`.
  *
  * Flags used were verified against `claude --help` for 2.1.285.
  */
@@ -99,7 +99,7 @@ export class ClaudeCodeExecutor implements Executor {
         "permission_mode bypassPermissions cannot be used in unattended runs: Claude Code refuses it together with --permission-prompts none. Use dontAsk with an allowed_tools list instead.",
       );
     }
-    // Default: no MCP at all (fast, no recursion into DuskFleet). Opt in per agent/project.
+    // Default: no MCP at all (fast, no recursion into Duskfleet). Opt in per agent/project.
     if (this.options.strictMcpConfig && !req.inheritMcp) argv.push("--strict-mcp-config");
     for (const dir of req.addDirs ?? []) argv.push("--add-dir", dir);
     if (req.claudeAgent) argv.push("--agent", req.claudeAgent);
@@ -201,8 +201,8 @@ export class ClaudeCodeExecutor implements Executor {
       closed = false;
       const state = createStreamState();
       let resultTimer: NodeJS.Timeout | null = null;
-      let graceKilled = false; // ended by DuskFleet after a result line: the result decides the outcome
-      let restart = false; // ended by DuskFleet at its init line: the next process decides
+      let graceKilled = false; // ended by Duskfleet after a result line: the result decides the outcome
+      let restart = false; // ended by Duskfleet at its init line: the next process decides
       let stderrTail = "";
       let spawnError: string | null = null;
 
@@ -441,7 +441,7 @@ function childEnv(): NodeJS.ProcessEnv {
   for (const key of Object.keys(env)) {
     if (key === "CLAUDECODE" || key === "CLAUDE_CODE_ENTRYPOINT" || key.startsWith("CLAUDE_CODE_SSE_")) delete env[key];
   }
-  // DuskFleet's own variable: an agent running `npm test` here would launch the real claude.
+  // Duskfleet's own variable: an agent running `npm test` here would launch the real claude.
   delete env["CLAUDE_BIN"];
   return env;
 }

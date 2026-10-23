@@ -1,4 +1,4 @@
-# DuskFleet
+# Duskfleet
 
 Local platform that orchestrates, observes and (later) schedules and evaluates autonomous
 Claude Code agents. An MCP server (stdio) spawns `claude -p --output-format stream-json`
@@ -114,7 +114,7 @@ npm workspaces, one `config/` and one SQLite database shared by three deliverabl
   and confines file tools (and Bash paths) to the project directory. Everything an agent
   needs must be in its own `allowed_tools`; use `add_dirs` to reach other directories.
 - **Runs have an owner** (`runs.owner`, `role@host:pid` from `processIdentity`, migration 7):
-  several DuskFleet processes share the DB, so `recoverOrphans` (startup and the lease holder's
+  several Duskfleet processes share the DB, so `recoverOrphans` (startup and the lease holder's
   once-a-minute sweep) fails a `running` row only when its owner is gone (dead pid on this host,
   NULL owner older than the longest timeout + 1 min, or this pid without the run in memory),
   never a live process's or another host's. A fresh NULL owner is a process on an old build
@@ -130,7 +130,7 @@ npm workspaces, one `config/` and one SQLite database shared by three deliverabl
 - **Two agent kinds, always explicit**: `own` (persona written here, body = system prompt,
   no `claude_agent`) or `link` (`claude_agent` + a project folder given as `project_path` or a
   registered `project` id; runs as `claude --agent <name>` in that folder using its
-  `.claude/agents/<name>.md`; DuskFleet owns only the unattended envelope). A folder that is
+  `.claude/agents/<name>.md`; Duskfleet owns only the unattended envelope). A folder that is
   not a project yet is registered in the private registry by `create_agent`. `create_agent` requires `kind` and `assertAgentKind` in core validates the
   combination before any file is written. Prefer link when the project already has the agent.
   **A link is prompted as the agent, never as its caller**: "run your loop", not "run
@@ -173,7 +173,7 @@ npm workspaces, one `config/` and one SQLite database shared by three deliverabl
   [project, local]` in `config/duskfleet.yaml` makes child sessions skip
   `~/.claude/settings.json`. Keep it unless the hook is removed.
 - Children run with `--strict-mcp-config`: they never see the caller's MCP servers,
-  so DuskFleet cannot recurse into itself.
+  so Duskfleet cannot recurse into itself.
 - Project paths must be absolute (`~` is expanded). Prefer `project_id` from
   `config/projects.yaml` in prompts and docs.
 - Scripts that import `@modelcontextprotocol/sdk` must live under `packages/mcp/` to

@@ -11,7 +11,7 @@
   blocking in a headless context. Set `claude.setting_sources: [project, local]` so runs skip
   user-level settings, or make the hook non-blocking. Inspect `data/logs/<run_id>.jsonl`: if the
   last line is an `assistant` message with no `result` line, this is the cause. Once the
-  `result` line is out, DuskFleet does not wait: each run leads its own process group, and if the
+  `result` line is out, Duskfleet does not wait: each run leads its own process group, and if the
   process (or anything it spawned that still holds its output, such as a hook) is alive 5 s
   later, the group gets SIGTERM, then SIGKILL after 5 s more. The run keeps the result's verdict
   and its events carry a note "still running 5 s after the result line". Keep
@@ -20,7 +20,7 @@
   server never mounted. Open the run detail: the denied calls are listed with the command or
   file, and `mcp.allowListedMissing` names the server. Fix the agent's `allowed_tools` (or
   `inherit_mcp`), not the prompt. One exception: when the mounted list has no claude.ai
-  connector at all, Claude Code came up without them and the allow-list is fine. DuskFleet
+  connector at all, Claude Code came up without them and the allow-list is fine. Duskfleet
   restarts the process once when it sees that at init (note "restarted once" on the run); a run
   flagged anyway had no luck twice. Run it again.
 - **The agent cannot run tests or use Bash**: `permission_mode: acceptEdits` does not allow
@@ -36,7 +36,7 @@
   Use `dontAsk` with `disallowed_tools: [Edit, Write, NotebookEdit]` for read-only agents.
 - **`bypassPermissions` rejected**: enable `claude.allow_bypass_permissions` deliberately; it maps
   to `--dangerously-skip-permissions`.
-- **Runs failed with "orphaned: owning process ... is gone"**: the DuskFleet process that
+- **Runs failed with "orphaned: owning process ... is gone"**: the Duskfleet process that
   started them (named in the error) exited or crashed while they were running. Runs of a live
   process (another MCP server, `serve`) are never touched. Resume the Claude session with the
   `resumeCommand` from `get_run` if you want to continue the work. "(unrecorded)" means the
@@ -48,14 +48,14 @@
   reused by an unrelated live process, or the machine's hostname changed since the run
   started (macOS renames `Mac.local` to `Mac-2.local` on a name clash), so the owner looks like
   another host. Without `scheduler.enabled` (or with no process holding the lease) the
-  periodic sweep does not run either; only the next start of a DuskFleet process recovers.
+  periodic sweep does not run either; only the next start of a Duskfleet process recovers.
   Clean up by hand: stop the owning process if it is still alive, then mark the row failed in
   `data/duskfleet.db`, e.g.
   `sqlite3 data/duskfleet.db "UPDATE runs SET status='failed', error='manual cleanup' WHERE id='<run id>' AND status='running'"`.
-- **`cancel_run` says the run is owned by another live DuskFleet process**: the claude child
+- **`cancel_run` says the run is owned by another live Duskfleet process**: the claude child
   belongs to that process (another MCP server, or `serve`); cancel it there, or stop that process
   and the run is recovered as orphaned.
-- **Two DuskFleet processes, schedules fire once**: that is the SQLite lease at work. The
+- **Two Duskfleet processes, schedules fire once**: that is the SQLite lease at work. The
   dashboard's Schedules page and `doctor` show the holder and its kind (`serve`, `mcp`).
 - **"Ticking from an unknown process", Run now never fires, the service is running**: a
   `packages/mcp/dist/index.js` started before your last build (an MCP host keeps it alive)

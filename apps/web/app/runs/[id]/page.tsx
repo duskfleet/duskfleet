@@ -36,7 +36,7 @@ export const dynamic = "force-dynamic";
 export async function generateMetadata({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   const data = getRun(id);
-  return { title: data ? `${runTitle(data.run.prompt, 60)} · DuskFleet` : "Run not found · DuskFleet" };
+  return { title: data ? `${runTitle(data.run.prompt, 60)} · Duskfleet` : "Run not found · Duskfleet" };
 }
 
 /** Timeline entries shown before "show all N events" (denials, errors and the result are always shown). */
@@ -235,7 +235,7 @@ export default async function RunPage({
                 </>
               )}
               {reasons.includes("orphaned") && (
-                <> DuskFleet restarted while the run was in progress; its process was lost.</>
+                <> Duskfleet restarted while the run was in progress; its process was lost.</>
               )}
               {reasons.includes("budget_exhausted") && !wrapUp && (
                 <>
@@ -285,7 +285,7 @@ export default async function RunPage({
               {run.mcp.used.length ? <>; used: {run.mcp.used.join(", ")}</> : null}.{" "}
               {connectorsNeverLoaded ? (
                 <>
-                  No claude.ai connector mounted at all: Claude Code came up without them (it happens; DuskFleet
+                  No claude.ai connector mounted at all: Claude Code came up without them (it happens; Duskfleet
                   restarts the process once when the init line shows it, and this run still had none). The allow-list is
                   fine; run it again.
                 </>

@@ -50,7 +50,7 @@ registry `data/projects.yaml` (`user_projects_file`, git-ignored), same syntax; 
 Per project you can also set:
 
 - `inherit_mcp: true`: every run on the project sees the MCP servers of the user running
-  DuskFleet (see [MCP servers inside runs](agents.md#mcp-servers-inside-runs)).
+  Duskfleet (see [MCP servers inside runs](agents.md#mcp-servers-inside-runs)).
 - `add_dirs: [...]`: extra directories the run may read and write (`--add-dir`). Runs are
   otherwise confined to the project directory.
 
@@ -74,5 +74,5 @@ for it). `max_concurrent_runs` always stays the hard cap. See
 | Variable | Purpose |
 |---|---|
 | `DUSKFLEET_CONFIG` | Directory containing `duskfleet.yaml` (default: the closest ancestor `config/` of the running package / cwd) |
-| `CLAUDE_BIN` | Path to the Claude Code binary (overrides `claude.binary`). Read by DuskFleet only: it is not passed on to agent runs. |
+| `CLAUDE_BIN` | Path to the Claude Code binary (overrides `claude.binary`). Read by Duskfleet only: it is not passed on to agent runs. |
 | `DUSKFLEET_LOG_LEVEL` | `debug` \| `info` \| `warn` \| `error` |

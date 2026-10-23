@@ -8,8 +8,8 @@ Claude Code's system prompt.
 
 | Kind | What it is | Required | Not allowed |
 |---|---|---|---|
-| **own** | A new agent whose persona lives in DuskFleet: the Markdown body is the system prompt | `system_prompt` (body) | `claude_agent` |
-| **link** | A reference to an agent that a project **folder** already defines in `.claude/agents/<name>.md`. The run starts as `claude --agent <name>` in that folder: the project agent brings prompt, tools and model; DuskFleet adds only the unattended envelope (permissions, allow-list, budget, MCP, optional extra instructions) | `claude_agent` + the folder: `project_path` (absolute; registered as a project on the fly if new) or a registered `project` id. The target file is verified to exist | — |
+| **own** | A new agent whose persona lives in Duskfleet: the Markdown body is the system prompt | `system_prompt` (body) | `claude_agent` |
+| **link** | A reference to an agent that a project **folder** already defines in `.claude/agents/<name>.md`. The run starts as `claude --agent <name>` in that folder: the project agent brings prompt, tools and model; Duskfleet adds only the unattended envelope (permissions, allow-list, budget, MCP, optional extra instructions) | `claude_agent` + the folder: `project_path` (absolute; registered as a project on the fly if new) or a registered `project` id. The target file is verified to exist | — |
 
 `create_agent` makes you say which one (`kind: "own" | "link"`) and rejects inconsistent
 combinations; `list_agents` reports `kind` for every agent and the dashboard shows
@@ -76,7 +76,7 @@ An agent without `model` uses the Claude Code default, which can be far more exp
 A run that hits `max_budget_usd` is killed mid-action. On 2026-10-14 a scheduled run spent
 its whole $5 on two subagents and died while writing the ticket comment that recorded its
 work: the ticket stayed In Progress with no trace, and the agent's WIP limit then blocked the
-next eleven hourly ticks. To make a budget stop leave a trace, DuskFleet splits the budget:
+next eleven hourly ticks. To make a budget stop leave a trace, Duskfleet splits the budget:
 
 - the **main pass** is launched with `--max-budget-usd` = `max_budget_usd` − reserve;
 - when it ends `budget_exhausted` (and only then), one **wrap-up pass** resumes the same
@@ -121,7 +121,7 @@ Two frontmatter fields lift the limits per agent:
 - `isolated: true`: the agent never edits the project checkout. Its runs do not count against
   `max_concurrent_per_project` and are not blocked by it, so an isolated reviewer and a normal
   coder can work on the same project at the same time (two normal agents still cannot). This
-  is a promise the agent's prompt keeps (read-only tools, or a worktree of its own); DuskFleet
+  is a promise the agent's prompt keeps (read-only tools, or a worktree of its own); Duskfleet
   does not check it.
 
 `max_concurrent_runs` stays the hard cap over everything. A non-integer or a value below 1
@@ -216,7 +216,7 @@ Verified against Claude Code 2.1.295 on 2026-10-08 with real runs:
 | `acceptEdits` | Edits in the project allowed; Bash and MCP only if allow-listed |
 | `dontAsk` | Same, nothing prompts. **Use this for read-only agents** together with `disallowed_tools: [Edit, Write, NotebookEdit]`, which removes those tools from the session |
 | `plan` | Blocks Bash, MCP and file writes entirely, allow-list or not. Useless for unattended work |
-| `bypassPermissions` | Refused by Claude Code together with `--permission-prompts none`; DuskFleet rejects it with a clear error |
+| `bypassPermissions` | Refused by Claude Code together with `--permission-prompts none`; Duskfleet rejects it with a clear error |
 
 `permission_mode: acceptEdits` does not allow Bash: an agent that must run tests needs an
 `allowed_tools` entry such as `Bash(npm test:*)`.
@@ -233,7 +233,7 @@ through `create_agent`.
 ## Reusing agents a project already defines
 
 Projects often ship their own Claude Code agents in `.claude/agents/*.md` (persona, tools,
-model). Instead of copying that prompt into DuskFleet, link to it:
+model). Instead of copying that prompt into Duskfleet, link to it:
 
 ```markdown
 ---
@@ -248,7 +248,7 @@ Optional extra instructions, appended after the project agent's own prompt.
 ```
 
 The run starts as `claude --agent my-agent`: the project agent decides who the
-model is and what it does; the DuskFleet agent decides what it may do unattended
+model is and what it does; the Duskfleet agent decides what it may do unattended
 (permissions, allow-list, budget, MCP). `list_project_agents` shows what a project offers;
 a link to a name the project does not define fails before anything is spawned. Note that a
 project agent's `tools:` list does not grant permissions in unattended runs: those tools
@@ -271,8 +271,8 @@ Two things to get right with a link:
 ## MCP servers inside runs
 
 By default a run starts with `--strict-mcp-config`: no MCP server at all, 25 built-in tools,
-no way to recurse into DuskFleet. Set `inherit_mcp: true` on an **agent** or on a
-**project** and the run instead sees the MCP servers of the user running DuskFleet,
+no way to recurse into Duskfleet. Set `inherit_mcp: true` on an **agent** or on a
+**project** and the run instead sees the MCP servers of the user running Duskfleet,
 including the claude.ai connectors (Atlassian, Figma, Gmail, Drive, ...). Verified: 168 tools,
 140 of them from connectors. Each server still has to be allow-listed on the agent, by
 server (`mcp__claude_ai_Atlassian_Rovo`) or by tool (`mcp__claude_ai_Figma__get_screenshot`).
@@ -288,7 +288,7 @@ whose server never mounted is reported as `mcp.allowListedMissing`, flags the ru
 
 **Connectors load at start or not at all.** Now and then Claude Code comes up with no
 claude.ai connector (3 runs out of 12 on 2026-10-20: the init line listed only the project's
-`.mcp.json` server). With `inherit_mcp`, DuskFleet compares the init line against the agent's
+`.mcp.json` server). With `inherit_mcp`, Duskfleet compares the init line against the agent's
 allow-listed servers and, when one is absent, ends the process and starts it again with a fresh
 session, once; the init line comes before the first model turn, so the restart costs seconds,
 not dollars. The run gets a note (`init reported no server for mcp__claude_ai_Figma ...
@@ -299,7 +299,7 @@ wrong (`mcp__plugin_*`) trigger the same one restart on every run: fix the name.
 ## Subagents inside runs
 
 A project agent usually delegates: a coordinator spawns a designer, a reviewer, a tester
-through Claude Code's `Agent` tool. DuskFleet records every such invocation as its own row
+through Claude Code's `Agent` tool. Duskfleet records every such invocation as its own row
 (`run_agents`, migration 5), so the unit you can judge is not only the run but each agent
 that did part of the work:
 
