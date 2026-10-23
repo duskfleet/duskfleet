@@ -188,6 +188,38 @@ export function projectAgentDefinitionHash(projectPath: string, name: string): s
 }
 
 /**
+ * Short hash of what an agent run is made of (`runs.agent_hash`): the loaded spec (every field
+ * except where it was loaded from, keys sorted, so moving or reformatting the file keeps the hash)
+ * and, for a link, the content of `<project>/.claude/agents/<claude_agent>.md`, the persona that
+ * actually runs. Two runs with the same hash ran the same agent; an edit to either part changes it.
+ */
+export function agentDefinitionHash(agent: AgentDefinition, projectPath: string): string {
+  const { source: _source, sourcePath: _sourcePath, ...spec } = agent;
+  const h = createHash("sha256").update(stableJson(spec));
+  if (agent.claudeAgent) {
+    h.update("\0");
+    const file = path.join(projectPath, ".claude", "agents", `${agent.claudeAgent}.md`);
+    try {
+      h.update(readFileSync(file));
+    } catch {
+      h.update("(missing)");
+    }
+  }
+  return h.digest("hex").slice(0, 12);
+}
+
+function stableJson(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map(stableJson).join(",")}]`;
+  if (value && typeof value === "object") {
+    const entries = Object.entries(value as Record<string, unknown>)
+      .filter(([, v]) => v !== undefined)
+      .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
+    return `{${entries.map(([k, v]) => `${JSON.stringify(k)}:${stableJson(v)}`).join(",")}}`;
+  }
+  return JSON.stringify(value) ?? "null";
+}
+
+/**
  * The two kinds of DuskFleet agent. The distinction is explicit in the MCP
  * tools because mixing them up produces agents that look fine and do nothing:
  *

@@ -150,7 +150,8 @@ Rules:
 
 - The busy check comes first: a tick whose agent or project is busy is `skipped_busy` without
   running the gate. Then the agent's daily caps: over a cap the tick is `skipped_daily_cap`
-  without running the gate.
+  without running the gate. Then the monthly budgets: a spent hard-stop budget makes it
+  `skipped_budget`, again without running the gate.
 - A gated fire runs in the background of the tick: a gate can take minutes, and the tick goes
   on renewing the lease and serving other schedules and **Run now** requests. The fire claims
   its tick (`next_run_at` moves on) before the gate starts, so no other process fires it again
@@ -192,7 +193,9 @@ default applies. `noop_pattern` and `clear_noop_pattern` in one `update_schedule
 refused. Make the agent start its final message with a recognisable sentence when it finds no
 work. Failed runs, and completed runs that [need review](dashboard.md#needs-review) (a
 permission denial, a budget or context limit, an MCP mismatch), never count as no-op, even
-when they end with "nothing to do": they were blocked, not idle.
+when they end with "nothing to do": they were blocked, not idle. The one exception is a run
+whose only reason is `empty_run` (no tool call at all): a text-only "nothing to do" answer is
+exactly what a no-op looks like, so it still counts.
 
 ## Auto-pause
 
@@ -227,6 +230,10 @@ Every schedule stores its two policies, so the behaviour below is explicit on th
 - A tick whose agent reached its [daily cap](agents.md#daily-caps) (`max_daily_runs`,
   `max_daily_cost_usd`, UTC day) is recorded as `skipped_daily_cap`, also before any gate; a
   pending resume is not tried either. The cap lifts at 00:00 UTC.
+- A tick refused by a spent hard-stop [monthly budget](agents.md#monthly-budgets) (global, its
+  agent's or its project's) is recorded as `skipped_budget`, also before any gate, and every
+  schedule of that budget's scope is paused: it stays paused after the month turns, until you
+  resume it (`update_schedule enabled: true` or the dashboard).
 - Missed ticks (nobody running) are not caught up (`skip_missed`): the schedule fires once when
   it is next considered and its next tick is computed from then.
 - `scheduler.enabled: false` in `duskfleet.yaml` is the kill switch, re-read every tick.

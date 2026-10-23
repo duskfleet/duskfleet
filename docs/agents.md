@@ -29,6 +29,16 @@ anything. Code never writes into `config/agents`. Because a user agent may later
 field, and store `add_dirs` inside your home directory as `~/...`
 ([MCP server](mcp-server.md)).
 
+## Builtin agents
+
+General-purpose patterns shipped in `config/agents/`, not bound to any project. Point them at a
+project with `run_agent` or a schedule; to change their envelope (model, allow-list, budget),
+copy the file into `data/agents/` with the same id and edit the copy.
+
+| Id | What it does |
+|---|---|
+| `pr-check-loop` | Gets the checks of one pull request green. It takes the PR named in the task, or the oldest open PR whose head commit has a failing check (none: `nothing to do`). Each iteration reads the latest head SHA, waits for its checks (`gh pr checks --watch --interval 30`), classifies every failing job and applies a fixed action: **regression** = fix the code and push, **lint** = run the lint command locally and push, **flake** = one `gh run rerun --failed` per job, **external / secret** = stop with a blocker report. At most 5 iterations; it never force-pushes or touches workflow files, and stops on a dirty checkout. It leaves a PR comment unless the checks went green without any change from it. Sonnet, `acceptEdits`, $3, 60 min; the allow-list covers `gh pr` / `gh run`, `git` and `npm` (copy it into `data/agents/` for another toolchain). Meant to be scheduled every 30 minutes: `create_schedule` with cron `*/30 * * * *` on the project |
+
 ## Frontmatter
 
 ```markdown
@@ -138,6 +148,40 @@ gives `skipped_daily_cap` too). A non-integer or a value below 1 for `max_daily_
 non-positive `max_daily_cost_usd`, is a config error naming the file. `list_agents` reports
 `maxDailyRuns` / `maxDailyCostUsd` (`null` = no cap); `update_agent` removes one with
 `clear: ["max_daily_runs"]`.
+
+## Monthly budgets
+
+Daily caps bound one agent per day. A budget bounds a **scope** per **calendar month (UTC)**:
+`global` (every run), `agent <id>` (the runs of one agent) or `project <id>` (the runs on one
+project, whichever agent: counted by project id, and by the project's path for runs started
+with a path). Budgets are rows in the database (`budgets` table), one per scope, managed with
+`set_budget` / `list_budgets` / `delete_budget` over MCP or `duskfleet budgets` on the CLI:
+
+```bash
+npm run cli -- budgets set global --amount 200
+npm run cli -- budgets set project my-app --amount 50 --warn 70
+npm run cli -- budgets set agent pr-reviewer --amount 20 --no-hard-stop
+npm run cli -- budgets
+```
+
+| Field | Meaning |
+|---|---|
+| `amount_usd` | spend allowed per UTC month, compared with the recorded `cost_usd` of the scope's runs created since the 1st at 00:00 UTC (gate runs included) |
+| `warn_percent` | default 80: from this share of `amount_usd` the budget is `warn` |
+| `hard_stop` | default true: once the spend reaches `amount_usd` (`over`), new runs in the scope are refused and its schedules paused. `false` = warn only, runs still start |
+
+Every budget covering a run (global, the agent's, the project's) is checked in `startRun`,
+after the busy guards and the daily caps, before anything is spawned. A spent hard-stop budget
+throws a `BudgetError` (message `budget: the <scope> budget is spent ...`) and pauses every
+enabled schedule of the scope (global: all of them; agent: that agent's; project: the schedules
+that run on it, by their own `project_id` or their agent's binding). A schedule tick refused
+this way is `skipped_budget`. Paused schedules stay paused when the month turns or the budget
+is raised or deleted: resume them by hand. A run in progress is not stopped, so a month can end
+above the amount by at most one run's `max_budget_usd` per active run.
+
+The dashboard's **Runs** page shows a banner for each budget at `warn` (amber) or `over`
+(coral when it stops runs); `list_budgets` and `duskfleet budgets` report `spentUsd`,
+`percent`, `state` (`ok` \| `warn` \| `over`) and `periodStart` for every budget.
 
 ## Resume once on failure
 

@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { AutoRefresh } from "@/components/AutoRefresh";
 import { RunTable } from "@/components/RunTable";
-import { listAgents, listProjects, listRuns, listSchedules, modelStats, overview } from "@/lib/data";
+import { budgetAlerts, listAgents, listProjects, listRuns, listSchedules, modelStats, overview } from "@/lib/data";
 import { fmtCost, fmtDayClock, fmtDuration, fmtInt, fmtPct, shortModel } from "@/lib/format";
 
 export const dynamic = "force-dynamic";
@@ -48,6 +48,7 @@ export default async function RunsPage({ searchParams }: { searchParams: Promise
   const recent = listRuns({ ...filter, limit }).filter((r) => r.status !== "running");
   const o = overview(filter);
   const models = modelStats();
+  const budgets = budgetAlerts();
   const agentName = agent ? (agents.find((a) => a.id === agent)?.name ?? agent) : null;
   const scheduleName = schedule ? (listSchedules().find((s) => s.id === schedule)?.name ?? schedule) : null;
   const activeLabel = [project, agentName, scheduleName ? `schedule "${scheduleName}"` : null, q ? `"${q}"` : null]
@@ -77,6 +78,26 @@ export default async function RunsPage({ searchParams }: { searchParams: Promise
           <span className="note">{fmtDayClock(new Date())}</span>
         </span>
       </div>
+
+      {budgets.map((b) => {
+        const spent = b.state === "over";
+        const label = b.scope === "global" ? "Global budget" : `Budget of ${b.scope} ${b.scopeId}`;
+        return (
+          <div key={b.id} className={`callout ${spent && b.hardStop ? "bad" : "warn"}`} style={{ margin: "0 0 16px" }}>
+            <span className="icon">!</span>
+            <div>
+              <strong>
+                {label}: {fmtCost(b.spentUsd)} of {fmtCost(b.amountUsd)} this month ({b.percent}%).
+              </strong>{" "}
+              {spent
+                ? b.hardStop
+                  ? "Spent: new runs in this scope are refused and its schedules were paused until the month turns (UTC) or the budget is raised."
+                  : "Spent; hard_stop is off, so runs still start."
+                : `Past its ${b.warnPercent}% warning threshold.`}
+            </div>
+          </div>
+        );
+      })}
 
       <div className="toolbar">
         <div className="filters">

@@ -16,6 +16,9 @@ npm run cli -- agents
 npm run cli -- projects
 npm run cli -- schedules
 npm run cli -- schedules run-now "pr review"              # schedule id or name; the lease holder fires it on its next tick
+npm run cli -- budgets                                    # monthly budgets with this month's spend and state
+npm run cli -- budgets set project my-app --amount 50 [--warn 80] [--no-hard-stop]   # or: global | agent <id>
+npm run cli -- budgets delete <budget id>
 npm run cli -- serve                                      # long-running scheduler process
 npm run cli -- install-service [--print]                  # register `serve` with launchd / systemd --user / Task Scheduler
 npm run cli -- uninstall-service
@@ -98,8 +101,16 @@ explicit model uses the Claude Code default.
 `claudeSessionId`, `permissionMode`, the exact `command` (binary, argv, cwd; the prompt is sent on stdin, so it is not in argv), `exitCode`,
 `terminationReason`, `error`, `resultText`, `numTurns`, `toolCalls`, input/output/cache tokens,
 `usageByModel` (the same tokens per model id), `costUsd`, `billingType`, `permissionDenials`, `deniedTools`, `mcp` (mounted, used, allow-listed but missing),
-`humanIntervention`, `contextExhausted`, `errorCode`/`errorFamily`/`errorDetail`, `scheduleId`, `logPath`, `phases` (the main pass and,
-after a budget exhaustion, the [wrap-up pass](agents.md#budget-reserve-and-wrap-up-pass)), `resumedFromRunId` (the run whose session it resumed, see [resume once](schedules.md#resume-once-on-failure)).
+`humanIntervention`, `contextExhausted`, `errorCode`/`errorFamily`/`errorDetail`, `scheduleId`, `logPath`, `lastEventAt` (when the run last produced output, refreshed at most every 15 s; the dashboard's silent-run flag), `phases` (the main pass and,
+after a budget exhaustion, the [wrap-up pass](agents.md#budget-reserve-and-wrap-up-pass)), `resumedFromRunId` (the run whose session it resumed, see [resume once](schedules.md#resume-once-on-failure)),
+`agentHash` and `claudeCodeVersion` (the eval bundle, below).
+
+The eval bundle says exactly what ran, so runs can be compared like with like: `modelUsed`, `agentHash`
+and `claudeCodeVersion`. `agentHash` is a 12-character hash taken when the run starts: the agent's
+loaded spec (every frontmatter field and the system prompt, not the file's location) and, for a
+[link](agents.md) agent, the content of the project's `.claude/agents/<claude_agent>.md`. Two runs
+with the same hash ran the same agent; editing either file changes it. `claudeCodeVersion` comes
+from the child's `init` line. Both are null for runs recorded before they existed.
 
 Token totals come from the result line's `modelUsage`, summed over every model, so they include
 the tokens of subagents; the result's own `usage` counts the main session only and is used just

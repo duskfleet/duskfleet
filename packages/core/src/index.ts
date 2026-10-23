@@ -7,6 +7,7 @@ export {
   AGENT_ID_PATTERN,
   type AgentKind,
   type AgentSpec,
+  agentDefinitionHash,
   agentFilePath,
   agentKind,
   agentSpecSchema,
@@ -74,6 +75,23 @@ export {
 } from "./git/diff.js";
 export * from "./observability/failure.js";
 export * from "./observability/run.js";
+export {
+  BUDGET_SCOPES,
+  type Budget,
+  BudgetError,
+  type BudgetInput,
+  type BudgetScope,
+  type BudgetSource,
+  type BudgetState,
+  type BudgetStatus,
+  budgetLabel,
+  budgetStatus,
+  budgetStatuses,
+  budgetStatusOf,
+  DEFAULT_WARN_PERCENT,
+  utcMonthStart,
+  validateBudgetInput,
+} from "./orchestration/budget.js";
 export { BusyError } from "./orchestration/busy.js";
 export { DailyCapError } from "./orchestration/daily-cap.js";
 export { ProjectValidationError, validateProjectPath } from "./orchestration/project-validation.js";
@@ -134,6 +152,7 @@ export {
 export { attachLastRun, type RunSummarySource, type ScheduleWithLastRun } from "./scheduler/last-run.js";
 export { type FireResult, Scheduler, type SchedulerOptions, type SchedulerStatus } from "./scheduler/scheduler.js";
 export * from "./scheduler/types.js";
+export { BudgetRepository } from "./storage/budgets.js";
 export { migrationDigests, openDatabase } from "./storage/db.js";
 export { type ListRunsFilter, NEEDS_REVIEW_SQL, type RunPatch, RunRepository } from "./storage/runs.js";
 export { type EndedRunFacts, parseGate, ScheduleRepository } from "./storage/schedules.js";

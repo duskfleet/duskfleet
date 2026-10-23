@@ -240,8 +240,9 @@ export function autoPauseReason(
   if (!(limit > 0)) return null;
   const runs = repo.recentEndedRuns(schedule.id, schedule.autoPausedAt, limit);
   if (runs.length < limit || !runs.every((r) => r.empty || r.needsReview)) return null;
-  const review = runs.filter((r) => r.needsReview).length;
-  const empty = runs.filter((r) => r.empty && !r.needsReview).length;
+  // An empty run is needs-review too (reason empty_run): count it as empty, not as review.
+  const empty = runs.filter((r) => r.empty).length;
+  const review = runs.filter((r) => r.needsReview && !r.empty).length;
   const parts = [
     ...(empty > 0 ? [`${empty} completed with 0 tool calls`] : []),
     ...(review > 0 ? [`${review} needed review`] : []),
