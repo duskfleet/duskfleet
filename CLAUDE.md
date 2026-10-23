@@ -21,7 +21,7 @@ npm run cli -- serve  # long-running scheduler process; the MCP server also tick
 npm run cli -- install-service [--print] | uninstall-service   # register `serve` with launchd / systemd --user / Task Scheduler
 npm run cli -- run --project <project id or abs path> --agent <agent id> --model haiku -- "task"
 npm run web          # Next.js dashboard, http://localhost:4777
-npm run check        # what CI runs, same order: check:public, lint (biome ci), build, typecheck, test
+npm run check        # what CI runs, same order: check:public, lint (biome ci), build, check:docs, typecheck, test
 npm run lint:fix     # Biome: format + safe fixes
 ```
 

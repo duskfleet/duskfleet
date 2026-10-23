@@ -98,12 +98,12 @@ with diagrams: [How it works](docs/how-it-works.md).
 | **Runs** | Every event, tool call, permission denial, token and dollar, in SQLite and a JSONL log per run. [CLI](docs/cli.md) |
 | **Schedules** | Cron schedules that skip when the agent is busy, never queue and never catch up. [Schedules](docs/schedules.md) |
 | **Dashboard** | Runs with cost, timeline and issues; a run that hit a permission denial is "needs review", never green. [Dashboard](docs/dashboard.md) |
-| **MCP tools** | 15 tools to create agents, start and inspect runs and manage schedules from a chat. [MCP server](docs/mcp-server.md) |
+| **MCP tools** | 18 tools to create agents, start and inspect runs and manage schedules from a chat. [MCP server](docs/mcp-server.md) |
 | **CLI** | The same operations from a terminal, plus `serve` and `install-service` for the scheduler. [CLI](docs/cli.md) |
 
 ## Status and roadmap
 
-Working today: agents, runs, scheduler, dashboard, 15 MCP tools. On the roadmap: deterministic
+Working today: agents, runs, scheduler, dashboard, 18 MCP tools. On the roadmap: deterministic
 and LLM evals as post-run hooks, metrics, Git integration.
 
 Formerly Gab Factory (renamed 2026-10-11); an existing `data/gabfactory.db` is adopted on first

@@ -23,8 +23,9 @@
     "lint": "biome ci .",
     "lint:fix": "biome check --write .",
     "check:public": "node scripts/check-public.mjs",
+    "check:docs": "node scripts/check-docs.mjs",
     "test:coverage": "npm run test:coverage -w @duskfleet/mcp",
-    "check": "npm run check:public && npm run lint && npm run build && npm run typecheck && npm run typecheck -w @duskfleet/web && npm test"
+    "check": "npm run check:public && npm run lint && npm run build && npm run check:docs && npm run typecheck && npm run typecheck -w @duskfleet/web && npm test"
   },
   "devDependencies": {
     "@biomejs/biome": "^2.5.15",
