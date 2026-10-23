@@ -15,7 +15,7 @@ export async function generateMetadata({ searchParams }: { searchParams: Promise
   const { agent, project } = await searchParams;
   const name = agent ? (listAgents().find((a) => a.id === agent)?.name ?? agent) : null;
   const parts = ["Runs", project, name].filter(Boolean);
-  return { title: `${parts.join(" · ")} · DuskFleet` };
+  return { title: `${parts.join(" · ")} · Duskfleet` };
 }
 
 export default async function RunsPage({ searchParams }: { searchParams: Promise<Search> }) {

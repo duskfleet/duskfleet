@@ -21,10 +21,10 @@ export interface ToolContext {
 
 export const SERVER_VERSION = "0.1.0";
 export const SERVER_INSTRUCTIONS =
-  "DuskFleet runs autonomous Claude Code agents against local projects. " +
+  "Duskfleet runs autonomous Claude Code agents against local projects. " +
   "Use list_agents and list_projects to discover what is available, run_agent to start a run " +
   "(returns immediately with a run_id unless wait_seconds is set), and get_run / list_runs to inspect results. " +
-  "create_agent / update_agent manage agent definitions: an agent is either kind 'own' (new persona written in DuskFleet) " +
+  "create_agent / update_agent manage agent definitions: an agent is either kind 'own' (new persona written in Duskfleet) " +
   "or kind 'link' (reuses an agent the project defines in .claude/agents/, see list_project_agents) — always choose explicitly. " +
   "create_schedule / list_schedules manage cron schedules. set_budget / list_budgets manage monthly budgets (global, agent, project).";
 

@@ -2,7 +2,7 @@
   "name": "@duskfleet/mcp",
   "version": "0.1.0",
   "private": true,
-  "description": "DuskFleet MCP server (stdio) and local CLI",
+  "description": "Duskfleet MCP server (stdio) and local CLI",
   "type": "module",
   "main": "./dist/index.js",
   "bin": {

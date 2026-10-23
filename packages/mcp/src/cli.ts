@@ -45,6 +45,8 @@ function print(value: unknown): void {
 function usage(): never {
   process.stderr.write(
     [
+      "Duskfleet - A fleet of agents for your own machine.",
+      "",
       "Usage:",
       "  duskfleet agents",
       "  duskfleet projects",

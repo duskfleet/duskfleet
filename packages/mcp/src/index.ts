@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { logger } from "@duskfleet/core";
 /**
- * DuskFleet MCP server entry point (stdio transport).
+ * Duskfleet MCP server entry point (stdio transport).
  *
  * stdout is the protocol channel; all logging goes to stderr.
  */
@@ -44,7 +44,7 @@ async function main(): Promise<void> {
 
   const transport = new StdioServerTransport();
   await server.connect(transport);
-  log.info("DuskFleet MCP server listening on stdio", { claude: version });
+  log.info("Duskfleet MCP server listening on stdio", { claude: version });
 }
 
 main().catch((err) => {

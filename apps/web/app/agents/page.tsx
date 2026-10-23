@@ -17,7 +17,7 @@ import { fmtAgo, fmtCost, fmtPct, shortModel, tildePath } from "@/lib/format";
 
 export const dynamic = "force-dynamic";
 
-export const metadata = { title: "Agents · DuskFleet" };
+export const metadata = { title: "Agents · Duskfleet" };
 
 type Agent = ReturnType<typeof listAgents>[number];
 
@@ -63,7 +63,7 @@ export default function AgentsPage() {
     });
   }
 
-  // Agents a project defines in .claude/agents that no DuskFleet agent links to yet.
+  // Agents a project defines in .claude/agents that no Duskfleet agent links to yet.
   const unlinked = projects.flatMap((p) =>
     projectAgentsFor(p.id)
       .filter((pa) => !agents.some((a) => a.project === p.id && a.claudeAgent === pa.name))
@@ -191,7 +191,7 @@ function AgentCard({
         <span
           className={`ac-kind ${a.claudeAgent ? "link" : ""}`}
           title={
-            a.claudeAgent ? `Runs as the project's ${a.claudeAgent} (claude --agent)` : "Persona written in DuskFleet"
+            a.claudeAgent ? `Runs as the project's ${a.claudeAgent} (claude --agent)` : "Persona written in Duskfleet"
           }
         >
           {a.claudeAgent ? "link" : "own"}
@@ -227,7 +227,7 @@ function AgentCard({
         {a.description ||
           (a.claudeAgent ? (
             <>
-              Runs <code>claude --agent {a.claudeAgent}</code> in the project. The persona lives in the repo; DuskFleet
+              Runs <code>claude --agent {a.claudeAgent}</code> in the project. The persona lives in the repo; Duskfleet
               owns only the envelope.
             </>
           ) : (

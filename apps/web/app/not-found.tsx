@@ -1,6 +1,6 @@
 import Link from "next/link";
 
-export const metadata = { title: "Not found · DuskFleet" };
+export const metadata = { title: "Not found · Duskfleet" };
 
 export default function NotFound() {
   return (
