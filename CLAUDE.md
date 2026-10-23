@@ -69,7 +69,9 @@ npm workspaces, one `config/` and one SQLite database shared by three deliverabl
   in-house 5-field parser in `cron.ts` (no dependency; DST-safe by re-deriving local time per
   candidate minute). Only the SQLite lease holder ticks; the holder is `<role>@host:pid`
   (`serve` / `mcp` / `cli`, `parseHolder`). Busy = `skipped_busy`, never a queue;
-  no catch-up of missed ticks; `scheduler.enabled` is the kill switch read every tick.
+  no catch-up of missed ticks; `scheduler.enabled` is the kill switch read every tick, and
+  `pause_scheduler` (one `scheduler_pause` row, migration 21) stops all firing until an instant,
+  also read every tick (the holder keeps the lease and the sweep). `trigger_kind` is only `cron`.
   Create/update validation is `scheduler/crud.ts`, shared by MCP, CLI and dashboard.
   Command gates (`sh -c`, full env) are opt-in: `scheduler.allow_command_gates` (default false)
   is checked on create/update (`assertCommandGateAllowed`) and again in `evaluateGate` per tick.

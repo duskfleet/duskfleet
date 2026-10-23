@@ -15,6 +15,7 @@
  */
 import { spawn } from "node:child_process";
 import type { DuskFleetConfig } from "../config/types.js";
+import { withEffectivePath } from "../execution/search-path.js";
 import { BudgetError } from "../orchestration/budget.js";
 import { BusyError } from "../orchestration/busy.js";
 import { DailyCapError } from "../orchestration/daily-cap.js";
@@ -132,7 +133,8 @@ export function runCommandGate(
       // sh, in its own process group so a timeout can kill everything it started.
       child = spawn("/bin/sh", ["-c", command], {
         cwd,
-        env: process.env,
+        // A GUI host's minimal PATH would hide git, gh, jq... (see search-path.ts).
+        env: withEffectivePath(process.env),
         stdio: ["ignore", "pipe", "pipe"],
         detached: process.platform !== "win32",
       });

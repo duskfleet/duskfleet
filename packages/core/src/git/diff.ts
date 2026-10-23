@@ -11,6 +11,7 @@
 import { spawnSync } from "node:child_process";
 import { closeSync, lstatSync, mkdirSync, openSync, readSync, writeFileSync } from "node:fs";
 import path from "node:path";
+import { withEffectivePath } from "../execution/search-path.js";
 
 /** At most this many files are listed in the event; `filesChanged` keeps the real count. */
 export const DIFF_MAX_FILES = 200;
@@ -85,6 +86,18 @@ interface GitOutput {
 }
 
 /**
+ * Environment of the git reads: the effective PATH (a GUI host's minimal one would hide a
+ * Homebrew git, see search-path.ts), and never the index lock another git process (the
+ * agent's own) may need.
+ */
+export function gitEnv(
+  env: NodeJS.ProcessEnv = process.env,
+  platform: NodeJS.Platform = process.platform,
+): NodeJS.ProcessEnv {
+  return { ...withEffectivePath(env, platform), GIT_OPTIONAL_LOCKS: "0" };
+}
+
+/**
  * Run a read-only git command. An output past GIT_MAX_BUFFER is a failure unless
  * `allowOverflow` is set: a cut `-z` list would yield half paths and wrong counts.
  */
@@ -102,8 +115,7 @@ function git(
     maxBuffer: GIT_MAX_BUFFER,
     timeout: Math.min(timeoutMs, GIT_TIMEOUT_MS),
     windowsHide: true,
-    // Read-only: never take the index lock another git process (the agent's own) may need.
-    env: { ...process.env, GIT_OPTIONAL_LOCKS: "0" },
+    env: gitEnv(),
   });
   const overflow = (r.error as NodeJS.ErrnoException | undefined)?.code === "ENOBUFS";
   const ok = overflow ? allowOverflow : !r.error && r.status !== null && okCodes.includes(r.status);

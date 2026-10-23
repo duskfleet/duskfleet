@@ -49,6 +49,13 @@ export {
 export { mergeSubagent, needsRepair, sameSubagent, subagentsFromLog } from "./execution/log-replay.js";
 export { allowListedMcpPrefixes, mcpToolPrefix, missingMcpServers } from "./execution/mcp.js";
 export {
+  DEFAULT_PATH_DIRS,
+  effectivePath,
+  isMinimalPath,
+  pathDefaulted,
+  withEffectivePath,
+} from "./execution/search-path.js";
+export {
   cleanHandBack,
   createStreamState,
   ingestLine,
@@ -67,6 +74,7 @@ export {
   DIFF_TIME_BUDGET_MS,
   type DiffFile,
   type DiffFileStatus,
+  gitEnv,
   headSha,
   parseNameStatus,
   parseNumstat,

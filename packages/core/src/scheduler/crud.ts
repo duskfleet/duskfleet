@@ -22,10 +22,12 @@ import {
   CONCURRENCY_POLICIES,
   DEFAULT_CATCH_UP_POLICY,
   DEFAULT_CONCURRENCY_POLICY,
+  DEFAULT_TRIGGER_KIND,
   IMPLEMENTED_CATCH_UP_POLICIES,
   type Schedule,
   type ScheduleInput,
   type SchedulePatch,
+  TRIGGER_KINDS,
 } from "./types.js";
 
 export const DEFAULT_TIME_ZONE = "Europe/London";
@@ -69,8 +71,12 @@ export function validateScheduleInput(config: DuskFleetConfig, input: ScheduleIn
   validatePolicies(input);
 }
 
-/** concurrency_policy and catch_up_policy: known values, and only the ones the scheduler implements. */
-function validatePolicies(input: Pick<ScheduleInput, "concurrencyPolicy" | "catchUpPolicy">): void {
+/** trigger_kind, concurrency_policy and catch_up_policy: known values, and only the ones the scheduler implements. */
+function validatePolicies(input: Pick<ScheduleInput, "concurrencyPolicy" | "catchUpPolicy" | "triggerKind">): void {
+  const trigger = input.triggerKind ?? DEFAULT_TRIGGER_KIND;
+  if (!(TRIGGER_KINDS as readonly string[]).includes(trigger)) {
+    throw new Error(`trigger_kind must be one of ${TRIGGER_KINDS.join(", ")}`);
+  }
   const concurrency = input.concurrencyPolicy ?? DEFAULT_CONCURRENCY_POLICY;
   if (!(CONCURRENCY_POLICIES as readonly string[]).includes(concurrency)) {
     throw new Error(`concurrency_policy must be one of ${CONCURRENCY_POLICIES.join(", ")}`);
@@ -256,6 +262,7 @@ export function updateSchedule(
     gate: patch.gate === undefined ? existing.gate : patch.gate,
     concurrencyPolicy: patch.concurrencyPolicy ?? existing.concurrencyPolicy,
     catchUpPolicy: patch.catchUpPolicy ?? existing.catchUpPolicy,
+    triggerKind: patch.triggerKind ?? existing.triggerKind,
   };
   validateScheduleInput(config, merged);
   assertCommandGateAllowed(config, patch.gate, configReloadError);

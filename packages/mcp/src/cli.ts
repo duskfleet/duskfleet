@@ -24,8 +24,10 @@ import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
 import {
   type BudgetInput,
+  effectivePath,
   findRepoRoot,
   parseHolder,
+  pathDefaulted,
   RUN_STATUSES,
   type RunStatus,
   subagentView,
@@ -190,6 +192,10 @@ async function main(): Promise<void> {
         node: process.version,
         claudeBinary: app.executor.binary,
         claudeVersion: version,
+        // What the claude lookup and every run use; defaulted = the inherited PATH was missing or
+        // minimal (GUI-launched host) and the usual install directories were put in front.
+        path: effectivePath(process.env["PATH"]),
+        pathDefaulted: pathDefaulted(process.env["PATH"]),
         error,
         configDir: app.config.configDir,
         dataDir: app.config.dataDir,
