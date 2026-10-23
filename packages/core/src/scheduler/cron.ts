@@ -1,6 +1,6 @@
 /**
  * Minimal 5-field cron (minute hour day-of-month month day-of-week) with an IANA
- * time zone. No dependency: DuskFleet only needs "weekdays at :30, 08–20,
+ * time zone. No dependency: Duskfleet only needs "weekdays at :30, 08–20,
  * London time", not Quartz.
  *
  * Supported per field: `*`, `N`, `A-B`, `A,B,C`, `* /S` and `A-B/S` steps, names

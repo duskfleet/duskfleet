@@ -1,4 +1,4 @@
-# DuskFleet global configuration.
+# Duskfleet global configuration.
 # Relative paths are resolved from the directory containing this file.
 
 # Where runtime data lives (SQLite database and per-run logs). Git-ignored.
@@ -33,7 +33,7 @@ max_concurrent_per_project: 4
 max_concurrent_per_agent: 4
 
 # Schedules live in the database (create_schedule over MCP, or the dashboard shows
-# them). The scheduler ticks inside whichever DuskFleet process holds the lease:
+# them). The scheduler ticks inside whichever Duskfleet process holds the lease:
 # the MCP server Claude Desktop keeps alive, or `duskfleet serve` under launchd.
 scheduler:
   enabled: true            # kill switch, re-read every tick: false stops all firing
@@ -59,9 +59,9 @@ claude:
   # have a minimal PATH, so setting this explicitly is the most reliable option.
   binary: null
   # Default for runs: true = --strict-mcp-config, the child session sees no MCP
-  # server at all (fast, and it cannot recurse into DuskFleet). An agent or a
+  # server at all (fast, and it cannot recurse into Duskfleet). An agent or a
   # project with inherit_mcp: true opts out and sees the MCP servers of the user
-  # running DuskFleet, including claude.ai connectors (Atlassian, Figma, ...).
+  # running Duskfleet, including claude.ai connectors (Atlassian, Figma, ...).
   # false = every run inherits everything. Verified 2026-10-08: with strict a run
   # sees 25 tools, without it 168 (140 from connectors).
   strict_mcp_config: true

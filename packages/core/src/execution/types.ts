@@ -1,5 +1,5 @@
 /**
- * Execution abstraction. This is the only contract the rest of DuskFleet
+ * Execution abstraction. This is the only contract the rest of Duskfleet
  * uses to run an agent. `ClaudeCodeExecutor` is the one implementation today.
  */
 import type { EffortLevel, PermissionMode } from "../config/types.js";

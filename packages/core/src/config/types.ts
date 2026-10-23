@@ -1,6 +1,6 @@
 /**
  * Declarative configuration types. Everything here is loaded from files under
- * `config/` and represents what DuskFleet *should* do.
+ * `config/` and represents what Duskfleet *should* do.
  */
 
 /** Permission modes accepted by `claude --permission-mode` (verified against CLI 2.1.285). */
@@ -46,7 +46,7 @@ export interface AgentDefinition {
   /** Budget of the resumed run (`on_failure: resume_once`). Defaults to `maxBudgetUsd`. */
   resumeBudgetUsd?: number;
   /**
-   * Let runs see the MCP servers of the user running DuskFleet (claude.ai
+   * Let runs see the MCP servers of the user running Duskfleet (claude.ai
    * connectors such as Atlassian or Figma, user/project .mcp.json). Default
    * false: runs start with --strict-mcp-config and no MCP at all.
    * Tools still need an allowed_tools entry such as "mcp__claude_ai_Figma".
@@ -57,7 +57,7 @@ export interface AgentDefinition {
   /**
    * Run as an agent defined by the target project itself (`<project>/.claude/agents/<name>.md`),
    * passed as `claude --agent <name>`. The project agent supplies persona, tools and model;
-   * this DuskFleet agent only adds the unattended envelope (permissions, budget, MCP, extra prompt).
+   * this Duskfleet agent only adds the unattended envelope (permissions, budget, MCP, extra prompt).
    */
   claudeAgent?: string;
   /**
@@ -74,7 +74,7 @@ export interface AgentDefinition {
   /**
    * The agent never edits the project checkout (read-only, or works in its own git worktree).
    * Its runs neither count against nor wait for max_concurrent_per_project. A promise the
-   * agent's prompt keeps; DuskFleet does not check it. Default false.
+   * agent's prompt keeps; Duskfleet does not check it. Default false.
    */
   isolated?: boolean;
   /**

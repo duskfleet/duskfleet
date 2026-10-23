@@ -1,6 +1,6 @@
 import Link from "next/link";
 
-export const metadata = { title: "Run not found · DuskFleet" };
+export const metadata = { title: "Run not found · Duskfleet" };
 
 export default function RunNotFound() {
   return (
