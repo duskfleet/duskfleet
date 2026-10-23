@@ -26,7 +26,7 @@ npm run cli -- tools                                      # the MCP tool catalog
 ```
 
 `doctor` prints the effective `path` used to find `claude` and passed to runs; `pathDefaulted`
-is true when the inherited `PATH` was missing or minimal (a GUI-launched host) and the usual
+is true on macOS when the inherited `PATH` was missing or minimal (a GUI-launched host) and the usual
 install directories were put in front ([Troubleshooting](troubleshooting.md)).
 
 `doctor` also reports the scheduler: whether something is ticking, which kind of process holds

@@ -16,7 +16,7 @@ import { classifyFailure } from "../observability/failure.js";
 import type { BillingType, RecordedCommand } from "../observability/run.js";
 import { logger } from "../util/log.js";
 import { missingMcpServers } from "./mcp.js";
-import { effectivePath } from "./search-path.js";
+import { effectivePath, withEffectivePath } from "./search-path.js";
 import { createStreamState, ingestLine, looksLikeContextExhaustion } from "./stream-json.js";
 import {
   type ExecutionEvent,
@@ -445,8 +445,7 @@ function childEnv(): NodeJS.ProcessEnv {
   // DuskFleet's own variable: an agent running `npm test` here would launch the real claude.
   delete env["CLAUDE_BIN"];
   // A GUI host's minimal PATH would hide node, git and claude from the run (see search-path.ts).
-  if (process.platform !== "win32") env["PATH"] = effectivePath(env["PATH"]);
-  return env;
+  return withEffectivePath(env);
 }
 
 /**

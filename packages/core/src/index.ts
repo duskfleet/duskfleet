@@ -48,7 +48,13 @@ export {
 } from "./execution/claude-code.js";
 export { mergeSubagent, needsRepair, sameSubagent, subagentsFromLog } from "./execution/log-replay.js";
 export { allowListedMcpPrefixes, mcpToolPrefix, missingMcpServers } from "./execution/mcp.js";
-export { DEFAULT_PATH_DIRS, effectivePath, isMinimalPath } from "./execution/search-path.js";
+export {
+  DEFAULT_PATH_DIRS,
+  effectivePath,
+  isMinimalPath,
+  pathDefaulted,
+  withEffectivePath,
+} from "./execution/search-path.js";
 export {
   cleanHandBack,
   createStreamState,
@@ -68,6 +74,7 @@ export {
   DIFF_TIME_BUDGET_MS,
   type DiffFile,
   type DiffFileStatus,
+  gitEnv,
   headSha,
   parseNameStatus,
   parseNumstat,

@@ -1,10 +1,12 @@
 # Troubleshooting
 
 - **`doctor` cannot find `claude`**: set `claude.binary` in `duskfleet.yaml` or `CLAUDE_BIN`.
-  GUI-launched hosts (Claude Desktop) start with a minimal `PATH` (only `/usr/bin`, `/bin`,
-  `/usr/sbin`, `/sbin`, or none): DuskFleet then puts `/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin`
-  in front, both to find `claude` and for every run. `doctor` prints the effective `path` and
-  `pathDefaulted: true` when that happened. Such hosts also do not expand `~` in
+  On macOS, GUI-launched hosts (Claude Desktop, launchd) start with a minimal `PATH` (only
+  `/usr/bin`, `/bin`, `/usr/sbin`, `/sbin`, or none): DuskFleet then puts
+  `/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin` in front, to find `claude` and for every
+  process it starts (runs, schedule gate commands, the git reads of a run's diff). `doctor`
+  prints the effective `path` and `pathDefaulted: true` when that happened. On Linux and
+  Windows the `PATH` is used as it is, even a minimal one. Such hosts also do not expand `~` in
   `claude_desktop_config.json` ("No executable file at ~/..."): use absolute paths.
 - **Is `claude` logged in, will a hook block scheduled runs?** `npm run cli -- doctor --probe`
   makes one real hello run on haiku (cents) and says which of the two it hit

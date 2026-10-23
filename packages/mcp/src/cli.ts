@@ -26,8 +26,8 @@ import {
   type BudgetInput,
   effectivePath,
   findRepoRoot,
-  isMinimalPath,
   parseHolder,
+  pathDefaulted,
   RUN_STATUSES,
   type RunStatus,
   subagentView,
@@ -193,7 +193,7 @@ async function main(): Promise<void> {
         // What the claude lookup and every run use; defaulted = the inherited PATH was missing or
         // minimal (GUI-launched host) and the usual install directories were put in front.
         path: effectivePath(process.env["PATH"]),
-        pathDefaulted: process.platform !== "win32" && isMinimalPath(process.env["PATH"]),
+        pathDefaulted: pathDefaulted(process.env["PATH"]),
         error,
         configDir: app.config.configDir,
         dataDir: app.config.dataDir,
