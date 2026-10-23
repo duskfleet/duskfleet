@@ -10,7 +10,7 @@ values (your own projects, your own agents, the MCP registration) live in git-ig
 data_dir: ../data               # SQLite + logs (git-ignored)
 allowed_project_roots: []       # e.g. [~/Documents/Projects]; empty = any directory except / and ~
 default_agent: null              # or an agent id; null = run_agent requires agent_id
-max_concurrent_runs: 2
+max_concurrent_runs: 4
 claude:
   binary: null                  # set to /Users/you/.local/bin/claude if PATH is minimal (GUI launch)
   strict_mcp_config: true       # child sessions ignore user-level MCP servers (faster, no hangs)
