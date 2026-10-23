@@ -3,8 +3,10 @@ import { allowListedMcpPrefixes, mcpToolPrefix } from "../execution/mcp.js";
 /**
  * Allow-listed MCP server prefixes that never showed up in a run: an `mcp__` entry of
  * `allowedTools` whose server prefix matches neither a mounted server nor a server actually
- * called (`used`, as prefixes). Mounted lists can be empty while connectors are still
- * connecting at init, so nothing is reported missing unless the run gave *some* MCP evidence.
+ * called (`used`, as prefixes). Only a non-empty mounted list from the init line is evidence:
+ * Claude Code reports `mcp_servers: []` when connectors load as deferred tools, and a call on
+ * one server never proves that another allow-listed server was absent (one not called leaves
+ * no trace). With nothing mounted, nothing is reported missing.
  */
 export function allowListedMcpMissing(
   allowedTools: readonly string[],
@@ -12,7 +14,7 @@ export function allowListedMcpMissing(
   used: readonly string[],
 ): string[] {
   const mountedPrefixes = new Set(mounted.map((m) => mcpToolPrefix(m.name)));
-  if (mountedPrefixes.size === 0 && used.length === 0) return [];
+  if (mountedPrefixes.size === 0) return [];
   return allowListedMcpPrefixes(allowedTools).filter((p) => !mountedPrefixes.has(p) && !used.includes(p));
 }
 
