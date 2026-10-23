@@ -24,6 +24,9 @@
  *  - Auto-pause: before a scheduled (not manual) fire, a schedule whose last
  *    `scheduler.auto_pause_after` ended runs were all empty (0 tool calls) or needs review
  *    is paused instead, with the reason stored on the row (`auto_paused` firing).
+ *  - `pause` (MCP `pause_scheduler`): a pause of the whole scheduler until an instant, stored in
+ *    the database and read every tick. The lease holder keeps ticking (lease, orphan sweep) but
+ *    fires nothing; what came due meanwhile fires once when the pause ends (no catch-up).
  *  - The lease holder also sweeps orphaned runs (owner process gone) at most once a
  *    minute, so a crashed process's runs close without waiting for the next start.
  */
@@ -48,7 +51,14 @@ import {
 } from "./crud.js";
 import { evaluateGate } from "./gate.js";
 import { type IdleStats, scheduleIdleStats } from "./idle.js";
-import type { Schedule, ScheduleInput, ScheduleOutcome, SchedulePatch } from "./types.js";
+import {
+  MAX_SCHEDULER_PAUSE_MINUTES,
+  type Schedule,
+  type ScheduleInput,
+  type ScheduleOutcome,
+  type SchedulePatch,
+  type SchedulerPause,
+} from "./types.js";
 
 export interface FireResult {
   outcome: ScheduleOutcome;
@@ -81,6 +91,8 @@ export interface SchedulerStatus {
   lease: { holder: string; expiresAt: string } | null;
   tickMs: number;
   lastTickAt: string | null;
+  /** The pause set with `pause_scheduler` while it is in force, else null. */
+  pause: SchedulerPause | null;
 }
 
 export class Scheduler {
@@ -113,7 +125,10 @@ export class Scheduler {
   // ---- CRUD (validation lives in crud.ts so MCP, CLI, dashboard and tests share it) ----
 
   create(input: ScheduleInput): Schedule {
-    const created = createSchedule(this.repo, this.runs.config, input, this.now());
+    // Fresh config: agent / project edits and scheduler.allow_command_gates apply without restart.
+    // A failed reload refuses command gates (the kept config may be stale), see commandGateRefusal.
+    const config = this.runs.reloadConfig();
+    const created = createSchedule(this.repo, config, input, this.now(), this.runs.configReloadError);
     log.info("schedule created", {
       id: created.id,
       name: created.name,
@@ -125,7 +140,8 @@ export class Scheduler {
   }
 
   update(id: string, patch: SchedulePatch): Schedule {
-    const updated = updateSchedule(this.repo, this.runs.config, id, patch, this.now());
+    const config = this.runs.reloadConfig();
+    const updated = updateSchedule(this.repo, config, id, patch, this.now(), this.runs.configReloadError);
     log.info("schedule updated", { id, name: updated.name, enabled: updated.enabled, next: updated.nextRunAt });
     return updated;
   }
@@ -207,7 +223,30 @@ export class Scheduler {
       lease: this.repo.leaseInfo(),
       tickMs: this.tickMs,
       lastTickAt: this.lastTickAt,
+      pause: this.repo.activePause(this.now().toISOString()),
     };
+  }
+
+  /**
+   * Pause the whole scheduler for `minutes` (1 to MAX_SCHEDULER_PAUSE_MINUTES), replacing any
+   * earlier pause; `minutes` 0 lifts it. Stored in the database, so it holds for whichever
+   * process ticks, and ends on its own. Returns the pause in force afterwards (null when lifted).
+   */
+  pause(minutes: number, reason: string | null = null): SchedulerPause | null {
+    if (!Number.isInteger(minutes) || minutes < 0 || minutes > MAX_SCHEDULER_PAUSE_MINUTES) {
+      throw new Error(
+        `minutes must be an integer from 0 (resume) to ${MAX_SCHEDULER_PAUSE_MINUTES} (7 days); for longer, set scheduler.enabled: false`,
+      );
+    }
+    if (minutes === 0) {
+      if (this.repo.clearPause()) log.info("scheduler pause lifted", { by: this.holder });
+      return null;
+    }
+    const now = this.now();
+    const until = new Date(now.getTime() + minutes * 60_000).toISOString();
+    this.repo.setPause(until, reason?.trim() || null, this.holder, now.toISOString());
+    log.info("scheduler paused", { until, reason, by: this.holder });
+    return this.repo.activePause(now.toISOString());
   }
 
   /** One pass. Public so tests can drive it without timers. */
@@ -241,6 +280,10 @@ export class Scheduler {
           log.error("orphan sweep failed", { err: err instanceof Error ? err.message : String(err) });
         }
       }
+
+      // pause_scheduler: keep the lease and the sweep, fire nothing. Due ticks and run-now
+      // requests stay where they are and fire once on the first tick after the pause.
+      if (this.repo.activePause(this.now().toISOString())) return;
 
       // Manual "run now" requests (dashboard) first: they fire even when paused, like fireNow.
       for (const s of this.repo.takeRunRequests()) {

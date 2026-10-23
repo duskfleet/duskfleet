@@ -47,6 +47,11 @@ scheduler:
   # Pause a schedule after this many consecutive runs that completed with 0 tool calls or
   # ended needs review; the reason shows on /schedules until it is resumed. 0 = never.
   auto_pause_after: 5
+  # Command gates (gate.command on a schedule) run `/bin/sh -c <command>` in the project
+  # directory with the full environment of the DuskFleet process, outside every Claude Code
+  # allow-list, on every tick. Off by default: create/update refuse them (MCP, CLI, dashboard)
+  # and a stored one makes its tick record `error` instead of running. Agent gates are not affected.
+  allow_command_gates: false
 
 claude:
   # Path to the Claude Code binary. Resolution order: CLAUDE_BIN env var, this

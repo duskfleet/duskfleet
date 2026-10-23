@@ -75,6 +75,33 @@ export const IMPLEMENTED_CATCH_UP_POLICIES: readonly CatchUpPolicy[] = ["skip_mi
 /** Most missed ticks `enqueue_missed_with_cap` would replay. */
 export const CATCH_UP_CAP = 3;
 
+/**
+ * What makes a schedule due. `cron` (the only value for now): its cron expression in its time
+ * zone. Stored so that other triggers (an API call, an event) can be added without a migration;
+ * the scheduler's tick only considers `cron` schedules.
+ */
+export const TRIGGER_KINDS = ["cron"] as const;
+export type TriggerKind = (typeof TRIGGER_KINDS)[number];
+export const DEFAULT_TRIGGER_KIND: TriggerKind = "cron";
+
+/**
+ * A pause of the whole scheduler until a given instant (`pause_scheduler`), stored in the database
+ * and read every tick: a friendlier kill switch next to `scheduler.enabled`, which needs a config
+ * edit and is never lifted on its own. While paused nothing fires (due ticks and run-now requests
+ * wait); the lease holder keeps the lease and the orphan sweep.
+ */
+export interface SchedulerPause {
+  /** The pause ends at this instant; a past value means not paused. */
+  pausedUntil: string;
+  pausedAt: string;
+  reason: string | null;
+  /** The process that set it (`role@host:pid`). */
+  pausedBy: string | null;
+}
+
+/** Longest pause `pause_scheduler` accepts, in minutes (7 days). Longer stops belong to `scheduler.enabled`. */
+export const MAX_SCHEDULER_PAUSE_MINUTES = 7 * 24 * 60;
+
 export const DEFAULT_CONCURRENCY_POLICY: ConcurrencyPolicy = "skip_if_active";
 export const DEFAULT_CATCH_UP_POLICY: CatchUpPolicy = "skip_missed";
 
@@ -127,6 +154,8 @@ export interface Schedule {
   concurrencyPolicy: ConcurrencyPolicy;
   /** What happens to ticks missed while nobody ticked (stored, default skip_missed). */
   catchUpPolicy: CatchUpPolicy;
+  /** What makes it due (stored, default and only value cron). */
+  triggerKind: TriggerKind;
   /**
    * Why the scheduler paused it on its own (see `scheduler.auto_pause_after`); null when it is
    * enabled or was paused by hand. Cleared when the schedule is resumed.
@@ -154,6 +183,7 @@ export interface ScheduleInput {
   gate?: ScheduleGate | null;
   concurrencyPolicy?: ConcurrencyPolicy;
   catchUpPolicy?: CatchUpPolicy;
+  triggerKind?: TriggerKind;
 }
 
 export type SchedulePatch = Partial<ScheduleInput>;

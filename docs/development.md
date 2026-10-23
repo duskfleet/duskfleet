@@ -218,8 +218,16 @@ once instead of on the next hourly run; it needs the same secret there.
 
 ## Security model
 
-- The project path is passed as the child's **working directory**; nothing is ever built into a
-  shell string (`spawn(binary, argv, { shell: false })`).
+- The project path is passed as the child's **working directory**; a Claude Code run is never
+  built into a shell string (`spawn(binary, argv, { shell: false })`).
+- The one exception is a schedule's **command gate**: `/bin/sh -c <command>` in the project
+  directory with the full environment of the DuskFleet process, outside every Claude Code
+  allow-list, on every tick. It is **off by default**: with `scheduler.allow_command_gates`
+  unset or `false`, `create_schedule` / `update_schedule` (MCP, CLI, dashboard, all through
+  `scheduler/crud.ts`) refuse a `gate.command`, and a row stored earlier makes its tick record
+  `error` instead of running the command. A failed config reload (`RunManager.configReloadError`)
+  refuses them too: the kept config may hold a stale `true`. Turn it on only if you trust everything that can reach
+  the MCP server; an agent gate is the alternative that stays inside an allow-list.
 - The prompt is written to the child's **stdin**, never passed as an argument: it does not show
   up in `ps` output nor in the recorded command, only in the run's `prompt` column.
 - Project paths are validated before anything runs; `allowed_project_roots` fences them.
