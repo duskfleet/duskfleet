@@ -128,6 +128,12 @@ export interface SchedulerConfig {
    * ended needs review (checked before each scheduled fire). 0 = never.
    */
   autoPauseAfter: number;
+  /**
+   * Whether schedules may use a command gate (`sh -c <command>` with the scheduler's whole
+   * environment, outside every Claude Code allow-list). Off by default: create / update refuse
+   * a command gate and the tick records `error` for a stored one instead of running it.
+   */
+  allowCommandGates: boolean;
 }
 
 export interface DuskFleetConfig {

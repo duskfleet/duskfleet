@@ -92,6 +92,41 @@ function validatePolicies(input: Pick<ScheduleInput, "concurrencyPolicy" | "catc
   }
 }
 
+export const COMMAND_GATES_OFF =
+  "command gates are disabled: a gate.command runs `/bin/sh -c` with the scheduler's full environment, " +
+  "outside every Claude Code allow-list. Set scheduler.allow_command_gates: true in config/duskfleet.yaml " +
+  "to allow them, or use an agent gate";
+
+/**
+ * Refuse a command gate unless `scheduler.allow_command_gates` is on. Checked on create and on an
+ * update that sets the gate, so pausing or editing an older row that already has one still works
+ * (its tick records `error` instead of running the command, see evaluateGate).
+ */
+export function assertCommandGateAllowed(
+  config: DuskFleetConfig,
+  gate: ScheduleInput["gate"],
+  configReloadError: string | null = null,
+): void {
+  if (gate?.command === undefined) return;
+  const refusal = commandGateRefusal(config, configReloadError);
+  if (refusal !== null) throw new Error(refusal);
+}
+
+/**
+ * Why command gates are not allowed right now, or null when they are. Fails closed: when the last
+ * config reload failed (`configReloadError`, see RunManager.configReloadError) the config in memory
+ * may hold a stale `allow_command_gates: true`, so it is not trusted.
+ */
+export function commandGateRefusal(config: DuskFleetConfig, configReloadError: string | null = null): string | null {
+  if (configReloadError !== null) {
+    return (
+      "command gates are refused while config/ fails to load (the last good scheduler.allow_command_gates " +
+      `may be stale): ${configReloadError}`
+    );
+  }
+  return config.scheduler.allowCommandGates ? null : COMMAND_GATES_OFF;
+}
+
 /**
  * The project a schedule runs on: its own project_id when set, else the project its agent is
  * bound to, else null (an unbound agent without a schedule project, or a deleted agent).
@@ -188,8 +223,10 @@ export function createSchedule(
   config: DuskFleetConfig,
   input: ScheduleInput,
   now: Date = new Date(),
+  configReloadError: string | null = null,
 ): Schedule {
   validateScheduleInput(config, input);
+  assertCommandGateAllowed(config, input.gate, configReloadError);
   if (repo.findByName(input.name)) throw new Error(`a schedule named "${input.name}" already exists`);
   const timeZone = input.timeZone ?? DEFAULT_TIME_ZONE;
   const nextRunAt = input.enabled === false ? null : nextRunAtFor(input.cron, timeZone, now);
@@ -206,6 +243,7 @@ export function updateSchedule(
   id: string,
   patch: SchedulePatch,
   now: Date = new Date(),
+  configReloadError: string | null = null,
 ): Schedule {
   const existing = repo.get(id);
   if (!existing) throw new Error(`schedule not found: ${id}`);
@@ -227,6 +265,7 @@ export function updateSchedule(
     triggerKind: patch.triggerKind ?? existing.triggerKind,
   };
   validateScheduleInput(config, merged);
+  assertCommandGateAllowed(config, patch.gate, configReloadError);
   if (merged.name !== existing.name && repo.findByName(merged.name))
     throw new Error(`a schedule named "${merged.name}" already exists`);
   const nextRunAt = merged.enabled ? nextRunAtFor(merged.cron, merged.timeZone!, now) : null;

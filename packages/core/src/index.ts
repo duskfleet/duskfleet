@@ -124,7 +124,10 @@ export {
   parseCron,
 } from "./scheduler/cron.js";
 export {
+  assertCommandGateAllowed,
   autoPauseReason,
+  COMMAND_GATES_OFF,
+  commandGateRefusal,
   createSchedule,
   DEFAULT_TIME_ZONE,
   effectiveOnFailure,

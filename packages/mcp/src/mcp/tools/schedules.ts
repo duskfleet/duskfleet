@@ -37,7 +37,7 @@ const gateSchema = z
       .min(1)
       .optional()
       .describe(
-        "Shell command run in the project directory before each run: exit 0 = work to do, run; exit 1-125 = skip (stdout kept as the reason); 126/127 (not executable, not found), a signal or a timeout = error. Costs nothing",
+        "Off unless scheduler.allow_command_gates is true in config/duskfleet.yaml (refused otherwise; prefer an agent gate). Shell command run with /bin/sh -c in the project directory, with the scheduler's environment, before each run: exit 0 = work to do, run; exit 1-125 = skip (stdout kept as the reason); 126/127 (not executable, not found), a signal or a timeout = error. Costs nothing",
       ),
     timeout_seconds: z
       .number()

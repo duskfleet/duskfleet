@@ -34,16 +34,19 @@ const here = path.dirname(fileURLToPath(import.meta.url));
 const fakeBinary = path.join(here, "fake-claude.js");
 const serverEntry = path.join(here, "..", "dist", "index.js");
 
-function makeRoot() {
+/** The test config; command gates are on unless `allowCommandGates` is false (then the key is absent: the default). */
+function globalYaml({ allowCommandGates = true } = {}) {
+  const gates = allowCommandGates ? "  allow_command_gates: true\n" : "";
+  return `data_dir: ../data\ndefault_agent: coder\nscheduler:\n  enabled: true\n  tick_seconds: 5\n${gates}claude:\n  binary: "${fakeBinary}"\n  default_timeout_minutes: 0.05\n`;
+}
+
+function makeRoot(options = {}) {
   const root = mkdtempSync(path.join(tmpdir(), "duskfleet-sched-"));
   const configDir = path.join(root, "config");
   mkdirSync(path.join(configDir, "agents"), { recursive: true });
   const project = path.join(root, "project");
   mkdirSync(project);
-  writeFileSync(
-    path.join(configDir, "duskfleet.yaml"),
-    `data_dir: ../data\ndefault_agent: coder\nscheduler:\n  enabled: true\n  tick_seconds: 5\nclaude:\n  binary: "${fakeBinary}"\n  default_timeout_minutes: 0.05\n`,
-  );
+  writeFileSync(path.join(configDir, "duskfleet.yaml"), globalYaml(options));
   writeFileSync(path.join(configDir, "projects.yaml"), `projects:\n  demo:\n    path: ${project}\n`);
   writeFileSync(path.join(configDir, "agents", "coder.md"), `---\nproject: demo\n---\nBe brief.\n`);
   writeFileSync(path.join(configDir, "agents", "free.md"), `---\n---\nUnbound.\n`);
@@ -1090,6 +1093,154 @@ test("policy enums: stored defaults, explicit values kept by edits, the reserved
     assert.equal(t.scheduler.firings(s.id).length, 1);
     assert.ok(Date.parse(after.nextRunAt) > Date.now(), "next_run_at moved past now");
     await t.runs.waitForRun(after.lastRunId, 15_000);
+  } finally {
+    await t.close(root);
+  }
+});
+
+test("command gates are opt-in: refused over MCP under the default config, accepted once scheduler.allow_command_gates is on", async () => {
+  const { root, configDir } = makeRoot({ allowCommandGates: false });
+  const transport = new StdioClientTransport({
+    command: process.execPath,
+    args: [serverEntry],
+    env: testEnv({ DUSKFLEET_CONFIG: configDir, DUSKFLEET_LOG_LEVEL: "warn" }),
+    stderr: "pipe",
+  });
+  const client = new Client({ name: "test-client", version: "0.0.0" });
+  try {
+    await client.connect(transport);
+    const base = { agent_id: "coder", prompt: "ok", cron: "0 * * * *" };
+    fails(
+      await client.callTool({
+        name: "create_schedule",
+        arguments: { ...base, name: "cmd", gate: { command: "true" } },
+      }),
+      /command gates are disabled.*scheduler\.allow_command_gates/,
+    );
+    // An agent gate is not affected, and neither is a schedule without a gate.
+    const plain = ok(await client.callTool({ name: "create_schedule", arguments: { ...base, name: "plain" } }));
+    ok(
+      await client.callTool({
+        name: "create_schedule",
+        arguments: { ...base, name: "agent gated", gate: { agent: { agent_id: "gatekeeper", prompt: "x" } } },
+      }),
+    );
+    fails(
+      await client.callTool({
+        name: "update_schedule",
+        arguments: { id: plain.schedule.id, gate: { command: "true" } },
+      }),
+      /scheduler\.allow_command_gates/,
+    );
+    assert.equal(ok(await client.callTool({ name: "list_schedules", arguments: {} })).schedules.length, 2);
+
+    // Config is re-read: switching it on needs no restart.
+    writeFileSync(path.join(configDir, "duskfleet.yaml"), globalYaml({ allowCommandGates: true }));
+    const created = ok(
+      await client.callTool({
+        name: "create_schedule",
+        arguments: { ...base, name: "cmd", gate: { command: "true" } },
+      }),
+    );
+    assert.equal(created.schedule.gate.command, "true");
+    ok(
+      await client.callTool({
+        name: "update_schedule",
+        arguments: { id: plain.schedule.id, gate: { command: "true" } },
+      }),
+    );
+  } finally {
+    await client.close();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("a stored command gate with scheduler.allow_command_gates off records error and never runs; on again, it runs", async () => {
+  const { root, configDir, project } = makeRoot();
+  const t = makeScheduler(configDir);
+  try {
+    const marker = path.join(project, "gate-ran");
+    const s = t.scheduler.create({
+      name: "old gated",
+      agentId: "coder",
+      prompt: "ok",
+      cron: "* * * * *",
+      gate: { command: `touch "${marker}"; exit 1` },
+    });
+    writeFileSync(path.join(configDir, "duskfleet.yaml"), globalYaml({ allowCommandGates: false }));
+    t.due(s.id);
+    await t.tickAll();
+    let row = t.repo.get(s.id);
+    assert.equal(row.lastOutcome, "error");
+    assert.match(row.lastError, /gate: command gates are disabled.*scheduler\.allow_command_gates/);
+    assert.equal(row.lastRunId, null, "no run started on a refused gate");
+    assert.equal(existsSync(marker), false, "the command did not run");
+    assert.deepEqual(row.gate, { command: `touch "${marker}"; exit 1` }, "the row keeps its gate");
+
+    // The row can still be paused and edited without touching its gate.
+    assert.equal(t.scheduler.update(s.id, { enabled: false }).enabled, false);
+    assert.equal(t.scheduler.update(s.id, { enabled: true, prompt: "again" }).prompt, "again");
+
+    writeFileSync(path.join(configDir, "duskfleet.yaml"), globalYaml({ allowCommandGates: true }));
+    t.due(s.id);
+    await t.tickAll();
+    row = t.repo.get(s.id);
+    assert.equal(row.lastOutcome, "skipped_gate", "switched on: the gate runs as before");
+    assert.equal(existsSync(marker), true);
+  } finally {
+    await t.close(root);
+  }
+});
+
+test("command gates fail closed: switched off while config/ fails to load, the stale true is not trusted", async () => {
+  const { root, configDir, project } = makeRoot();
+  const t = makeScheduler(configDir);
+  try {
+    const marker = path.join(project, "gate-ran");
+    const s = t.scheduler.create({
+      name: "gated",
+      agentId: "coder",
+      prompt: "ok",
+      cron: "* * * * *",
+      gate: { command: `touch "${marker}"; exit 1` },
+    });
+    const plain = t.scheduler.create({ name: "plain", agentId: "coder", prompt: "ok", cron: "0 * * * *" });
+    // The switch goes off, but a broken agent file makes every reload fail: the config in memory
+    // still says allow_command_gates: true.
+    writeFileSync(path.join(configDir, "duskfleet.yaml"), globalYaml({ allowCommandGates: false }));
+    const bad = path.join(configDir, "agents", "bad.md");
+    writeFileSync(bad, "---\npermission_mode: not-a-mode\n---\nbody\n");
+
+    t.due(s.id);
+    await t.tickAll();
+    const row = t.repo.get(s.id);
+    assert.equal(row.lastOutcome, "error");
+    assert.match(row.lastError, /gate: command gates are refused while config\/ fails to load/);
+    assert.equal(existsSync(marker), false, "the command did not run");
+    assert.throws(
+      () =>
+        t.scheduler.create({
+          name: "new",
+          agentId: "coder",
+          prompt: "ok",
+          cron: "0 * * * *",
+          gate: { command: "true" },
+        }),
+      /command gates are refused while config\/ fails to load/,
+    );
+    assert.throws(
+      () => t.scheduler.update(plain.id, { gate: { command: "true" } }),
+      /command gates are refused while config\/ fails to load/,
+    );
+    // Edits that do not set a command gate still work on the kept config.
+    assert.equal(t.scheduler.update(plain.id, { prompt: "again" }).prompt, "again");
+
+    // Config loads again with the switch off: the usual refusal.
+    rmSync(bad);
+    assert.throws(
+      () => t.scheduler.update(plain.id, { gate: { command: "true" } }),
+      /command gates are disabled.*scheduler\.allow_command_gates/,
+    );
   } finally {
     await t.close(root);
   }
