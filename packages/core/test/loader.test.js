@@ -82,10 +82,12 @@ test("a malformed agent file fails loadConfig by name, and a reload keeps the pr
   const reloaded = runs.reloadConfig();
   assert.equal(reloaded, config, "the previous config object is kept");
   assert.deepEqual([...reloaded.agents.keys()], ["good"]);
+  assert.match(runs.configReloadError, /permission_mode/, "the failed reload is recorded");
 
   rmSync(bad);
   writeFileSync(path.join(dataDir, "agents", "added.md"), agentFile("new"));
   assert.deepEqual([...runs.reloadConfig().agents.keys()].sort(), ["added", "good"], "a fixed file loads again");
+  assert.equal(runs.configReloadError, null, "a successful reload clears it");
 });
 
 test("the builtin agents shipped in config/agents load, are general-purpose and fit for a public repo", () => {
