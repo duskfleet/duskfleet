@@ -25,12 +25,12 @@ allowed_project_roots: []
 default_agent: null
 
 # Maximum number of Claude Code processes running at the same time.
-max_concurrent_runs: 2
+max_concurrent_runs: 4
 # Two agents in the same working copy would fight over branches and files, and a
 # scheduler tick must not start an agent whose previous run is still going. A
 # run_agent that would exceed these is refused with a clear error (not queued).
-max_concurrent_per_project: 1
-max_concurrent_per_agent: 1
+max_concurrent_per_project: 4
+max_concurrent_per_agent: 4
 
 # Schedules live in the database (create_schedule over MCP, or the dashboard shows
 # them). The scheduler ticks inside whichever DuskFleet process holds the lease:
