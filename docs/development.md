@@ -232,7 +232,8 @@ once instead of on the next hourly run; it needs the same secret there.
 
 - **New MCP tool**: add a file in `packages/mcp/src/mcp/tools/`, register it in `packages/mcp/src/mcp/server.ts`.
 - **New builtin agent**: drop a Markdown file in `config/agents/` and list it under "Builtin
-  agents" in `docs/agents.md`. Builtins are general-purpose (no `project:`, no personal paths).
+  agents" in `docs/agents.md`. Builtins are general-purpose (no `project:`, no `add_dirs`, no
+  personal paths); `packages/core/test/builtin-agents.test.js` checks it.
 - **Schema change**: append a migration in `packages/core/src/storage/db.ts`; never edit an existing one. Then pin its digest in `packages/mcp/test/migrations.test.js` (the failing test prints it).
 - **Run status changes**: only `RunManager`, through `assertTransition`.
 - **New dashboard view**: add a route under `apps/web/app/` and a query in `apps/web/lib/data.ts`.
