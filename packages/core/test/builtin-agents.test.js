@@ -38,5 +38,9 @@ test("why-work-stopped is read-only: dontAsk, no edit tools, SELECT through sqli
   assert.equal(agent.isolated, true, "it never edits the checkout, so it may run beside the agent it diagnoses");
   assert.match(agent.systemPrompt, /skipped_busy/);
   assert.match(agent.systemPrompt, /review_reasons_json/);
+  // Every outcome and review reason the core can store is named, so the agent can read them.
+  for (const word of ["skipped_budget", "budgets", "empty_run", "max_concurrent_runs", "kind = 'gate'"]) {
+    assert.ok(agent.systemPrompt.includes(word), `the prompt explains ${word}`);
+  }
   assert.match(agent.systemPrompt, /never\s+output\s+a\s+diff\s+or\s+a\s+patch/);
 });
