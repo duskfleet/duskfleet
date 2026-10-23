@@ -130,7 +130,9 @@ With the switch off, `create_schedule` / `update_schedule` fail with a message n
 `scheduler.allow_command_gates`, and a schedule that already has a command gate is kept but its
 tick records `error` (reason "command gates are disabled…") instead of running the command.
 Pausing or editing that row still works. The switch is re-read on every tick and every call: no
-restart needed.
+restart needed. It fails closed: while any file under `config/` fails to load, DuskFleet keeps the
+last good config for everything else but refuses command gates (reason "command gates are refused
+while config/ fails to load…"), since the kept value may be a stale `true`.
 
 ```
 create_schedule { …, "gate": { "command": "./scripts/has-ready-work.sh", "timeout_seconds": 60 } }

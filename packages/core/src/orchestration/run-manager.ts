@@ -181,6 +181,7 @@ export class RunManager {
   private readonly active = new Map<string, ActiveRun>();
 
   private _config: DuskFleetConfig;
+  private _configReloadError: string | null = null;
 
   /** This process as `role@host:pid`, recorded as the owner of every run it starts. */
   readonly owner: string;
@@ -205,16 +206,23 @@ export class RunManager {
    * apply without restarting the host process (Claude Desktop keeps the MCP
    * server alive for hours). On a parse error the previous config is kept and
    * the error is logged; a broken file must not take running agents down.
+   * The error stays in `configReloadError` until a reload succeeds, so a check that must fail
+   * closed (command gates) does not trust the kept, possibly stale, config.
    */
   reloadConfig(): DuskFleetConfig {
     try {
       this._config = loadConfig(this._config.configDir);
+      this._configReloadError = null;
     } catch (err) {
-      log.warn("config reload failed; keeping previous config", {
-        err: err instanceof Error ? err.message : String(err),
-      });
+      this._configReloadError = err instanceof Error ? err.message : String(err);
+      log.warn("config reload failed; keeping previous config", { err: this._configReloadError });
     }
     return this._config;
+  }
+
+  /** The error of the last reloadConfig() when it failed (the config in memory is stale), else null. */
+  get configReloadError(): string | null {
+    return this._configReloadError;
   }
 
   /** How the given runs ended (status, review reasons, cost), in one query: what a schedule row shows. */

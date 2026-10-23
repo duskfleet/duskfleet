@@ -1177,6 +1177,60 @@ test("a stored command gate with scheduler.allow_command_gates off records error
   }
 });
 
+test("command gates fail closed: switched off while config/ fails to load, the stale true is not trusted", async () => {
+  const { root, configDir, project } = makeRoot();
+  const t = makeScheduler(configDir);
+  try {
+    const marker = path.join(project, "gate-ran");
+    const s = t.scheduler.create({
+      name: "gated",
+      agentId: "coder",
+      prompt: "ok",
+      cron: "* * * * *",
+      gate: { command: `touch "${marker}"; exit 1` },
+    });
+    const plain = t.scheduler.create({ name: "plain", agentId: "coder", prompt: "ok", cron: "0 * * * *" });
+    // The switch goes off, but a broken agent file makes every reload fail: the config in memory
+    // still says allow_command_gates: true.
+    writeFileSync(path.join(configDir, "duskfleet.yaml"), globalYaml({ allowCommandGates: false }));
+    const bad = path.join(configDir, "agents", "bad.md");
+    writeFileSync(bad, "---\npermission_mode: not-a-mode\n---\nbody\n");
+
+    t.due(s.id);
+    await t.tickAll();
+    const row = t.repo.get(s.id);
+    assert.equal(row.lastOutcome, "error");
+    assert.match(row.lastError, /gate: command gates are refused while config\/ fails to load/);
+    assert.equal(existsSync(marker), false, "the command did not run");
+    assert.throws(
+      () =>
+        t.scheduler.create({
+          name: "new",
+          agentId: "coder",
+          prompt: "ok",
+          cron: "0 * * * *",
+          gate: { command: "true" },
+        }),
+      /command gates are refused while config\/ fails to load/,
+    );
+    assert.throws(
+      () => t.scheduler.update(plain.id, { gate: { command: "true" } }),
+      /command gates are refused while config\/ fails to load/,
+    );
+    // Edits that do not set a command gate still work on the kept config.
+    assert.equal(t.scheduler.update(plain.id, { prompt: "again" }).prompt, "again");
+
+    // Config loads again with the switch off: the usual refusal.
+    rmSync(bad);
+    assert.throws(
+      () => t.scheduler.update(plain.id, { gate: { command: "true" } }),
+      /command gates are disabled.*scheduler\.allow_command_gates/,
+    );
+  } finally {
+    await t.close(root);
+  }
+});
+
 test("command gate: exit 0 runs, non-zero skips with stdout as the reason, a timeout is an error; gates cost nothing", async () => {
   const { root, configDir } = makeRoot();
   const t = makeScheduler(configDir);

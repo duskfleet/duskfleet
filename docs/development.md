@@ -225,7 +225,8 @@ once instead of on the next hourly run; it needs the same secret there.
   allow-list, on every tick. It is **off by default**: with `scheduler.allow_command_gates`
   unset or `false`, `create_schedule` / `update_schedule` (MCP, CLI, dashboard, all through
   `scheduler/crud.ts`) refuse a `gate.command`, and a row stored earlier makes its tick record
-  `error` instead of running the command. Turn it on only if you trust everything that can reach
+  `error` instead of running the command. A failed config reload (`RunManager.configReloadError`)
+  refuses them too: the kept config may hold a stale `true`. Turn it on only if you trust everything that can reach
   the MCP server; an agent gate is the alternative that stays inside an allow-list.
 - The prompt is written to the child's **stdin**, never passed as an argument: it does not show
   up in `ps` output nor in the recorded command, only in the run's `prompt` column.

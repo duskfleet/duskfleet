@@ -114,7 +114,9 @@ export class Scheduler {
 
   create(input: ScheduleInput): Schedule {
     // Fresh config: agent / project edits and scheduler.allow_command_gates apply without restart.
-    const created = createSchedule(this.repo, this.runs.reloadConfig(), input, this.now());
+    // A failed reload refuses command gates (the kept config may be stale), see commandGateRefusal.
+    const config = this.runs.reloadConfig();
+    const created = createSchedule(this.repo, config, input, this.now(), this.runs.configReloadError);
     log.info("schedule created", {
       id: created.id,
       name: created.name,
@@ -126,7 +128,8 @@ export class Scheduler {
   }
 
   update(id: string, patch: SchedulePatch): Schedule {
-    const updated = updateSchedule(this.repo, this.runs.reloadConfig(), id, patch, this.now());
+    const config = this.runs.reloadConfig();
+    const updated = updateSchedule(this.repo, config, id, patch, this.now(), this.runs.configReloadError);
     log.info("schedule updated", { id, name: updated.name, enabled: updated.enabled, next: updated.nextRunAt });
     return updated;
   }

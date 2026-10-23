@@ -21,7 +21,7 @@ import { DailyCapError } from "../orchestration/daily-cap.js";
 import type { RunManager } from "../orchestration/run-manager.js";
 // crud.ts imports validateGate from here: a cycle, safe because both sides only call
 // functions at run time, never at module evaluation.
-import { COMMAND_GATES_OFF, scheduleProjectId } from "./crud.js";
+import { commandGateRefusal, scheduleProjectId } from "./crud.js";
 import {
   DEFAULT_GATE_BUDGET_USD,
   DEFAULT_GATE_MARKER,
@@ -253,10 +253,11 @@ export async function evaluateGate(runs: RunManager, s: Schedule): Promise<GateV
   }
   try {
     if (gate.command !== undefined) {
-      // A row stored before the switch existed (or while it was on): never run it while it is off.
-      if (!runs.reloadConfig().scheduler.allowCommandGates) {
-        return { kind: "error", gateRunId: null, costUsd: 0, reason: COMMAND_GATES_OFF };
-      }
+      // A row stored before the switch existed (or while it was on): never run it while it is off,
+      // nor while config/ fails to load (the kept config may hold a stale `true`).
+      const config = runs.reloadConfig();
+      const refusal = commandGateRefusal(config, runs.configReloadError);
+      if (refusal !== null) return { kind: "error", gateRunId: null, costUsd: 0, reason: refusal };
       // The directory the real run would use, resolved by RunManager exactly as startRun does.
       const cwd = runs.projectPathFor({ agentId: s.agentId, projectId: s.projectId });
       return await runCommandGate(gate.command, cwd, gate.timeoutSeconds ?? DEFAULT_GATE_TIMEOUT_SECONDS);
