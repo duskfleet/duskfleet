@@ -187,7 +187,7 @@ async function main(): Promise<void> {
         claudeVersion: version,
         // What the claude lookup and every run use; defaulted = the inherited PATH was missing or
         // minimal (GUI-launched host) and the usual install directories were put in front.
-        path: effectivePath(),
+        path: effectivePath(process.env["PATH"]),
         pathDefaulted: process.platform !== "win32" && isMinimalPath(process.env["PATH"]),
         error,
         configDir: app.config.configDir,

@@ -25,11 +25,9 @@ export function isMinimalPath(pathEnv: string | undefined): boolean {
  * The PATH DuskFleet uses to find `claude` and passes to its runs: `pathEnv` itself, or, when it
  * is missing or minimal, the default install directories followed by it (no duplicates).
  * Windows is left alone: its PATH is never launchd's and the defaults are POSIX directories.
+ * `pathEnv` has no default on purpose: `undefined` means "no PATH", not "the current one".
  */
-export function effectivePath(
-  pathEnv: string | undefined = process.env["PATH"],
-  platform: NodeJS.Platform = process.platform,
-): string {
+export function effectivePath(pathEnv: string | undefined, platform: NodeJS.Platform = process.platform): string {
   if (platform === "win32" || !isMinimalPath(pathEnv)) return pathEnv ?? "";
   const existing = (pathEnv ?? "").split(path.posix.delimiter).filter(Boolean);
   return [...new Set([...DEFAULT_PATH_DIRS, ...existing])].join(path.posix.delimiter);

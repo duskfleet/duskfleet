@@ -469,7 +469,7 @@ export function resolveClaudeBinary(configured: string | null): string {
   const candidates: string[] = [];
   if (process.env["CLAUDE_BIN"]) candidates.push(process.env["CLAUDE_BIN"]);
   if (configured) candidates.push(configured);
-  for (const dir of effectivePath().split(path.delimiter)) {
+  for (const dir of effectivePath(process.env["PATH"]).split(path.delimiter)) {
     if (dir) candidates.push(path.join(dir, "claude"));
   }
   candidates.push(path.join(homedir(), ".local", "bin", "claude"));
