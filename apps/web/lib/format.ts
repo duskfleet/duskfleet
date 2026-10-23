@@ -118,10 +118,11 @@ export function elapsedSince(iso: string | null): number | null {
   return iso ? Date.now() - new Date(iso).getTime() : null;
 }
 
-/** "claude-haiku-5-5" → "haiku 5.5"; "claude-haiku-4-5-20251001" → "haiku 4.5"; aliases pass through. */
+/** "claude-haiku-5-5" → "haiku 5.5"; "claude-haiku-4-5-20251001" → "haiku 4.5"; "claude-sonnet-4-20250514" → "sonnet 4"; aliases pass through. */
 export function shortModel(model: string | null | undefined): string {
   if (!model) return "default";
-  const m = /^claude-([a-z]+)-(\d+)(?:-(\d+))?/.exec(model);
+  // A minor version is one or two digits; an 8-digit date suffix is not one.
+  const m = /^claude-([a-z]+)-(\d+)(?:-(\d{1,2})(?!\d))?/.exec(model);
   if (m) return m[3] ? `${m[1]} ${m[2]}.${m[3]}` : `${m[1]} ${m[2]}`;
   return model;
 }
