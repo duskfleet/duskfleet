@@ -7,7 +7,7 @@ npm run web            # dev server on http://localhost:4777
 
 A Next.js app that reads the database the MCP server writes (SQLite WAL mode). It can run
 while the MCP server is running or not; it only needs `config/` and `data/duskfleet.db`. It
-has no authentication: keep it on localhost.
+has no authentication and answers on localhost only (see [Remote access](#remote-access)).
 
 Five views. The runs list and a running run's detail auto-refresh every 3 seconds (pause button
 in the nav); the other pages are static.
@@ -67,6 +67,21 @@ in the nav); the other pages are static.
 - **MCP**: the tool catalogue (`packages/mcp/dist/tools.json`, generated at build time from the
   real server) with a sticky index, plus the registration snippets for Claude Desktop and
   Claude Code with your absolute paths.
+
+## Remote access
+
+The dashboard is localhost only and has **no authentication**. It shows prompts, transcripts,
+diffs, local paths and cost, and its agents and schedules pages can delete agents and change
+schedules. Both scripts bind to the loopback interface (`--hostname 127.0.0.1`), so another
+machine on the network gets "connection refused". A middleware (`apps/web/middleware.ts`) also
+answers `403` to any request whose `Host` header is not `localhost`, `127.0.0.1` or `[::1]` on
+the dashboard's port (4777, or `PORT`): a web page cannot reach it through DNS rebinding.
+
+To open it from another machine, tunnel the port over SSH instead of exposing it:
+
+```bash
+ssh -L 4777:127.0.0.1:4777 <host>    # then browse http://localhost:4777 on this machine
+```
 
 ## Needs review
 
