@@ -67,7 +67,7 @@ test("tildePath replaces the home prefix only on a path boundary", () => {
   const home = "/home/me";
   assert.equal(tildePath("/home/me/Documents/x", home), "~/Documents/x");
   assert.equal(tildePath("/home/me", home), "~");
-  assert.equal(tildePath("/home/meadow/x", home), "/home/meadow/x");
+  assert.equal(tildePath("/srv/meadow/x", "/srv/me"), "/srv/meadow/x");
   assert.equal(tildePath("/srv/x", home), "/srv/x");
   assert.equal(tildePath("/home/me/x", ""), "/home/me/x");
   assert.equal(tildePath(null, home), "–");
