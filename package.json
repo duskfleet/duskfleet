@@ -2,7 +2,7 @@
   "name": "duskfleet",
   "version": "0.1.0",
   "private": true,
-  "description": "Local AI agent orchestration, scheduling, observability & evaluation platform on top of Claude Code",
+  "description": "A fleet of agents for your own machine.",
   "license": "MIT",
   "type": "module",
   "engines": {

@@ -5,7 +5,7 @@ import { fmtRelative, fmtTime } from "@/lib/format";
 
 export const dynamic = "force-dynamic";
 
-export const metadata = { title: "MCP tools · DuskFleet" };
+export const metadata = { title: "MCP tools · Duskfleet" };
 
 const GROUPS: Array<{ key: ToolCatalogEntry["group"]; title: string; blurb: string }> = [
   { key: "runs", title: "Runs", blurb: "Start, watch and stop agent executions." },

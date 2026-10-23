@@ -96,7 +96,7 @@ sync check (every MCP tool in `docs/mcp-server.md`, every `docs/` page linked fr
 
 The owner runs a development loop over this repository's own issues and PRs with three local
 Claude Code agents and four local skills (`.claude/` is git-ignored: agents, skills and
-settings stay on the machine). A DuskFleet run loads the project's skills (verified with Claude
+settings stay on the machine). A Duskfleet run loads the project's skills (verified with Claude
 Code 2.1.302: `--permission-prompts none` with `--setting-sources project,local` still mounts
 `.claude/skills` and the built-in skills), so an agent only needs `Skill` in its
 `allowed_tools`.
@@ -190,7 +190,7 @@ PR:     flow: needs-review ──► flow: in-review ──► flow: changes-req
   interrupted. Agents keep their side of it: swap the label first, push or post before the
   timeout, never end a run with work "still running in the background".
 
-The DuskFleet side is three user agents in `data/agents/` (developer, reviewer, planner) that
+The Duskfleet side is three user agents in `data/agents/` (developer, reviewer, planner) that
 link the local Claude Code agents (`claude_agent`) and add only the unattended envelope:
 permission mode, `gh` / `git` / `npm` allow-list, budget and timeout — plus one cron schedule
 per agent, staggered so a PR opened by the developer meets the reviewer within the hour and a
@@ -232,7 +232,8 @@ once instead of on the next hourly run; it needs the same secret there.
 
 - **New MCP tool**: add a file in `packages/mcp/src/mcp/tools/`, register it in `packages/mcp/src/mcp/server.ts`.
 - **New builtin agent**: drop a Markdown file in `config/agents/` and list it under "Builtin
-  agents" in `docs/agents.md`. Builtins are general-purpose (no `project:`, no personal paths).
+  agents" in `docs/agents.md`. Builtins are general-purpose (no `project:`, no `add_dirs`, no
+  personal paths); `packages/core/test/builtin-agents.test.js` checks it.
 - **Schema change**: append a migration in `packages/core/src/storage/db.ts`; never edit an existing one. Then pin its digest in `packages/mcp/test/migrations.test.js` (the failing test prints it).
 - **Run status changes**: only `RunManager`, through `assertTransition`.
 - **New dashboard view**: add a route under `apps/web/app/` and a query in `apps/web/lib/data.ts`.
@@ -240,7 +241,7 @@ once instead of on the next hourly run; it needs the same secret there.
 - **Claude CLI flags**: verify every flag against `claude --help` before using it. The ones the
   executor uses, checked against `claude --help` of Claude Code 2.1.285:
 
-  | Flag | Purpose in DuskFleet |
+  | Flag | Purpose in Duskfleet |
   |---|---|
   | `-p, --print` | Non-interactive execution; with no positional prompt it reads the prompt from stdin (`--input-format` defaults to `text`), which is how the executor sends it |
   | `--output-format stream-json` + `--verbose` | Line-delimited JSON events (`stream-json` refuses to run without `--verbose`) |

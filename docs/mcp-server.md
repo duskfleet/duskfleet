@@ -7,7 +7,7 @@ npm run mcp            # = node packages/mcp/dist/index.js
 The server speaks MCP over stdio; logs go to stderr. Runs execute as child processes of the
 server, so keep it alive while runs are in progress. Each run records the process that owns
 it; a run still marked `running` whose owner is gone is closed as `failed` with an "orphaned"
-error, at the next start of any DuskFleet process, or within a minute by the scheduler lease
+error, at the next start of any Duskfleet process, or within a minute by the scheduler lease
 holder while `scheduler.enabled` is true and some process holds the lease. Runs owned by
 another live process are left alone: they count toward `max_concurrent_per_project` /
 `max_concurrent_per_agent` here too, and `cancel_run` refuses them (cancel them from the
@@ -49,7 +49,7 @@ claude mcp add duskfleet -- node /absolute/path/to/duskfleet/packages/mcp/dist/i
 Or copy `.mcp.json.example` to `.mcp.json` in this repo (git-ignored, machine-specific) and
 fill in the absolute paths. The dashboard's **MCP** page prints both snippets with your paths.
 
-Child runs never see the caller's MCP servers (`--strict-mcp-config`), so DuskFleet cannot
+Child runs never see the caller's MCP servers (`--strict-mcp-config`), so Duskfleet cannot
 recurse into itself.
 
 ## Tools
@@ -62,11 +62,12 @@ recurse into itself.
 | `update_agent` | Merge fields into a user agent; `clear: [...]` removes optional fields. Pass `kind` to convert: `link` (with `claude_agent`) or `own` (with a `system_prompt`); `clear: ["claude_agent"]` unlinks and therefore needs a prompt. Builtins are read-only (override them instead). |
 | `delete_agent` | Remove a user agent file; the builtin with the same id, if any, takes over again |
 | `list_projects` | Named projects, allowed roots, executor info |
-| `list_schedules` | Schedules with next/last firing, outcome of the last tick (`started` \| `resumed` \| `skipped_busy` \| `skipped_daily_cap` \| `skipped_budget` \| `skipped_gate` \| `skipped_disabled` \| `error`), `lastRun` (how the run it last started ended: `status`, `needsReview`, `reviewReasons`, `terminationReason`, `costUsd`), `effectiveOnFailure` and `willResumeRunId` (the run the next fire resumes, or null), `idle7d` (last 7 days: `ticks`, `fires`, `runs`, `noopRuns`, `noopCostUsd`, `costUsd`, `gateChecks`, `gateSkips`, `gateCostUsd`; see [idle cost](schedules.md#idle-cost)) and scheduler status (kill switch, lease holder) |
-| `create_schedule` | `name`, `agent_id`, `prompt`, `cron`, optional `time_zone`, `project_id`, `model`, `enabled`, `on_failure` (`resume_once` \| `none`, omit to inherit the agent's), `resume_budget_usd` (see [resume once](schedules.md#resume-once-on-failure)), `noop_pattern` (see [idle cost](schedules.md#idle-cost)), `gate` (`command` + `timeout_seconds`, or `agent` with `agent_id`, `prompt`, `budget_usd`, `model`, `marker`; see [gates](schedules.md#gates-skip-cheaply-when-there-is-no-work)), `concurrency_policy` (`skip_if_active`), `catch_up_policy` (`skip_missed`; see [policies](schedules.md#policies)) |
-| `update_schedule` | Merge fields (the two policies too); `enabled: false` pauses, `true` resumes from now; `clear_model`, `clear_on_failure`, `clear_noop_pattern`, `clear_gate` remove the overrides |
+| `list_schedules` | Schedules with next/last firing, outcome of the last tick (`started` \| `resumed` \| `skipped_busy` \| `skipped_daily_cap` \| `skipped_budget` \| `skipped_gate` \| `skipped_disabled` \| `error`), `lastRun` (how the run it last started ended: `status`, `needsReview`, `reviewReasons`, `terminationReason`, `costUsd`), `effectiveOnFailure` and `willResumeRunId` (the run the next fire resumes, or null), `idle7d` (last 7 days: `ticks`, `fires`, `runs`, `noopRuns`, `noopCostUsd`, `costUsd`, `gateChecks`, `gateSkips`, `gateCostUsd`; see [idle cost](schedules.md#idle-cost)), `triggerKind` and scheduler status (kill switch, lease holder, `pause`: the [`pause_scheduler`](schedules.md#pausing-the-whole-scheduler) pause in force or null) |
+| `create_schedule` | `name`, `agent_id`, `prompt`, `cron`, optional `time_zone`, `project_id`, `model`, `enabled`, `on_failure` (`resume_once` \| `none`, omit to inherit the agent's), `resume_budget_usd` (see [resume once](schedules.md#resume-once-on-failure)), `noop_pattern` (see [idle cost](schedules.md#idle-cost)), `gate` (`command` + `timeout_seconds`, or `agent` with `agent_id`, `prompt`, `budget_usd`, `model`, `marker`; see [gates](schedules.md#gates-skip-cheaply-when-there-is-no-work)), `concurrency_policy` (`skip_if_active`), `catch_up_policy` (`skip_missed`), `trigger_kind` (`cron`; see [policies](schedules.md#policies)) |
+| `update_schedule` | Merge fields (the policies and `trigger_kind` too); `enabled: false` pauses, `true` resumes from now; `clear_model`, `clear_on_failure`, `clear_noop_pattern`, `clear_gate` remove the overrides |
 | `delete_schedule` | Remove a schedule |
 | `run_schedule_now` | Fire a schedule immediately, same busy and gate rules as a tick; `skip_gate: true` bypasses the gate |
+| `pause_scheduler` | Pause every schedule for `minutes` (1 to 10080), optional `reason`; stored in the database, ends on its own; `minutes: 0` lifts it. See [pausing the whole scheduler](schedules.md#pausing-the-whole-scheduler) |
 | `list_budgets` | Monthly budgets with this UTC month's `spentUsd`, `percent` and `state` (`ok` \| `warn` \| `over`); see [monthly budgets](agents.md#monthly-budgets) |
 | `set_budget` | `scope` (`global` \| `agent` \| `project`), `scope_id` (agent or project id; omit for global), `amount_usd`, optional `warn_percent` (default 80), `hard_stop` (default true). Creates the scope's budget or replaces it |
 | `delete_budget` | Remove a budget; schedules it paused stay paused |

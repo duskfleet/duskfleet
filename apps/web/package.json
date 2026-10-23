@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "DuskFleet dashboard: agents, running and past runs (read-only)",
+  "description": "Duskfleet dashboard: agents, running and past runs (read-only)",
   "scripts": {
     "dev": "next dev --hostname 127.0.0.1 --port 4777",
     "build": "next build",

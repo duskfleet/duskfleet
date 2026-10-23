@@ -97,7 +97,7 @@ the agent chose to stop, or when something silently narrowed what it could do:
 |---|---|
 | `budget_exhausted` | `terminationReason` says the budget ran out (with or without a wrap-up pass) |
 | `timed_out` | the agent's `timeout_minutes` elapsed |
-| `orphaned` | DuskFleet restarted while the run was in progress |
+| `orphaned` | Duskfleet restarted while the run was in progress |
 | `nonzero_exit` | the process exited with a code other than 0 |
 | `failed` | any other failure (spawn error, no result line) |
 | `permission_denied` | a tool call was refused: the allow-list is incomplete |
