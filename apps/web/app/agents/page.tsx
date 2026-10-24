@@ -185,34 +185,36 @@ function AgentCard({
   return (
     <article className="agent-card" id={a.id}>
       <header className="ac-head">
-        <h3 className="ac-name" title={a.name !== a.id ? a.name : undefined}>
-          {a.id}
-        </h3>
-        <span
-          className={`ac-kind ${a.claudeAgent ? "link" : ""}`}
-          title={
-            a.claudeAgent ? `Runs as the project's ${a.claudeAgent} (claude --agent)` : "Persona written in Duskfleet"
-          }
-        >
-          {a.claudeAgent ? "link" : "own"}
-        </span>
-        {a.source === "builtin" ? (
+        <div className="ac-title">
+          <h3 className="ac-name" title={a.name !== a.id ? `${a.id}: ${a.name}` : a.id}>
+            {a.id}
+          </h3>
           <span
-            className="flag quiet"
-            title="Versioned in config/agents. To edit it here or via update_agent, move it to data/agents."
+            className={`ac-kind ${a.claudeAgent ? "link" : ""}`}
+            title={
+              a.claudeAgent ? `Runs as the project's ${a.claudeAgent} (claude --agent)` : "Persona written in Duskfleet"
+            }
           >
-            builtin
+            {a.claudeAgent ? "link" : "own"}
           </span>
-        ) : a.overridesBuiltin ? (
-          <span className="flag warn" title="This user file replaces the builtin with the same id">
-            user · overrides builtin
-          </span>
-        ) : null}
-        {a.isDefault && (
-          <span className="flag quiet" title="default_agent in duskfleet.yaml">
-            default
-          </span>
-        )}
+          {a.source === "builtin" ? (
+            <span
+              className="flag quiet"
+              title="Versioned in config/agents. To edit it here or via update_agent, move it to data/agents."
+            >
+              builtin
+            </span>
+          ) : a.overridesBuiltin ? (
+            <span className="flag warn" title="This user file replaces the builtin with the same id">
+              user · overrides builtin
+            </span>
+          ) : null}
+          {a.isDefault && (
+            <span className="flag quiet" title="default_agent in duskfleet.yaml">
+              default
+            </span>
+          )}
+        </div>
         <span className="ac-state-slot">{state}</span>
       </header>
 
