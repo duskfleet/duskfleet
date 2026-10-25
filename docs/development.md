@@ -237,8 +237,9 @@ The Duskfleet side is three user agents in `data/agents/` (developer, reviewer, 
 link the local Claude Code agents (`claude_agent`) and add only the unattended envelope:
 permission mode, `gh` / `git` / `npm` allow-list, budget and timeout — plus one cron schedule
 per agent, staggered so a PR opened by the developer meets the reviewer within the hour and a
-planner run lands just before a developer tick. A busy agent makes a tick skip
-(`skipped_busy`), never queue. See `docs/agents.md` and `docs/schedules.md`.
+planner run lands just before a developer tick. A busy agent makes a tick wait as one deferred
+fire until the next occurrence (`deferred`, else `skipped_busy`), never queue. See
+`docs/agents.md` and `docs/schedules.md`.
 
 The GitHub Project "DuskFleet Flow" (org project 2) is a read-only mirror of the labels:
 `node scripts/project-sync.mjs [--repo <owner/name>]... [--dry-run]` adds every open issue and

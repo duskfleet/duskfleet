@@ -134,6 +134,12 @@ export interface SchedulerConfig {
    * a command gate and the tick records `error` for a stored one instead of running it.
    */
   allowCommandGates: boolean;
+  /**
+   * A scheduled fire refused by a concurrency guard (BusyError) is kept as one pending fire,
+   * retried every tick until it starts or the next cron occurrence arrives (outcome `deferred`).
+   * false = the tick is lost as `skipped_busy`.
+   */
+  deferBusy: boolean;
 }
 
 export interface DuskFleetConfig {

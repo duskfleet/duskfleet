@@ -60,7 +60,9 @@ in the nav); the other pages are static.
   schedule's own, else its agent's; "no project" last), one card each: cron (raw and in plain words), agent, model, the
   [gate](schedules.md#gates-skip-cheaply-when-there-is-no-work) and on-failure policy in force, the
   prompt, the last 10 firings as squares coloured by how the run they started **ended** (clean,
-  needs review from the stored review reasons, failed, running, cancelled, skipped busy, skipped by
+  needs review from the stored review reasons, failed, running, cancelled, deferred (busy, waiting
+  as the schedule's one pending fire: hollow square with the accent border, and a **deferred**
+  badge on the row while it waits), skipped busy, skipped by
   the gate, run gone), and a footer with the next tick (theoretical one for paused schedules), the
   fired / skipped counters, the [idle cost](schedules.md#idle-cost) over 7 days (no-op runs out of
   all runs and the dollars they cost, amber when at least half were no-ops), what the gate skipped

@@ -59,6 +59,8 @@ interface ScheduleRow {
   trigger_kind: string | null;
   paused_reason: string | null;
   auto_paused_at: string | null;
+  deferred_until: string | null;
+  deferred_reason: string | null;
 }
 
 /** One ended run of a schedule as the auto-pause streak reads it (`ScheduleRepository.recentEndedRuns`). */
@@ -127,6 +129,8 @@ function rowToSchedule(r: ScheduleRow): Schedule {
     triggerKind: (r.trigger_kind as TriggerKind | null) ?? DEFAULT_TRIGGER_KIND,
     pausedReason: r.paused_reason ?? null,
     autoPausedAt: r.auto_paused_at ?? null,
+    deferredUntil: r.deferred_until ?? null,
+    deferredReason: r.deferred_reason ?? null,
   };
 }
 
@@ -227,6 +231,8 @@ export class ScheduleRepository {
       else if (typeof v === "object" && v !== null) values.push(JSON.stringify(v));
       else values.push(v as string | number | null);
     }
+    // A pause drops a pending deferred fire: it is a scheduled fire, not a manual request.
+    if (patch.enabled === false) sets.push("deferred_until = NULL", "deferred_reason = NULL");
     values.push(id);
     this.db.prepare(`UPDATE schedules SET ${sets.join(", ")} WHERE id = ?`).run(...values);
     return this.get(id)!;
@@ -253,6 +259,70 @@ export class ScheduleRepository {
     if (rows.length > 0)
       this.db.prepare("UPDATE schedules SET run_requested_at = NULL WHERE run_requested_at IS NOT NULL").run();
     return rows;
+  }
+
+  /** Schedules with a pending deferred fire (`scheduler.defer_busy`), oldest deadline first. */
+  deferred(): Schedule[] {
+    return (
+      this.db
+        .prepare("SELECT * FROM schedules WHERE deferred_until IS NOT NULL ORDER BY deferred_until")
+        .all() as unknown as ScheduleRow[]
+    ).map(rowToSchedule);
+  }
+
+  /** Keep one pending fire for this schedule until `until`; a second call replaces the first (one per schedule). */
+  defer(id: string, until: string, reason: string): void {
+    this.db
+      .prepare("UPDATE schedules SET deferred_until = ?, deferred_reason = ?, updated_at = ? WHERE id = ?")
+      .run(until, reason, new Date().toISOString(), id);
+  }
+
+  /**
+   * Put a pending deferred fire back after a retry that was busy again, only if nothing is pending
+   * now: a fresher pending recorded meanwhile (the due loop deferring the next occurrence while
+   * this retry's gate ran) wins over the stale one. Never onto a paused schedule: a pause during the
+   * retry's gate cleared the pending, and a paused schedule never starts from one. True when it was
+   * put back.
+   */
+  restoreDeferred(id: string, until: string, reason: string): boolean {
+    const r = this.db
+      .prepare(
+        "UPDATE schedules SET deferred_until = ?, deferred_reason = ?, updated_at = ? WHERE id = ? AND deferred_until IS NULL AND enabled = 1",
+      )
+      .run(until, reason, new Date().toISOString(), id);
+    return Number(r.changes) > 0;
+  }
+
+  /**
+   * A firing row that only carries a gate's spend, leaving the schedule row untouched: a deferred
+   * retry whose gate ran but whose run was refused busy afterwards. Keeps gateSpendSince accurate
+   * without moving next_run_at or the last outcome.
+   */
+  recordGateSpend(
+    id: string,
+    outcome: ScheduleOutcome,
+    error: string | null,
+    gate: { runId: string | null; costUsd: number | null },
+  ): void {
+    this.db
+      .prepare(
+        "INSERT INTO schedule_firings (schedule_id, fired_at, outcome, run_id, error, gate_run_id, gate_cost_usd) VALUES (?, ?, ?, NULL, ?, ?, ?)",
+      )
+      .run(id, new Date().toISOString(), outcome, error, gate.runId, gate.costUsd ?? 0);
+  }
+
+  /**
+   * Compare-and-set take of a pending deferred fire: clear it only if it still holds the deadline
+   * this process read. True when this call took it (then retry, expire or drop it); false when
+   * someone else took or replaced it meanwhile.
+   */
+  takeDeferred(id: string, expected: string): boolean {
+    const r = this.db
+      .prepare(
+        "UPDATE schedules SET deferred_until = NULL, deferred_reason = NULL, updated_at = ? WHERE id = ? AND deferred_until = ?",
+      )
+      .run(new Date().toISOString(), id, expected);
+    return Number(r.changes) > 0;
   }
 
   delete(id: string): boolean {
@@ -285,7 +355,16 @@ export class ScheduleRepository {
       .run(nextRunAt, new Date().toISOString(), id);
   }
 
-  /** Record a firing attempt and advance the schedule. `gate` is set when a gate ran on this tick. */
+  /**
+   * Record a firing attempt and advance the schedule. `gate` is set when a gate ran on this tick.
+   * `deferred` counts as neither a fire nor a skip (the row that settles it does).
+   *
+   * `settles` says which pending deferred fire a start settles: `"any"` (a manual start: the work
+   * any pending was waiting for has just begun), a deadline (a retry: only the pending it took, if
+   * it still holds that deadline), or null (none). Never a blanket clear on every start: while a
+   * retry's gate ran, the due loop may have recorded a fresher pending for the next occurrence,
+   * and that one must survive the retry's start. Ignored for outcomes other than started/resumed.
+   */
   recordFiring(
     id: string,
     outcome: ScheduleOutcome,
@@ -293,8 +372,14 @@ export class ScheduleRepository {
     error: string | null,
     nextRunAt: string | null,
     gate: { runId: string | null; costUsd: number | null } | null = null,
+    settles: "any" | string | null = null,
   ): void {
     const now = new Date().toISOString();
+    const started = outcome === "started" || outcome === "resumed";
+    const settleAny = started && settles === "any" ? 1 : 0;
+    // A deadline that matches nothing when this start settles no specific pending.
+    const settleUntil = started && settles !== null && settles !== "any" ? settles : null;
+    const settleSome = settleAny === 1 || settleUntil !== null ? 1 : 0;
     this.db
       .prepare(
         "INSERT INTO schedule_firings (schedule_id, fired_at, outcome, run_id, error, gate_run_id, gate_cost_usd) VALUES (?, ?, ?, ?, ?, ?, ?)",
@@ -303,17 +388,26 @@ export class ScheduleRepository {
     this.db
       .prepare(
         `UPDATE schedules SET last_fired_at = ?, last_outcome = ?, last_error = ?, last_run_id = COALESCE(?, last_run_id),
-           fires = fires + ?, skips = skips + ?, next_run_at = ?, updated_at = ? WHERE id = ?`,
+           fires = fires + ?, skips = skips + ?, next_run_at = ?, updated_at = ?,
+           deferred_reason = CASE WHEN ? AND (? OR deferred_until IS ?) THEN NULL ELSE deferred_reason END,
+           deferred_until = CASE WHEN ? AND (? OR deferred_until IS ?) THEN NULL ELSE deferred_until END
+         WHERE id = ?`,
       )
       .run(
         now,
         outcome,
         error,
         runId,
-        outcome === "started" || outcome === "resumed" ? 1 : 0,
-        outcome === "started" || outcome === "resumed" ? 0 : 1,
+        started ? 1 : 0,
+        started || outcome === "deferred" ? 0 : 1,
         nextRunAt,
         now,
+        settleSome,
+        settleAny,
+        settleUntil,
+        settleSome,
+        settleAny,
+        settleUntil,
         id,
       );
   }
@@ -325,7 +419,7 @@ export class ScheduleRepository {
   autoPause(id: string, reason: string, nowIso: string = new Date().toISOString()): boolean {
     const r = this.db
       .prepare(
-        "UPDATE schedules SET enabled = 0, next_run_at = NULL, paused_reason = ?, auto_paused_at = ?, updated_at = ? WHERE id = ? AND enabled = 1",
+        "UPDATE schedules SET enabled = 0, next_run_at = NULL, paused_reason = ?, auto_paused_at = ?, updated_at = ?, deferred_until = NULL, deferred_reason = NULL WHERE id = ? AND enabled = 1",
       )
       .run(reason, nowIso, nowIso, id);
     return Number(r.changes) > 0;

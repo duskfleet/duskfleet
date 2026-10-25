@@ -171,8 +171,9 @@ for what it checks, and a cheap `model`.
 
 Rules:
 
-- The busy check comes first: a tick whose agent or project is busy is `skipped_busy` without
-  running the gate. Then the agent's daily caps: over a cap the tick is `skipped_daily_cap`
+- The busy check comes first: a tick whose agent or project is busy is
+  [deferred](#busy-ticks-one-deferred-fire) (or `skipped_busy`) without running the gate; each
+  retry of a deferred fire checks busy first too, so waiting costs nothing. Then the agent's daily caps: over a cap the tick is `skipped_daily_cap`
   without running the gate. Then the monthly budgets: a spent hard-stop budget makes it
   `skipped_budget`, again without running the gate.
 - A gated fire runs in the background of the tick: a gate can take minutes, and the tick goes
@@ -238,6 +239,44 @@ dashboard): the reason is cleared, and only runs created after the pause count t
 next streak, so the schedule gets `auto_pause_after` fresh runs before it can be paused again.
 Run now still fires a paused schedule.
 
+## Busy ticks: one deferred fire
+
+Agents that share a checkout often find it busy at their tick: a development run outlasts the
+next agent's slot. A queue of ticks would pile up (three skipped ticks become three paid runs)
+and start work an hour late on a different repository state, so DuskFleet keeps the trigger in
+the smallest form instead. With `scheduler.defer_busy: true` (the default, in `duskfleet.yaml`):
+
+- A **scheduled** tick refused by a concurrency guard (agent or project busy) is recorded as
+  `deferred` and stays pending on the row (`deferredUntil` = the next cron occurrence,
+  `deferredReason` = the busy message; a **deferred** badge on the dashboard).
+- Every tick retries it (busy check first, then the gate if any). A retry that is busy again
+  writes nothing: one busy spell is one `deferred` row, not one per tick (only a retry whose
+  gate ran and was refused afterwards adds a `deferred` row carrying the gate's cost, so the
+  gate spend stays counted). It is put back only if nothing newer is pending and the schedule
+  was not paused meanwhile. When the guard has
+  cleared the fire starts as usual (`started` or `resumed`, the run carries the `scheduleId`)
+  and `next_run_at` is not moved (re-read at that moment: a long gate never writes back an
+  occurrence that was claimed meanwhile).
+- One pending per schedule, never more: when the next cron occurrence comes before it started,
+  the pending is dropped and recorded as `skipped_busy` with the original tick's message (a lost
+  trigger shows as lost), and that occurrence fires normally (deferred again if still busy).
+- Pausing the schedule (by hand, auto-pause or a spent budget) drops the pending; a paused
+  schedule never starts from it. A manual start (**Run now**, `run_schedule_now`) settles it; a
+  retry that starts settles only its own pending, so a pending recorded for the next occurrence
+  while the retry's gate ran is kept.
+  A [`pause_scheduler`](#pausing-the-whole-scheduler) pause does not drop it: no tick retries it
+  while the pause holds, and the first tick after the pause retries it or, past its deadline,
+  settles it as `skipped_busy`.
+- `deferred` counts as neither a fire nor a skip: the row that settles it does.
+- Not deferred: daily caps (`skipped_daily_cap`), budgets (`skipped_budget`) and gate skips
+  (`skipped_gate`), which a retry would defeat; manual triggers (`run_schedule_now`, **Run
+  now**, `schedules run-now`) and `run_agent`, which stay `skipped_busy` / a busy error: the
+  caller is there to retry.
+
+`scheduler.defer_busy: false` gives the old behaviour: the busy tick is `skipped_busy` and the
+trigger is lost until the next occurrence. A pending left from before the switch is settled as
+`skipped_busy` on the next tick.
+
 ## Policies
 
 Every schedule stores its two policies and its trigger kind, so the behaviour below is explicit
@@ -250,7 +289,10 @@ on the row (`concurrencyPolicy`, `catchUpPolicy`, `triggerKind` in `list_schedul
 | `catch_up_policy` | `skip_missed`; `enqueue_missed_with_cap` is reserved and refused for now (planned: replay up to 3 missed ticks, never for sub-hourly schedules) | `skip_missed` |
 | `trigger_kind` | `cron` (the only one for now; the field leaves room for other triggers, such as an API call, and the tick only fires `cron` schedules) | `cron` |
 
-- A tick whose agent or project is still busy is recorded as `skipped_busy`, never queued (checked before any [gate](#gates-skip-cheaply-when-there-is-no-work)).
+- A tick whose agent or project is still busy is never queued (checked before any
+  [gate](#gates-skip-cheaply-when-there-is-no-work)): it becomes the schedule's one
+  [deferred fire](#busy-ticks-one-deferred-fire), or `skipped_busy` with
+  `scheduler.defer_busy: false`.
 - A tick whose agent reached its [daily cap](agents.md#daily-caps) (`max_daily_runs`,
   `max_daily_cost_usd`, UTC day) is recorded as `skipped_daily_cap`, also before any gate; a
   pending resume is not tried either. The cap lifts at 00:00 UTC.
