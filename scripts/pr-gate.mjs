@@ -17,6 +17,11 @@
 //         no agent involved. Only run it with a token whose pushes trigger CI (a user token,
 //         never the workflow's GITHUB_TOKEN: a push made with it starts no workflow).
 //
+// A PR from a fork (a contributor's) is handed back with `flow: contributor-changes` instead:
+// the developer agent cannot push to a fork, so that label is the contributor's to answer and
+// no agent picks it. Once the contributor pushes a commit after the label, the gate moves the
+// PR back to `flow: needs-review` for the next review round.
+//
 // Idempotent: a PR whose current head already carries a `[pr-gate]` comment is left alone,
 // whatever its labels (a human may have overruled the gate). Drafts and Dependabot PRs are
 // never touched. Run from the repository (gh resolves {owner}/{repo}).
@@ -42,6 +47,8 @@ import { execFileSync } from "node:child_process";
 
 const GATED_LABELS = ["flow: needs-review", "flow: ready-to-merge"];
 const HANDOFF_LABEL = "flow: changes-requested";
+// The hand-off for a contributor's PR (from a fork): no agent can push to it, nobody picks it.
+const CONTRIBUTOR_LABEL = "flow: contributor-changes";
 const MARKER = "[pr-gate]";
 const FAILED_CONCLUSIONS = new Set(["FAILURE", "TIMED_OUT", "ERROR"]);
 // Lock label → the state an orphaned one goes back to.
@@ -78,9 +85,14 @@ const prs = JSON.parse(
     "--limit",
     "200",
     "--json",
-    "number,isDraft,author,labels,baseRefName,headRefName,headRefOid,mergeable,mergeStateStatus,statusCheckRollup,body",
+    "number,isDraft,author,labels,baseRefName,headRefName,headRefOid,mergeable,mergeStateStatus,statusCheckRollup,body,isCrossRepository",
   ]),
 );
+
+// The label that hands a PR back for rework: the developer's, or the contributor's for a fork.
+function handoffLabel(pr, label = HANDOFF_LABEL) {
+  return label === HANDOFF_LABEL && pr.isCrossRepository ? CONTRIBUTOR_LABEL : label;
+}
 
 // GitHub computes `mergeable` lazily: the first read after a push to the base says UNKNOWN.
 // Re-read the PR until it is known (a few seconds), then give up on that PR for this run.
@@ -186,7 +198,7 @@ function expirePrLock(pr, labels) {
   if (!lock) return null;
   const since = lockedAt(pr.number, lock);
   if (since === null) return "locked";
-  let target = PR_LOCKS[lock];
+  let target = handoffLabel(pr, PR_LOCKS[lock]);
   let why;
   if (lock === "flow: in-progress") {
     // A push after the label is the developer at work; the clock runs from the last one.
@@ -209,7 +221,7 @@ function expirePrLock(pr, labels) {
       .map((c) => /^VERDICT:\s*(approve|changes)\b/im.exec(c.body)?.[1]?.toLowerCase())
       .findLast(Boolean);
     if (verdict) {
-      target = VERDICT_LABELS[verdict];
+      target = handoffLabel(pr, VERDICT_LABELS[verdict]);
       why = `VERDICT: ${verdict} for head ${pr.headRefOid.slice(0, 7)} was posted but never labelled`;
     } else {
       why = `no verdict for ${hours(since)} h`;
@@ -224,6 +236,26 @@ function expirePrLock(pr, labels) {
     `Back to ${target} so the next tick picks it up (docs/development.md, "Issue and review flow by agents").`,
   ]);
   return "expired";
+}
+
+// A contributor's PR handed back with `flow: contributor-changes` comes back for review once a
+// commit lands on its head after the label: the contributor answered. Returns the summary
+// bucket, or null when the PR does not carry the label.
+function reviveContributorPr(pr, labels) {
+  if (!labels.includes(CONTRIBUTOR_LABEL)) return null;
+  const since = lockedAt(pr.number, CONTRIBUTOR_LABEL);
+  if (since === null) return "waiting";
+  const commits = JSON.parse(
+    gh(["pr", "view", String(pr.number), "--json", "commits", "--jq", "[.commits[].committedDate]"]),
+  );
+  if (!commits.some((date) => (Date.parse(date) || 0) > since)) return "waiting";
+  console.log(`PR #${pr.number}: new commits since ${CONTRIBUTOR_LABEL} -> flow: needs-review`);
+  if (dryRun) return "revived";
+  swapLabel(pr.number, CONTRIBUTOR_LABEL, "flow: needs-review");
+  comment(pr.number, [
+    `${MARKER} New commits since the last review, head ${pr.headRefOid}: back to flow: needs-review for the next round (docs/development.md, "Issue and review flow by agents").`,
+  ]);
+  return "revived";
 }
 
 // An issue locked `flow: in-progress` whose developer never opened a PR goes back to the queue.
@@ -252,6 +284,8 @@ function gate(pr) {
   if (pr.isDraft || pr.headRefName.startsWith("dependabot/")) return "skipped";
   const locked = expirePrLock(pr, labels);
   if (locked) return locked;
+  const revived = reviveContributorPr(pr, labels);
+  if (revived) return revived;
   const gating = labels.find((name) => GATED_LABELS.includes(name));
   if (!gating) return "skipped";
   const { mergeable, mergeStateStatus } = mergeState(pr);
@@ -272,26 +306,37 @@ function gate(pr) {
     console.log(`PR #${pr.number}: head ${pr.headRefOid.slice(0, 7)} already handed back, left alone`);
     return "skipped";
   }
-  console.log(`PR #${pr.number}: ${gating} -> ${HANDOFF_LABEL}`);
+  const handoff = handoffLabel(pr);
+  console.log(`PR #${pr.number}: ${gating} -> ${handoff}`);
   for (const line of why) console.log(`  - ${line}`);
   if (dryRun) return "handed";
 
   // Labels first, marker comment last: the comment is what makes the hand-off idempotent, so
   // it must exist only once the labels moved. A failed label call leaves no marker, and the
   // next run retries the whole hand-off.
-  swapLabel(pr.number, gating, HANDOFF_LABEL);
+  swapLabel(pr.number, gating, handoff);
   comment(pr.number, [
     `${MARKER} Rework needed before review or merge, head ${pr.headRefOid}:`,
     ...why.map((line) => `- ${line}`),
     "",
-    `Handed to the developer with ${HANDOFF_LABEL} (docs/development.md, "Issue and review flow by agents").`,
+    `Handed ${pr.isCrossRepository ? "back to the contributor" : "to the developer"} with ${handoff} (docs/development.md, "Issue and review flow by agents").`,
   ]);
   return "handed";
 }
 
 // One failing PR (an update-branch 422 after the PR turned conflicting, a 5xx) must not skip
 // the others: log it, go on, and exit non-zero at the end.
-const summary = { handed: 0, updated: 0, clean: 0, locked: 0, expired: 0, skipped: 0, failed: 0 };
+const summary = {
+  handed: 0,
+  updated: 0,
+  clean: 0,
+  locked: 0,
+  expired: 0,
+  waiting: 0,
+  revived: 0,
+  skipped: 0,
+  failed: 0,
+};
 for (const pr of prs) {
   try {
     summary[gate(pr)]++;
@@ -340,6 +385,6 @@ for (const issue of issues) {
 }
 
 console.log(
-  `pr-gate${dryRun ? " (dry run)" : ""}: ${summary.handed} handed back, ${summary.updated} updated, ${summary.clean} clean, ${summary.locked} locked and alive, ${summary.expired} stale locks expired, ${summary.skipped} not gated, ${summary.failed} failed`,
+  `pr-gate${dryRun ? " (dry run)" : ""}: ${summary.handed} handed back, ${summary.updated} updated, ${summary.clean} clean, ${summary.locked} locked and alive, ${summary.expired} stale locks expired, ${summary.waiting} waiting for a contributor, ${summary.revived} back for review, ${summary.skipped} not gated, ${summary.failed} failed`,
 );
 if (summary.failed > 0) process.exitCode = 1;
