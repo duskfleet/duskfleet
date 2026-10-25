@@ -720,12 +720,22 @@ test("`duskfleet serve` stays alive past its first tick and holds the lease unti
   let exited = null;
   child.on("exit", (code) => (exited = code));
   try {
-    // long enough for bootstrap + the first tick to finish (it used to exit with 0 right after it)
-    await new Promise((r) => setTimeout(r, 2500));
+    // Wait for the start line instead of a fixed sleep: under a loaded suite the bootstrap alone
+    // can take longer than 2.5 s. Then give the first tick time to finish (serve used to exit
+    // with 0 right after it).
+    const deadline = Date.now() + 20_000;
+    while (exited === null && !/scheduler ticking every/.test(stderr) && Date.now() < deadline) {
+      await new Promise((r) => setTimeout(r, 100));
+    }
+    await new Promise((r) => setTimeout(r, 1500));
     assert.equal(exited, null, `serve exited early with ${exited}: ${stderr}`);
     assert.match(stderr, /scheduler ticking every/);
     const db = openDatabase(loadConfig(configDir).dataDir);
-    const lease = new ScheduleRepository(db).leaseInfo();
+    let lease = new ScheduleRepository(db).leaseInfo();
+    while (!lease && Date.now() < deadline) {
+      await new Promise((r) => setTimeout(r, 100));
+      lease = new ScheduleRepository(db).leaseInfo();
+    }
     db.close();
     assert.ok(lease && /^serve@/.test(lease.holder), `lease held by serve, got ${JSON.stringify(lease)}`);
     assert.ok(new Date(lease.expiresAt).getTime() > Date.now(), "lease is live");

@@ -40,6 +40,10 @@ jobs:
       - name: Build core + mcp
         run: npm run build
 
+      # After the build: the tool names come from packages/mcp/dist/tools.json, which the build writes.
+      - name: Docs sync (every MCP tool in docs/mcp-server.md, every docs page linked from README.md)
+        run: npm run check:docs
+
       - name: Typecheck (core, mcp, web)
         run: |
           npm run typecheck
