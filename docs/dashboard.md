@@ -8,12 +8,27 @@ npm run web            # dev server on http://localhost:4777
 A Next.js app that reads the database the MCP server writes (SQLite WAL mode). It can run
 while the MCP server is running or not; it only needs `config/` and `data/duskfleet.db`. It
 has no authentication and answers on localhost only (see [Remote access](#remote-access)).
+It sends no telemetry: the `dev` and `build` scripts set `NEXT_TELEMETRY_DISABLED=1` (on
+Windows, set it in your shell first), and `start` / `duskfleet-web` (`bin/start.mjs`) default it
+to `1` on every platform.
 
 Five views. The runs list and a running run's detail auto-refresh every 3 seconds (pause button
 in the nav); the other pages are static.
 
-- **Runs**: KPI cards (clean runs, needs review, spend) computed on the current filter; project /
-  agent chips, prompt search (`?q=`), `?schedule=` and `?limit=` (load older). Runs are identified
+- **Runs**: KPI cards (clean runs, needs review, spend) computed on the current project / agent
+  filter; project / agent chips, prompt search (`?q=`), `?schedule=` and `?limit=` (load older).
+  The KPI cards filter the list by how runs ended, `?outcome=` (real runs only, gate runs left
+  out, by the stored review verdict):
+  - `needs_review`: every run with a review reason (click the **Needs review** card; it also shows
+    how many of them started today, UTC day like the daily caps);
+  - `clean`: completed with nothing to review;
+  - `completed_review`: completed, but with a review reason;
+  - `failed`: failed, timed out or cancelled.
+
+  `clean` + `completed_review` + `failed` are the finished runs (the three links of the **Clean
+  runs** card). With `needs_review` on, the card lists one chip per review reason with its count;
+  a chip adds `?reason=<id>` (`permission_denied`, `empty_run`, `timed_out`, ...). `outcome` and
+  `reason` combine with the other parameters, and "× clear filters" drops them all. Runs are identified
   by a short title (first line of the prompt); the whole row links to the detail. A running run
   that produced no stream-json output for 5 minutes shows a "no output for N min" flag (amber,
   red from 15 minutes; since the start when it never produced any). Informational only: nothing
@@ -65,8 +80,9 @@ in the nav); the other pages are static.
   scope's schedules; amber when it only warns). Nothing shows while every budget is `ok`. A
   tick refused by a budget shows as "skipped, monthly budget spent" in the schedule's strip.
 - **MCP**: the tool catalogue (`packages/mcp/dist/tools.json`, generated at build time from the
-  real server) with a sticky index, plus the registration snippets for Claude Desktop and
-  Claude Code with your absolute paths.
+  real server; the published `@duskfleet/web` ships a copy as `tools.json`) with a sticky index,
+  plus the registration snippets for Claude Desktop and Claude Code with your absolute paths
+  (outside a checkout, the `duskfleet` package installed next to `@duskfleet/web`).
 
 ## Remote access
 

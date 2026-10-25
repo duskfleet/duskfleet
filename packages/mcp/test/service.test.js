@@ -10,7 +10,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { test } from "node:test";
 import { formatHolder, parseHolder } from "@duskfleet/core";
-import { installService, renderService, serviceStatus, uninstallService } from "../dist/service.js";
+import { installService, renderService, serviceDirs, serviceStatus, uninstallService } from "../dist/service.js";
 
 const base = {
   repoRoot: "/opt/dusk fleet",
@@ -87,6 +87,43 @@ test("Task Scheduler XML: logon trigger, no time limit, restart on failure, cmd 
   );
   assert.match(u.content, /<WorkingDirectory>C:\\dusk<\/WorkingDirectory>/);
   assert.ok(u.installCommands[0].includes("schtasks /Create /F /TN"));
+});
+
+test("installed package: no repo root, the unit runs beside the config and exports DUSKFLEET_CONFIG", () => {
+  // checkout with its own config/: nothing exported, the service finds it
+  assert.deepEqual(serviceDirs("/opt/dusk", "/opt/dusk/config"), { repoRoot: "/opt/dusk", configDir: null });
+  // checkout, config elsewhere (DUSKFLEET_CONFIG set by hand): exported
+  assert.deepEqual(serviceDirs("/opt/dusk", "/srv/df/config"), { repoRoot: "/opt/dusk", configDir: "/srv/df/config" });
+  // installed package (global install): never a directory above dist
+  const dirs = serviceDirs(null, "/home/me/duskfleet/config");
+  assert.deepEqual(dirs, { repoRoot: "/home/me/duskfleet", configDir: "/home/me/duskfleet/config" });
+
+  const t = { ...base, ...dirs, cliEntry: "/usr/local/lib/node_modules/duskfleet/dist/cli.js" };
+  const mac = renderService({ ...t, platform: "darwin" });
+  assert.match(mac.content, /<key>WorkingDirectory<\/key><string>\/home\/me\/duskfleet<\/string>/);
+  assert.match(mac.content, /<key>DUSKFLEET_CONFIG<\/key><string>\/home\/me\/duskfleet\/config<\/string>/);
+  const lin = renderService({ ...t, platform: "linux" });
+  assert.match(lin.content, /^Environment="DUSKFLEET_CONFIG=\/home\/me\/duskfleet\/config"$/m);
+  const win = renderService({ ...t, platform: "win32", configDir: "C:\\df\\config", user: "PC\\me" });
+  assert.match(win.content, /<Arguments>\/c &quot;set &quot;DUSKFLEET_CONFIG=C:\\df\\config&quot;&amp;&amp; &quot;/);
+  // a checkout unit stays as it was
+  assert.doesNotMatch(renderService({ ...base, platform: "linux" }).content, /DUSKFLEET_CONFIG/);
+});
+
+test("a cli.js inside the npx cache is refused: the unit would break once npm evicts it", () => {
+  const npx = { ...base, cliEntry: "/home/me/.npm/_npx/1a2b/node_modules/duskfleet/dist/cli.js" };
+  for (const platform of ["darwin", "linux"]) {
+    assert.throws(() => renderService({ ...npx, platform }), /npx's temporary cache.*npm install -g duskfleet/);
+  }
+  assert.throws(
+    () => renderService({ ...base, platform: "win32", user: "PC\\me", cliEntry: "C:\\npm-cache\\_npx\\1\\cli.js" }),
+    /temporary cache/,
+  );
+  // "_npx" as part of a longer name is not the cache
+  assert.doesNotMatch(
+    renderService({ ...base, platform: "linux", cliEntry: "/opt/my_npx_tools/cli.js" }).content,
+    /_npx\/1/,
+  );
 });
 
 test("unsupported platform is refused with a hint", () => {

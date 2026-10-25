@@ -10,9 +10,10 @@ duskfleet/
 ├── data/                runtime: duskfleet.db, logs/<run_id>.jsonl, agents/*.md (git-ignored)
 ├── packages/
 │   ├── core/            @duskfleet/core — domain: config, storage, execution, orchestration, scheduler, evals
-│   └── mcp/             @duskfleet/mcp  — MCP server (stdio) + CLI + tests
+│   ├── mcp/             @duskfleet/mcp  — MCP server (stdio) + CLI + tests
+│   └── duskfleet/       duskfleet       — the published npm package: mcp + core bundled (no source)
 └── apps/
-    └── web/             @duskfleet/web  — Next.js dashboard (read-only)
+    └── web/             @duskfleet/web  — Next.js dashboard (read-only), published too
 ```
 
 A local `playground/` directory is ignored by version control: put a throwaway project there
@@ -37,8 +38,9 @@ packages/core/src/observability  Run model
 packages/core/src/evals          types + repository (foundation only)
 packages/core/src/index.ts       public API of @duskfleet/core
 packages/mcp/src/mcp             MCP server + tools (one file per tool group)
-packages/mcp/src/cli.ts          local CLI
-packages/mcp/src/index.ts        MCP server entry point
+packages/mcp/src/cli.ts          CLI bin: Node version check, then cli-main.ts (the local CLI)
+packages/mcp/src/index.ts        MCP server bin: Node version check, then server-main.ts
+packages/mcp/src/node-version.ts the Node 24 gate; no imports, loads on old runtimes
 packages/core/test               unit tests of core modules (nothing spawned)
 packages/mcp/test                fake Claude binary + end-to-end tests
 apps/web/app                     Next.js routes: /, /agents, /runs/[id], /schedules, /mcp
@@ -52,8 +54,34 @@ npm run build          # core + mcp (tsc). The CLI, the MCP server and the dashb
 npm run typecheck      # core + mcp; dashboard: npm run typecheck -w @duskfleet/web
 npm test               # packages/core/test, then packages/mcp/test; node --test, ~25 s, no network, no cost
 npm test -w @duskfleet/core   # core unit tests alone, under a second
-npm run check          # everything CI runs, in the same order (hygiene, lint, build, typecheck, tests)
+npm run check          # everything CI runs, in the same order (hygiene, lint, build, pack, typecheck, tests)
 ```
+
+## Published packages
+
+Two packages go to npm, always at the same version (one bump touches both `package.json` files):
+
+- `duskfleet` (`packages/duskfleet`): the `duskfleet` and `duskfleet-mcp` bins, for
+  `npx duskfleet`. It has no source of its own: `npm run build` ends with
+  `scripts/assemble-package.mjs`, which copies the built `packages/mcp/dist` to
+  `packages/duskfleet/dist` and `packages/core/dist` to `dist/core` (`.js` and `tools.json` only),
+  and rewrites the `@duskfleet/core` imports into relative paths. `@duskfleet/core` and
+  `@duskfleet/mcp` stay private and are never published; the runtime dependencies of `duskfleet`
+  must equal those of core + mcp (the script fails otherwise). A thin package rather than renaming
+  `packages/mcp`: the workspace keeps importing `@duskfleet/core` and the tests keep running on
+  `packages/mcp/dist`, and only the copy is rewritten.
+- `@duskfleet/web` (`apps/web`): the built dashboard (`.next/`, `public/`, `next.config.mjs`, and
+  `tools.json`, the MCP catalogue copied from `packages/mcp/dist` by `scripts/copy-tools.mjs` at
+  the end of its build, so run `npm run build` first) and
+  `bin/start.mjs` (bin `duskfleet-web`), which runs `next start` on 127.0.0.1 (`PORT`, default
+  4777) and passes the working directory and the environment through, so `DUSKFLEET_CONFIG`
+  points it at a config. Core is bundled into the server build by Next (it is not a
+  `serverExternalPackages` entry), so `@duskfleet/core` is only a dev dependency.
+
+`npm run check:pack` (`scripts/check-pack.mjs`) runs `npm pack --dry-run` on both and fails on a
+file outside the allow-list, test files, source maps, `data/`, `.env*`, `@duskfleet/core` in a
+published dependency field, or two different versions; it prints both tarball sizes. To try the
+real thing: `npm pack -w duskfleet`, then `npx ./duskfleet-0.1.0.tgz --help` from another directory.
 
 One home per module: a test that only calls core functions (state machine, loader, parser, cron,
 tool summaries) lives in `packages/core/test` and imports `@duskfleet/core`; a test that needs the
@@ -83,6 +111,8 @@ login and spends nothing: the tests use the fake binary. In order:
 | Typecheck | `npm run typecheck`, `npm run typecheck -w @duskfleet/web` | Type errors anywhere |
 | Tests + coverage | `npm run test:coverage` | A failing test, or line coverage of the in-process code under 80 % |
 | Dashboard build | `npm run build:web` | `next build` errors (Server Component rules `tsc` does not see) |
+| Pack check | `npm run check:pack -- --require-web-build` | A published tarball holds a file outside its allow-list (tests, maps, `data/`, `.env*`), lists `@duskfleet/core` as a dependency, misses the dashboard build, or the two versions differ. `npm run check` runs it without the flag: an unbuilt dashboard is only a warning there. |
+| Packed CLI smoke | `npm pack -w duskfleet`, then `npx ./duskfleet-*.tgz --help` outside the repository | The tarball does not install or its CLI does not start. |
 | Audit | `npm audit --audit-level=high` | Report-only until the Next 16 upgrade clears the `postcss` advisory Next 15 pins; then blocking on high / critical. |
 
 Two tests are gates in themselves: `test/migrations.test.js` pins the SHA-256 of every shipped
@@ -108,6 +138,7 @@ work from a label query when its schedule wakes it:
 ```
 issue:  priority: * ──(planner, when unblocked)──► flow: ready ──(developer picks, swaps the label first)──► flow: in-progress ──► closed by the merge
 PR:     flow: needs-review ──► flow: in-review ──► flow: changes-requested ──► flow: needs-review … ──► flow: ready-to-merge
+fork PR:                        flow: in-review ──► flow: contributor-changes ──(contributor pushes; PR gate)──► flow: needs-review …
 ```
 
 - A human writes issues and sets their `priority:` labels; a priority is the consent for an
@@ -124,6 +155,15 @@ PR:     flow: needs-review ──► flow: in-review ──► flow: changes-req
   issue, one that already has an open PR, or an `area: website` issue: the public site
   (`duskfleet-website`) is the owner's work, and the developer agents of this repository
   would build it into the dashboard.
+- The planner also adopts contributor pull requests: a PR from a fork, not a draft, with no
+  `flow:` label yet (the snapshot lists them under `adoptions`) is handed to the reviewer with
+  `flow: needs-review`, and every open issue it closes is locked with `flow: in-progress` (its
+  previous `flow:` label removed), so the developer never starts work a contributor already
+  did. A PR from a branch of this repository is an agent's own and labels itself. No agent
+  can push to a fork, so a contributor's PR is never handed to the developer: the reviewer
+  (and the PR gate) hands it back with `flow: contributor-changes`, a label the developer
+  does not pick; when the contributor pushes, the PR gate moves it back to
+  `flow: needs-review` for the next round.
 - Dependencies are lines in an issue's body or comments: `Blocked by #65` (or
   `Depends on #62, #61`). While one of them is open the issue carries the `blocked` label and
   stays out of the queue; the planner removes the label once all of them are closed. A
@@ -142,7 +182,8 @@ PR:     flow: needs-review ──► flow: in-review ──► flow: changes-req
   hold as inline comments), then checks the rules of CLAUDE.md — and, for a PR that closes an
   issue, the issue's own acceptance criteria — and posts one summary comment ending with
   `VERDICT: approve` or `VERDICT: changes`. The verdict's label (`flow: ready-to-merge` or
-  `flow: changes-requested`) is the hand-off. Read-only agent; after three `VERDICT: changes`
+  `flow: changes-requested`; `flow: contributor-changes` when the PR comes from a fork) is the
+  hand-off. Read-only agent; after three `VERDICT: changes`
   rounds it parks the PR with `flow: needs-human`. The built-in `code-review` skill is not
   used unattended: its fork gathers context with commands no allow-list can permit
   (`git diff @{upstream}...HEAD`, `;` chains), so it was denied in most runs.
@@ -159,13 +200,15 @@ PR:     flow: needs-review ──► flow: in-review ──► flow: changes-req
   in those two states (drafts and Dependabot excluded) and, when it conflicts with its base or
   a required check (read from the rulesets on the base branch; a failed non-required job such
   as `sync` does not count) failed on its head, swaps the label to `flow: changes-requested`
-  and then posts one comment starting with `[pr-gate]` (head SHA and the reasons; it is
+  (`flow: contributor-changes` for a PR from a fork) and then posts one comment starting with `[pr-gate]` (head SHA and the reasons; it is
   written last, so a failed label call is retried on the next run). One failing PR does not
   stop the others; the script exits non-zero at the end. The developer's next run merges
   the base into the branch or fixes the check, and hands the PR back to the reviewer as after
   any review. A PR that is merely behind its base is updated in place with `--update-branch`.
   Idempotent: a head that already carries a `[pr-gate]` comment is left alone, so a human can
-  overrule the gate by relabelling. The workflow `.github/workflows/pr-gate.yml` runs it on
+  overrule the gate by relabelling. A PR labelled `flow: contributor-changes` with a commit on
+  its head newer than the label goes back to `flow: needs-review` with a `[pr-gate]` comment:
+  the contributor answered, the reviewer looks again. The workflow `.github/workflows/pr-gate.yml` runs it on
   every push to `main`, after every CI run, once an hour and on demand. With the repository
   secret `PR_GATE_TOKEN` (a user token with write access; scopes in the workflow header) it
   also updates branches and its label changes fire the project sync; with the default token it

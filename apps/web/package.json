@@ -1,23 +1,44 @@
 {
   "name": "@duskfleet/web",
   "version": "0.1.0",
-  "private": true,
   "type": "module",
   "description": "Duskfleet dashboard: agents, running and past runs (read-only)",
+  "license": "MIT",
+  "engines": {
+    "node": ">=24"
+  },
+  "bin": {
+    "duskfleet-web": "./bin/start.mjs"
+  },
+  "files": [
+    "bin/",
+    ".next/",
+    "!.next/cache/",
+    "!.next/trace",
+    "!.next/types/",
+    "!.next/**/*.map",
+    "public/",
+    "next.config.mjs",
+    "tools.json",
+    "LICENSE"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
   "scripts": {
-    "dev": "next dev --hostname 127.0.0.1 --port 4777",
-    "build": "next build",
-    "start": "next start --hostname 127.0.0.1 --port 4777",
+    "dev": "NEXT_TELEMETRY_DISABLED=1 next dev --hostname 127.0.0.1 --port 4777",
+    "build": "NEXT_TELEMETRY_DISABLED=1 next build && node scripts/copy-tools.mjs",
+    "start": "node bin/start.mjs",
     "typecheck": "tsc --noEmit",
     "test": "node --test test/*.test.mjs"
   },
   "dependencies": {
-    "@duskfleet/core": "0.1.0",
     "next": "^15.5.28",
     "react": "^19.3.1",
     "react-dom": "^19.3.1"
   },
   "devDependencies": {
+    "@duskfleet/core": "0.1.0",
     "@types/react": "^19.1.0",
     "@types/react-dom": "^19.1.0",
     "typescript": "^5.9.3"

@@ -1,15 +1,43 @@
+import { REVIEW_REASON_LABELS, type ReviewReason, RUN_OUTCOMES, type RunOutcome } from "@duskfleet/core";
 import Link from "next/link";
 import { AutoRefresh } from "@/components/AutoRefresh";
 import { RunTable } from "@/components/RunTable";
-import { budgetAlerts, listAgents, listProjects, listRuns, listSchedules, modelStats, overview } from "@/lib/data";
+import {
+  budgetAlerts,
+  listAgents,
+  listProjects,
+  listRuns,
+  listSchedules,
+  modelStats,
+  overview,
+  type RunsFilter,
+} from "@/lib/data";
 import { fmtCost, fmtDayClock, fmtDuration, fmtInt, fmtPct, shortModel } from "@/lib/format";
 
 export const dynamic = "force-dynamic";
 
-type Search = { agent?: string; project?: string; schedule?: string; q?: string; limit?: string };
+type Search = {
+  agent?: string;
+  project?: string;
+  schedule?: string;
+  q?: string;
+  outcome?: string;
+  reason?: string;
+  limit?: string;
+};
 
 const DEFAULT_LIMIT = 50;
 const MAX_LIMIT = 200;
+
+const OUTCOME_LABELS: Record<RunOutcome, string> = {
+  needs_review: "needs review",
+  clean: "clean",
+  completed_review: "completed to review",
+  failed: "failed",
+};
+
+const isOutcome = (v: string | undefined): v is RunOutcome => (RUN_OUTCOMES as readonly string[]).includes(v ?? "");
+const isReason = (v: string | undefined): v is ReviewReason => Boolean(v && Object.hasOwn(REVIEW_REASON_LABELS, v));
 
 export async function generateMetadata({ searchParams }: { searchParams: Promise<Search> }) {
   const { agent, project } = await searchParams;
@@ -26,17 +54,22 @@ export default async function RunsPage({ searchParams }: { searchParams: Promise
   const projects = listProjects();
   const agents = listAgents();
   const projectPath = project ? projects.find((p) => p.id === project)?.path : undefined;
-  const filter: { agentId?: string; projectPath?: string; scheduleId?: string; q?: string } = {};
+  // Unknown values are ignored rather than filtering everything out.
+  const outcome = isOutcome(sp.outcome) ? sp.outcome : undefined;
+  const reason = isReason(sp.reason) ? sp.reason : undefined;
+  const filter: Omit<RunsFilter, "limit" | "status"> = {};
   if (agent) filter.agentId = agent;
   if (projectPath) filter.projectPath = projectPath;
   if (schedule) filter.scheduleId = schedule;
   if (q) filter.q = q;
-  const filtered = Boolean(agent || project || schedule || q);
+  if (outcome) filter.outcome = outcome;
+  if (reason) filter.reason = reason;
+  const filtered = Boolean(agent || project || schedule || q || outcome || reason);
 
   const qs = (next: Partial<Search>) => {
     const p = new URLSearchParams();
-    const merged: Search = { agent, project, schedule, q, ...next };
-    for (const k of ["agent", "project", "schedule", "q", "limit"] as const) {
+    const merged: Search = { agent, project, schedule, q, outcome, reason, ...next };
+    for (const k of ["agent", "project", "schedule", "q", "outcome", "reason", "limit"] as const) {
       const v = merged[k];
       if (v) p.set(k, v);
     }
@@ -46,17 +79,44 @@ export default async function RunsPage({ searchParams }: { searchParams: Promise
 
   const running = listRuns({ ...filter, status: "running", limit: 50 });
   const recent = listRuns({ ...filter, limit }).filter((r) => r.status !== "running");
-  const o = overview(filter);
+  // KPIs stay on the agent / project scope: the outcome tiles show the whole picture they filter.
+  const o = overview({ agentId: filter.agentId, projectPath: filter.projectPath });
   const models = modelStats();
   const budgets = budgetAlerts();
   const agentName = agent ? (agents.find((a) => a.id === agent)?.name ?? agent) : null;
   const scheduleName = schedule ? (listSchedules().find((s) => s.id === schedule)?.name ?? schedule) : null;
-  const activeLabel = [project, agentName, scheduleName ? `schedule "${scheduleName}"` : null, q ? `"${q}"` : null]
+  const activeLabel = [
+    project,
+    agentName,
+    scheduleName ? `schedule "${scheduleName}"` : null,
+    q ? `"${q}"` : null,
+    outcome ? OUTCOME_LABELS[outcome] : null,
+    reason ? REVIEW_REASON_LABELS[reason] : null,
+  ]
     .filter(Boolean)
     .join(" / ");
-  // In-memory filters (schedule, q) count what they found, not the whole table.
-  const total = schedule || q ? recent.length + running.length : o.total;
-  const hasMore = !schedule && !q && recent.length >= limit && total > recent.length + running.length;
+  const outcomeCounts: Record<RunOutcome, number> = {
+    needs_review: o.needsReview,
+    clean: o.clean,
+    completed_review: o.completed - o.clean,
+    failed: o.failed,
+  };
+  const reasonCount = reason ? (o.reviewReasons.find((r) => r.reason === reason)?.count ?? 0) : 0;
+  // The size of the filtered set, when the KPIs know it exactly. In-memory filters (schedule, q)
+  // and a reason combined with another outcome than needs_review count what they found instead.
+  const exactTotal =
+    schedule || q
+      ? null
+      : reason
+        ? !outcome || outcome === "needs_review"
+          ? reasonCount
+          : null
+        : outcome
+          ? outcomeCounts[outcome]
+          : o.total;
+  const total = exactTotal ?? recent.length + running.length;
+  const hasMore = exactTotal !== null && recent.length >= limit && total > recent.length + running.length;
+  const reviewOn = outcome === "needs_review";
 
   return (
     <>
@@ -140,6 +200,8 @@ export default async function RunsPage({ searchParams }: { searchParams: Promise
             {agent && <input type="hidden" name="agent" value={agent} />}
             {project && <input type="hidden" name="project" value={project} />}
             {schedule && <input type="hidden" name="schedule" value={schedule} />}
+            {outcome && <input type="hidden" name="outcome" value={outcome} />}
+            {reason && <input type="hidden" name="reason" value={reason} />}
             <input
               type="search"
               name="q"
@@ -178,13 +240,50 @@ export default async function RunsPage({ searchParams }: { searchParams: Promise
           <div className="label">Clean runs</div>
           <div className="value">{fmtPct(o.clean, o.finished)}</div>
           <div className="sub">
-            {fmtInt(o.clean)} clean · {fmtInt(o.completed - o.clean)} completed to review · {fmtInt(o.failed)} failed
+            {(["clean", "completed_review", "failed"] as const).map((k, i) => (
+              <span key={k}>
+                {i > 0 && " · "}
+                <Link
+                  href={qs({ outcome: outcome === k ? undefined : k, reason: undefined, limit: undefined })}
+                  className={outcome === k ? "on" : ""}
+                  aria-current={outcome === k ? "true" : undefined}
+                >
+                  {fmtInt(outcomeCounts[k])} {OUTCOME_LABELS[k]}
+                </Link>
+              </span>
+            ))}
           </div>
         </div>
-        <div className="stat">
-          <div className="label">Needs review</div>
-          <div className={`value ${o.needsReview ? "warn" : ""}`}>{o.needsReview}</div>
-          <div className="sub">failed, timed out, out of budget or context, orphaned, or denied a tool</div>
+        <div className={`stat filter ${reviewOn ? "on" : ""}`}>
+          <Link
+            href={qs({ outcome: reviewOn ? undefined : "needs_review", reason: undefined, limit: undefined })}
+            className="stat-hit"
+            aria-current={reviewOn ? "true" : undefined}
+            title={reviewOn ? "Show every run again" : "Show only the runs that need review"}
+          >
+            <div className="label">Needs review</div>
+            <div className={`value ${o.needsReview ? "warn" : ""}`}>
+              {fmtInt(o.needsReview)}
+              <span className="today" title="Started since midnight UTC, the day the daily caps count">
+                {fmtInt(o.needsReviewToday)} today
+              </span>
+            </div>
+          </Link>
+          {reviewOn && o.reviewReasons.length > 0 ? (
+            <div className="sub filters">
+              {o.reviewReasons.map((r) => (
+                <Link
+                  key={r.reason}
+                  href={qs({ reason: reason === r.reason ? undefined : r.reason, limit: undefined })}
+                  className={`chip ${reason === r.reason ? "on" : ""}`}
+                >
+                  {REVIEW_REASON_LABELS[r.reason]} {fmtInt(r.count)}
+                </Link>
+              ))}
+            </div>
+          ) : (
+            <div className="sub">failed, timed out, out of budget or context, orphaned, or denied a tool</div>
+          )}
         </div>
         <div className="stat">
           <div className="label">Spent</div>
@@ -229,7 +328,7 @@ export default async function RunsPage({ searchParams }: { searchParams: Promise
             : "No runs yet. Start one with run_agent from Claude Desktop, Claude Code or the CLI."
         }
       />
-      {(hasMore || (recent.length > 0 && !schedule && !q)) && (
+      {(hasMore || (recent.length > 0 && exactTotal !== null)) && (
         <div className="more">
           <span>
             showing {fmtInt(recent.length + running.length)} of {fmtInt(total)} runs

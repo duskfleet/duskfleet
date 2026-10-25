@@ -42,7 +42,8 @@ project on your disk and keeps a record of what happened.
 
 ## Quick start
 
-Requirements: macOS or Linux, Node.js **24+** (built-in `node:sqlite`, no native addons), and
+Requirements: macOS or Linux, Node.js **24+** (built-in `node:sqlite`, no native addons; `.nvmrc`
+pins it, and an older Node gets `Duskfleet needs Node 24 or newer; you have vX.Y.Z`), and
 [Claude Code](https://docs.anthropic.com/en/docs/claude-code) installed and **logged in** for
 the user that runs Duskfleet (Duskfleet does not manage authentication).
 

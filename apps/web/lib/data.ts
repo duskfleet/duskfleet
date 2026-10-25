@@ -17,6 +17,7 @@ import {
   type DuskFleetConfig,
   describeCron,
   findRepoRoot,
+  type ListRunsFilter,
   listProjectAgents,
   loadAgents,
   loadConfig,
@@ -26,7 +27,9 @@ import {
   openDatabase,
   type ProjectAgentInfo,
   parseCron,
+  type ReviewReason,
   type Run,
+  type RunOutcome,
   RunRepository,
   type RunStatus,
   resolveClaudeBinary,
@@ -34,6 +37,7 @@ import {
   ScheduleRepository,
   scheduleIdleStats,
   scheduleRunState,
+  utcDayStart,
 } from "@duskfleet/core";
 
 interface Services {
@@ -181,6 +185,10 @@ export interface RunsFilter {
   scheduleId?: string;
   /** Case-insensitive substring of the prompt (in memory). */
   q?: string;
+  /** How the run ended (stored review verdict, in SQL); real runs only, like the overview counts. */
+  outcome?: RunOutcome;
+  /** Only runs with this stored review reason (in SQL); real runs only. */
+  reason?: ReviewReason;
   limit?: number;
 }
 
@@ -205,12 +213,14 @@ export function listRuns(filter: RunsFilter = {}): RunWithProject[] {
   const { runs } = services();
   const inMemory = Boolean(filter.scheduleId || filter.q);
   const limit = filter.limit ?? 50;
-  const f: { status?: RunStatus; agentId?: string; projectPath?: string; limit: number } = {
-    limit: inMemory ? 200 : limit,
-  };
+  const f: ListRunsFilter = { limit: inMemory ? 200 : limit };
   if (filter.status) f.status = filter.status;
   if (filter.agentId) f.agentId = filter.agentId;
   if (filter.projectPath) f.projectPath = filter.projectPath;
+  if (filter.outcome) f.outcome = filter.outcome;
+  if (filter.reason) f.reason = filter.reason;
+  // The outcome KPIs count real runs only: a gate run must not show up under them.
+  if (filter.outcome || filter.reason) f.kind = "run";
   let list = runs.list(f);
   if (filter.scheduleId) list = list.filter((r) => r.scheduleId === filter.scheduleId);
   if (filter.q) {
@@ -486,6 +496,10 @@ export interface Overview {
   failed: number;
   /** Every run with a review reason, completed or not (a failed run is counted here too). */
   needsReview: number;
+  /** Of needsReview, the runs created since midnight UTC (the daily caps' day). */
+  needsReviewToday: number;
+  /** Runs per stored review reason, most frequent first; reasons with no run are left out. */
+  reviewReasons: Array<{ reason: ReviewReason; count: number }>;
   costUsd: number;
   costLast24hUsd: number;
   /** Part of costUsd spent by schedule gate agents (runs of kind 'gate'). */
@@ -495,9 +509,10 @@ export interface Overview {
 /** KPIs for the cards. With a filter, computed on the same subset the list shows. */
 export function overview(filter: Pick<RunsFilter, "agentId" | "projectPath"> = {}): Overview {
   const { db } = services();
-  const since = new Date(Date.now() - 24 * 3600_000).toISOString();
+  const now = new Date();
+  const since = new Date(now.getTime() - 24 * 3600_000).toISOString();
   const where: string[] = [];
-  const values: string[] = [since];
+  const values: string[] = [];
   if (filter.agentId) {
     where.push("agent_id = ?");
     values.push(filter.agentId);
@@ -518,12 +533,13 @@ export function overview(filter: Pick<RunsFilter, "agentId" | "projectPath"> = {
               SUM(kind = 'run' AND status = 'completed' AND NOT ${NEEDS_REVIEW_SQL}) AS clean,
               SUM(kind = 'run' AND status IN ('failed','timed_out','cancelled'))  AS failed,
               SUM(kind = 'run' AND ${NEEDS_REVIEW_SQL})                           AS needs_review,
+              SUM(kind = 'run' AND ${NEEDS_REVIEW_SQL} AND created_at >= ?)       AS needs_review_today,
               COALESCE(SUM(cost_usd), 0)                                          AS cost_usd,
               COALESCE(SUM(CASE WHEN created_at >= ? THEN cost_usd END), 0)       AS cost_24h,
               COALESCE(SUM(CASE WHEN kind = 'gate' THEN cost_usd END), 0)         AS cost_gates
        FROM runs ${where.length ? "WHERE " + where.join(" AND ") : ""}`,
     )
-    .get(...values) as {
+    .get(utcDayStart(now), since, ...values) as {
     total: number;
     running: number | null;
     finished: number | null;
@@ -531,10 +547,20 @@ export function overview(filter: Pick<RunsFilter, "agentId" | "projectPath"> = {
     clean: number | null;
     failed: number | null;
     needs_review: number | null;
+    needs_review_today: number | null;
     cost_usd: number;
     cost_24h: number;
     cost_gates: number;
   };
+  // One row per (run, stored reason): the counts behind the reason chips, same scope as above.
+  const reasons = db
+    .prepare(
+      `SELECT j.value AS reason, COUNT(*) AS n
+       FROM runs, json_each(COALESCE(runs.review_reasons_json, '[]')) AS j
+       WHERE kind = 'run' ${where.map((w) => `AND ${w}`).join(" ")}
+       GROUP BY j.value ORDER BY n DESC, j.value`,
+    )
+    .all(...values) as Array<{ reason: ReviewReason; n: number }>;
   return {
     total: r.total,
     running: r.running ?? 0,
@@ -543,6 +569,8 @@ export function overview(filter: Pick<RunsFilter, "agentId" | "projectPath"> = {
     clean: r.clean ?? 0,
     failed: r.failed ?? 0,
     needsReview: r.needs_review ?? 0,
+    needsReviewToday: r.needs_review_today ?? 0,
+    reviewReasons: reasons.map((x) => ({ reason: x.reason, count: x.n })),
     costUsd: r.cost_usd,
     costLast24hUsd: r.cost_24h,
     costGatesUsd: r.cost_gates,
@@ -650,13 +678,18 @@ export interface ToolCatalog {
 /**
  * The MCP tool catalogue is written by `npm run build` of @duskfleet/mcp
  * (packages/mcp/dist/tools.json). The dashboard only reads the file: it must
- * not depend on the mcp package.
+ * not depend on the mcp package. An installed @duskfleet/web has no repo above it:
+ * its build ships a copy (tools.json next to package.json, `scripts/copy-tools.mjs`),
+ * found through DUSKFLEET_WEB_DIR, which `bin/start.mjs` sets.
  */
 export function toolCatalog(): ToolCatalog | null {
   const root = findRepoRoot(process.cwd());
-  if (!root) return null;
-  const file = path.join(root, "packages", "mcp", "dist", "tools.json");
-  if (!existsSync(file)) return null;
+  const webDir = process.env.DUSKFLEET_WEB_DIR;
+  const file = [
+    root ? path.join(root, "packages", "mcp", "dist", "tools.json") : null,
+    webDir ? path.join(webDir, "tools.json") : null,
+  ].find((f): f is string => !!f && existsSync(f));
+  if (!file) return null;
   try {
     return { ...(JSON.parse(readFileSync(file, "utf8")) as Omit<ToolCatalog, "path">), path: file };
   } catch {
@@ -664,10 +697,26 @@ export function toolCatalog(): ToolCatalog | null {
   }
 }
 
+/**
+ * The MCP server entry: the checkout's packages/mcp/dist/index.js, else the `duskfleet`
+ * package installed next to @duskfleet/web (same node_modules), else a placeholder.
+ */
+function mcpEntry(): string {
+  // A directory holding config/duskfleet.yaml is a "root" for an installed package too,
+  // but has no packages/mcp/dist: only an entry that exists counts.
+  const root = findRepoRoot(process.cwd());
+  const webDir = process.env.DUSKFLEET_WEB_DIR;
+  const entry = [
+    root ? path.join(root, "packages", "mcp", "dist", "index.js") : null,
+    // <prefix>/node_modules/@duskfleet/web -> <prefix>/node_modules/duskfleet/dist/index.js
+    webDir ? path.resolve(webDir, "..", "..", "duskfleet", "dist", "index.js") : null,
+  ].find((f): f is string => !!f && existsSync(f));
+  return entry ?? "<path to the duskfleet package>/dist/index.js";
+}
+
 /** Where this server is registered, for the docs page. Absolute paths, as the hosts need them. */
 export function mcpRegistration() {
-  const root = findRepoRoot(process.cwd());
-  const entry = root ? path.join(root, "packages", "mcp", "dist", "index.js") : "<repo>/packages/mcp/dist/index.js";
+  const entry = mcpEntry();
   let claudeBin: string;
   try {
     claudeBin = resolveClaudeBinary(config().claude.binary); // absolute: GUI hosts start with a minimal PATH

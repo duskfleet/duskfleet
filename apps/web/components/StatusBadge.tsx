@@ -1,4 +1,5 @@
-import { REVIEW_REASON_LABELS, type ReviewReason, type Run, type RunStatus } from "@duskfleet/core";
+import type { ReviewReason, Run, RunStatus } from "@duskfleet/core";
+import { badgeVerdict } from "@/lib/status";
 
 type BadgeRun = Pick<Run, "status" | "reviewReasons">;
 
@@ -19,12 +20,7 @@ export function StatusBadge({
   reasons?: ReviewReason[];
 }) {
   const s = run?.status ?? status ?? "pending";
-  const reasons = given ?? run?.reviewReasons ?? [];
-  const why = reasons.map((r) => REVIEW_REASON_LABELS[r]).join(" · ");
-  const attention = s === "completed" && reasons.length > 0;
-  const label = attention ? "needs review" : s.replace("_", " ");
-  const cls = attention ? "attention" : s;
-  const title = reasons.length > 0 ? `${s.replace("_", " ")} · needs review: ${why}` : s;
+  const { label, cls, title } = badgeVerdict(s, given ?? run?.reviewReasons ?? []);
   return (
     <span className={`badge ${cls}`} title={title}>
       {label}
