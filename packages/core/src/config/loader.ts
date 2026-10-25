@@ -100,6 +100,7 @@ const globalSchema = z.object({
           }
         }),
       auto_pause_after: z.number().int().min(0).default(5),
+      allow_command_gates: z.boolean().default(false),
       defer_busy: z.boolean().default(true),
     })
     .prefault({}),
@@ -207,6 +208,7 @@ export function loadConfig(configDir: string): DuskFleetConfig {
       defaultTimeZone: g.scheduler.default_time_zone,
       noopPattern: g.scheduler.noop_pattern,
       autoPauseAfter: g.scheduler.auto_pause_after,
+      allowCommandGates: g.scheduler.allow_command_gates,
       deferBusy: g.scheduler.defer_busy,
     },
     agents,

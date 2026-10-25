@@ -2,7 +2,7 @@
   "name": "duskfleet",
   "version": "0.1.0",
   "private": true,
-  "description": "Local AI agent orchestration, scheduling, observability & evaluation platform on top of Claude Code",
+  "description": "A fleet of agents for your own machine.",
   "license": "MIT",
   "type": "module",
   "engines": {
@@ -16,7 +16,7 @@
     "build": "npm run build -w @duskfleet/core && npm run build -w @duskfleet/mcp",
     "build:web": "npm run build -w @duskfleet/web",
     "typecheck": "npm run typecheck -w @duskfleet/core && npm run typecheck -w @duskfleet/mcp",
-    "test": "npm test -w @duskfleet/core && npm test -w @duskfleet/mcp",
+    "test": "npm test -w @duskfleet/core && npm test -w @duskfleet/mcp && npm test -w @duskfleet/web",
     "mcp": "node packages/mcp/dist/index.js",
     "cli": "node packages/mcp/dist/cli.js",
     "web": "npm run dev -w @duskfleet/web",

@@ -30,11 +30,14 @@
  *   "linger"  -> like "ok", but keeps running after the result line (grace kill tests)
  *   "linger-hook" -> like "ok", then exits while a spawned descendant keeps stdout open
  *                 (a user-level Stop hook); the descendant's pid is written to ./hook.pid
+ *   "deferred-mcp" -> like "ok", but the init reports `mcp_servers: []` and no mcp__ tool
+ *                 (Claude Code 2.1.306 loads connectors as deferred tools, verified
+ *                 2026-10-21) and one tool of one MCP server is still called
  *   "mcp-missing-once" -> like "ok", but the first spawn's init lists no claude.ai connector
  *                 (only the project's "duskfleet" server); later spawns list Figma
  *   "mcp-missing" -> like "ok", every spawn's init lists no claude.ai connector
  *
- * With `--resume <id>` (the wrap-up pass) the prompt is DuskFleet's fixed text, so the
+ * With `--resume <id>` (the wrap-up pass) the prompt is Duskfleet's fixed text, so the
  * behaviour comes from FAKE_CLAUDE_RESUME instead: unset = a short successful pass that
  * says where it stopped; "budget" = exhausts the reserve too; "hang" = never ends.
  */
@@ -65,7 +68,7 @@ if (args[0] === "--version") {
 }
 
 // Read after --version: execFile leaves stdin open, so reading it there would block forever.
-// FAKE_CLAUDE_MODE picks the behaviour when the prompt is fixed by DuskFleet (doctor --probe).
+// FAKE_CLAUDE_MODE picks the behaviour when the prompt is fixed by Duskfleet (doctor --probe).
 // stdin is read either way so the executor's write never hits a closed pipe.
 const stdinPrompt = readFileSync(0, "utf8").trim() || "ok";
 const prompt = process.env.FAKE_CLAUDE_MODE ?? stdinPrompt;
@@ -114,9 +117,12 @@ out({
   cwd: process.cwd(),
   session_id: sessionId,
   tools: ["Bash", "Edit", "Read"],
-  mcp_servers: connectorsLoaded
-    ? [{ name: "claude.ai Figma", status: "connected" }]
-    : [{ name: "duskfleet", status: "connected", source: "project" }],
+  mcp_servers:
+    prompt === "deferred-mcp"
+      ? []
+      : connectorsLoaded
+        ? [{ name: "claude.ai Figma", status: "connected" }]
+        : [{ name: "duskfleet", status: "connected", source: "project" }],
   model,
   permissionMode: "acceptEdits",
   claude_code_version: "9.9.9",
@@ -459,6 +465,28 @@ if (resumeIdx >= 0) {
     process.exit(0);
   }
 } else {
+  if (prompt === "deferred-mcp") {
+    out({
+      type: "assistant",
+      message: {
+        model,
+        role: "assistant",
+        content: [
+          {
+            type: "tool_use",
+            id: "toolu_m1",
+            name: "mcp__example_tracker__search",
+            input: { query: "open" },
+          },
+        ],
+        usage: { input_tokens: 10, output_tokens: 5 },
+      },
+    });
+    out({
+      type: "user",
+      message: { role: "user", content: [{ tool_use_id: "toolu_m1", type: "tool_result", content: "[]" }] },
+    });
+  }
   out({
     type: "assistant",
     message: {

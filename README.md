@@ -3,14 +3,16 @@
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/assets/logo-dark.svg">
   <source media="(prefers-color-scheme: light)" srcset="docs/assets/logo-light.svg">
-  <img alt="DuskFleet" src="docs/assets/logo-light.svg" width="400">
+  <img alt="Duskfleet" src="docs/assets/logo-light.svg" width="400">
 </picture>
 
-# DuskFleet
+# Duskfleet
 
-### Orchestrate, observe and schedule autonomous Claude Code agents on your local projects.
+### Run, record and schedule unattended Claude Code agents on your local projects.
 
-**Runs on your machine: no account, no cloud.**
+**A fleet of agents for your own machine.**
+
+Website: [duskfleet.com](https://duskfleet.com/?utm_source=github&utm_medium=readme&utm_campaign=always-on&utm_content=hero)
 
 [![CI](https://github.com/duskfleet/duskfleet/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/duskfleet/duskfleet/actions/workflows/ci.yml)
 [![Node 24+](https://img.shields.io/badge/node-24%2B-339933?logo=node.js&logoColor=white)](https://nodejs.org/)
@@ -22,21 +24,28 @@
 [What you get](#what-you-get) ·
 [Status and roadmap](#status-and-roadmap) ·
 [Documentation](#documentation) ·
-[License](#license)
+[License](#license) ·
+[Website](https://duskfleet.com/?utm_source=github&utm_medium=readme&utm_campaign=always-on&utm_content=readme)
 
 </div>
 
-> [!NOTE]
-> DuskFleet runs `claude -p` unattended against a project on your disk and records what happened.
-> Agents are Markdown files, every run (events, tool calls, permission denials, tokens, dollars)
-> lands in a local SQLite database, and cron schedules fire from a local process, with no cloud
-> service in between.
+**Who it is for:** people who already run Claude Code on their own projects and want those runs
+unattended, scheduled and recorded, on their own machine. Duskfleet runs `claude -p` against a
+project on your disk and keeps a record of what happened.
+
+- **Local, no account, no cloud**: everything runs on your machine with your own Claude Code
+  login; there is no service in between.
+- **Every run recorded**: events, tool calls, permission denials, tokens and cost land in a
+  local SQLite database, plus a JSONL log per run.
+- **Cron schedules and a dashboard**: schedules fire from a local process, and a dashboard on
+  localhost shows runs, schedules and agents.
 
 ## Quick start
 
-Requirements: macOS or Linux, Node.js **24+** (built-in `node:sqlite`, no native addons), and
+Requirements: macOS or Linux, Node.js **24+** (built-in `node:sqlite`, no native addons; `.nvmrc`
+pins it, and an older Node gets `Duskfleet needs Node 24 or newer; you have vX.Y.Z`), and
 [Claude Code](https://docs.anthropic.com/en/docs/claude-code) installed and **logged in** for
-the user that runs DuskFleet (DuskFleet does not manage authentication).
+the user that runs Duskfleet (Duskfleet does not manage authentication).
 
 ```bash
 git clone https://github.com/duskfleet/duskfleet.git
@@ -71,13 +80,13 @@ Desktop closed, register the scheduler as a per-user service once with
 Claude Desktop / Claude Cowork / Claude Code
         │  MCP (stdio)
         ▼
-  DuskFleet MCP server ──▶ Orchestration ──▶ Claude Code CLI ──▶ your local project
+  Duskfleet MCP server ──▶ Orchestration ──▶ Claude Code CLI ──▶ your local project
         │
         ▼
   SQLite (runs, events, schedules)  +  data/logs/<run_id>.jsonl
 ```
 
-You describe *what should happen* in `config/` (agents, projects) and in schedules. DuskFleet
+You describe *what should happen* in `config/` (agents, projects) and in schedules. Duskfleet
 runs `claude -p` unattended with a target project as working directory, owns the unattended
 envelope (permissions, allow-lists, budget, MCP) and records *what happened*. A run end to end,
 with diagrams: [How it works](docs/how-it-works.md).

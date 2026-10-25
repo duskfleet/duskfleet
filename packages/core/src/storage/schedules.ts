@@ -11,6 +11,7 @@ import {
   type ConcurrencyPolicy,
   DEFAULT_CATCH_UP_POLICY,
   DEFAULT_CONCURRENCY_POLICY,
+  DEFAULT_TRIGGER_KIND,
   type RunOutcomes,
   type Schedule,
   type ScheduleFiring,
@@ -18,6 +19,8 @@ import {
   type ScheduleInput,
   type ScheduleOutcome,
   type SchedulePatch,
+  type SchedulerPause,
+  type TriggerKind,
 } from "../scheduler/types.js";
 import { logger } from "../util/log.js";
 import { NEEDS_REVIEW_SQL } from "./runs.js";
@@ -53,6 +56,7 @@ interface ScheduleRow {
   gate_json: string | null;
   concurrency_policy: string | null;
   catch_up_policy: string | null;
+  trigger_kind: string | null;
   paused_reason: string | null;
   auto_paused_at: string | null;
   deferred_until: string | null;
@@ -122,6 +126,7 @@ function rowToSchedule(r: ScheduleRow): Schedule {
     gate: parseGate(r.gate_json, r.name),
     concurrencyPolicy: (r.concurrency_policy as ConcurrencyPolicy | null) ?? DEFAULT_CONCURRENCY_POLICY,
     catchUpPolicy: (r.catch_up_policy as CatchUpPolicy | null) ?? DEFAULT_CATCH_UP_POLICY,
+    triggerKind: (r.trigger_kind as TriggerKind | null) ?? DEFAULT_TRIGGER_KIND,
     pausedReason: r.paused_reason ?? null,
     autoPausedAt: r.auto_paused_at ?? null,
     deferredUntil: r.deferred_until ?? null,
@@ -152,12 +157,12 @@ export class ScheduleRepository {
     return row ? rowToSchedule(row) : null;
   }
 
-  /** Enabled schedules whose next_run_at is at or before `now`. */
+  /** Enabled cron schedules (trigger_kind 'cron') whose next_run_at is at or before `now`. */
   due(nowIso: string): Schedule[] {
     return (
       this.db
         .prepare(
-          "SELECT * FROM schedules WHERE enabled = 1 AND next_run_at IS NOT NULL AND next_run_at <= ? ORDER BY next_run_at",
+          "SELECT * FROM schedules WHERE enabled = 1 AND trigger_kind = 'cron' AND next_run_at IS NOT NULL AND next_run_at <= ? ORDER BY next_run_at",
         )
         .all(nowIso) as unknown as ScheduleRow[]
     ).map(rowToSchedule);
@@ -170,8 +175,8 @@ export class ScheduleRepository {
       .prepare(
         `INSERT INTO schedules (id, name, agent_id, project_id, prompt, model, cron, time_zone, enabled, created_at, updated_at, next_run_at,
            last_fired_at, last_outcome, last_error, last_run_id, fires, skips, on_failure, resume_budget_usd, noop_pattern, gate_json,
-           concurrency_policy, catch_up_policy)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, NULL, NULL, 0, 0, ?, ?, ?, ?, ?, ?)`,
+           concurrency_policy, catch_up_policy, trigger_kind)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, NULL, NULL, 0, 0, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         id,
@@ -192,6 +197,7 @@ export class ScheduleRepository {
         input.gate ? JSON.stringify(input.gate) : null,
         input.concurrencyPolicy ?? DEFAULT_CONCURRENCY_POLICY,
         input.catchUpPolicy ?? DEFAULT_CATCH_UP_POLICY,
+        input.triggerKind ?? DEFAULT_TRIGGER_KIND,
       );
     return this.get(id)!;
   }
@@ -215,6 +221,7 @@ export class ScheduleRepository {
       gate: "gate_json",
       concurrencyPolicy: "concurrency_policy",
       catchUpPolicy: "catch_up_policy",
+      triggerKind: "trigger_kind",
       pausedReason: "paused_reason",
     };
     for (const [k, v] of Object.entries(patch)) {
@@ -502,6 +509,36 @@ export class ScheduleRepository {
       )
       .get(sinceIso) as { started: number | null; skipped_busy: number | null };
     return { started: r.started ?? 0, skippedBusy: r.skipped_busy ?? 0 };
+  }
+
+  // ---- scheduler pause -----------------------------------------------------
+
+  /** Pause the whole scheduler until `untilIso` (replaces any earlier pause). */
+  setPause(untilIso: string, reason: string | null, pausedBy: string | null, nowIso = new Date().toISOString()): void {
+    this.db
+      .prepare(
+        `INSERT INTO scheduler_pause (id, paused_until, paused_at, reason, paused_by) VALUES (1, ?, ?, ?, ?)
+         ON CONFLICT(id) DO UPDATE SET paused_until = excluded.paused_until, paused_at = excluded.paused_at,
+           reason = excluded.reason, paused_by = excluded.paused_by`,
+      )
+      .run(untilIso, nowIso, reason, pausedBy);
+  }
+
+  /** Lift the pause. True when there was one stored (expired or not). */
+  clearPause(): boolean {
+    return Number(this.db.prepare("DELETE FROM scheduler_pause WHERE id = 1").run().changes) > 0;
+  }
+
+  /** The pause in force at `nowIso`, or null (none stored, or already over). */
+  activePause(nowIso: string = new Date().toISOString()): SchedulerPause | null {
+    const r = this.db
+      .prepare(
+        "SELECT paused_until, paused_at, reason, paused_by FROM scheduler_pause WHERE id = 1 AND paused_until > ?",
+      )
+      .get(nowIso) as
+      | { paused_until: string; paused_at: string; reason: string | null; paused_by: string | null }
+      | undefined;
+    return r ? { pausedUntil: r.paused_until, pausedAt: r.paused_at, reason: r.reason, pausedBy: r.paused_by } : null;
   }
 
   // ---- lease ---------------------------------------------------------------

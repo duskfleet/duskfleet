@@ -181,6 +181,7 @@ export class RunManager {
   private readonly active = new Map<string, ActiveRun>();
 
   private _config: DuskFleetConfig;
+  private _configReloadError: string | null = null;
 
   /** This process as `role@host:pid`, recorded as the owner of every run it starts. */
   readonly owner: string;
@@ -205,16 +206,23 @@ export class RunManager {
    * apply without restarting the host process (Claude Desktop keeps the MCP
    * server alive for hours). On a parse error the previous config is kept and
    * the error is logged; a broken file must not take running agents down.
+   * The error stays in `configReloadError` until a reload succeeds, so a check that must fail
+   * closed (command gates) does not trust the kept, possibly stale, config.
    */
   reloadConfig(): DuskFleetConfig {
     try {
       this._config = loadConfig(this._config.configDir);
+      this._configReloadError = null;
     } catch (err) {
-      log.warn("config reload failed; keeping previous config", {
-        err: err instanceof Error ? err.message : String(err),
-      });
+      this._configReloadError = err instanceof Error ? err.message : String(err);
+      log.warn("config reload failed; keeping previous config", { err: this._configReloadError });
     }
     return this._config;
+  }
+
+  /** The error of the last reloadConfig() when it failed (the config in memory is stale), else null. */
+  get configReloadError(): string | null {
+    return this._configReloadError;
   }
 
   /** How the given runs ended (status, review reasons, cost), in one query: what a schedule row shows. */
@@ -224,7 +232,7 @@ export class RunManager {
 
   /**
    * Mark `running` runs whose owning process is gone as failed. Called at startup and
-   * by the scheduler lease holder. Several DuskFleet processes share the database
+   * by the scheduler lease holder. Several Duskfleet processes share the database
    * (serve, one MCP server per host session, CLI), so a run owned by a live process,
    * or by another host, is left alone.
    */
@@ -629,11 +637,11 @@ export class RunManager {
       this.runs.addEvent(id, "note", { message: "cancel requested" });
       return run;
     }
-    // Another live DuskFleet process owns the claude child; writing `cancelled` here would
+    // Another live Duskfleet process owns the claude child; writing `cancelled` here would
     // leave it running. It has to be cancelled through that process.
     if (!this.ownerIsGone(run)) {
       throw new Error(
-        `run ${id} is owned by ${run.owner ?? "(unrecorded: an older DuskFleet build)"}, another live DuskFleet process; cancel it from there (or stop that process).`,
+        `run ${id} is owned by ${run.owner ?? "(unrecorded: an older Duskfleet build)"}, another live Duskfleet process; cancel it from there (or stop that process).`,
       );
     }
     // Not active and its owner is gone (orphan) – close it out directly
@@ -764,7 +772,7 @@ export class RunManager {
     if (this.active.size >= this.config.maxConcurrentRuns) {
       return `max_concurrent_runs (${this.config.maxConcurrentRuns}) reached; wait for a run to finish`;
     }
-    // Count this process's runs plus the live runs of other DuskFleet processes on the same database.
+    // Count this process's runs plus the live runs of other Duskfleet processes on the same database.
     const busy: Array<[string, { projectPath: string; agentId: string; isolated: boolean }]> = [
       ...this.active.entries(),
     ];
@@ -947,7 +955,7 @@ export class RunManager {
       const mcp = this.summarizeMcp(active);
       if (mcp.allowListedMissing.length) {
         this.runs.addEvent(runId, "note", {
-          message: `allow-listed MCP servers never mounted in this run: ${mcp.allowListedMissing.join(", ")} (mounted: ${mcp.mounted.map((m) => mcpToolPrefix(m.name)).join(", ") || "none reported"})`,
+          message: `allow-listed MCP servers never mounted in this run: ${mcp.allowListedMissing.join(", ")} (mounted: ${mcp.mounted.map((m) => mcpToolPrefix(m.name)).join(", ")})`,
         });
       }
       // Subagents still open when the process ended (cancel, timeout, crash) never handed back.
@@ -1030,8 +1038,11 @@ export class RunManager {
   /**
    * What MCP looked like in this run. "Missing" = an allow-listed mcp__ entry whose
    * server prefix matches neither a mounted server nor a server actually called.
-   * Mounted lists can be empty while connectors are still connecting at init, so a
-   * prefix is only reported missing when the run gave us *some* MCP evidence.
+   * Only an init line that lists the mounted servers is evidence of what mounted: the list
+   * is empty while connectors are still connecting, and Claude Code 2.1.306 reports
+   * `mcp_servers: []` for connectors it loads as deferred tools (verified 2026-10-21).
+   * A server that was merely not called in that run leaves no trace, so a call on one
+   * server never proves that another allow-listed server was absent.
    */
   private summarizeMcp(active: ActiveRun | undefined): import("../execution/types.js").RunMcpInfo {
     if (!active) return { mounted: [], used: [], allowListedMissing: [] };

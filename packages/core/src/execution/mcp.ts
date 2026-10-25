@@ -21,8 +21,13 @@ export function allowListedMcpPrefixes(allowedTools: readonly string[]): string[
   return [...prefixes].sort();
 }
 
-/** Required prefixes that match no reported server, whatever its status (a pending server counts as present). */
+/**
+ * Required prefixes that match no reported server, whatever its status (a pending server counts as
+ * present). An empty list is no evidence: Claude Code reports `mcp_servers: []` when connectors load
+ * as deferred tools, so nothing is missing then.
+ */
 export function missingMcpServers(required: readonly string[], mounted: readonly McpServerInfo[]): string[] {
+  if (mounted.length === 0) return [];
   const present = new Set(mounted.map((s) => mcpToolPrefix(s.name)));
   return required.filter((p) => !present.has(p));
 }

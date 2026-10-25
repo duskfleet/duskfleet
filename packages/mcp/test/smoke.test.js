@@ -60,6 +60,10 @@ function makeApp({ extraYaml = "", agents = {} } = {}) {
     path.join(configDir, "agents", "connected.md"),
     `---\npermission_mode: dontAsk\ninherit_mcp: true\nadd_dirs: ["${root}/extra"]\nallowed_tools: ["mcp__claude_ai_Figma", "mcp__plugin_productivity_atlassian", "mcp__claude_ai_Figma__get_metadata"]\n---\nUse MCP.\n`,
   );
+  writeFileSync(
+    path.join(configDir, "agents", "two-servers.md"),
+    `---\npermission_mode: dontAsk\ninherit_mcp: true\nallowed_tools: ["mcp__example_tracker", "mcp__example_design"]\n---\nUse MCP.\n`,
+  );
   const config = loadConfig(configDir);
   const db = openDatabase(config.dataDir);
   const executor = new ClaudeCodeExecutor({
@@ -759,6 +763,32 @@ test("MCP servers mounted and allow-list mismatches are recorded on the run", as
   }
 });
 
+test("an allow-listed server that was simply not called is not 'missing' when init listed no servers", async () => {
+  // Claude Code 2.1.306 reports mcp_servers: [] when connectors load as deferred tools, so a call
+  // on one server says nothing about another: no note, no needs-review (false positive seen 2026-10-21).
+  const app = makeApp();
+  try {
+    const started = await app.runs.startRun({
+      prompt: "deferred-mcp",
+      projectPath: app.project,
+      agentId: "two-servers",
+    });
+    const run = await app.runs.waitForRun(started.id, 10_000);
+    assert.equal(run.status, "completed");
+    assert.deepEqual(run.mcp.mounted, []);
+    assert.deepEqual(run.mcp.used, ["mcp__example_tracker"]);
+    assert.deepEqual(run.mcp.allowListedMissing, []);
+    assert.deepEqual(run.reviewReasons, []);
+    const notes = app.runs.events(run.id).filter((e) => e.type === "note");
+    assert.equal(notes.length, 0);
+    assert.equal(summarizeRun(app.runs.listRuns({ limit: 1 })[0]).needsReview, false);
+    // An empty init list is no evidence for the restart either: one process, one init.
+    assert.equal(app.runs.events(run.id).filter((e) => e.type === "init").length, 1);
+  } finally {
+    await app.cleanup();
+  }
+});
+
 test("a child whose init lacks an allow-listed connector is restarted once, before any model turn", async () => {
   const app = makeApp({
     agents: {
@@ -1130,7 +1160,7 @@ test("needs review: every run that ended before the agent chose to stop, from on
       status: "failed",
       terminationReason: null,
       exitCode: null,
-      error: "orphaned: DuskFleet restarted while this run was in progress",
+      error: "orphaned: Duskfleet restarted while this run was in progress",
     }),
     ["orphaned"],
   );

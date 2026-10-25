@@ -22,10 +22,12 @@ import {
   CONCURRENCY_POLICIES,
   DEFAULT_CATCH_UP_POLICY,
   DEFAULT_CONCURRENCY_POLICY,
+  DEFAULT_TRIGGER_KIND,
   IMPLEMENTED_CATCH_UP_POLICIES,
   type Schedule,
   type ScheduleInput,
   type SchedulePatch,
+  TRIGGER_KINDS,
 } from "./types.js";
 
 export const DEFAULT_TIME_ZONE = "Europe/London";
@@ -69,8 +71,12 @@ export function validateScheduleInput(config: DuskFleetConfig, input: ScheduleIn
   validatePolicies(input);
 }
 
-/** concurrency_policy and catch_up_policy: known values, and only the ones the scheduler implements. */
-function validatePolicies(input: Pick<ScheduleInput, "concurrencyPolicy" | "catchUpPolicy">): void {
+/** trigger_kind, concurrency_policy and catch_up_policy: known values, and only the ones the scheduler implements. */
+function validatePolicies(input: Pick<ScheduleInput, "concurrencyPolicy" | "catchUpPolicy" | "triggerKind">): void {
+  const trigger = input.triggerKind ?? DEFAULT_TRIGGER_KIND;
+  if (!(TRIGGER_KINDS as readonly string[]).includes(trigger)) {
+    throw new Error(`trigger_kind must be one of ${TRIGGER_KINDS.join(", ")}`);
+  }
   const concurrency = input.concurrencyPolicy ?? DEFAULT_CONCURRENCY_POLICY;
   if (!(CONCURRENCY_POLICIES as readonly string[]).includes(concurrency)) {
     throw new Error(`concurrency_policy must be one of ${CONCURRENCY_POLICIES.join(", ")}`);
@@ -84,6 +90,41 @@ function validatePolicies(input: Pick<ScheduleInput, "concurrencyPolicy" | "catc
       `catch_up_policy ${catchUp} is not implemented yet (planned: replay up to ${CATCH_UP_CAP} missed ticks, never for sub-hourly schedules); use ${IMPLEMENTED_CATCH_UP_POLICIES.join(", ")}`,
     );
   }
+}
+
+export const COMMAND_GATES_OFF =
+  "command gates are disabled: a gate.command runs `/bin/sh -c` with the scheduler's full environment, " +
+  "outside every Claude Code allow-list. Set scheduler.allow_command_gates: true in config/duskfleet.yaml " +
+  "to allow them, or use an agent gate";
+
+/**
+ * Refuse a command gate unless `scheduler.allow_command_gates` is on. Checked on create and on an
+ * update that sets the gate, so pausing or editing an older row that already has one still works
+ * (its tick records `error` instead of running the command, see evaluateGate).
+ */
+export function assertCommandGateAllowed(
+  config: DuskFleetConfig,
+  gate: ScheduleInput["gate"],
+  configReloadError: string | null = null,
+): void {
+  if (gate?.command === undefined) return;
+  const refusal = commandGateRefusal(config, configReloadError);
+  if (refusal !== null) throw new Error(refusal);
+}
+
+/**
+ * Why command gates are not allowed right now, or null when they are. Fails closed: when the last
+ * config reload failed (`configReloadError`, see RunManager.configReloadError) the config in memory
+ * may hold a stale `allow_command_gates: true`, so it is not trusted.
+ */
+export function commandGateRefusal(config: DuskFleetConfig, configReloadError: string | null = null): string | null {
+  if (configReloadError !== null) {
+    return (
+      "command gates are refused while config/ fails to load (the last good scheduler.allow_command_gates " +
+      `may be stale): ${configReloadError}`
+    );
+  }
+  return config.scheduler.allowCommandGates ? null : COMMAND_GATES_OFF;
 }
 
 /**
@@ -182,8 +223,10 @@ export function createSchedule(
   config: DuskFleetConfig,
   input: ScheduleInput,
   now: Date = new Date(),
+  configReloadError: string | null = null,
 ): Schedule {
   validateScheduleInput(config, input);
+  assertCommandGateAllowed(config, input.gate, configReloadError);
   if (repo.findByName(input.name)) throw new Error(`a schedule named "${input.name}" already exists`);
   const timeZone = input.timeZone ?? DEFAULT_TIME_ZONE;
   const nextRunAt = input.enabled === false ? null : nextRunAtFor(input.cron, timeZone, now);
@@ -200,6 +243,7 @@ export function updateSchedule(
   id: string,
   patch: SchedulePatch,
   now: Date = new Date(),
+  configReloadError: string | null = null,
 ): Schedule {
   const existing = repo.get(id);
   if (!existing) throw new Error(`schedule not found: ${id}`);
@@ -218,8 +262,10 @@ export function updateSchedule(
     gate: patch.gate === undefined ? existing.gate : patch.gate,
     concurrencyPolicy: patch.concurrencyPolicy ?? existing.concurrencyPolicy,
     catchUpPolicy: patch.catchUpPolicy ?? existing.catchUpPolicy,
+    triggerKind: patch.triggerKind ?? existing.triggerKind,
   };
   validateScheduleInput(config, merged);
+  assertCommandGateAllowed(config, patch.gate, configReloadError);
   if (merged.name !== existing.name && repo.findByName(merged.name))
     throw new Error(`a schedule named "${merged.name}" already exists`);
   const nextRunAt = merged.enabled ? nextRunAtFor(merged.cron, merged.timeZone!, now) : null;

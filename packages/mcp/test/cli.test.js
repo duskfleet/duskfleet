@@ -80,7 +80,10 @@ test("doctor --probe makes one haiku run outside any project, says it costs mone
   try {
     const plain = cli(configDir, ["doctor"]);
     assert.equal(plain.status, 0, plain.stderr);
-    assert.equal("probe" in JSON.parse(plain.stdout), false, "no probe without the flag");
+    const plainReport = JSON.parse(plain.stdout);
+    assert.equal("probe" in plainReport, false, "no probe without the flag");
+    assert.equal(typeof plainReport.path, "string", "doctor prints the effective PATH");
+    assert.equal(typeof plainReport.pathDefaulted, "boolean");
     assert.doesNotMatch(plain.stderr, /costs/);
 
     const ok = cli(configDir, ["doctor", "--probe"]);

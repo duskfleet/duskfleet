@@ -2,7 +2,7 @@
  * Claude Code CLI executor.
  *
  * Everything CLI-specific lives here: flag names, output parsing, process
- * lifecycle. The rest of DuskFleet only sees `Executor` / `ExecutionResult`.
+ * lifecycle. The rest of Duskfleet only sees `Executor` / `ExecutionResult`.
  *
  * Flags used were verified against `claude --help` for 2.1.285.
  */
@@ -16,6 +16,7 @@ import { classifyFailure } from "../observability/failure.js";
 import type { BillingType, RecordedCommand } from "../observability/run.js";
 import { logger } from "../util/log.js";
 import { missingMcpServers } from "./mcp.js";
+import { effectivePath, withEffectivePath } from "./search-path.js";
 import { createStreamState, ingestLine, looksLikeContextExhaustion } from "./stream-json.js";
 import {
   type ExecutionEvent,
@@ -66,7 +67,7 @@ export class ClaudeCodeExecutor implements Executor {
 
   version(): Promise<string> {
     return new Promise((resolve, reject) => {
-      execFile(this.binary, ["--version"], { timeout: 15_000 }, (err, stdout) => {
+      execFile(this.binary, ["--version"], { timeout: 15_000, env: childEnv() }, (err, stdout) => {
         if (err) reject(err);
         else resolve(stdout.trim());
       });
@@ -99,7 +100,7 @@ export class ClaudeCodeExecutor implements Executor {
         "permission_mode bypassPermissions cannot be used in unattended runs: Claude Code refuses it together with --permission-prompts none. Use dontAsk with an allowed_tools list instead.",
       );
     }
-    // Default: no MCP at all (fast, no recursion into DuskFleet). Opt in per agent/project.
+    // Default: no MCP at all (fast, no recursion into Duskfleet). Opt in per agent/project.
     if (this.options.strictMcpConfig && !req.inheritMcp) argv.push("--strict-mcp-config");
     for (const dir of req.addDirs ?? []) argv.push("--add-dir", dir);
     if (req.claudeAgent) argv.push("--agent", req.claudeAgent);
@@ -201,8 +202,8 @@ export class ClaudeCodeExecutor implements Executor {
       closed = false;
       const state = createStreamState();
       let resultTimer: NodeJS.Timeout | null = null;
-      let graceKilled = false; // ended by DuskFleet after a result line: the result decides the outcome
-      let restart = false; // ended by DuskFleet at its init line: the next process decides
+      let graceKilled = false; // ended by Duskfleet after a result line: the result decides the outcome
+      let restart = false; // ended by Duskfleet at its init line: the next process decides
       let stderrTail = "";
       let spawnError: string | null = null;
 
@@ -441,9 +442,10 @@ function childEnv(): NodeJS.ProcessEnv {
   for (const key of Object.keys(env)) {
     if (key === "CLAUDECODE" || key === "CLAUDE_CODE_ENTRYPOINT" || key.startsWith("CLAUDE_CODE_SSE_")) delete env[key];
   }
-  // DuskFleet's own variable: an agent running `npm test` here would launch the real claude.
+  // Duskfleet's own variable: an agent running `npm test` here would launch the real claude.
   delete env["CLAUDE_BIN"];
-  return env;
+  // A GUI host's minimal PATH would hide node, git and claude from the run (see search-path.ts).
+  return withEffectivePath(env);
 }
 
 /**
@@ -458,14 +460,15 @@ export function billingTypeOf(env: NodeJS.ProcessEnv): BillingType {
  * Binary resolution order:
  *   1. CLAUDE_BIN environment variable
  *   2. explicit config value
- *   3. `claude` found on PATH
+ *   3. `claude` found on PATH (the effective one: a missing or minimal PATH gets the default
+ *      install directories in front, see search-path.ts)
  *   4. ~/.local/bin/claude (default install location)
  */
 export function resolveClaudeBinary(configured: string | null): string {
   const candidates: string[] = [];
   if (process.env["CLAUDE_BIN"]) candidates.push(process.env["CLAUDE_BIN"]);
   if (configured) candidates.push(configured);
-  for (const dir of (process.env["PATH"] ?? "").split(path.delimiter)) {
+  for (const dir of effectivePath(process.env["PATH"]).split(path.delimiter)) {
     if (dir) candidates.push(path.join(dir, "claude"));
   }
   candidates.push(path.join(homedir(), ".local", "bin", "claude"));

@@ -35,19 +35,22 @@ const fakeBinary = path.join(here, "fake-claude.js");
 const serverEntry = path.join(here, "..", "dist", "index.js");
 
 /**
+ * The test config; command gates are on unless `allowCommandGates` is false (then the key is absent: the default).
  * `deferBusy` defaults to false here: the tests written before scheduler.defer_busy pin the
  * skipped_busy behaviour, which `defer_busy: false` must keep exactly. The deferral tests pass true.
  */
-function makeRoot({ deferBusy = false } = {}) {
+function globalYaml({ allowCommandGates = true, deferBusy = false } = {}) {
+  const gates = allowCommandGates ? "  allow_command_gates: true\n" : "";
+  return `data_dir: ../data\ndefault_agent: coder\nscheduler:\n  enabled: true\n  tick_seconds: 5\n${gates}  defer_busy: ${deferBusy}\nclaude:\n  binary: "${fakeBinary}"\n  default_timeout_minutes: 0.05\n`;
+}
+
+function makeRoot(options = {}) {
   const root = mkdtempSync(path.join(tmpdir(), "duskfleet-sched-"));
   const configDir = path.join(root, "config");
   mkdirSync(path.join(configDir, "agents"), { recursive: true });
   const project = path.join(root, "project");
   mkdirSync(project);
-  writeFileSync(
-    path.join(configDir, "duskfleet.yaml"),
-    `data_dir: ../data\ndefault_agent: coder\nscheduler:\n  enabled: true\n  tick_seconds: 5\n  defer_busy: ${deferBusy}\nclaude:\n  binary: "${fakeBinary}"\n  default_timeout_minutes: 0.05\n`,
-  );
+  writeFileSync(path.join(configDir, "duskfleet.yaml"), globalYaml(options));
   writeFileSync(path.join(configDir, "projects.yaml"), `projects:\n  demo:\n    path: ${project}\n`);
   writeFileSync(path.join(configDir, "agents", "coder.md"), `---\nproject: demo\n---\nBe brief.\n`);
   writeFileSync(path.join(configDir, "agents", "free.md"), `---\n---\nUnbound.\n`);
@@ -132,6 +135,21 @@ test("schedules over MCP: create, list, update, run now, delete; validation erro
     assert.equal(created.schedule.enabled, true);
     assert.equal(created.schedule.concurrencyPolicy, "skip_if_active");
     assert.equal(created.schedule.catchUpPolicy, "skip_missed");
+    assert.equal(created.schedule.triggerKind, "cron");
+
+    const schedulerPaused = ok(
+      await client.callTool({ name: "pause_scheduler", arguments: { minutes: 30, reason: "maintenance" } }),
+    );
+    assert.equal(schedulerPaused.paused, true);
+    assert.equal(schedulerPaused.pause.reason, "maintenance");
+    assert.equal(schedulerPaused.scheduler.pause.pausedUntil, schedulerPaused.pause.pausedUntil);
+    const listedPaused = ok(await client.callTool({ name: "list_schedules", arguments: {} }));
+    assert.equal(listedPaused.scheduler.pause.reason, "maintenance");
+    const schedulerResumed = ok(await client.callTool({ name: "pause_scheduler", arguments: { minutes: 0 } }));
+    assert.equal(schedulerResumed.paused, false);
+    assert.equal(schedulerResumed.scheduler.pause, null);
+    fails(await client.callTool({ name: "pause_scheduler", arguments: { minutes: 20_000 } }), /10080/);
+
     fails(
       await client.callTool({
         name: "create_schedule",
@@ -1079,6 +1097,237 @@ test("policy enums: stored defaults, explicit values kept by edits, the reserved
     assert.equal(t.scheduler.firings(s.id).length, 1);
     assert.ok(Date.parse(after.nextRunAt) > Date.now(), "next_run_at moved past now");
     await t.runs.waitForRun(after.lastRunId, 15_000);
+  } finally {
+    await t.close(root);
+  }
+});
+
+test("command gates are opt-in: refused over MCP under the default config, accepted once scheduler.allow_command_gates is on", async () => {
+  const { root, configDir } = makeRoot({ allowCommandGates: false });
+  const transport = new StdioClientTransport({
+    command: process.execPath,
+    args: [serverEntry],
+    env: testEnv({ DUSKFLEET_CONFIG: configDir, DUSKFLEET_LOG_LEVEL: "warn" }),
+    stderr: "pipe",
+  });
+  const client = new Client({ name: "test-client", version: "0.0.0" });
+  try {
+    await client.connect(transport);
+    const base = { agent_id: "coder", prompt: "ok", cron: "0 * * * *" };
+    fails(
+      await client.callTool({
+        name: "create_schedule",
+        arguments: { ...base, name: "cmd", gate: { command: "true" } },
+      }),
+      /command gates are disabled.*scheduler\.allow_command_gates/,
+    );
+    // An agent gate is not affected, and neither is a schedule without a gate.
+    const plain = ok(await client.callTool({ name: "create_schedule", arguments: { ...base, name: "plain" } }));
+    ok(
+      await client.callTool({
+        name: "create_schedule",
+        arguments: { ...base, name: "agent gated", gate: { agent: { agent_id: "gatekeeper", prompt: "x" } } },
+      }),
+    );
+    fails(
+      await client.callTool({
+        name: "update_schedule",
+        arguments: { id: plain.schedule.id, gate: { command: "true" } },
+      }),
+      /scheduler\.allow_command_gates/,
+    );
+    assert.equal(ok(await client.callTool({ name: "list_schedules", arguments: {} })).schedules.length, 2);
+
+    // Config is re-read: switching it on needs no restart.
+    writeFileSync(path.join(configDir, "duskfleet.yaml"), globalYaml({ allowCommandGates: true }));
+    const created = ok(
+      await client.callTool({
+        name: "create_schedule",
+        arguments: { ...base, name: "cmd", gate: { command: "true" } },
+      }),
+    );
+    assert.equal(created.schedule.gate.command, "true");
+    ok(
+      await client.callTool({
+        name: "update_schedule",
+        arguments: { id: plain.schedule.id, gate: { command: "true" } },
+      }),
+    );
+  } finally {
+    await client.close();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("a stored command gate with scheduler.allow_command_gates off records error and never runs; on again, it runs", async () => {
+  const { root, configDir, project } = makeRoot();
+  const t = makeScheduler(configDir);
+  try {
+    const marker = path.join(project, "gate-ran");
+    const s = t.scheduler.create({
+      name: "old gated",
+      agentId: "coder",
+      prompt: "ok",
+      cron: "* * * * *",
+      gate: { command: `touch "${marker}"; exit 1` },
+    });
+    writeFileSync(path.join(configDir, "duskfleet.yaml"), globalYaml({ allowCommandGates: false }));
+    t.due(s.id);
+    await t.tickAll();
+    let row = t.repo.get(s.id);
+    assert.equal(row.lastOutcome, "error");
+    assert.match(row.lastError, /gate: command gates are disabled.*scheduler\.allow_command_gates/);
+    assert.equal(row.lastRunId, null, "no run started on a refused gate");
+    assert.equal(existsSync(marker), false, "the command did not run");
+    assert.deepEqual(row.gate, { command: `touch "${marker}"; exit 1` }, "the row keeps its gate");
+
+    // The row can still be paused and edited without touching its gate.
+    assert.equal(t.scheduler.update(s.id, { enabled: false }).enabled, false);
+    assert.equal(t.scheduler.update(s.id, { enabled: true, prompt: "again" }).prompt, "again");
+
+    writeFileSync(path.join(configDir, "duskfleet.yaml"), globalYaml({ allowCommandGates: true }));
+    t.due(s.id);
+    await t.tickAll();
+    row = t.repo.get(s.id);
+    assert.equal(row.lastOutcome, "skipped_gate", "switched on: the gate runs as before");
+    assert.equal(existsSync(marker), true);
+  } finally {
+    await t.close(root);
+  }
+});
+
+test("command gates fail closed: switched off while config/ fails to load, the stale true is not trusted", async () => {
+  const { root, configDir, project } = makeRoot();
+  const t = makeScheduler(configDir);
+  try {
+    const marker = path.join(project, "gate-ran");
+    const s = t.scheduler.create({
+      name: "gated",
+      agentId: "coder",
+      prompt: "ok",
+      cron: "* * * * *",
+      gate: { command: `touch "${marker}"; exit 1` },
+    });
+    const plain = t.scheduler.create({ name: "plain", agentId: "coder", prompt: "ok", cron: "0 * * * *" });
+    // The switch goes off, but a broken agent file makes every reload fail: the config in memory
+    // still says allow_command_gates: true.
+    writeFileSync(path.join(configDir, "duskfleet.yaml"), globalYaml({ allowCommandGates: false }));
+    const bad = path.join(configDir, "agents", "bad.md");
+    writeFileSync(bad, "---\npermission_mode: not-a-mode\n---\nbody\n");
+
+    t.due(s.id);
+    await t.tickAll();
+    const row = t.repo.get(s.id);
+    assert.equal(row.lastOutcome, "error");
+    assert.match(row.lastError, /gate: command gates are refused while config\/ fails to load/);
+    assert.equal(existsSync(marker), false, "the command did not run");
+    assert.throws(
+      () =>
+        t.scheduler.create({
+          name: "new",
+          agentId: "coder",
+          prompt: "ok",
+          cron: "0 * * * *",
+          gate: { command: "true" },
+        }),
+      /command gates are refused while config\/ fails to load/,
+    );
+    assert.throws(
+      () => t.scheduler.update(plain.id, { gate: { command: "true" } }),
+      /command gates are refused while config\/ fails to load/,
+    );
+    // Edits that do not set a command gate still work on the kept config.
+    assert.equal(t.scheduler.update(plain.id, { prompt: "again" }).prompt, "again");
+
+    // Config loads again with the switch off: the usual refusal.
+    rmSync(bad);
+    assert.throws(
+      () => t.scheduler.update(plain.id, { gate: { command: "true" } }),
+      /command gates are disabled.*scheduler\.allow_command_gates/,
+    );
+  } finally {
+    await t.close(root);
+  }
+});
+
+test("trigger_kind: stored default cron, kept by edits, unknown values refused; due() only picks cron schedules", async () => {
+  const { root, configDir } = makeRoot();
+  const t = makeScheduler(configDir);
+  try {
+    const s = t.scheduler.create({ name: "trigger", agentId: "coder", prompt: "ok", cron: "0 * * * *" });
+    assert.equal(s.triggerKind, "cron");
+    assert.equal(t.db.prepare("SELECT trigger_kind FROM schedules WHERE id = ?").get(s.id).trigger_kind, "cron");
+    assert.equal(t.scheduler.update(s.id, { prompt: "ok again" }).triggerKind, "cron", "an edit keeps it");
+    assert.throws(
+      () => t.scheduler.create({ name: "api", agentId: "coder", prompt: "ok", cron: "0 * * * *", triggerKind: "api" }),
+      /trigger_kind must be one of cron/,
+    );
+    assert.throws(() => t.scheduler.update(s.id, { triggerKind: "api" }), /trigger_kind must be one of cron/);
+
+    // A row with another kind (a future trigger) is never fired by the cron tick.
+    const past = new Date(Date.now() - 1000).toISOString();
+    t.repo.update(s.id, { nextRunAt: past });
+    assert.equal(t.repo.due(new Date().toISOString()).length, 1);
+    t.db.prepare("UPDATE schedules SET trigger_kind = 'api' WHERE id = ?").run(s.id);
+    assert.equal(t.repo.due(new Date().toISOString()).length, 0);
+    await t.tickAll();
+    const after = t.repo.get(s.id);
+    assert.equal(after.fires, 0);
+    assert.equal(after.nextRunAt, past);
+  } finally {
+    await t.close(root);
+  }
+});
+
+test("pause_scheduler: stored pause stops every fire until it ends, keeps the lease, lifts with 0; due ticks fire once after", async () => {
+  const { root, configDir } = makeRoot();
+  const t = makeScheduler(configDir);
+  try {
+    const s = t.scheduler.create({ name: "paused", agentId: "coder", prompt: "ok", cron: "0 * * * *" });
+    assert.equal(t.scheduler.status().pause, null);
+    assert.throws(() => t.scheduler.pause(-1), /minutes must be an integer from 0/);
+    assert.throws(() => t.scheduler.pause(1.5), /minutes must be an integer from 0/);
+    assert.throws(() => t.scheduler.pause(10_081), /scheduler.enabled: false/);
+
+    const pause = t.scheduler.pause(15, "  deploy  ");
+    assert.equal(pause.reason, "deploy");
+    assert.equal(pause.pausedBy, "A");
+    assert.ok(Math.abs(Date.parse(pause.pausedUntil) - (Date.now() + 15 * 60_000)) < 5000);
+    // Read by every process from the database: a second scheduler (another holder) sees it.
+    const other = new Scheduler(t.repo, t.runs, { tickMs: 1000, holder: "B" });
+    assert.equal(other.status().pause.pausedUntil, pause.pausedUntil);
+
+    t.due(s.id);
+    t.repo.requestRun(s.id);
+    await t.tickAll();
+    await t.tickAll();
+    let row = t.repo.get(s.id);
+    assert.equal(row.fires, 0, "nothing fires while paused");
+    assert.equal(t.scheduler.firings(s.id).length, 0, "and nothing is recorded");
+    assert.ok(row.runRequestedAt, "a run-now request waits");
+    assert.equal(t.repo.leaseInfo().holder, "A", "the lease is kept");
+
+    // An expired pause no longer counts.
+    t.db.prepare("UPDATE scheduler_pause SET paused_until = ?").run(new Date(Date.now() - 1000).toISOString());
+    assert.equal(t.scheduler.status().pause, null);
+    t.scheduler.pause(15);
+    assert.equal(t.scheduler.pause(0), null, "0 lifts it");
+    assert.equal(t.scheduler.status().pause, null);
+    assert.equal(t.db.prepare("SELECT COUNT(*) AS n FROM scheduler_pause").get().n, 0);
+
+    // Lifted: the waiting request fires once and moves next_run_at past now, so the tick missed
+    // during the pause is not replayed on top of it (no catch-up).
+    await t.tickAll();
+    await t.tickAll();
+    row = t.repo.get(s.id);
+    assert.equal(row.runRequestedAt, null);
+    const firings = t.scheduler.firings(s.id);
+    assert.deepEqual(
+      firings.map((f) => f.outcome),
+      ["started"],
+    );
+    assert.ok(Date.parse(row.nextRunAt) > Date.now());
+    for (const r of t.runs.listRuns({ status: "running" })) t.runs.cancelRun(r.id);
   } finally {
     await t.close(root);
   }

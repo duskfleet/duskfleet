@@ -2,7 +2,8 @@
  * Schedule gates: a cheap check before a scheduled run, so a schedule that finds no work
  * skips for (almost) nothing instead of paying a full agent session to say "nothing to do".
  *
- *  - command gate: `sh -c <command>` in the project directory. Exit 0 = there is work, run.
+ *  - command gate (opt-in, `scheduler.allow_command_gates`): `sh -c <command>` in the project
+ *    directory with the scheduler's environment. Exit 0 = there is work, run.
  *    Exit 1-125 = skip, its stdout (else stderr) is the reason. 126 / 127 (not executable,
  *    not found: a typo or a PATH without the tool), death by signal, timeout or spawn failure
  *    = error: a broken gate must not read as "idle".
@@ -14,13 +15,14 @@
  */
 import { spawn } from "node:child_process";
 import type { DuskFleetConfig } from "../config/types.js";
+import { withEffectivePath } from "../execution/search-path.js";
 import { BudgetError } from "../orchestration/budget.js";
 import { BusyError } from "../orchestration/busy.js";
 import { DailyCapError } from "../orchestration/daily-cap.js";
 import type { RunManager } from "../orchestration/run-manager.js";
 // crud.ts imports validateGate from here: a cycle, safe because both sides only call
 // functions at run time, never at module evaluation.
-import { scheduleProjectId } from "./crud.js";
+import { commandGateRefusal, scheduleProjectId } from "./crud.js";
 import {
   DEFAULT_GATE_BUDGET_USD,
   DEFAULT_GATE_MARKER,
@@ -131,7 +133,8 @@ export function runCommandGate(
       // sh, in its own process group so a timeout can kill everything it started.
       child = spawn("/bin/sh", ["-c", command], {
         cwd,
-        env: process.env,
+        // A GUI host's minimal PATH would hide git, gh, jq... (see search-path.ts).
+        env: withEffectivePath(process.env),
         stdio: ["ignore", "pipe", "pipe"],
         detached: process.platform !== "win32",
       });
@@ -252,6 +255,11 @@ export async function evaluateGate(runs: RunManager, s: Schedule): Promise<GateV
   }
   try {
     if (gate.command !== undefined) {
+      // A row stored before the switch existed (or while it was on): never run it while it is off,
+      // nor while config/ fails to load (the kept config may hold a stale `true`).
+      const config = runs.reloadConfig();
+      const refusal = commandGateRefusal(config, runs.configReloadError);
+      if (refusal !== null) return { kind: "error", gateRunId: null, costUsd: 0, reason: refusal };
       // The directory the real run would use, resolved by RunManager exactly as startRun does.
       const cwd = runs.projectPathFor({ agentId: s.agentId, projectId: s.projectId });
       return await runCommandGate(gate.command, cwd, gate.timeoutSeconds ?? DEFAULT_GATE_TIMEOUT_SECONDS);

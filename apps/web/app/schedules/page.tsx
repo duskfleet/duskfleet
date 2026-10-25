@@ -21,7 +21,7 @@ const HOLDER_LABEL: Record<string, string> = {
 
 export const dynamic = "force-dynamic";
 
-export const metadata = { title: "Schedules · DuskFleet" };
+export const metadata = { title: "Schedules · Duskfleet" };
 
 const FIRINGS_SHOWN = 10;
 
@@ -131,7 +131,7 @@ export default function SchedulesPage() {
         <div className="callout warn" style={{ margin: "0 0 16px" }}>
           <span className="icon">!</span>
           <div>
-            <strong>No DuskFleet process is ticking.</strong> Schedules fire only while the MCP server (Claude Desktop /
+            <strong>No Duskfleet process is ticking.</strong> Schedules fire only while the MCP server (Claude Desktop /
             Claude Code) or
             <code> duskfleet serve</code> is running. Install it as a service once with{" "}
             <code>npm run cli -- install-service</code>. Missed ticks are not caught up.

@@ -17,7 +17,7 @@ candidate minute, so a schedule at 08:00 fires at 08:00 on both sides of a clock
 
 ## Who ticks
 
-Any DuskFleet process can: the MCP server that Claude Desktop or Claude Code keeps alive, or
+Any Duskfleet process can: the MCP server that Claude Desktop or Claude Code keeps alive, or
 `duskfleet serve`, a plain long-running process:
 
 ```bash
@@ -49,7 +49,7 @@ npm run cli -- doctor                     # "scheduler.service" says whether it 
 |---|---|---|
 | macOS | launchd LaunchAgent (`RunAtLoad`, `KeepAlive`) | `~/Library/LaunchAgents/com.duskfleet.scheduler.plist` |
 | Linux | systemd user unit (`Restart=always`) | `~/.config/systemd/user/duskfleet.service` |
-| Windows | Task Scheduler logon task, no time limit, restart on failure | task "DuskFleet Scheduler", XML kept under `%LOCALAPPDATA%\DuskFleet` |
+| Windows | Task Scheduler logon task, no time limit, restart on failure | task "Duskfleet Scheduler", XML kept under `%LOCALAPPDATA%\Duskfleet` |
 
 All three run as the logged-in user, so the service sees the same `claude` login as your
 terminal, start at login and restart the process if it dies. They append the process output to
@@ -115,7 +115,24 @@ no work skips for (almost) nothing instead of paying a full agent session to say
 schedule, set with `gate` on `create_schedule` / `update_schedule` (`clear_gate: true` removes
 it). Two kinds:
 
-**Command gate**: a shell command run with `sh -c` in the project directory.
+**Command gate** (off by default): a shell command run with `/bin/sh -c` in the project
+directory, with the full environment of the DuskFleet process that holds the lease, outside
+every Claude Code allow-list. Anything that can call `create_schedule` could otherwise make the
+scheduler run arbitrary shell on every tick, so command gates are refused unless
+`config/duskfleet.yaml` sets:
+
+```yaml
+scheduler:
+  allow_command_gates: true
+```
+
+With the switch off, `create_schedule` / `update_schedule` fail with a message naming
+`scheduler.allow_command_gates`, and a schedule that already has a command gate is kept but its
+tick records `error` (reason "command gates are disabled…") instead of running the command.
+Pausing or editing that row still works. The switch is re-read on every tick and every call: no
+restart needed. It fails closed: while any file under `config/` fails to load, DuskFleet keeps the
+last good config for everything else but refuses command gates (reason "command gates are refused
+while config/ fails to load…"), since the kept value may be a stale `true`.
 
 ```
 create_schedule { …, "gate": { "command": "./scripts/has-ready-work.sh", "timeout_seconds": 60 } }
@@ -239,6 +256,9 @@ the smallest form instead. With `scheduler.defer_busy: true` (the default, in `d
   trigger shows as lost), and that occurrence fires normally (deferred again if still busy).
 - Pausing the schedule (by hand, auto-pause or a spent budget) drops the pending; a paused
   schedule never starts from it. A start of any kind (also **Run now**) settles it.
+  A [`pause_scheduler`](#pausing-the-whole-scheduler) pause does not drop it: no tick retries it
+  while the pause holds, and the first tick after the pause retries it or, past its deadline,
+  settles it as `skipped_busy`.
 - `deferred` counts as neither a fire nor a skip: the row that settles it does.
 - Not deferred: daily caps (`skipped_daily_cap`), budgets (`skipped_budget`) and gate skips
   (`skipped_gate`), which a retry would defeat; manual triggers (`run_schedule_now`, **Run
@@ -251,14 +271,15 @@ trigger is lost until the next occurrence. A pending left from before the switch
 
 ## Policies
 
-Every schedule stores its two policies, so the behaviour below is explicit on the row
-(`concurrencyPolicy`, `catchUpPolicy` in `list_schedules`; set with `concurrency_policy` /
-`catch_up_policy` on `create_schedule` / `update_schedule`):
+Every schedule stores its two policies and its trigger kind, so the behaviour below is explicit
+on the row (`concurrencyPolicy`, `catchUpPolicy`, `triggerKind` in `list_schedules`; set with
+`concurrency_policy` / `catch_up_policy` / `trigger_kind` on `create_schedule` / `update_schedule`):
 
 | Field | Values | Default |
 |---|---|---|
 | `concurrency_policy` | `skip_if_active` (the only one) | `skip_if_active` |
 | `catch_up_policy` | `skip_missed`; `enqueue_missed_with_cap` is reserved and refused for now (planned: replay up to 3 missed ticks, never for sub-hourly schedules) | `skip_missed` |
+| `trigger_kind` | `cron` (the only one for now; the field leaves room for other triggers, such as an API call, and the tick only fires `cron` schedules) | `cron` |
 
 - A tick whose agent or project is still busy is never queued (checked before any
   [gate](#gates-skip-cheaply-when-there-is-no-work)): it becomes the schedule's one
@@ -273,7 +294,8 @@ Every schedule stores its two policies, so the behaviour below is explicit on th
   resume it (`update_schedule enabled: true` or the dashboard).
 - Missed ticks (nobody running) are not caught up (`skip_missed`): the schedule fires once when
   it is next considered and its next tick is computed from then.
-- `scheduler.enabled: false` in `duskfleet.yaml` is the kill switch, re-read every tick.
+- `scheduler.enabled: false` in `duskfleet.yaml` is the kill switch, re-read every tick. For a
+  stop that ends on its own, [pause the whole scheduler](#pausing-the-whole-scheduler) instead.
 - A schedule whose last `scheduler.auto_pause_after` runs were all empty or needs review is
   [auto-paused](#auto-pause) instead of fired.
 - Every run started by a schedule carries its `scheduleId`, and the schedule carries the
@@ -290,3 +312,21 @@ Every schedule stores its two policies, so the behaviour below is explicit on th
   `run_requested_at` on the row and the lease holder fires it on its next tick (neither spawns
   Claude, which makes the CLI form safe to call from a git hook, see [CLI](cli.md#firing-an-agent-from-a-script-or-a-git-hook)).
   All follow the busy rules of a tick.
+
+## Pausing the whole scheduler
+
+`pause_scheduler { "minutes": 60, "reason": "deploy" }` stops every schedule for an hour without
+editing `duskfleet.yaml`. The pause is a row in the database, read on every tick by whichever
+process holds the lease, so it holds for a `serve` service and an MCP server alike, and it ends
+on its own. `list_schedules` shows it as `scheduler.pause` (`pausedUntil`, `pausedAt`, `reason`,
+`pausedBy`), null when none is in force.
+
+- While paused nothing fires and nothing is recorded: due ticks wait, and so do **Run now**
+  requests from the dashboard or the CLI. When the pause ends they fire once, as after any
+  missed ticks (no catch-up). `run_schedule_now` over MCP still fires at once.
+- The lease holder keeps its lease and its orphan sweep during the pause.
+- A new call replaces the previous pause (shorter or longer); `minutes: 0` lifts it now.
+- `minutes` goes up to 10080 (7 days). For an open-ended stop, use the kill switch
+  `scheduler.enabled: false`.
+- Paused schedules (`enabled: false`) stay paused when the scheduler pause ends: the two are
+  independent.
