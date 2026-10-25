@@ -1253,20 +1253,34 @@ h2 .h2-id {
   gap: 12px;
   min-width: 0;
 }
+/* the state badge keeps the title row: the name truncates, the chips wrap inside .ac-title */
 .ac-head {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   gap: 10px;
+}
+.ac-title {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  align-items: center;
   flex-wrap: wrap;
+  gap: 4px 10px;
 }
 .ac-name {
   margin: 0;
+  min-width: 0;
   font-family: var(--font-display);
   font-weight: 600;
   font-size: 18px;
   line-height: 26px;
   color: var(--text);
-  overflow-wrap: anywhere;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ac-title > :not(.ac-name) {
+  flex-shrink: 0;
 }
 .ac-kind {
   font-size: 12px;
@@ -1284,8 +1298,11 @@ h2 .h2-id {
   font-weight: 600;
 }
 .ac-state-slot {
-  margin-left: auto;
+  flex-shrink: 0;
   display: inline-flex;
+  align-items: center;
+  min-height: 26px;
+  white-space: nowrap;
 }
 .ac-state {
   color: var(--faint);
