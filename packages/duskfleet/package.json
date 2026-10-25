@@ -3,6 +3,11 @@
   "version": "0.1.0",
   "description": "A fleet of agents for your own machine.",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/duskfleet/duskfleet.git",
+    "directory": "packages/duskfleet"
+  },
   "type": "module",
   "engines": {
     "node": ">=24"

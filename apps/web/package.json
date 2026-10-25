@@ -4,6 +4,11 @@
   "type": "module",
   "description": "Duskfleet dashboard: agents, running and past runs (read-only)",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/duskfleet/duskfleet.git",
+    "directory": "apps/web"
+  },
   "engines": {
     "node": ">=24"
   },
