@@ -26,6 +26,12 @@ export interface ServiceTarget {
   platform: NodeJS.Platform;
   /** Absolute path of the repo (working directory of the service). */
   repoRoot: string;
+  /**
+   * Config directory exported as DUSKFLEET_CONFIG, for a config the service could not find
+   * by walking up from its cli.js (an installed package, or DUSKFLEET_CONFIG set by hand).
+   * Null or absent: the service finds `<repoRoot>/config` itself.
+   */
+  configDir?: string | null;
   /** Absolute path of the node binary that runs the CLI. */
   nodeBin: string;
   /** Absolute path of packages/mcp/dist/cli.js. */
@@ -90,6 +96,36 @@ function xml(s: string): string {
   return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 }
 
+/**
+ * Where the service runs and which config it reads. From a checkout (`repoRoot` found by
+ * walking up from cli.js) the service runs in the repo and finds `config/` itself; the
+ * resolved config is exported only when it is somewhere else. From an installed package
+ * there is no repo root: the service runs in the config directory's parent and always gets
+ * DUSKFLEET_CONFIG, or it would not find its config and restart in a loop.
+ */
+export function serviceDirs(
+  repoRoot: string | null,
+  configDir: string,
+): { repoRoot: string; configDir: string | null } {
+  const resolved = path.resolve(configDir);
+  if (repoRoot) {
+    return { repoRoot, configDir: resolved === path.resolve(repoRoot, "config") ? null : resolved };
+  }
+  return { repoRoot: path.dirname(resolved), configDir: resolved };
+}
+
+/**
+ * `npx duskfleet install-service` runs from npm's temporary cache (`.../_npx/<hash>/...`):
+ * a unit pointing there breaks as soon as npm evicts the cache. Refuse it.
+ */
+export function assertNotNpxCache(cliEntry: string): void {
+  if (path.resolve(cliEntry).split(/[\\/]/).includes("_npx")) {
+    throw new Error(
+      `install-service refuses to register ${cliEntry}: it lives in npx's temporary cache, which npm can evict at any time. Install the package first (npm install -g duskfleet), then run "duskfleet install-service".`,
+    );
+  }
+}
+
 function searchPath(t: ServiceTarget, extra: string[]): string {
   const dirs = [path.dirname(t.nodeBin)];
   if (t.claudeBin) dirs.push(path.dirname(t.claudeBin));
@@ -105,12 +141,14 @@ export function renderService(t: ServiceTarget): ServiceUnit {
       `install-service supports macOS (launchd), Linux (systemd --user) and Windows (Task Scheduler); this is ${t.platform}. Run "duskfleet serve" under your own supervisor instead.`,
     );
   }
+  assertNotNpxCache(t.cliEntry);
 
   if (t.platform === "darwin") {
     const env: Array<[string, string]> = [
       ["PATH", searchPath(t, ["/opt/homebrew/bin", "/usr/local/bin", "/usr/bin", "/bin"])],
     ];
     if (t.claudeBin) env.push(["CLAUDE_BIN", t.claudeBin]);
+    if (t.configDir) env.push(["DUSKFLEET_CONFIG", t.configDir]);
     const content = [
       '<?xml version="1.0" encoding="UTF-8"?>',
       '<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">',
@@ -174,6 +212,7 @@ export function renderService(t: ServiceTarget): ServiceUnit {
       "RestartSec=5",
       `Environment=${quote(`PATH=${pathEnv}`)}`,
       ...(t.claudeBin ? [`Environment=${quote(`CLAUDE_BIN=${t.claudeBin}`)}`] : []),
+      ...(t.configDir ? [`Environment=${quote(`DUSKFLEET_CONFIG=${t.configDir}`)}`] : []),
       `StandardOutput=append:${t.logPath}`,
       `StandardError=append:${t.logPath}`,
       "",
@@ -208,7 +247,9 @@ export function renderService(t: ServiceTarget): ServiceUnit {
   // "no time limit" or "restart on failure"; XML can. The command goes through
   // cmd.exe so stdout/stderr can be appended to the log file.
   const user = t.user ?? windowsUser();
-  const cmd = `/c ""${t.nodeBin}" "${t.cliEntry}" serve >> "${t.logPath}" 2>&1"`;
+  // A task has no environment block: the config dir is set by cmd.exe before node starts.
+  const setConfig = t.configDir ? `set "DUSKFLEET_CONFIG=${t.configDir}"&& ` : "";
+  const cmd = `/c "${setConfig}"${t.nodeBin}" "${t.cliEntry}" serve >> "${t.logPath}" 2>&1"`;
   const content = [
     '<?xml version="1.0" encoding="UTF-16"?>',
     '<Task version="1.4" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">',

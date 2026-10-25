@@ -51,6 +51,15 @@ jobs:
       - name: Build dashboard
         run: npm run build:web
 
+      - name: Pack check (duskfleet + @duskfleet/web tarballs, allow-lists, same version)
+        run: npm run check:pack -- --require-web-build
+
+      - name: Packed CLI smoke (npx on the duskfleet tarball, outside the repository)
+        run: |
+          npm pack -w duskfleet --pack-destination "$RUNNER_TEMP"
+          cd "$RUNNER_TEMP"
+          npx --yes ./duskfleet-*.tgz --help
+
       # Report-only until the Next 16 upgrade: Next 15 pins postcss 8.4.31, which carries a high
       # advisory, and an npm override does not take (npm drops the package instead). The step
       # stays visible in the run summary; make it blocking again once `npm audit` is clean.

@@ -1,5 +1,5 @@
 {
-  "name": "duskfleet",
+  "name": "duskfleet-workspace",
   "version": "0.1.0",
   "private": true,
   "description": "A fleet of agents for your own machine.",
@@ -13,7 +13,7 @@
     "apps/*"
   ],
   "scripts": {
-    "build": "npm run build -w @duskfleet/core && npm run build -w @duskfleet/mcp",
+    "build": "npm run build -w @duskfleet/core && npm run build -w @duskfleet/mcp && npm run build -w duskfleet",
     "build:web": "npm run build -w @duskfleet/web",
     "typecheck": "npm run typecheck -w @duskfleet/core && npm run typecheck -w @duskfleet/mcp",
     "test": "npm test -w @duskfleet/core && npm test -w @duskfleet/mcp && npm test -w @duskfleet/web",
@@ -23,8 +23,9 @@
     "lint": "biome ci .",
     "lint:fix": "biome check --write .",
     "check:public": "node scripts/check-public.mjs",
+    "check:pack": "node scripts/check-pack.mjs",
     "test:coverage": "npm run test:coverage -w @duskfleet/mcp",
-    "check": "npm run check:public && npm run lint && npm run build && npm run typecheck && npm run typecheck -w @duskfleet/web && npm test"
+    "check": "npm run check:public && npm run lint && npm run build && npm run check:pack && npm run typecheck && npm run typecheck -w @duskfleet/web && npm test"
   },
   "devDependencies": {
     "@biomejs/biome": "^2.5.15",

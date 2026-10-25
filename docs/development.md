@@ -10,9 +10,10 @@ duskfleet/
 ├── data/                runtime: duskfleet.db, logs/<run_id>.jsonl, agents/*.md (git-ignored)
 ├── packages/
 │   ├── core/            @duskfleet/core — domain: config, storage, execution, orchestration, scheduler, evals
-│   └── mcp/             @duskfleet/mcp  — MCP server (stdio) + CLI + tests
+│   ├── mcp/             @duskfleet/mcp  — MCP server (stdio) + CLI + tests
+│   └── duskfleet/       duskfleet       — the published npm package: mcp + core bundled (no source)
 └── apps/
-    └── web/             @duskfleet/web  — Next.js dashboard (read-only)
+    └── web/             @duskfleet/web  — Next.js dashboard (read-only), published too
 ```
 
 A local `playground/` directory is ignored by version control: put a throwaway project there
@@ -53,8 +54,34 @@ npm run build          # core + mcp (tsc). The CLI, the MCP server and the dashb
 npm run typecheck      # core + mcp; dashboard: npm run typecheck -w @duskfleet/web
 npm test               # packages/core/test, then packages/mcp/test; node --test, ~25 s, no network, no cost
 npm test -w @duskfleet/core   # core unit tests alone, under a second
-npm run check          # everything CI runs, in the same order (hygiene, lint, build, typecheck, tests)
+npm run check          # everything CI runs, in the same order (hygiene, lint, build, pack, typecheck, tests)
 ```
+
+## Published packages
+
+Two packages go to npm, always at the same version (one bump touches both `package.json` files):
+
+- `duskfleet` (`packages/duskfleet`): the `duskfleet` and `duskfleet-mcp` bins, for
+  `npx duskfleet`. It has no source of its own: `npm run build` ends with
+  `scripts/assemble-package.mjs`, which copies the built `packages/mcp/dist` to
+  `packages/duskfleet/dist` and `packages/core/dist` to `dist/core` (`.js` and `tools.json` only),
+  and rewrites the `@duskfleet/core` imports into relative paths. `@duskfleet/core` and
+  `@duskfleet/mcp` stay private and are never published; the runtime dependencies of `duskfleet`
+  must equal those of core + mcp (the script fails otherwise). A thin package rather than renaming
+  `packages/mcp`: the workspace keeps importing `@duskfleet/core` and the tests keep running on
+  `packages/mcp/dist`, and only the copy is rewritten.
+- `@duskfleet/web` (`apps/web`): the built dashboard (`.next/`, `public/`, `next.config.mjs`, and
+  `tools.json`, the MCP catalogue copied from `packages/mcp/dist` by `scripts/copy-tools.mjs` at
+  the end of its build, so run `npm run build` first) and
+  `bin/start.mjs` (bin `duskfleet-web`), which runs `next start` on 127.0.0.1 (`PORT`, default
+  4777) and passes the working directory and the environment through, so `DUSKFLEET_CONFIG`
+  points it at a config. Core is bundled into the server build by Next (it is not a
+  `serverExternalPackages` entry), so `@duskfleet/core` is only a dev dependency.
+
+`npm run check:pack` (`scripts/check-pack.mjs`) runs `npm pack --dry-run` on both and fails on a
+file outside the allow-list, test files, source maps, `data/`, `.env*`, `@duskfleet/core` in a
+published dependency field, or two different versions; it prints both tarball sizes. To try the
+real thing: `npm pack -w duskfleet`, then `npx ./duskfleet-0.1.0.tgz --help` from another directory.
 
 One home per module: a test that only calls core functions (state machine, loader, parser, cron,
 tool summaries) lives in `packages/core/test` and imports `@duskfleet/core`; a test that needs the
@@ -83,6 +110,8 @@ login and spends nothing: the tests use the fake binary. In order:
 | Typecheck | `npm run typecheck`, `npm run typecheck -w @duskfleet/web` | Type errors anywhere |
 | Tests + coverage | `npm run test:coverage` | A failing test, or line coverage of the in-process code under 80 % |
 | Dashboard build | `npm run build:web` | `next build` errors (Server Component rules `tsc` does not see) |
+| Pack check | `npm run check:pack -- --require-web-build` | A published tarball holds a file outside its allow-list (tests, maps, `data/`, `.env*`), lists `@duskfleet/core` as a dependency, misses the dashboard build, or the two versions differ. `npm run check` runs it without the flag: an unbuilt dashboard is only a warning there. |
+| Packed CLI smoke | `npm pack -w duskfleet`, then `npx ./duskfleet-*.tgz --help` outside the repository | The tarball does not install or its CLI does not start. |
 | Audit | `npm audit --audit-level=high` | Report-only until the Next 16 upgrade clears the `postcss` advisory Next 15 pins; then blocking on high / critical. |
 
 Two tests are gates in themselves: `test/migrations.test.js` pins the SHA-256 of every shipped

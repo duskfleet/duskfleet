@@ -8,8 +8,9 @@ npm run web            # dev server on http://localhost:4777
 A Next.js app that reads the database the MCP server writes (SQLite WAL mode). It can run
 while the MCP server is running or not; it only needs `config/` and `data/duskfleet.db`. It
 has no authentication and answers on localhost only (see [Remote access](#remote-access)).
-It sends no telemetry: the `dev`, `build` and `start` scripts set `NEXT_TELEMETRY_DISABLED=1`
-(on Windows, set it in your shell before starting the dashboard).
+It sends no telemetry: the `dev` and `build` scripts set `NEXT_TELEMETRY_DISABLED=1` (on
+Windows, set it in your shell first), and `start` / `duskfleet-web` (`bin/start.mjs`) default it
+to `1` on every platform.
 
 Five views. The runs list and a running run's detail auto-refresh every 3 seconds (pause button
 in the nav); the other pages are static.
@@ -81,8 +82,9 @@ in the nav); the other pages are static.
   scope's schedules; amber when it only warns). Nothing shows while every budget is `ok`. A
   tick refused by a budget shows as "skipped, monthly budget spent" in the schedule's strip.
 - **MCP**: the tool catalogue (`packages/mcp/dist/tools.json`, generated at build time from the
-  real server) with a sticky index, plus the registration snippets for Claude Desktop and
-  Claude Code with your absolute paths.
+  real server; the published `@duskfleet/web` ships a copy as `tools.json`) with a sticky index,
+  plus the registration snippets for Claude Desktop and Claude Code with your absolute paths
+  (outside a checkout, the `duskfleet` package installed next to `@duskfleet/web`).
 
 ## Remote access
 
