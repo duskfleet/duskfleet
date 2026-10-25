@@ -255,7 +255,9 @@ the smallest form instead. With `scheduler.defer_busy: true` (the default, in `d
   the pending is dropped and recorded as `skipped_busy` with the original tick's message (a lost
   trigger shows as lost), and that occurrence fires normally (deferred again if still busy).
 - Pausing the schedule (by hand, auto-pause or a spent budget) drops the pending; a paused
-  schedule never starts from it. A start of any kind (also **Run now**) settles it.
+  schedule never starts from it. A manual start (**Run now**, `run_schedule_now`) settles it; a
+  retry that starts settles only its own pending, so a pending recorded for the next occurrence
+  while the retry's gate ran is kept.
   A [`pause_scheduler`](#pausing-the-whole-scheduler) pause does not drop it: no tick retries it
   while the pause holds, and the first tick after the pause retries it or, past its deadline,
   settles it as `skipped_busy`.
