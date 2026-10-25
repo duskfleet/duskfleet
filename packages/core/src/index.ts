@@ -100,7 +100,7 @@ export {
   validateBudgetInput,
 } from "./orchestration/budget.js";
 export { BusyError } from "./orchestration/busy.js";
-export { DailyCapError } from "./orchestration/daily-cap.js";
+export { DailyCapError, utcDayStart } from "./orchestration/daily-cap.js";
 export { ProjectValidationError, validateProjectPath } from "./orchestration/project-validation.js";
 export {
   budgetPlan,
@@ -164,7 +164,14 @@ export { type FireResult, Scheduler, type SchedulerOptions, type SchedulerStatus
 export * from "./scheduler/types.js";
 export { BudgetRepository } from "./storage/budgets.js";
 export { migrationDigests, openDatabase } from "./storage/db.js";
-export { type ListRunsFilter, NEEDS_REVIEW_SQL, type RunPatch, RunRepository } from "./storage/runs.js";
+export {
+  type ListRunsFilter,
+  NEEDS_REVIEW_SQL,
+  RUN_OUTCOMES,
+  type RunOutcome,
+  type RunPatch,
+  RunRepository,
+} from "./storage/runs.js";
 export { type EndedRunFacts, parseGate, ScheduleRepository } from "./storage/schedules.js";
 
 export { type LogLevel, logger } from "./util/log.js";

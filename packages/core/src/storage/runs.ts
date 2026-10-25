@@ -171,8 +171,19 @@ export interface ListRunsFilter {
   kind?: RunKind;
   agentId?: string;
   projectPath?: string;
+  /** How the run ended, by the stored review verdict (`RUN_OUTCOMES`). */
+  outcome?: RunOutcome;
+  /** Only runs whose stored review reasons include this one. */
+  reason?: ReviewReason;
   limit?: number;
 }
+
+/**
+ * Outcome buckets of the runs list: `needs_review` is every run with a stored review reason;
+ * the other three split the finished runs (clean + completed_review + failed = finished).
+ */
+export const RUN_OUTCOMES = ["needs_review", "clean", "completed_review", "failed"] as const;
+export type RunOutcome = (typeof RUN_OUTCOMES)[number];
 
 /** Fields that change after creation. Everything not listed is immutable. */
 export type RunPatch = Partial<
@@ -260,6 +271,13 @@ const PATCH_COLUMNS: Record<keyof RunPatch, string> = {
  * terminal transition, the same value `Run.reviewReasons` exposes: no second copy of the rule.
  */
 export const NEEDS_REVIEW_SQL = `(COALESCE(review_reasons_json, '[]') <> '[]')`;
+
+const OUTCOME_SQL: Record<RunOutcome, string> = {
+  needs_review: NEEDS_REVIEW_SQL,
+  clean: `(status = 'completed' AND NOT ${NEEDS_REVIEW_SQL})`,
+  completed_review: `(status = 'completed' AND ${NEEDS_REVIEW_SQL})`,
+  failed: `(status IN ('failed','timed_out','cancelled'))`,
+};
 
 const SUMMARY_COLUMNS = "id, status, review_reasons_json, termination_reason, cost_usd, ended_at";
 type SummaryRow = Pick<
@@ -432,6 +450,11 @@ export class RunRepository {
     if (filter.projectPath) {
       where.push("project_path = ?");
       values.push(filter.projectPath);
+    }
+    if (filter.outcome) where.push(OUTCOME_SQL[filter.outcome]);
+    if (filter.reason) {
+      where.push("EXISTS (SELECT 1 FROM json_each(COALESCE(review_reasons_json, '[]')) WHERE value = ?)");
+      values.push(filter.reason);
     }
     const limit = Math.min(Math.max(filter.limit ?? 20, 1), 200);
     values.push(limit);

@@ -5,9 +5,9 @@
   "type": "module",
   "description": "Duskfleet dashboard: agents, running and past runs (read-only)",
   "scripts": {
-    "dev": "next dev --hostname 127.0.0.1 --port 4777",
-    "build": "next build",
-    "start": "next start --hostname 127.0.0.1 --port 4777",
+    "dev": "NEXT_TELEMETRY_DISABLED=1 next dev --hostname 127.0.0.1 --port 4777",
+    "build": "NEXT_TELEMETRY_DISABLED=1 next build",
+    "start": "NEXT_TELEMETRY_DISABLED=1 next start --hostname 127.0.0.1 --port 4777",
     "typecheck": "tsc --noEmit",
     "test": "node --test test/*.test.mjs"
   },

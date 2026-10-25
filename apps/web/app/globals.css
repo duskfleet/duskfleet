@@ -295,6 +295,55 @@ h2 .count {
   color: var(--muted);
   margin-top: 4px;
 }
+/* a tile that filters the runs list (?outcome=): active like the toolbar chips */
+.stat.filter:hover {
+  border-color: var(--border-strong);
+}
+.stat.filter.on {
+  background: var(--warn-bg);
+  border-color: transparent;
+}
+.stat .stat-hit {
+  display: block;
+  color: inherit;
+}
+.stat .stat-hit:hover {
+  text-decoration: none;
+}
+.stat .value .today {
+  font-family: inherit;
+  font-size: 12.5px;
+  font-weight: 500;
+  letter-spacing: 0;
+  color: var(--muted);
+  margin-left: 6px;
+}
+.stat .sub a {
+  color: var(--muted);
+  text-decoration: underline;
+  text-decoration-color: var(--border-strong);
+  text-underline-offset: 2px;
+}
+.stat .sub a:hover {
+  color: var(--text);
+}
+.stat .sub a.on {
+  color: var(--warn);
+  text-decoration-color: currentColor;
+  font-weight: 500;
+}
+.stat .sub.filters {
+  gap: 6px;
+}
+.stat .sub.filters a.chip {
+  padding: 1px 9px;
+  font-size: 12px;
+  line-height: 17.5px;
+  text-decoration: none;
+}
+.stat .sub.filters a.chip.on {
+  border-color: var(--warn);
+}
 
 /* ---- badges & pills ------------------------------------------------------ */
 /* status badge: dot + label on a tint of the status colour */
@@ -1204,20 +1253,34 @@ h2 .h2-id {
   gap: 12px;
   min-width: 0;
 }
+/* the state badge keeps the title row: the name truncates, the chips wrap inside .ac-title */
 .ac-head {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   gap: 10px;
+}
+.ac-title {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  align-items: center;
   flex-wrap: wrap;
+  gap: 4px 10px;
 }
 .ac-name {
   margin: 0;
+  min-width: 0;
   font-family: var(--font-display);
   font-weight: 600;
   font-size: 18px;
   line-height: 26px;
   color: var(--text);
-  overflow-wrap: anywhere;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ac-title > :not(.ac-name) {
+  flex-shrink: 0;
 }
 .ac-kind {
   font-size: 12px;
@@ -1235,8 +1298,11 @@ h2 .h2-id {
   font-weight: 600;
 }
 .ac-state-slot {
-  margin-left: auto;
+  flex-shrink: 0;
   display: inline-flex;
+  align-items: center;
+  min-height: 26px;
+  white-space: nowrap;
 }
 .ac-state {
   color: var(--faint);
