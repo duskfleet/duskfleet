@@ -22,6 +22,7 @@ const STATUS_BY_LABEL = {
   "flow: needs-review": "Needs review",
   "flow: in-review": "In review",
   "flow: changes-requested": "Changes requested",
+  "flow: contributor-changes": "Changes requested",
   "flow: ready-to-merge": "Ready to merge",
   "flow: needs-human": "Needs human",
 };
