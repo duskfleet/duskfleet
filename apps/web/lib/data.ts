@@ -702,15 +702,16 @@ export function toolCatalog(): ToolCatalog | null {
  * package installed next to @duskfleet/web (same node_modules), else a placeholder.
  */
 function mcpEntry(): string {
+  // A directory holding config/duskfleet.yaml is a "root" for an installed package too,
+  // but has no packages/mcp/dist: only an entry that exists counts.
   const root = findRepoRoot(process.cwd());
-  if (root) return path.join(root, "packages", "mcp", "dist", "index.js");
   const webDir = process.env.DUSKFLEET_WEB_DIR;
-  if (webDir) {
+  const entry = [
+    root ? path.join(root, "packages", "mcp", "dist", "index.js") : null,
     // <prefix>/node_modules/@duskfleet/web -> <prefix>/node_modules/duskfleet/dist/index.js
-    const installed = path.resolve(webDir, "..", "..", "duskfleet", "dist", "index.js");
-    if (existsSync(installed)) return installed;
-  }
-  return "<path to the duskfleet package>/dist/index.js";
+    webDir ? path.resolve(webDir, "..", "..", "duskfleet", "dist", "index.js") : null,
+  ].find((f): f is string => !!f && existsSync(f));
+  return entry ?? "<path to the duskfleet package>/dist/index.js";
 }
 
 /** Where this server is registered, for the docs page. Absolute paths, as the hosts need them. */

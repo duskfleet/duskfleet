@@ -94,3 +94,45 @@ test("the bundled CLI runs: --help without config, doctor on a config with the f
     rmSync(root, { recursive: true, force: true });
   }
 });
+
+/** A minimal two-package workspace with a copy of scripts/check-pack.mjs, so the check runs on it. */
+function packWorkspace(cliVersion, webVersion) {
+  const root = mkdtempSync(path.join(tmpdir(), "duskfleet-pack-"));
+  const write = (rel, content) => {
+    mkdirSync(path.dirname(path.join(root, rel)), { recursive: true });
+    writeFileSync(path.join(root, rel), content);
+  };
+  write("package.json", JSON.stringify({ name: "ws", private: true, workspaces: ["packages/duskfleet", "apps/web"] }));
+  write("packages/duskfleet/package.json", JSON.stringify({ name: "duskfleet", version: cliVersion }));
+  for (const f of ["dist/cli.js", "dist/index.js", "dist/core/index.js"]) write(`packages/duskfleet/${f}`, "");
+  write("apps/web/package.json", JSON.stringify({ name: "@duskfleet/web", version: webVersion }));
+  for (const f of ["bin/start.mjs", "next.config.mjs"]) write(`apps/web/${f}`, "");
+  write("scripts/check-pack.mjs", readFileSync(path.join(here, "..", "..", "..", "scripts", "check-pack.mjs")));
+  return root;
+}
+
+test("check-pack fails when the two packages carry different versions, passes when they match", () => {
+  for (const [web, ok] of [
+    ["0.1.0", true],
+    ["0.2.0", false],
+  ]) {
+    const root = packWorkspace("0.1.0", web);
+    try {
+      const r = spawnSync(process.execPath, [path.join(root, "scripts", "check-pack.mjs")], {
+        cwd: root,
+        env: testEnv(),
+        encoding: "utf8",
+      });
+      if (ok) {
+        assert.equal(r.status, 0, r.stderr);
+        assert.match(r.stdout, /both tarballs clean, version 0\.1\.0/);
+      } else {
+        assert.equal(r.status, 1, r.stdout);
+        assert.match(r.stderr, /1 problem\(s\)/);
+        assert.match(r.stderr, /versions differ: duskfleet@0\.1\.0, @duskfleet\/web@0\.2\.0/);
+      }
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  }
+});

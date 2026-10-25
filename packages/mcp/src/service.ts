@@ -114,6 +114,18 @@ export function serviceDirs(
   return { repoRoot: path.dirname(resolved), configDir: resolved };
 }
 
+/**
+ * `npx duskfleet install-service` runs from npm's temporary cache (`.../_npx/<hash>/...`):
+ * a unit pointing there breaks as soon as npm evicts the cache. Refuse it.
+ */
+export function assertNotNpxCache(cliEntry: string): void {
+  if (path.resolve(cliEntry).split(/[\\/]/).includes("_npx")) {
+    throw new Error(
+      `install-service refuses to register ${cliEntry}: it lives in npx's temporary cache, which npm can evict at any time. Install the package first (npm install -g duskfleet), then run "duskfleet install-service".`,
+    );
+  }
+}
+
 function searchPath(t: ServiceTarget, extra: string[]): string {
   const dirs = [path.dirname(t.nodeBin)];
   if (t.claudeBin) dirs.push(path.dirname(t.claudeBin));
@@ -129,6 +141,7 @@ export function renderService(t: ServiceTarget): ServiceUnit {
       `install-service supports macOS (launchd), Linux (systemd --user) and Windows (Task Scheduler); this is ${t.platform}. Run "duskfleet serve" under your own supervisor instead.`,
     );
   }
+  assertNotNpxCache(t.cliEntry);
 
   if (t.platform === "darwin") {
     const env: Array<[string, string]> = [

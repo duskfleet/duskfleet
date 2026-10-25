@@ -57,7 +57,10 @@ terminal, start at login and restart the process if it dies. They append the pro
 repo, the `claude` binary as `CLAUDE_BIN`) and is never versioned. When the config is not the
 repo's own `config/` (an installed `duskfleet` package, or `DUSKFLEET_CONFIG` set by hand), the
 unit also exports the resolved directory as `DUSKFLEET_CONFIG`; from an installed package the
-service runs in that directory's parent.
+service runs in that directory's parent. `npx duskfleet install-service` is refused: npx runs
+the package from npm's temporary cache (a `_npx` directory), which npm may evict at any time,
+and the unit would then point at nothing. Install the package first (`npm install -g
+duskfleet`) and run `duskfleet install-service`.
 
 Things to know:
 
