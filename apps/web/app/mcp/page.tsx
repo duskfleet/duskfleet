@@ -1,7 +1,9 @@
+import Link from "next/link";
 import { CopyButton } from "@/components/CopyButton";
 import { TocSpy } from "@/components/TocSpy";
 import { type JsonSchema, mcpRegistration, type ToolCatalogEntry, toolCatalog } from "@/lib/data";
 import { fmtRelative, fmtTime } from "@/lib/format";
+import { filterTools } from "@/lib/tools";
 
 export const dynamic = "force-dynamic";
 
@@ -15,7 +17,8 @@ const GROUPS: Array<{ key: ToolCatalogEntry["group"]; title: string; blurb: stri
   { key: "other", title: "Other", blurb: "" },
 ];
 
-export default function McpPage() {
+export default async function McpPage({ searchParams }: { searchParams: Promise<{ q?: string }> }) {
+  const q = (await searchParams).q?.trim() || undefined;
   const catalog = toolCatalog();
   const reg = mcpRegistration();
   const desktopJson = JSON.stringify(
@@ -24,12 +27,22 @@ export default function McpPage() {
     2,
   );
   const claudeCodeCmd = `claude mcp add --scope user duskfleet -e CLAUDE_BIN=${reg.claudeBin} -- ${reg.node} ${reg.entry}`;
-  const groups = catalog ? GROUPS.filter((g) => catalog.tools.some((t) => t.group === g.key)) : [];
+  const tools = catalog ? filterTools(catalog.tools, q) : [];
+  const groups = GROUPS.filter((g) => tools.some((t) => t.group === g.key));
 
   return (
     <>
       <div className="page-head">
-        <h1>MCP {catalog ? <span className="count">{catalog.tools.length} tools</span> : "tools"}</h1>
+        <h1>
+          MCP{" "}
+          {catalog ? (
+            <span className="count">
+              {q ? `${tools.length} of ${catalog.tools.length}` : catalog.tools.length} tools
+            </span>
+          ) : (
+            "tools"
+          )}
+        </h1>
         {catalog && (
           <span className="note">
             server <code>{catalog.server.name}</code> v{catalog.server.version} ·{" "}
@@ -52,54 +65,87 @@ export default function McpPage() {
           </div>
         </div>
       ) : (
-        <div className="docs">
-          <nav className="toc" aria-label="Tools">
-            {groups.map((g) => (
-              <div key={g.key} style={{ display: "contents" }}>
-                <div className="group">{g.title}</div>
-                {catalog.tools
-                  .filter((t) => t.group === g.key)
-                  .map((t) => (
-                    <a key={t.name} href={`#${t.name}`}>
-                      {t.name}
-                    </a>
-                  ))}
-              </div>
-            ))}
-            <div className="group">Setup</div>
-            <a href="#connect" className="plain">
-              Connect a client
-            </a>
-          </nav>
-          <TocSpy selector=".toc" />
-
-          <div className="docs-main">
-            <section className="docs-section">
-              <h2>What the server tells clients</h2>
-              <div className="card server-says">
-                <Sentences text={catalog.server.instructions} />
-              </div>
-            </section>
-
-            {groups.map((g) => (
-              <section key={g.key} className="docs-section" id={`group-${g.key}`}>
-                <h2>
-                  {g.title} <span className="count">{catalog.tools.filter((t) => t.group === g.key).length}</span>
-                  {g.blurb && <span className="count">· {g.blurb}</span>}
-                </h2>
-                <div className="tool-list">
-                  {catalog.tools
+        <>
+          <div className="toolbar">
+            <div className="toolbar-row">
+              {/* biome-ignore lint/a11y/useSemanticElements: the <search> element is not styled here; role="search" on the form is the established pattern */}
+              <form className="search" action="/mcp" method="get" role="search">
+                <input
+                  type="search"
+                  name="q"
+                  defaultValue={q ?? ""}
+                  placeholder="Filter by tool or parameter name…"
+                  aria-label="Filter tools"
+                />
+                <button type="submit" className="search-btn">
+                  Filter
+                </button>
+                {q && (
+                  <Link href="/mcp" className="clear">
+                    × clear filter
+                  </Link>
+                )}
+              </form>
+            </div>
+          </div>
+          <div className="docs">
+            <nav className="toc" aria-label="Tools">
+              {groups.map((g) => (
+                <div key={g.key} style={{ display: "contents" }}>
+                  <div className="group">{g.title}</div>
+                  {tools
                     .filter((t) => t.group === g.key)
                     .map((t) => (
-                      <ToolCard key={t.name} tool={t} />
+                      <a key={t.name} href={`#${t.name}`}>
+                        {t.name}
+                      </a>
                     ))}
                 </div>
-              </section>
-            ))}
+              ))}
+              <div className="group">Setup</div>
+              <a href="#connect" className="plain">
+                Connect a client
+              </a>
+            </nav>
+            <TocSpy selector=".toc" />
 
-            <ConnectClient desktopJson={desktopJson} claudeCodeCmd={claudeCodeCmd} />
+            <div className="docs-main">
+              <section className="docs-section">
+                <h2>What the server tells clients</h2>
+                <div className="card server-says">
+                  <Sentences text={catalog.server.instructions} />
+                </div>
+              </section>
+
+              {q && tools.length === 0 && (
+                <section className="docs-section">
+                  <div className="empty">
+                    No tool or parameter name contains <code>{q}</code>.{" "}
+                    <Link href="/mcp">Show all {catalog.tools.length} tools</Link>
+                  </div>
+                </section>
+              )}
+
+              {groups.map((g) => (
+                <section key={g.key} className="docs-section" id={`group-${g.key}`}>
+                  <h2>
+                    {g.title} <span className="count">{tools.filter((t) => t.group === g.key).length}</span>
+                    {g.blurb && <span className="count">· {g.blurb}</span>}
+                  </h2>
+                  <div className="tool-list">
+                    {tools
+                      .filter((t) => t.group === g.key)
+                      .map((t) => (
+                        <ToolCard key={t.name} tool={t} />
+                      ))}
+                  </div>
+                </section>
+              ))}
+
+              <ConnectClient desktopJson={desktopJson} claudeCodeCmd={claudeCodeCmd} />
+            </div>
           </div>
-        </div>
+        </>
       )}
       {!catalog && <ConnectClient desktopJson={desktopJson} claudeCodeCmd={claudeCodeCmd} />}
     </>
