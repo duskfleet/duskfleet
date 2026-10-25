@@ -28,6 +28,10 @@ const STATUS_BY_LABEL = {
 };
 const STATUS_NONE = "Backlog";
 const STATUS_DONE = "Done";
+// A design issue handed to review waits for the owner (reviewed in chat), not for the reviewer
+// agent that works the "Needs review" column: it gets its own column.
+const DESIGN_LABEL = "area: design";
+const STATUS_DESIGN_REVIEW = { "flow: needs-review": "Design needs review" };
 
 const args = process.argv.slice(2);
 const dryRun = args.includes("--dry-run");
@@ -63,7 +67,12 @@ const project = graphql(
 if (!project) throw new Error(`project ${owner}/${projectNumber} not found (scope "project" granted to gh?)`);
 const statusField = project.field;
 const optionId = new Map(statusField.options.map((option) => [option.name, option.id]));
-for (const name of [...Object.values(STATUS_BY_LABEL), STATUS_NONE, STATUS_DONE]) {
+for (const name of [
+  ...Object.values(STATUS_BY_LABEL),
+  ...Object.values(STATUS_DESIGN_REVIEW),
+  STATUS_NONE,
+  STATUS_DONE,
+]) {
   if (!optionId.has(name)) throw new Error(`Status option "${name}" missing in project "${project.title}"`);
 }
 
@@ -133,7 +142,9 @@ for (const content of open) {
 function wantedStatus(item) {
   if (item.state !== "OPEN") return STATUS_DONE;
   const flow = item.labels.find((name) => name in STATUS_BY_LABEL);
-  return flow ? STATUS_BY_LABEL[flow] : STATUS_NONE;
+  if (!flow) return STATUS_NONE;
+  if (item.labels.includes(DESIGN_LABEL) && flow in STATUS_DESIGN_REVIEW) return STATUS_DESIGN_REVIEW[flow];
+  return STATUS_BY_LABEL[flow];
 }
 
 for (const item of items.values()) {

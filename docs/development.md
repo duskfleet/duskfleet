@@ -244,7 +244,9 @@ The GitHub Project "DuskFleet Flow" (org project 2) is a read-only mirror of the
 `node scripts/project-sync.mjs [--repo <owner/name>]... [--dry-run]` adds every open issue and
 PR of the given repositories (the current one by default) to the project (the project's
 auto-add workflow covers the issues of this repository only) and sets each item's Status from
-its `flow:` label (`Backlog` without one, `Done` when closed or merged). The website repository
+its `flow:` label (`Backlog` without one, `Done` when closed or merged; an `area: design` issue
+in `flow: needs-review` is `Design needs review`, since the owner reviews designs in chat while
+the reviewer agent works the `Needs review` column). The website repository
 shares the board, so the workflow passes both. Labels stay the source of truth:
 agents never touch the project, and a Status dragged on the board is overwritten on the next
 sync. Its views: *Board* (open items by Status, Backlog hidden), *Backlog* (open issues with no
