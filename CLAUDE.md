@@ -10,8 +10,10 @@ topic). Keep them in sync when behaviour changes.
 
 ```bash
 npm install --cache "$TMPDIR/npm-cache"   # ~/.npm has root-owned files on this machine
-npm run build        # core + mcp (tsc). Run after every change under packages/: the CLI,
+npm run build        # core + mcp (tsc), then assembles the published `duskfleet` package
+                     # (packages/duskfleet/dist). Run after every change under packages/: the CLI,
                      # the MCP server and the dashboard all import from dist/
+npm run check:pack   # npm pack --dry-run of duskfleet + @duskfleet/web: allow-lists, same version
 npm run typecheck    # core + mcp;  web: npm run typecheck -w @duskfleet/web
 npm test             # packages/core/test then packages/mcp/test, node --test, ~25 s, no network, no cost
 npm run cli -- doctor | agents | projects | run | runs | run-info | schedules
@@ -21,7 +23,7 @@ npm run cli -- serve  # long-running scheduler process; the MCP server also tick
 npm run cli -- install-service [--print] | uninstall-service   # register `serve` with launchd / systemd --user / Task Scheduler
 npm run cli -- run --project <project id or abs path> --agent <agent id> --model haiku -- "task"
 npm run web          # Next.js dashboard, http://localhost:4777
-npm run check        # what CI runs, same order: check:public, lint (biome ci), build, typecheck, test
+npm run check        # what CI runs, same order: check:public, lint (biome ci), build, check:pack, typecheck, test
 npm run lint:fix     # Biome: format + safe fixes
 ```
 
@@ -43,6 +45,10 @@ npm workspaces, one `config/` and one SQLite database shared by three deliverabl
   Must not import anything from MCP or React.
 - `packages/mcp` (`@duskfleet/mcp`): MCP server, CLI, tests. One file per tool group in
   `src/mcp/tools/`; register it in `src/mcp/server.ts`.
+- `packages/duskfleet` (`duskfleet`): the published npm package, no source. `scripts/assemble-package.mjs`
+  copies mcp's and core's `dist/` into it and rewrites the core imports; core and mcp stay private,
+  never published. It and `@duskfleet/web` always share one version (`scripts/check-pack.mjs`).
+  The dashboard bundles core into its Next build (core is not a `serverExternalPackages` entry).
 - `apps/web` (`@duskfleet/web`): Next.js 15 dashboard. Reads the DB the server writes (WAL
   mode). Never mutates runs or builtins; its only writes are server actions on user agent
   files (`app/agents/actions.ts`: delete, unlink) and on schedule rows
