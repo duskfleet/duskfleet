@@ -38,8 +38,9 @@ packages/core/src/observability  Run model
 packages/core/src/evals          types + repository (foundation only)
 packages/core/src/index.ts       public API of @duskfleet/core
 packages/mcp/src/mcp             MCP server + tools (one file per tool group)
-packages/mcp/src/cli.ts          local CLI
-packages/mcp/src/index.ts        MCP server entry point
+packages/mcp/src/cli.ts          CLI bin: Node version check, then cli-main.ts (the local CLI)
+packages/mcp/src/index.ts        MCP server bin: Node version check, then server-main.ts
+packages/mcp/src/node-version.ts the Node 24 gate; no imports, loads on old runtimes
 packages/core/test               unit tests of core modules (nothing spawned)
 packages/mcp/test                fake Claude binary + end-to-end tests
 apps/web/app                     Next.js routes: /, /agents, /runs/[id], /schedules, /mcp

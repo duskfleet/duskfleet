@@ -6,6 +6,7 @@ import {
   createStreamState,
   ingestLine,
   mcpToolPrefix,
+  missingMcpServers,
   summarizeToolInput,
 } from "@duskfleet/core";
 
@@ -86,6 +87,21 @@ test("allow-listed MCP servers that neither mounted nor were called are missing"
 
 test("no MCP evidence at all (nothing mounted, nothing called) reports nothing missing", () => {
   assert.deepEqual(allowListedMcpMissing(["mcp__claude_ai_Figma"], [], []), []);
+});
+
+test("an empty mounted list (deferred connectors) with one server called reports nothing missing", () => {
+  assert.deepEqual(
+    allowListedMcpMissing(["mcp__example_tracker", "mcp__example_design"], [], ["mcp__example_tracker"]),
+    [],
+  );
+});
+
+test("missingMcpServers: an empty init list is no evidence, a list without the server is", () => {
+  assert.deepEqual(missingMcpServers(["mcp__claude_ai_Figma"], []), []);
+  assert.deepEqual(missingMcpServers(["mcp__claude_ai_Figma"], [{ name: "duskfleet", status: "connected" }]), [
+    "mcp__claude_ai_Figma",
+  ]);
+  assert.deepEqual(missingMcpServers(["mcp__claude_ai_Figma"], [{ name: "claude.ai Figma", status: "pending" }]), []);
 });
 
 test("an allow-list without mcp__ entries never reports a mismatch", () => {

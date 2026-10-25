@@ -6,6 +6,7 @@
  * the same config and database as the CLI: DUSKFLEET_CONFIG (directory holding duskfleet.yaml)
  * when set, otherwise the closest ancestor of the working directory with config/duskfleet.yaml.
  * Listens on 127.0.0.1 only; PORT overrides the port (default 4777, the one the Host check expects).
+ * Sends no telemetry: NEXT_TELEMETRY_DISABLED defaults to 1 (on every platform, unlike a script prefix).
  *
  *   duskfleet-web            # what `duskfleet dashboard` invokes
  *   npm run start -w @duskfleet/web
@@ -26,7 +27,7 @@ const port = process.env.PORT || "4777";
 const nextBin = createRequire(import.meta.url).resolve("next/dist/bin/next");
 const child = spawn(process.execPath, [nextBin, "start", appDir, "--hostname", "127.0.0.1", "--port", port], {
   stdio: "inherit",
-  env: process.env,
+  env: { NEXT_TELEMETRY_DISABLED: "1", ...process.env },
 });
 for (const signal of ["SIGINT", "SIGTERM"]) process.on(signal, () => child.kill(signal));
 child.on("exit", (code, signal) => process.exit(code ?? (signal ? 1 : 0)));

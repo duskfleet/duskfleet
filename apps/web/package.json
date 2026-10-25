@@ -25,8 +25,8 @@
     "access": "public"
   },
   "scripts": {
-    "dev": "next dev --hostname 127.0.0.1 --port 4777",
-    "build": "next build",
+    "dev": "NEXT_TELEMETRY_DISABLED=1 next dev --hostname 127.0.0.1 --port 4777",
+    "build": "NEXT_TELEMETRY_DISABLED=1 next build",
     "start": "node bin/start.mjs",
     "typecheck": "tsc --noEmit",
     "test": "node --test test/*.test.mjs"
