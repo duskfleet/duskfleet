@@ -109,6 +109,7 @@ work from a label query when its schedule wakes it:
 ```
 issue:  priority: * ──(planner, when unblocked)──► flow: ready ──(developer picks, swaps the label first)──► flow: in-progress ──► closed by the merge
 PR:     flow: needs-review ──► flow: in-review ──► flow: changes-requested ──► flow: needs-review … ──► flow: ready-to-merge
+fork PR:                        flow: in-review ──► flow: contributor-changes ──(contributor pushes; PR gate)──► flow: needs-review …
 ```
 
 - A human writes issues and sets their `priority:` labels; a priority is the consent for an
@@ -129,9 +130,11 @@ PR:     flow: needs-review ──► flow: in-review ──► flow: changes-req
   `flow:` label yet (the snapshot lists them under `adoptions`) is handed to the reviewer with
   `flow: needs-review`, and every open issue it closes is locked with `flow: in-progress` (its
   previous `flow:` label removed), so the developer never starts work a contributor already
-  did. A PR from a branch of this repository is an agent's own and labels itself. The
-  reviewer cannot push to a fork: its `flow: changes-requested` is for the contributor to
-  answer, and the developer leaves such a PR alone.
+  did. A PR from a branch of this repository is an agent's own and labels itself. No agent
+  can push to a fork, so a contributor's PR is never handed to the developer: the reviewer
+  (and the PR gate) hands it back with `flow: contributor-changes`, a label the developer
+  does not pick; when the contributor pushes, the PR gate moves it back to
+  `flow: needs-review` for the next round.
 - Dependencies are lines in an issue's body or comments: `Blocked by #65` (or
   `Depends on #62, #61`). While one of them is open the issue carries the `blocked` label and
   stays out of the queue; the planner removes the label once all of them are closed. A
@@ -150,7 +153,8 @@ PR:     flow: needs-review ──► flow: in-review ──► flow: changes-req
   hold as inline comments), then checks the rules of CLAUDE.md — and, for a PR that closes an
   issue, the issue's own acceptance criteria — and posts one summary comment ending with
   `VERDICT: approve` or `VERDICT: changes`. The verdict's label (`flow: ready-to-merge` or
-  `flow: changes-requested`) is the hand-off. Read-only agent; after three `VERDICT: changes`
+  `flow: changes-requested`; `flow: contributor-changes` when the PR comes from a fork) is the
+  hand-off. Read-only agent; after three `VERDICT: changes`
   rounds it parks the PR with `flow: needs-human`. The built-in `code-review` skill is not
   used unattended: its fork gathers context with commands no allow-list can permit
   (`git diff @{upstream}...HEAD`, `;` chains), so it was denied in most runs.
@@ -167,13 +171,15 @@ PR:     flow: needs-review ──► flow: in-review ──► flow: changes-req
   in those two states (drafts and Dependabot excluded) and, when it conflicts with its base or
   a required check (read from the rulesets on the base branch; a failed non-required job such
   as `sync` does not count) failed on its head, swaps the label to `flow: changes-requested`
-  and then posts one comment starting with `[pr-gate]` (head SHA and the reasons; it is
+  (`flow: contributor-changes` for a PR from a fork) and then posts one comment starting with `[pr-gate]` (head SHA and the reasons; it is
   written last, so a failed label call is retried on the next run). One failing PR does not
   stop the others; the script exits non-zero at the end. The developer's next run merges
   the base into the branch or fixes the check, and hands the PR back to the reviewer as after
   any review. A PR that is merely behind its base is updated in place with `--update-branch`.
   Idempotent: a head that already carries a `[pr-gate]` comment is left alone, so a human can
-  overrule the gate by relabelling. The workflow `.github/workflows/pr-gate.yml` runs it on
+  overrule the gate by relabelling. A PR labelled `flow: contributor-changes` with a commit on
+  its head newer than the label goes back to `flow: needs-review` with a `[pr-gate]` comment:
+  the contributor answered, the reviewer looks again. The workflow `.github/workflows/pr-gate.yml` runs it on
   every push to `main`, after every CI run, once an hour and on demand. With the repository
   secret `PR_GATE_TOKEN` (a user token with write access; scopes in the workflow header) it
   also updates branches and its label changes fire the project sync; with the default token it
