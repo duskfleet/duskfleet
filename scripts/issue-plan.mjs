@@ -6,6 +6,10 @@
 //   candidates   - issues that may be promoted to `flow: ready`, best first. Never an
 //                  `area: website` issue: the public site (duskfleet-website) is the owner's
 //                  work; the developer agents here would build it into the dashboard.
+//   adoptions    - contributor PRs (from a fork, not a draft, no `flow:` label yet) to hand
+//                  to the reviewer with `flow: needs-review`, and the open issues they close
+//                  to lock with `flow: in-progress`, so the developer never starts them twice.
+//                  A PR from a branch of this repository is an agent's own; it labels itself.
 // Read-only: it never changes a label. Run from the repository (gh resolves {owner}/{repo}).
 //
 //   node scripts/issue-plan.mjs
@@ -64,7 +68,7 @@ const openPrs = JSON.parse(
     "--limit",
     "200",
     "--json",
-    "number,title,headRefName,labels,body,files,isDraft",
+    "number,title,headRefName,labels,body,files,isDraft,isCrossRepository,author",
   ]),
 );
 // State of every issue and PR, so a blocker that is a closed issue or a merged PR counts as done.
@@ -95,6 +99,8 @@ const prs = openPrs.map((pr) => {
     title: pr.title,
     branch: pr.headRefName,
     draft: pr.isDraft,
+    fork: pr.isCrossRepository,
+    author: pr.author?.login ?? null,
     flow: labelValue(labels, "flow: "),
     closes: [...closes].sort((a, b) => a - b),
     dirs: [...new Set(pr.files.map((file) => file.path.split("/").slice(0, 2).join("/")))].sort(),
@@ -149,6 +155,22 @@ const candidates = issues
   )
   .map((issue) => issue.number);
 
+// A contributor's PR arrives with no `flow:` label and the developer could still pick the
+// issue it closes: hand the PR to the reviewer and lock the issue, whatever flow label it had.
+const adoptions = prs
+  .filter((pr) => pr.fork && !pr.draft && pr.flow === null && !pr.author?.endsWith("[bot]"))
+  .map((pr) => ({
+    pr: pr.number,
+    addPr: "flow: needs-review",
+    issues: issues
+      .filter((issue) => pr.closes.includes(issue.number) && issue.flow !== "in-progress")
+      .map((issue) => ({
+        issue: issue.number,
+        remove: issue.flow ? `flow: ${issue.flow}` : null,
+        add: "flow: in-progress",
+      })),
+  }));
+
 const count = (list, flow) => list.filter((item) => item.flow === flow).length;
 
 console.log(
@@ -165,6 +187,7 @@ console.log(
         prsAwaitingMerge: count(prs, "ready-to-merge"),
       },
       labelActions,
+      adoptions,
       candidates,
       issues,
       prs,

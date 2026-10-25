@@ -125,6 +125,13 @@ PR:     flow: needs-review ──► flow: in-review ──► flow: changes-req
   issue, one that already has an open PR, or an `area: website` issue: the public site
   (`duskfleet-website`) is the owner's work, and the developer agents of this repository
   would build it into the dashboard.
+- The planner also adopts contributor pull requests: a PR from a fork, not a draft, with no
+  `flow:` label yet (the snapshot lists them under `adoptions`) is handed to the reviewer with
+  `flow: needs-review`, and every open issue it closes is locked with `flow: in-progress` (its
+  previous `flow:` label removed), so the developer never starts work a contributor already
+  did. A PR from a branch of this repository is an agent's own and labels itself. The
+  reviewer cannot push to a fork: its `flow: changes-requested` is for the contributor to
+  answer, and the developer leaves such a PR alone.
 - Dependencies are lines in an issue's body or comments: `Blocked by #65` (or
   `Depends on #62, #61`). While one of them is open the issue carries the `blocked` label and
   stays out of the queue; the planner removes the label once all of them are closed. A
