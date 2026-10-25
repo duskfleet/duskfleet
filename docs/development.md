@@ -70,7 +70,9 @@ Two packages go to npm, always at the same version (one bump touches both `packa
   must equal those of core + mcp (the script fails otherwise). A thin package rather than renaming
   `packages/mcp`: the workspace keeps importing `@duskfleet/core` and the tests keep running on
   `packages/mcp/dist`, and only the copy is rewritten.
-- `@duskfleet/web` (`apps/web`): the built dashboard (`.next/`, `public/`, `next.config.mjs`) and
+- `@duskfleet/web` (`apps/web`): the built dashboard (`.next/`, `public/`, `next.config.mjs`, and
+  `tools.json`, the MCP catalogue copied from `packages/mcp/dist` by `scripts/copy-tools.mjs` at
+  the end of its build, so run `npm run build` first) and
   `bin/start.mjs` (bin `duskfleet-web`), which runs `next start` on 127.0.0.1 (`PORT`, default
   4777) and passes the working directory and the environment through, so `DUSKFLEET_CONFIG`
   points it at a config. Core is bundled into the server build by Next (it is not a

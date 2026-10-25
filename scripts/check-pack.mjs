@@ -32,7 +32,15 @@ const PACKAGES = [
   {
     name: "@duskfleet/web",
     dir: "apps/web",
-    allowed: [/^package\.json$/, /^LICENSE$/, /^bin\/.+\.mjs$/, /^\.next\//, /^public\//, /^next\.config\.mjs$/],
+    allowed: [
+      /^package\.json$/,
+      /^LICENSE$/,
+      /^bin\/.+\.mjs$/,
+      /^\.next\//,
+      /^public\//,
+      /^next\.config\.mjs$/,
+      /^tools\.json$/,
+    ],
     required: ["bin/start.mjs", "next.config.mjs"],
   },
 ];

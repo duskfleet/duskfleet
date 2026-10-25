@@ -678,13 +678,18 @@ export interface ToolCatalog {
 /**
  * The MCP tool catalogue is written by `npm run build` of @duskfleet/mcp
  * (packages/mcp/dist/tools.json). The dashboard only reads the file: it must
- * not depend on the mcp package.
+ * not depend on the mcp package. An installed @duskfleet/web has no repo above it:
+ * its build ships a copy (tools.json next to package.json, `scripts/copy-tools.mjs`),
+ * found through DUSKFLEET_WEB_DIR, which `bin/start.mjs` sets.
  */
 export function toolCatalog(): ToolCatalog | null {
   const root = findRepoRoot(process.cwd());
-  if (!root) return null;
-  const file = path.join(root, "packages", "mcp", "dist", "tools.json");
-  if (!existsSync(file)) return null;
+  const webDir = process.env.DUSKFLEET_WEB_DIR;
+  const file = [
+    root ? path.join(root, "packages", "mcp", "dist", "tools.json") : null,
+    webDir ? path.join(webDir, "tools.json") : null,
+  ].find((f): f is string => !!f && existsSync(f));
+  if (!file) return null;
   try {
     return { ...(JSON.parse(readFileSync(file, "utf8")) as Omit<ToolCatalog, "path">), path: file };
   } catch {
@@ -692,10 +697,25 @@ export function toolCatalog(): ToolCatalog | null {
   }
 }
 
+/**
+ * The MCP server entry: the checkout's packages/mcp/dist/index.js, else the `duskfleet`
+ * package installed next to @duskfleet/web (same node_modules), else a placeholder.
+ */
+function mcpEntry(): string {
+  const root = findRepoRoot(process.cwd());
+  if (root) return path.join(root, "packages", "mcp", "dist", "index.js");
+  const webDir = process.env.DUSKFLEET_WEB_DIR;
+  if (webDir) {
+    // <prefix>/node_modules/@duskfleet/web -> <prefix>/node_modules/duskfleet/dist/index.js
+    const installed = path.resolve(webDir, "..", "..", "duskfleet", "dist", "index.js");
+    if (existsSync(installed)) return installed;
+  }
+  return "<path to the duskfleet package>/dist/index.js";
+}
+
 /** Where this server is registered, for the docs page. Absolute paths, as the hosts need them. */
 export function mcpRegistration() {
-  const root = findRepoRoot(process.cwd());
-  const entry = root ? path.join(root, "packages", "mcp", "dist", "index.js") : "<repo>/packages/mcp/dist/index.js";
+  const entry = mcpEntry();
   let claudeBin: string;
   try {
     claudeBin = resolveClaudeBinary(config().claude.binary); // absolute: GUI hosts start with a minimal PATH

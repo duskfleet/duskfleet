@@ -54,7 +54,10 @@ npm run cli -- doctor                     # "scheduler.service" says whether it 
 All three run as the logged-in user, so the service sees the same `claude` login as your
 terminal, start at login and restart the process if it dies. They append the process output to
 `data/logs/serve.log`. The unit carries absolute paths (node, `packages/mcp/dist/cli.js`, the
-repo, the `claude` binary as `CLAUDE_BIN`) and is never versioned.
+repo, the `claude` binary as `CLAUDE_BIN`) and is never versioned. When the config is not the
+repo's own `config/` (an installed `duskfleet` package, or `DUSKFLEET_CONFIG` set by hand), the
+unit also exports the resolved directory as `DUSKFLEET_CONFIG`; from an installed package the
+service runs in that directory's parent.
 
 Things to know:
 

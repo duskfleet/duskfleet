@@ -34,7 +34,14 @@ import {
 } from "@duskfleet/core";
 import { bootstrap } from "./bootstrap.js";
 import { PROBE_COST_NOTE, type ProbeReport, probeNotRun, runProbe } from "./probe.js";
-import { installService, renderService, type ServiceTarget, serviceStatus, uninstallService } from "./service.js";
+import {
+  installService,
+  renderService,
+  type ServiceTarget,
+  serviceDirs,
+  serviceStatus,
+  uninstallService,
+} from "./service.js";
 import { buildToolCatalog } from "./tools-catalog.js";
 
 function print(value: unknown): void {
@@ -71,14 +78,16 @@ function usage(asked = false): never {
   process.exit(asked ? 0 : 2);
 }
 
-/** What the service runs: this node, this dist/cli.js, this repo, the resolved claude binary. */
-function serviceTarget(claudeBin: string | null, dataDir: string): ServiceTarget {
+/** What the service runs: this node, this dist/cli.js, this repo (or config), the resolved claude binary. */
+function serviceTarget(claudeBin: string | null, dataDir: string, configDir: string): ServiceTarget {
   // The bin is dist/cli.js (the Node version check); this module sits next to it.
   const cliEntry = path.join(path.dirname(fileURLToPath(import.meta.url)), "cli.js");
-  const repoRoot = findRepoRoot(cliEntry) ?? path.resolve(path.dirname(cliEntry), "..", "..", "..");
+  // An installed package has no repo root above its cli.js: the unit then carries the config dir.
+  const dirs = serviceDirs(findRepoRoot(cliEntry), configDir);
   return {
     platform: process.platform,
-    repoRoot,
+    repoRoot: dirs.repoRoot,
+    configDir: dirs.configDir,
     nodeBin: process.execPath,
     cliEntry,
     logPath: path.join(dataDir, "logs", "serve.log"),
@@ -105,7 +114,7 @@ async function main(): Promise<void> {
   switch (command) {
     case "install-service": {
       const { values } = parseArgs({ args: rest, options: { print: { type: "boolean", default: false } } });
-      const target = serviceTarget(app.executor.binary, app.config.dataDir);
+      const target = serviceTarget(app.executor.binary, app.config.dataDir, app.config.configDir);
       if (values.print) {
         const unit = renderService(target);
         process.stderr.write(`# ${unit.unitPath}\n`);

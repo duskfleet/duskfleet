@@ -19,6 +19,7 @@
     "!.next/**/*.map",
     "public/",
     "next.config.mjs",
+    "tools.json",
     "LICENSE"
   ],
   "publishConfig": {
@@ -26,7 +27,7 @@
   },
   "scripts": {
     "dev": "NEXT_TELEMETRY_DISABLED=1 next dev --hostname 127.0.0.1 --port 4777",
-    "build": "NEXT_TELEMETRY_DISABLED=1 next build",
+    "build": "NEXT_TELEMETRY_DISABLED=1 next build && node scripts/copy-tools.mjs",
     "start": "node bin/start.mjs",
     "typecheck": "tsc --noEmit",
     "test": "node --test test/*.test.mjs"

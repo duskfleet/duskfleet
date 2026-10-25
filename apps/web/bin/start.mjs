@@ -7,8 +7,10 @@
  * when set, otherwise the closest ancestor of the working directory with config/duskfleet.yaml.
  * Listens on 127.0.0.1 only; PORT overrides the port (default 4777, the one the Host check expects).
  * Sends no telemetry: NEXT_TELEMETRY_DISABLED defaults to 1 (on every platform, unlike a script prefix).
+ * DUSKFLEET_WEB_DIR tells the server where the package sits (its tools.json copy, a sibling
+ * duskfleet package for the MCP page) when there is no checkout above the working directory.
  *
- *   duskfleet-web            # what `duskfleet dashboard` invokes
+ *   duskfleet-web            # the installed package's bin
  *   npm run start -w @duskfleet/web
  */
 import { spawn } from "node:child_process";
@@ -27,7 +29,7 @@ const port = process.env.PORT || "4777";
 const nextBin = createRequire(import.meta.url).resolve("next/dist/bin/next");
 const child = spawn(process.execPath, [nextBin, "start", appDir, "--hostname", "127.0.0.1", "--port", port], {
   stdio: "inherit",
-  env: { NEXT_TELEMETRY_DISABLED: "1", ...process.env },
+  env: { NEXT_TELEMETRY_DISABLED: "1", ...process.env, DUSKFLEET_WEB_DIR: appDir },
 });
 for (const signal of ["SIGINT", "SIGTERM"]) process.on(signal, () => child.kill(signal));
 child.on("exit", (code, signal) => process.exit(code ?? (signal ? 1 : 0)));
