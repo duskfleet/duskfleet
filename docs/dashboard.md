@@ -80,9 +80,10 @@ in the nav); the other pages are static.
   scope's schedules; amber when it only warns). Nothing shows while every budget is `ok`. A
   tick refused by a budget shows as "skipped, monthly budget spent" in the schedule's strip.
 - **MCP**: the tool catalogue (`packages/mcp/dist/tools.json`, generated at build time from the
-  real server; the published `@duskfleet/web` ships a copy as `tools.json`) with a sticky index,
-  plus the registration snippets for Claude Desktop and Claude Code with your absolute paths
-  (outside a checkout, the `duskfleet` package installed next to `@duskfleet/web`).
+  real server; the published `@duskfleet/web` ships a copy as `tools.json`) with a sticky index
+  and a filter by tool or parameter name (`/mcp?q=agent`), plus the registration snippets for
+  Claude Desktop and Claude Code with your absolute paths (outside a checkout, the `duskfleet`
+  package installed next to `@duskfleet/web`).
 
 ## Remote access
 
