@@ -384,6 +384,9 @@ export class Scheduler {
     // while its gate ran the due loop may have claimed the occurrence and moved next_run_at on, and
     // writing the stale value back would make that occurrence due a second time.
     const nextAt = (): string | null => (retry ? (this.repo.get(s.id)?.nextRunAt ?? null) : nextRunAt);
+    // Which pending deferred fire a start settles: a manual start any of them, a retry only the one
+    // it took (a fresher pending recorded by the due loop while its gate ran survives), else none.
+    const settles = manual ? "any" : retry ? s.deferredUntil : null;
     if (!s.enabled && !manual) {
       this.repo.recordFiring(s.id, "skipped_disabled", null, null, nextAt());
       return { outcome: "skipped_disabled", runId: null, error: null };
@@ -405,7 +408,7 @@ export class Scheduler {
         if (s.resumeBudgetUsd !== null) input.budgetUsd = s.resumeBudgetUsd;
         try {
           const run = await this.runs.resumeRun(input);
-          this.repo.recordFiring(s.id, "resumed", run.id, null, nextAt());
+          this.repo.recordFiring(s.id, "resumed", run.id, null, nextAt(), null, settles);
           log.info("schedule fired as a resume", {
             schedule: s.name,
             runId: run.id,
@@ -472,7 +475,7 @@ export class Scheduler {
       const run = await this.runs.startRun(input);
       if (resumable && resumeError)
         this.runs.note(run.id, `started fresh: the resume of run ${resumable.id} was refused (${resumeError})`);
-      this.repo.recordFiring(s.id, "started", run.id, null, nextAt(), gateSpend);
+      this.repo.recordFiring(s.id, "started", run.id, null, nextAt(), gateSpend, settles);
       log.info("schedule fired", { schedule: s.name, runId: run.id, manual, gated: gateSpend !== null });
       return {
         outcome: "started",

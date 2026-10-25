@@ -357,8 +357,13 @@ export class ScheduleRepository {
 
   /**
    * Record a firing attempt and advance the schedule. `gate` is set when a gate ran on this tick.
-   * `deferred` counts as neither a fire nor a skip (the row that settles it does); a start, manual
-   * or not, settles a pending deferred fire too: the work it was waiting for has just begun.
+   * `deferred` counts as neither a fire nor a skip (the row that settles it does).
+   *
+   * `settles` says which pending deferred fire a start settles: `"any"` (a manual start: the work
+   * any pending was waiting for has just begun), a deadline (a retry: only the pending it took, if
+   * it still holds that deadline), or null (none). Never a blanket clear on every start: while a
+   * retry's gate ran, the due loop may have recorded a fresher pending for the next occurrence,
+   * and that one must survive the retry's start. Ignored for outcomes other than started/resumed.
    */
   recordFiring(
     id: string,
@@ -367,9 +372,14 @@ export class ScheduleRepository {
     error: string | null,
     nextRunAt: string | null,
     gate: { runId: string | null; costUsd: number | null } | null = null,
+    settles: "any" | string | null = null,
   ): void {
     const now = new Date().toISOString();
     const started = outcome === "started" || outcome === "resumed";
+    const settleAny = started && settles === "any" ? 1 : 0;
+    // A deadline that matches nothing when this start settles no specific pending.
+    const settleUntil = started && settles !== null && settles !== "any" ? settles : null;
+    const settleSome = settleAny === 1 || settleUntil !== null ? 1 : 0;
     this.db
       .prepare(
         "INSERT INTO schedule_firings (schedule_id, fired_at, outcome, run_id, error, gate_run_id, gate_cost_usd) VALUES (?, ?, ?, ?, ?, ?, ?)",
@@ -379,8 +389,8 @@ export class ScheduleRepository {
       .prepare(
         `UPDATE schedules SET last_fired_at = ?, last_outcome = ?, last_error = ?, last_run_id = COALESCE(?, last_run_id),
            fires = fires + ?, skips = skips + ?, next_run_at = ?, updated_at = ?,
-           deferred_until = CASE WHEN ? THEN NULL ELSE deferred_until END,
-           deferred_reason = CASE WHEN ? THEN NULL ELSE deferred_reason END
+           deferred_reason = CASE WHEN ? AND (? OR deferred_until IS ?) THEN NULL ELSE deferred_reason END,
+           deferred_until = CASE WHEN ? AND (? OR deferred_until IS ?) THEN NULL ELSE deferred_until END
          WHERE id = ?`,
       )
       .run(
@@ -392,8 +402,12 @@ export class ScheduleRepository {
         started || outcome === "deferred" ? 0 : 1,
         nextRunAt,
         now,
-        started ? 1 : 0,
-        started ? 1 : 0,
+        settleSome,
+        settleAny,
+        settleUntil,
+        settleSome,
+        settleAny,
+        settleUntil,
         id,
       );
   }

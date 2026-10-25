@@ -1916,6 +1916,54 @@ test("defer_busy: a schedule paused during a gated retry that ends busy gets no 
   }
 });
 
+test("defer_busy: a gated retry that starts after the next occurrence came keeps that occurrence's pending", async () => {
+  const { root, configDir } = makeDeferRoot();
+  const t = makeScheduler(configDir);
+  const runIds = [];
+  try {
+    const s = t.scheduler.create({
+      name: "late start",
+      agentId: "gatekeeper",
+      prompt: "ok",
+      cron: "0 3 * * *",
+      gate: { command: "sleep 1; exit 0", timeoutSeconds: 10 },
+    });
+    const staleUntil = new Date(Date.now() + 3_600_000).toISOString();
+    t.db
+      .prepare("UPDATE schedules SET next_run_at = ?, deferred_until = ?, deferred_reason = ? WHERE id = ?")
+      .run(new Date(Date.now() - 1000).toISOString(), staleUntil, "project busy: an earlier tick", s.id);
+
+    // The retry of occurrence N takes its pending and runs its gate; the due loop hits N+1 while
+    // that gate still runs and records a fresh pending for it. Then the retry's gate passes.
+    await t.scheduler.tick();
+    const fresh = t.repo.get(s.id);
+    assert.ok(fresh.deferredUntil && fresh.deferredUntil !== staleUntil, "the due loop deferred N+1");
+    await t.scheduler.settled();
+    let row = t.repo.get(s.id);
+    assert.equal(row.lastOutcome, "started", "the retry started");
+    runIds.push(row.lastRunId);
+    assert.equal(row.deferredUntil, fresh.deferredUntil, "the retry's start did not wipe N+1's pending");
+    assert.equal(row.deferredReason, fresh.deferredReason);
+    assert.deepEqual(
+      t.repo.firings(s.id).map((f) => f.outcome),
+      ["started", "deferred"],
+    );
+    await t.runs.waitForRun(row.lastRunId, 15_000);
+
+    // A manual start still settles whatever is pending: the work it waited for has begun.
+    const manual = await t.scheduler.fireNow(s.id, { skipGate: true });
+    assert.equal(manual.outcome, "started");
+    runIds.push(manual.runId);
+    row = t.repo.get(s.id);
+    assert.equal(row.deferredUntil, null, "a manual start settles the pending");
+    assert.equal(row.deferredReason, null);
+    await t.runs.waitForRun(manual.runId, 15_000);
+  } finally {
+    for (const id of runIds) if (t.runs.getRun(id)?.status === "running") t.runs.cancelRun(id);
+    await t.close(root);
+  }
+});
+
 test("defer_busy: daily cap skips are not deferred; turning defer_busy off settles a pending as skipped_busy", async () => {
   const { root, configDir } = makeDeferRoot();
   writeFileSync(path.join(configDir, "agents", "once.md"), `---\nproject: demo\nmax_daily_runs: 1\n---\nOnce.\n`);
