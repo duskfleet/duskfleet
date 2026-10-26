@@ -20,6 +20,14 @@ import {
 const log = logger("config");
 
 /**
+ * No config to load: no config/duskfleet.yaml above the entry point, or none in the directory
+ * DUSKFLEET_CONFIG names. Callers tell it apart with `instanceof` (the CLI points at `init`).
+ */
+export class ConfigNotFoundError extends Error {
+  override name = "ConfigNotFoundError";
+}
+
+/**
  * Locates the config directory.
  *   1. DUSKFLEET_CONFIG env var (path to a directory containing duskfleet.yaml)
  *   2. <repo root>/config, where the repo root is the closest ancestor of
@@ -30,7 +38,7 @@ export function resolveConfigDir(startFrom: string = process.cwd()): string {
   if (fromEnv) return expandHome(fromEnv);
   const root = findRepoRoot(startFrom);
   if (!root) {
-    throw new Error(
+    throw new ConfigNotFoundError(
       `Could not find config/duskfleet.yaml walking up from ${startFrom}. Set DUSKFLEET_CONFIG to the config directory.`,
     );
   }
@@ -146,7 +154,7 @@ const projectsSchema = z.object({
 export function loadConfig(configDir: string): DuskFleetConfig {
   const globalPath = path.join(configDir, "duskfleet.yaml");
   if (!existsSync(globalPath)) {
-    throw new Error(`Config file not found: ${globalPath}`);
+    throw new ConfigNotFoundError(`Config file not found: ${globalPath}`);
   }
   const raw = parseYaml(readFileSync(globalPath, "utf8")) ?? {};
   const g = globalSchema.parse(raw);

@@ -23,6 +23,7 @@ export {
 } from "./config/agent-files.js";
 export { type AgentLintProblem, assertAgentSpecClean, collapseHome, lintAgentSpec } from "./config/agent-lint.js";
 export {
+  ConfigNotFoundError,
   expandHome,
   findRepoRoot,
   isDirectory,

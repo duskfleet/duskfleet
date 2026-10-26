@@ -19,10 +19,12 @@ import { fileURLToPath } from "node:url";
  *   duskfleet uninstall-service
  *   duskfleet doctor           # also reports the service and who holds the scheduler lease
  *   duskfleet doctor --probe   # plus one real hello run on haiku (costs cents): auth, blocking hooks
+ *   duskfleet --version        # handled in cli.ts, before the Node version check
  */
 import { parseArgs } from "node:util";
 import {
   type BudgetInput,
+  ConfigNotFoundError,
   effectivePath,
   findRepoRoot,
   parseHolder,
@@ -48,6 +50,9 @@ function print(value: unknown): void {
   process.stdout.write(JSON.stringify(value, null, 2) + "\n");
 }
 
+/** Last line of the usage, and of any command that fails because no config was found. */
+const INIT_HINT = "First time here? Run: npx duskfleet init";
+
 /** Usage on stderr with exit 2 (a wrong invocation), or on stdout with exit 0 when asked for (`--help`). */
 function usage(asked = false): never {
   (asked ? process.stdout : process.stderr).write(
@@ -72,6 +77,9 @@ function usage(asked = false): never {
       "  duskfleet uninstall-service",
       "  duskfleet doctor [--probe]",
       "  duskfleet --help",
+      "  duskfleet --version",
+      "",
+      INIT_HINT,
       "",
     ].join("\n"),
   );
@@ -377,5 +385,6 @@ async function main(): Promise<void> {
 
 main().catch((err) => {
   process.stderr.write(`error: ${err instanceof Error ? err.message : String(err)}\n`);
+  if (err instanceof ConfigNotFoundError) process.stderr.write(`${INIT_HINT}\n`);
   process.exit(1);
 });

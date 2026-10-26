@@ -10,6 +10,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
+import { ConfigNotFoundError, resolveConfigDir } from "@duskfleet/core";
 import { testEnv } from "./helpers.js";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -49,6 +50,58 @@ test("--help prints the usage on stdout with exit 0 and loads no config; no comm
   const none = run(workspaceCli, [], { DUSKFLEET_CONFIG: missing });
   assert.equal(none.status, 2);
   assert.match(none.stderr, /Usage:/);
+  assert.match(none.stderr, /First time here\? Run: npx duskfleet init\n$/);
+  assert.match(run(workspaceCli, ["--help"]).stdout, /First time here\? Run: npx duskfleet init\n$/);
+});
+
+test("a command that finds no config ends with the init hint; other errors do not", () => {
+  const missing = run(workspaceCli, ["doctor"], { DUSKFLEET_CONFIG: path.join(tmpdir(), "duskfleet-no-such-config") });
+  assert.equal(missing.status, 1);
+  assert.match(missing.stderr, /error: Config file not found: .*\nFirst time here\? Run: npx duskfleet init\n$/);
+
+  // The other no-config case (no DUSKFLEET_CONFIG, nothing found walking up) throws the same class;
+  // the bins live inside this repository, so check the lookup in process from a temp dir.
+  const saved = process.env["DUSKFLEET_CONFIG"];
+  delete process.env["DUSKFLEET_CONFIG"];
+  const outside = mkdtempSync(path.join(tmpdir(), "duskfleet-no-repo-"));
+  try {
+    assert.throws(
+      () => resolveConfigDir(outside),
+      (err) => err instanceof ConfigNotFoundError && /Could not find config\/duskfleet\.yaml/.test(err.message),
+    );
+  } finally {
+    if (saved !== undefined) process.env["DUSKFLEET_CONFIG"] = saved;
+    rmSync(outside, { recursive: true, force: true });
+  }
+
+  // Not every error is a missing config: an invalid one gets no hint.
+  const root = mkdtempSync(path.join(tmpdir(), "duskfleet-bad-config-"));
+  try {
+    writeFileSync(path.join(root, "duskfleet.yaml"), "max_concurrent_runs: -1\n");
+    const bad = run(workspaceCli, ["doctor"], { DUSKFLEET_CONFIG: root });
+    assert.equal(bad.status, 1);
+    assert.doesNotMatch(bad.stderr, /duskfleet init/);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("--version and -v print the package's own version, need no config, exit 0 (both bins)", () => {
+  const ownVersion = (dir) => JSON.parse(readFileSync(path.join(dir, "..", "package.json"), "utf8")).version;
+  const published = JSON.parse(readFileSync(path.join(bundleDir, "..", "package.json"), "utf8")).version;
+  const workspaceDist = path.dirname(workspaceCli);
+  assert.equal(ownVersion(workspaceDist), published, "@duskfleet/mcp and duskfleet carry the same version");
+  for (const dir of [workspaceDist, bundleDir]) {
+    for (const bin of ["cli.js", "index.js"]) {
+      for (const flag of ["--version", "-v"]) {
+        const r = run(path.join(dir, bin), [flag], {
+          DUSKFLEET_CONFIG: path.join(tmpdir(), "duskfleet-no-such-config"),
+        });
+        assert.equal(r.status, 0, r.stderr);
+        assert.equal(r.stdout, `${published}\n`, `${dir}/${bin} ${flag}`);
+      }
+    }
+  }
 });
 
 test("the duskfleet bundle carries core, imports no @duskfleet/core and ships no maps or declarations", () => {
