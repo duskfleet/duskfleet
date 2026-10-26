@@ -49,7 +49,13 @@ npm run cli -- doctor                     # "scheduler.service" says whether it 
 |---|---|---|
 | macOS | launchd LaunchAgent (`RunAtLoad`, `KeepAlive`) | `~/Library/LaunchAgents/com.duskfleet.scheduler.plist` |
 | Linux | systemd user unit (`Restart=always`) | `~/.config/systemd/user/duskfleet.service` |
-| Windows | Task Scheduler logon task, no time limit, restart on failure | task "Duskfleet Scheduler", XML kept under `%LOCALAPPDATA%\Duskfleet` |
+| Windows (experimental) | Task Scheduler logon task, no time limit, restart on failure | task "Duskfleet Scheduler", XML kept under `%LOCALAPPDATA%\Duskfleet` |
+
+> [!NOTE]
+> Windows is **experimental** ([platform support](../README.md#platform-support)): the Task
+> Scheduler unit is implemented but has not been run by the maintainers. Output goes to
+> `data/logs/serve.log`, the task XML to `%LOCALAPPDATA%\Duskfleet`. To verify it on your machine,
+> follow the [Windows test plan](windows-test-plan.md).
 
 All three run as the logged-in user, so the service sees the same `claude` login as your
 terminal, start at login and restart the process if it dies. They append the process output to
@@ -68,8 +74,8 @@ Things to know:
   `npm run build`**, otherwise the service keeps running the old code (same as the MCP server).
 - While the machine sleeps nothing runs; missed ticks are not caught up (see Policies).
 - Linux: `loginctl enable-linger $USER` keeps the unit alive when you are logged out.
-- Windows support is implemented but has not been exercised by the maintainers: check
-  `data/logs/serve.log` if `doctor` reports the task running but nothing fires.
+- Windows (experimental, see the note above): check `data/logs/serve.log` if `doctor` reports
+  the task running but nothing fires, and report what you find as an issue.
 - The MCP server keeps ticking as a fallback: stop the service and it takes over after three
   ticks (90 s by default).
 - `serve` has priority: on its first tick it takes the lease from a live `mcp` / `cli` /
