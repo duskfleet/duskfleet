@@ -117,6 +117,59 @@ the real `stream-json` event shapes, so they never launch a real Claude. They co
 executor, state machine, SQLite storage, validation, scheduler, legacy database adoption and the
 MCP server driven over stdio. Add a case to the fake binary when the parser learns a new event.
 
+## Releasing
+
+`CHANGELOG.md` ([Keep a Changelog](https://keepachangelog.com/en/1.1.0/)) is the release notes:
+every user-facing pull request adds a line, linking itself, under `## [Unreleased]` (Added,
+Changed or Fixed). A release is one pull request, then a tag pushed by the maintainer. In order,
+with `0.2.0` standing for the new version:
+
+1. **Bump the version, in one commit on a branch.** Set `"version": "0.2.0"` in all five
+   `package.json` files (`package.json`, `packages/core`, `packages/mcp`, `packages/duskfleet`,
+   `apps/web`) and the two exact `"@duskfleet/core": "0.2.0"` pins (in `packages/mcp` and
+   `apps/web`), then refresh the lockfile:
+
+   ```bash
+   npm install --package-lock-only
+   npm run check:pack     # fails if duskfleet and @duskfleet/web differ
+   ```
+
+2. **Date the changelog.** Rename `## [Unreleased]` to `## [0.2.0] - YYYY-MM-DD` (the day of the
+   tag), add a new empty `## [Unreleased]` above it, and update the two link lines at the bottom
+   (`[Unreleased]` compares `v0.2.0...HEAD`, `[0.2.0]` points to the release tag).
+3. **Open the pull request** with both commits and the release notes (the CHANGELOG section
+   without its heading) in its description; `npm run check` must pass, and the `publish dry-run`
+   job proves the packages build and pack.
+4. **After the merge, tag `main`** (maintainer only, annotated tag):
+
+   ```bash
+   git switch main
+   git pull --ff-only
+   git tag -a v0.2.0 -m "Duskfleet 0.2.0"
+   git push origin v0.2.0
+   ```
+
+5. **Create the GitHub release** from that tag, with the CHANGELOG section as its notes (save it
+   to a file first, outside the repository):
+
+   ```bash
+   gh release create v0.2.0 --verify-tag --title "Duskfleet 0.2.0" --notes-file <notes file>
+   ```
+
+6. **Watch the publish.** The tag runs the `publish` job of `.github/workflows/publish.yml`
+   ([Publishing](#publishing)): `gh run list --workflow publish.yml --limit 1`, then
+   `gh run watch <run id>`. A failure after the first package published is fixed by re-running
+   the job: a version already on the registry is skipped.
+7. **Verify from outside the repository**:
+
+   ```bash
+   npx duskfleet@latest --version        # prints 0.2.0
+   npm view @duskfleet/web version       # prints 0.2.0
+   ```
+
+For `0.1.0` the versions already read `0.1.0`: skip step 1, and set the date of its CHANGELOG
+section to the day of the tag if it differs.
+
 ## Quality gates
 
 Every pull request runs the `checks` job in `.github/workflows/ci.yml`; a ruleset on `main` refuses
