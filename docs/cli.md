@@ -24,7 +24,15 @@ npm run cli -- serve                                      # long-running schedul
 npm run cli -- install-service [--print]                  # register `serve` with launchd / systemd --user / Task Scheduler
 npm run cli -- uninstall-service
 npm run cli -- tools                                      # the MCP tool catalogue
+npm run cli -- --help                                     # the usage (also -h); no config needed
+npm run cli -- --version                                  # the package version (also -v); duskfleet-mcp --version too
 ```
+
+`duskfleet` with no arguments prints the usage on stderr and exits 2; `--help` prints it on
+stdout and exits 0. Both end with `First time here? Run: npx duskfleet init`, and so does the
+error of any command that finds no config (no `config/duskfleet.yaml` above the CLI, or none in
+the directory `DUSKFLEET_CONFIG` names). `--version` prints the version of the installed
+`duskfleet` package and needs neither a config nor Node 24.
 
 ## First run
 
