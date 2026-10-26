@@ -256,6 +256,10 @@ on the row (`concurrencyPolicy`, `catchUpPolicy`, `triggerKind` in `list_schedul
 | `catch_up_policy` | `skip_missed`; `enqueue_missed_with_cap` is reserved and refused for now (planned: replay up to 3 missed ticks, never for sub-hourly schedules) | `skip_missed` |
 | `trigger_kind` | `cron` (the only one for now; the field leaves room for other triggers, such as an API call, and the tick only fires `cron` schedules) | `cron` |
 
+What to change when a schedule keeps skipping (`skipped_busy`, `skipped_daily_cap`,
+`skipped_budget`, `auto_paused`, or nothing recorded at all) is in
+[troubleshooting](troubleshooting.md#runs-skipped-by-gates).
+
 - A tick whose agent or project is still busy is recorded as `skipped_busy`, never queued (checked before any [gate](#gates-skip-cheaply-when-there-is-no-work)).
 - A tick whose agent reached its [daily cap](agents.md#daily-caps) (`max_daily_runs`,
   `max_daily_cost_usd`, UTC day) is recorded as `skipped_daily_cap`, also before any gate; a

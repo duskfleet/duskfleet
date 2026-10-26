@@ -1,0 +1,132 @@
+# Publishes the two npm packages, `duskfleet` and `@duskfleet/web`, at the same version with npm
+# provenance (docs/development.md "Publishing"). A tag `v<version>` pushed by the owner runs the
+# `publish` job; every pull request runs the `dry-run` job, the same steps ending in
+# `npm publish --dry-run`, so a broken pack is caught before the tag.
+#
+# The `publish` job needs the NPM_TOKEN repository secret: a granular npm access token that can
+# publish `duskfleet` and `@duskfleet/web` only. `id-token: write` lets npm sign the provenance
+# statement through GitHub's OIDC token; each package.json `repository` must name this repository
+# or the registry refuses the provenance.
+name: Publish
+
+on:
+  push:
+    tags: ["v*"]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  dry-run:
+    name: publish dry-run
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    concurrency:
+      group: publish-dry-run-${{ github.ref }}
+      cancel-in-progress: true
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Both packages carry the same version
+        run: |
+          core=$(node -p "require('./packages/duskfleet/package.json').version")
+          web=$(node -p "require('./apps/web/package.json').version")
+          if [ "$core" != "$web" ]; then
+            echo "::error::duskfleet is $core but @duskfleet/web is $web (bump both together)"
+            exit 1
+          fi
+          echo "version $core"
+
+      - name: Install
+        run: npm ci
+
+      - name: Checks (what CI runs)
+        run: npm run check
+
+      - name: Build dashboard
+        run: npm run build:web
+
+      - name: Pack check with the dashboard build
+        run: npm run check:pack -- --require-web-build
+
+      - name: npm publish --dry-run (duskfleet)
+        working-directory: packages/duskfleet
+        run: npm publish --dry-run --access public
+
+      - name: npm publish --dry-run (@duskfleet/web)
+        working-directory: apps/web
+        run: npm publish --dry-run --access public
+
+  publish:
+    name: publish
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      id-token: write
+    concurrency:
+      group: publish-${{ github.ref }}
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      # No dependency cache on the publishing job: what ships is built from a clean install.
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+          registry-url: https://registry.npmjs.org
+
+      - name: Tag matches the version of both packages
+        run: |
+          tag="${GITHUB_REF_NAME#v}"
+          core=$(node -p "require('./packages/duskfleet/package.json').version")
+          web=$(node -p "require('./apps/web/package.json').version")
+          if [ "$tag" != "$core" ] || [ "$tag" != "$web" ]; then
+            echo "::error::tag $GITHUB_REF_NAME does not match duskfleet $core and @duskfleet/web $web"
+            exit 1
+          fi
+          echo "publishing version $tag"
+
+      - name: Install
+        run: npm ci
+
+      - name: Checks (what CI runs)
+        run: npm run check
+
+      - name: Build dashboard
+        run: npm run build:web
+
+      - name: Pack check with the dashboard build
+        run: npm run check:pack -- --require-web-build
+
+      # A version already on the registry is skipped, so a re-run after a failed second publish
+      # finishes the release instead of failing on the first package.
+      - name: npm publish --provenance (duskfleet)
+        working-directory: packages/duskfleet
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          if npm view "duskfleet@${GITHUB_REF_NAME#v}" version > /dev/null 2>&1; then
+            echo "duskfleet@${GITHUB_REF_NAME#v} is already published, skipping"
+          else
+            npm publish --provenance --access public
+          fi
+
+      - name: npm publish --provenance (@duskfleet/web)
+        working-directory: apps/web
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          if npm view "@duskfleet/web@${GITHUB_REF_NAME#v}" version > /dev/null 2>&1; then
+            echo "@duskfleet/web@${GITHUB_REF_NAME#v} is already published, skipping"
+          else
+            npm publish --provenance --access public
+          fi
