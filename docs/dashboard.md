@@ -112,14 +112,14 @@ the agent chose to stop, or when something silently narrowed what it could do:
 
 | Reason | When |
 |---|---|
-| `budget_exhausted` | `terminationReason` says the budget ran out (with or without a wrap-up pass) |
-| `timed_out` | the agent's `timeout_minutes` elapsed |
-| `orphaned` | Duskfleet restarted while the run was in progress |
+| `budget_exhausted` | `terminationReason` says the budget ran out (with or without a wrap-up pass); fix: [troubleshooting](troubleshooting.md#budget-exhausted-or-timed-out) |
+| `timed_out` | the agent's `timeout_minutes` elapsed; fix: [troubleshooting](troubleshooting.md#budget-exhausted-or-timed-out) |
+| `orphaned` | Duskfleet restarted while the run was in progress; see [troubleshooting](troubleshooting.md#context-exhausted-and-orphaned-runs) |
 | `nonzero_exit` | the process exited with a code other than 0 |
 | `failed` | any other failure (spawn error, no result line) |
-| `permission_denied` | a tool call was refused: the allow-list is incomplete |
-| `context_exhausted` | structured signal that the context window ran out |
-| `mcp_missing` | an allow-listed MCP server never mounted |
+| `permission_denied` | a tool call was refused: the allow-list is incomplete; fix: [troubleshooting](troubleshooting.md#permission-denial) |
+| `context_exhausted` | structured signal that the context window ran out; see [troubleshooting](troubleshooting.md#context-exhausted-and-orphaned-runs) |
+| `mcp_missing` | an allow-listed MCP server never mounted; fix: [troubleshooting](troubleshooting.md#permission-denial) |
 | `empty_run` | the run completed with zero tool calls ("no work done"; the same signal the schedule auto-pause counts as empty). Structured only: the result text is never read |
 
 A run that used tools but never edited a file (a read-only reviewer, a planner) is not empty
