@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 /**
@@ -5,6 +6,7 @@ import { fileURLToPath } from "node:url";
  * testing without an MCP client.
  *
  *   duskfleet agents
+ *   duskfleet agents create <id> [--model <m>] [--budget <usd>] [...] [--force] -- "<system prompt>"
  *   duskfleet projects
  *   duskfleet run --project <id or path> [--agent <id>] [--model <m>] [--no-wait] -- "<prompt>"
  *   duskfleet runs [--status <s>] [--limit <n>]
@@ -23,8 +25,10 @@ import { fileURLToPath } from "node:url";
  */
 import { parseArgs } from "node:util";
 import {
+  assertAgentIdFree,
   type BudgetInput,
   ConfigNotFoundError,
+  createAgentFromFields,
   effectivePath,
   findRepoRoot,
   parseHolder,
@@ -61,6 +65,9 @@ function usage(asked = false): never {
       "",
       "Usage:",
       "  duskfleet agents",
+      "  duskfleet agents create <id> [--model <m>] [--budget <usd>] [--permission-mode <mode>]",
+      "                          [--allowed-tools <a,b>] [--disallowed-tools <a,b>] [--timeout <minutes>]",
+      '                          [--description <text>] [--force] (-- "<system prompt>" | --prompt-file <file>)',
       "  duskfleet projects",
       '  duskfleet run --project <id or path> [--agent <id>] [--model <m>] [--no-wait] -- "<prompt>"',
       "  duskfleet runs [--status <status>] [--limit <n>]",
@@ -84,6 +91,94 @@ function usage(asked = false): never {
     ].join("\n"),
   );
   process.exit(asked ? 0 : 2);
+}
+
+/**
+ * Defaults of `agents create` when a flag is not given: what makes the README Quick start safe
+ * with only `--model haiku` (a small budget, no prompts, file tools plus the common test runners).
+ */
+const AGENT_CREATE_DEFAULTS = {
+  maxBudgetUsd: 0.5,
+  permissionMode: "dontAsk",
+  timeoutMinutes: 10,
+  allowedTools: [
+    "Read",
+    "Grep",
+    "Glob",
+    "Edit",
+    "Write",
+    "Bash(npm test:*)",
+    "Bash(npm run test:*)",
+    "Bash(npx vitest:*)",
+    "Bash(npx jest:*)",
+    "Bash(pytest:*)",
+    "Bash(python -m pytest:*)",
+    "Bash(cargo test:*)",
+    "Bash(go test:*)",
+    "Bash(make test:*)",
+  ],
+} as const;
+
+function csv(value: string): string[] {
+  return value
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean);
+}
+
+function numberFlag(name: string, value: string): number {
+  const n = Number(value);
+  if (value.trim() === "" || !Number.isFinite(n)) throw new Error(`--${name} must be a number, got "${value}"`);
+  return n;
+}
+
+/** `agents create <id> [flags] -- "<system prompt>"` to the raw fields of a kind `own` agent. */
+function parseAgentCreate(args: string[]): { id: string; fields: Record<string, unknown>; force: boolean } {
+  const { values, positionals } = parseArgs({
+    args,
+    allowPositionals: true,
+    options: {
+      model: { type: "string", short: "m" },
+      budget: { type: "string" },
+      "permission-mode": { type: "string" },
+      "allowed-tools": { type: "string" },
+      "disallowed-tools": { type: "string" },
+      timeout: { type: "string" },
+      description: { type: "string" },
+      "prompt-file": { type: "string" },
+      force: { type: "boolean", default: false },
+    },
+  });
+  const [id, ...words] = positionals;
+  if (!id) usage();
+  // Same rule as create_agent: bypassPermissions stays a hand-edited, config-gated choice.
+  if (values["permission-mode"] === "bypassPermissions") {
+    throw new Error("--permission-mode bypassPermissions cannot be set here; edit the agent file by hand");
+  }
+  const inline = words.join(" ").trim();
+  if (inline && values["prompt-file"])
+    throw new Error("give the system prompt after -- or with --prompt-file, not both");
+  const systemPrompt = values["prompt-file"] ? readFileSync(values["prompt-file"], "utf8") : inline;
+  if (!systemPrompt.trim()) {
+    throw new Error(
+      'agents create needs a system prompt: the persona of the agent, after -- ("...") or in a file with --prompt-file',
+    );
+  }
+  const fields: Record<string, unknown> = {
+    id,
+    description: values.description ?? "",
+    permission_mode: values["permission-mode"] ?? AGENT_CREATE_DEFAULTS.permissionMode,
+    allowed_tools:
+      values["allowed-tools"] !== undefined ? csv(values["allowed-tools"]) : [...AGENT_CREATE_DEFAULTS.allowedTools],
+    timeout_minutes:
+      values.timeout !== undefined ? numberFlag("timeout", values.timeout) : AGENT_CREATE_DEFAULTS.timeoutMinutes,
+    max_budget_usd:
+      values.budget !== undefined ? numberFlag("budget", values.budget) : AGENT_CREATE_DEFAULTS.maxBudgetUsd,
+    system_prompt: systemPrompt,
+  };
+  if (values.model) fields["model"] = values.model;
+  if (values["disallowed-tools"] !== undefined) fields["disallowed_tools"] = csv(values["disallowed-tools"]);
+  return { id, fields, force: values.force };
 }
 
 /** What the service runs: this node, this dist/cli.js, this repo (or config), the resolved claude binary. */
@@ -150,7 +245,27 @@ async function main(): Promise<void> {
       return done();
     }
     case "agents": {
-      print([...app.config.agents.values()].map(({ systemPrompt: _p, ...a }) => a));
+      const [sub, ...args] = rest;
+      if (sub === "create") {
+        const { id, fields, force } = parseAgentCreate(args);
+        const config = app.config;
+        const existing = assertAgentIdFree(config, id, force, "--force", null);
+        const agent = createAgentFromFields("own", fields, config, () => app.runs.reloadConfig());
+        const { systemPrompt: _p, ...shown } = agent;
+        process.stderr.write(
+          `agent "${id}" written to ${agent.sourcePath}\nnext: duskfleet run --project <id or absolute path> --agent ${id} -- "<task>"\n`,
+        );
+        print({ created: true, overrode: existing?.source ?? null, agent: shown });
+        return done();
+      }
+      if (sub) usage();
+      const agents = [...app.config.agents.values()].map(({ systemPrompt: _p, ...a }) => a);
+      if (agents.length === 0) {
+        process.stderr.write(
+          `no agents yet: Duskfleet ships none. Create your first one with\n  duskfleet agents create <id> --model haiku -- "<system prompt>"\n`,
+        );
+      }
+      print(agents);
       return done();
     }
     case "projects": {

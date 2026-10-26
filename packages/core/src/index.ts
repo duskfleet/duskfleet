@@ -4,6 +4,13 @@
  */
 
 export {
+  assertAgentIdFree,
+  assertAgentWritable,
+  assertSpecLoadable,
+  createAgentFromFields,
+  writeAgentAndVerify,
+} from "./config/agent-create.js";
+export {
   AGENT_ID_PATTERN,
   type AgentKind,
   type AgentSpec,

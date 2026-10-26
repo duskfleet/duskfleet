@@ -6,10 +6,11 @@ import {
   agentKind,
   agentSpecSchema,
   agentToSpec,
-  assertAgentKind,
+  assertAgentIdFree,
   assertAgentSpecClean,
-  assertWrapUpReserve,
+  assertAgentWritable,
   budgetPlan,
+  createAgentFromFields,
   type DuskFleetConfig,
   deleteAgentFile,
   EFFORT_LEVELS,
@@ -20,7 +21,7 @@ import {
   projectIdFromPath,
   upsertUserProject,
   validateProjectPath,
-  writeAgentFile,
+  writeAgentAndVerify,
 } from "@duskfleet/core";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
@@ -28,20 +29,6 @@ import { errorResult, jsonResult, type ToolContext } from "../server.js";
 
 /** Permission modes a tool may set. bypassPermissions stays a hand-edited, config-gated choice. */
 const MCP_PERMISSION_MODES = PERMISSION_MODES.filter((m) => m !== "bypassPermissions") as [string, ...string[]];
-
-/** Validate what the loader would reject, *before* a file lands on disk and breaks every later config load. */
-function assertSpecLoadable(spec: AgentSpec, config: DuskFleetConfig): void {
-  if (spec.project && !config.projects.has(spec.project)) {
-    throw new Error(
-      `project "${spec.project}" is not in projects.yaml. Known projects: ${[...config.projects.keys()].join(", ") || "(none)"}`,
-    );
-  }
-}
-
-function assertKind(kind: "own" | "link", spec: AgentSpec, config: DuskFleetConfig): void {
-  assertAgentKind(kind, spec, (id) => config.projects.get(id)?.path ?? null);
-  assertWrapUpReserve(spec, config.claude.defaultMaxBudgetUsd);
-}
 
 /**
  * A link points at a FOLDER that defines agents. Resolve it to a registered project:
@@ -89,19 +76,6 @@ function projectFromFolder(
   if (!fresh.projects.has(id))
     throw new Error(`project "${id}" was written to ${config.userProjectsFile} but did not load`);
   return id;
-}
-
-/** Write the agent file, then make sure the config still loads; otherwise remove the file and fail loudly. */
-function writeAndVerify(ctx: ToolContext, config: DuskFleetConfig, spec: AgentSpec): AgentDefinition {
-  assertSpecLoadable(spec, config);
-  const file = writeAgentFile(config.userAgentsDir, spec);
-  const reloaded = ctx.config; // triggers a reload; on failure the previous config is kept
-  const fresh = reloaded.agents.get(spec.id);
-  if (!fresh || fresh.sourcePath !== file) {
-    deleteAgentFile(config.userAgentsDir, spec.id);
-    throw new Error(`agent file ${file} did not load (see server log); it has been removed again`);
-  }
-  return fresh;
 }
 
 function presentAgent(a: AgentDefinition, config: DuskFleetConfig) {
@@ -304,16 +278,7 @@ export function registerAgentTools(server: McpServer, ctx: ToolContext): void {
     async (args) => {
       try {
         const config = ctx.config;
-        const existing = config.agents.get(args.id);
-        if (existing && !args.overwrite) {
-          return errorResult(
-            new Error(
-              existing.source === "user"
-                ? `agent "${args.id}" already exists (${existing.sourcePath}). Use update_agent, or pass overwrite: true to replace it.`
-                : `"${args.id}" is a builtin agent (${existing.sourcePath}). Pass overwrite: true to create a user override, or choose another id.`,
-            ),
-          );
-        }
+        const existing = assertAgentIdFree(config, args.id, args.overwrite ?? false, "overwrite: true", "update_agent");
         const { overwrite: _o, kind, project_path, ...fields } = args;
         let registeredProject: string | null = null;
         if (project_path) {
@@ -321,9 +286,7 @@ export function registerAgentTools(server: McpServer, ctx: ToolContext): void {
           registeredProject = fields.project;
         }
         const cfg = ctx.config;
-        const spec = assertAgentSpecClean(agentSpecSchema.parse(fields));
-        assertKind(kind, spec, cfg);
-        const fresh = writeAndVerify(ctx, cfg, spec);
+        const fresh = createAgentFromFields(kind, fields, cfg, () => ctx.config);
         return jsonResult({
           created: true,
           kind,
@@ -405,8 +368,8 @@ export function registerAgentTools(server: McpServer, ctx: ToolContext): void {
         for (const k of clear ?? []) delete (merged as Record<string, unknown>)[k];
         const spec = assertAgentSpecClean(agentSpecSchema.parse(merged));
         const kind = requestedKind ?? agentKind(spec);
-        assertKind(kind, spec, cfgNow);
-        const fresh = writeAndVerify(ctx, cfgNow, spec);
+        assertAgentWritable(kind, spec, cfgNow);
+        const fresh = writeAgentAndVerify(cfgNow, spec, () => ctx.config);
         return jsonResult({ updated: true, kind, agent: presentAgent(fresh, ctx.config) });
       } catch (err) {
         return errorResult(err);

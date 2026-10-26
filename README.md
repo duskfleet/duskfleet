@@ -65,11 +65,18 @@ npm run build
 npm run cli -- doctor          # Claude binary, version, where config and data live
 ```
 
-Try a run on a small throwaway project of your own (anything with a failing test will do),
-with the cheapest model:
+Duskfleet ships no starter agent: create your first one, on the cheapest model. `agents create`
+writes it to `data/agents/fixer.md` (git-ignored) with safe defaults: a $0.50 budget, no
+permission prompts (`dontAsk`), file tools plus the common test commands, 10 minutes.
 
 ```bash
-npm run cli -- run --project /abs/path/to/scratch-project --model haiku -- "Fix the failing test"
+npm run cli -- agents create fixer --model haiku -- "You fix the failing test in this project. Run the tests, read the failure, change the minimum code, run them again. No git, no installs."
+```
+
+Then try it on a small throwaway project of your own (anything with a failing test will do):
+
+```bash
+npm run cli -- run --project /abs/path/to/scratch-project --agent fixer -- "Fix the failing test"
 npm run cli -- runs
 npm run web                    # dashboard on http://localhost:4777
 ```
