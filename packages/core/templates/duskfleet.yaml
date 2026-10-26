@@ -1,0 +1,34 @@
+# Duskfleet configuration (starter file).
+# Relative paths are resolved from the directory containing this file.
+# Every key and its default: https://github.com/duskfleet/duskfleet/blob/main/docs/configuration.md
+
+# Where runtime data lives: SQLite database, per-run logs, agents created at runtime
+# (<data_dir>/agents) and the private project registry (<data_dir>/projects.yaml).
+data_dir: data
+
+# Optional safety fence: when non-empty, a project path must be inside one of these
+# directories to be executed. Use absolute paths or ~.
+allowed_project_roots: []
+#  - ~/Projects
+
+# Agent used when a run names none. null = every run must name its agent (--agent example).
+default_agent: null
+
+# Maximum number of Claude Code processes running at the same time, and per project / agent.
+max_concurrent_runs: 2
+max_concurrent_per_project: 1
+max_concurrent_per_agent: 1
+
+scheduler:
+  enabled: true            # kill switch, re-read every tick: false stops all firing
+  auto_pause_after: 5
+  allow_command_gates: false
+
+claude:
+  # Path to the Claude Code binary. null = CLAUDE_BIN, then `claude` on PATH, then ~/.local/bin/claude.
+  binary: null
+  # Unattended runs can hang on user-level hooks; [project, local] skips ~/.claude/settings.json.
+  setting_sources: [project, local]
+  # Default per-run limits, overridable per agent.
+  default_timeout_minutes: 30
+  default_max_budget_usd: 5

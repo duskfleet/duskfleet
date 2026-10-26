@@ -38,6 +38,12 @@ export {
   type UserProjectEntry,
   upsertUserProject,
 } from "./config/project-files.js";
+export {
+  STARTER_AGENT_ID,
+  type StarterResult,
+  starterTemplatesDir,
+  writeStarterConfig,
+} from "./config/starter.js";
 export * from "./config/types.js";
 export * from "./evals/types.js";
 export {

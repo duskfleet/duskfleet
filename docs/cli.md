@@ -6,7 +6,8 @@ The CLI uses the same orchestration code as the MCP server and is the quickest w
 ```bash
 npm run cli -- doctor                                     # Claude binary, version, config and data paths
 npm run cli -- doctor --probe                             # plus one real hello run on haiku (costs cents)
-npm run cli -- run --project ~/Documents/Projects/my-app -- "Add a README section describing the build"
+npm run cli -- run --project ~/Documents/Projects/my-app --agent example --model haiku -- "Fix the failing test"   # example = the starter agent
+npm run cli -- run --project ~/Documents/Projects/my-app -- "Add a README section describing the build"           # no --agent: default_agent of duskfleet.yaml
 npm run cli -- run --project my-app --agent my-reviewer --model sonnet -- "Review src/ for obvious bugs"   # registered id or path (--project-id is the explicit form)
 npm run cli -- run --no-wait --project /path -- "..."     # return immediately (see the note below)
 npm run cli -- runs --status completed --limit 10
@@ -44,6 +45,12 @@ running after its result (a user-level Stop hook). When `claude --version` alrea
 probe is not attempted (outcome `skipped`, nothing spent); a local error before the run (for
 example no writable temp directory) gives outcome `error`. `doctor` exits 1 when the probe fails. Ctrl-C (or SIGTERM) during the
 probe cancels the run, removes its temporary directory and exits 130 without a report.
+
+`run` takes its agent from `--agent`, else from `default_agent` in `duskfleet.yaml` (`null` in the
+shipped config, so `--agent` is needed). An unknown agent, or none, fails with the known agent
+ids; when there is no agent at all it names the two directories it looked in (`config/agents/`
+and the user agents directory, `data/agents/` by default). A clone ships `example`
+([Agents](agents.md#builtin-agents)).
 
 Each run writes a raw event log to `data/logs/<run_id>.jsonl` and a structured row to SQLite.
 In a git checkout it also writes the patch of what it changed to `data/logs/<run_id>.diff`;

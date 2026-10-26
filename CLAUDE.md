@@ -57,6 +57,9 @@ npm workspaces, one `config/` and one SQLite database shared by three deliverabl
   fires it on its next tick). No auth, localhost only.
 - `config/`: `duskfleet.yaml`, `agents/*.md` (builtin agents: YAML frontmatter + system
   prompt body), `projects.yaml` (repo-relative examples only). Meant to be committed.
+  `agents/example.md` (the Quick start agent) is a copy of `packages/core/templates/agents/example.md`,
+  the starter template that `writeStarterConfig` (`core/src/config/starter.ts`) copies into a new
+  user config; the package ships the templates in `dist/templates`. Edit the template, copy it over.
   **This repo is public: no usernames, home paths or machine-specific values in versioned
   files, docs or examples** (`npm run check:public` enforces it in CI; placeholders `<you>`, `me` are fine). Personal projects live in `data/projects.yaml`, personal agents
   in `data/agents/`, the MCP registration in `.mcp.json` (all git-ignored).

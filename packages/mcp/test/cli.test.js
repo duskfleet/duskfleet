@@ -75,6 +75,27 @@ test("cli run --project accepts a registered id or a path; unknown ids, relative
   }
 });
 
+test("cli run with no agent anywhere says where agents are looked up", () => {
+  const { root, configDir, project } = makeRoot();
+  try {
+    rmSync(path.join(configDir, "agents", "coder.md"));
+    writeFileSync(
+      path.join(configDir, "duskfleet.yaml"),
+      `data_dir: ../data\nclaude:\n  binary: ${JSON.stringify(fakeBinary)}\n`,
+    );
+    const r = cli(configDir, ["run", "--project", project, "--", "hello"]);
+    assert.notEqual(r.status, 0);
+    assert.ok(
+      r.stderr.includes(
+        `Known agents: (none: no agent file in ${path.join(configDir, "agents")} or ${path.join(root, "data", "agents")})`,
+      ),
+      r.stderr,
+    );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("doctor --probe makes one haiku run outside any project, says it costs money and reports failures", () => {
   const { root, configDir } = makeRoot();
   try {

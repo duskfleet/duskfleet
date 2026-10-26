@@ -9,7 +9,7 @@ import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, 
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { test } from "node:test";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { testEnv } from "./helpers.js";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -54,7 +54,12 @@ test("--help prints the usage on stdout with exit 0 and loads no config; no comm
 test("the duskfleet bundle carries core, imports no @duskfleet/core and ships no maps or declarations", () => {
   assert.ok(existsSync(path.join(bundleDir, "cli.js")), "packages/duskfleet/dist is missing: run npm run build");
   assert.ok(existsSync(path.join(bundleDir, "core", "index.js")), "core is bundled under dist/core");
+  const templates = path.join(bundleDir, "templates") + path.sep;
   for (const file of walk(bundleDir)) {
+    if (file.startsWith(templates)) {
+      assert.match(file, /\.(md|yaml)$/, `unexpected template file in the bundle: ${file}`);
+      continue;
+    }
     assert.ok(file.endsWith(".js") || path.basename(file) === "tools.json", `unexpected file in the bundle: ${file}`);
     if (!file.endsWith(".js")) continue;
     const text = readFileSync(file, "utf8");
@@ -95,6 +100,53 @@ test("the bundled CLI runs: --help without config, doctor on a config with the f
   }
 });
 
+test("the bundle ships the starter config: writeStarterConfig fills a user config and run --agent example starts", async () => {
+  const core = await import(pathToFileURL(path.join(bundleDir, "core", "index.js")).href);
+  assert.equal(core.starterTemplatesDir(), path.join(bundleDir, "templates"), "templates resolve inside the bundle");
+  const root = mkdtempSync(path.join(tmpdir(), "duskfleet-starter-"));
+  try {
+    const configDir = path.join(root, "user-config");
+    const project = path.join(root, "scratch");
+    mkdirSync(project);
+    const first = core.writeStarterConfig(configDir);
+    assert.deepEqual(first.created.map((f) => path.relative(configDir, f)).sort(), [
+      path.join("agents", "example.md"),
+      "duskfleet.yaml",
+    ]);
+    assert.deepEqual(first.kept, []);
+    const second = core.writeStarterConfig(configDir);
+    assert.deepEqual(second.created, [], "a second call writes nothing");
+    assert.equal(second.kept.length, 2);
+
+    const entry = path.join(bundleDir, "cli.js");
+    const env = { DUSKFLEET_CONFIG: configDir, CLAUDE_BIN: fakeBinary };
+    const agents = run(entry, ["agents"], env);
+    assert.equal(agents.status, 0, agents.stderr);
+    assert.match(agents.stdout, /"example"/);
+
+    const started = run(
+      entry,
+      ["run", "--project", project, "--agent", "example", "--model", "haiku", "--", "Fix the failing test"],
+      env,
+    );
+    assert.equal(started.status, 0, started.stderr);
+    const runInfo = JSON.parse(started.stdout);
+    assert.equal(runInfo.agentId, "example");
+    assert.equal(runInfo.status, "completed");
+    assert.ok(existsSync(path.join(configDir, "data", "duskfleet.db")), "data_dir of the starter is <config>/data");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("the repository's config/agents/example.md is the starter template, byte for byte", () => {
+  const repo = path.join(here, "..", "..", "..");
+  assert.equal(
+    readFileSync(path.join(repo, "config", "agents", "example.md"), "utf8"),
+    readFileSync(path.join(repo, "packages", "core", "templates", "agents", "example.md"), "utf8"),
+  );
+});
+
 /** A minimal two-package workspace with a copy of scripts/check-pack.mjs, so the check runs on it. */
 function packWorkspace(cliVersion, webVersion) {
   const root = mkdtempSync(path.join(tmpdir(), "duskfleet-pack-"));
@@ -104,7 +156,14 @@ function packWorkspace(cliVersion, webVersion) {
   };
   write("package.json", JSON.stringify({ name: "ws", private: true, workspaces: ["packages/duskfleet", "apps/web"] }));
   write("packages/duskfleet/package.json", JSON.stringify({ name: "duskfleet", version: cliVersion }));
-  for (const f of ["dist/cli.js", "dist/index.js", "dist/core/index.js"]) write(`packages/duskfleet/${f}`, "");
+  for (const f of [
+    "dist/cli.js",
+    "dist/index.js",
+    "dist/core/index.js",
+    "dist/templates/duskfleet.yaml",
+    "dist/templates/agents/example.md",
+  ])
+    write(`packages/duskfleet/${f}`, "");
   write("apps/web/package.json", JSON.stringify({ name: "@duskfleet/web", version: webVersion }));
   for (const f of ["bin/start.mjs", "next.config.mjs"]) write(`apps/web/${f}`, "");
   write("scripts/check-pack.mjs", readFileSync(path.join(here, "..", "..", "..", "scripts", "check-pack.mjs")));

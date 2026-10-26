@@ -26,8 +26,21 @@ const PACKAGES = [
   {
     name: "duskfleet",
     dir: "packages/duskfleet",
-    allowed: [/^package\.json$/, /^README\.md$/, /^LICENSE$/, /^dist\/.+\.js$/, /^dist\/tools\.json$/],
-    required: ["dist/cli.js", "dist/index.js", "dist/core/index.js"],
+    allowed: [
+      /^package\.json$/,
+      /^README\.md$/,
+      /^LICENSE$/,
+      /^dist\/.+\.js$/,
+      /^dist\/tools\.json$/,
+      /^dist\/templates\/.+\.(md|yaml)$/,
+    ],
+    required: [
+      "dist/cli.js",
+      "dist/index.js",
+      "dist/core/index.js",
+      "dist/templates/duskfleet.yaml",
+      "dist/templates/agents/example.md",
+    ],
   },
   {
     name: "@duskfleet/web",

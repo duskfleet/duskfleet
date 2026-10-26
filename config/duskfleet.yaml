@@ -20,8 +20,9 @@ user_projects_file: null
 allowed_project_roots: []
 #  - ~/Documents/Projects
 
-# Agent used by run_agent when no agent_id is supplied. Leave unset (null) to make
-# agent_id mandatory: every agent here is bound to a project, so there is no sensible default.
+# Agent used by run_agent (and `run`) when no agent is named. null makes the agent mandatory
+# (`--agent example` for the starter agent in agents/example.md): an agent that edits files
+# should be picked on purpose, not by default.
 default_agent: null
 
 # Maximum number of Claude Code processes running at the same time.

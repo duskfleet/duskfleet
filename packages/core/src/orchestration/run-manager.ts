@@ -1057,15 +1057,18 @@ export class RunManager {
   private resolveAgent(agentId: string | undefined): AgentDefinition {
     const id = agentId ?? this.config.defaultAgent;
     if (!id) {
-      throw new Error(
-        `no agent given and no default_agent in duskfleet.yaml. Known agents: ${[...this.config.agents.keys()].join(", ")}`,
-      );
+      throw new Error(`no agent given and no default_agent in duskfleet.yaml. ${this.knownAgents()}`);
     }
     const agent = this.config.agents.get(id);
-    if (!agent) {
-      throw new Error(`unknown agent "${id}". Known agents: ${[...this.config.agents.keys()].join(", ")}`);
-    }
+    if (!agent) throw new Error(`unknown agent "${id}". ${this.knownAgents()}`);
     return agent;
+  }
+
+  /** The agent ids for an error message, or where agents are looked up when there is none. */
+  private knownAgents(): string {
+    const ids = [...this.config.agents.keys()];
+    if (ids.length) return `Known agents: ${ids.join(", ")}`;
+    return `Known agents: (none: no agent file in ${path.join(this.config.configDir, "agents")} or ${this.config.userAgentsDir})`;
   }
 
   private resolveProject(input: StartRunInput): {

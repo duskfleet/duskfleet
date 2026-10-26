@@ -55,11 +55,13 @@ npm run build
 npm run cli -- doctor          # Claude binary, version, where config and data live
 ```
 
-Try a run on a small throwaway project of your own (anything with a failing test will do),
-with the cheapest model:
+Try a run on a small throwaway project of your own (anything with a failing test will do) with
+`example`, the starter agent in `config/agents/` (haiku, $0.50 cap, may edit files and run the
+project's tests):
 
 ```bash
-npm run cli -- run --project /abs/path/to/scratch-project --model haiku -- "Fix the failing test"
+npm run cli -- agents          # lists example
+npm run cli -- run --project /abs/path/to/scratch-project --agent example --model haiku -- "Fix the failing test"
 npm run cli -- runs
 npm run web                    # dashboard on http://localhost:4777
 ```

@@ -6,7 +6,8 @@
  * copies packages/mcp/dist to packages/duskfleet/dist and packages/core/dist to
  * packages/duskfleet/dist/core, then rewrites every `@duskfleet/core` import of the copied mcp
  * files into a relative path. Only runtime files are copied (`.js` and `tools.json`): no
- * declarations, no source maps. No bundler, no new dependency.
+ * declarations, no source maps. The starter config templates (packages/core/templates) go to
+ * dist/templates. No bundler, no new dependency.
  *
  * It also copies README.md and LICENSE next to the package.json of both published packages
  * (git-ignored copies: npm only packs files inside the package folder; the README gets absolute
@@ -42,6 +43,9 @@ for (const dir of [coreDist, mcpDist]) {
 rmSync(out, { recursive: true, force: true });
 copyTree(mcpDist, out, (file) => file.endsWith(".js") || path.basename(file) === "tools.json");
 copyTree(coreDist, path.join(out, "core"), (file) => file.endsWith(".js"));
+// Starter config (duskfleet.yaml + the example agent), found by core's starterTemplatesDir() two
+// levels above dist/core/config/starter.js, i.e. dist/templates.
+copyTree(path.join(root, "packages", "core", "templates"), path.join(out, "templates"), () => true);
 
 // Rewrite the core imports of the mcp files (core's own files only import each other relatively).
 const coreEntry = path.join(out, "core", "index.js");

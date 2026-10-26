@@ -65,7 +65,9 @@ Two packages go to npm, always at the same version (one bump touches both `packa
   `npx duskfleet`. It has no source of its own: `npm run build` ends with
   `scripts/assemble-package.mjs`, which copies the built `packages/mcp/dist` to
   `packages/duskfleet/dist` and `packages/core/dist` to `dist/core` (`.js` and `tools.json` only),
-  and rewrites the `@duskfleet/core` imports into relative paths. `@duskfleet/core` and
+  copies the starter config templates of `packages/core/templates` (`duskfleet.yaml`,
+  `agents/example.md`) to `dist/templates`, where core's `starterTemplatesDir()` finds them, and
+  rewrites the `@duskfleet/core` imports into relative paths. `@duskfleet/core` and
   `@duskfleet/mcp` stay private and are never published; the runtime dependencies of `duskfleet`
   must equal those of core + mcp (the script fails otherwise). A thin package rather than renaming
   `packages/mcp`: the workspace keeps importing `@duskfleet/core` and the tests keep running on
@@ -293,7 +295,10 @@ local run-data handling, and recommended configuration.
 - **New MCP tool**: add a file in `packages/mcp/src/mcp/tools/`, register it in `packages/mcp/src/mcp/server.ts`.
 - **New builtin agent**: drop a Markdown file in `config/agents/` and list it under "Builtin
   agents" in `docs/agents.md`. Builtins are general-purpose (no `project:`, no `add_dirs`, no
-  personal paths); `packages/core/test/builtin-agents.test.js` checks it.
+  personal paths); `packages/core/test/builtin-agents.test.js` checks it. `example` is the one
+  exception to "drop a file": it is also the starter template, so edit
+  `packages/core/templates/agents/example.md` and copy it over `config/agents/example.md`
+  (`packages/mcp/test/package.test.js` fails when they differ).
 - **Schema change**: append a migration in `packages/core/src/storage/db.ts`; never edit an existing one. Then pin its digest in `packages/mcp/test/migrations.test.js` (the failing test prints it).
 - **Run status changes**: only `RunManager`, through `assertTransition`.
 - **New dashboard view**: add a route under `apps/web/app/` and a query in `apps/web/lib/data.ts`.
