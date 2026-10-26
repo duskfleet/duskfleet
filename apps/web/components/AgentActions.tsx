@@ -37,7 +37,7 @@ export function AgentActions({
     });
 
   return (
-    <span style={{ display: "inline-flex", gap: 6, alignItems: "center", flexWrap: "wrap", fontSize: "0.8rem" }}>
+    <span style={{ display: "inline-flex", gap: 6, alignItems: "center", flexWrap: "wrap", fontSize: 14 }}>
       {confirm ? (
         <>
           <span className="muted">{confirm === "delete" ? `Delete "${id}"?` : `Remove link to ${linked}?`}</span>
@@ -81,7 +81,7 @@ export function AgentActions({
         </>
       )}
       {result && (
-        <span className={result.ok ? "muted" : ""} style={{ color: result.ok ? undefined : "var(--bad)" }}>
+        <span className={result.ok ? "muted" : ""} style={{ color: result.ok ? undefined : "var(--bad-ink)" }}>
           {result.message}
         </span>
       )}
