@@ -280,6 +280,24 @@ lags until the script is run by hand. The website repository carries a copy of t
 that checks out this repository for the script, so its own label changes reach the board at
 once instead of on the next hourly run; it needs the same secret there.
 
+## Traffic snapshots
+
+GitHub keeps a repository's traffic (views, clones, referrers, popular paths) for 14 days only.
+`node scripts/traffic-snapshot.mjs [--repo <owner/name>] [--out <dir>]` reads the four
+traffic endpoints through the local `gh` login (`gh api`, no token in the repo or in `config/`)
+and writes them into one file, `data/traffic/<owner>/<name>/<YYYY-MM-DD>.json` (UTC date,
+git-ignored; `--out` replaces `data/traffic`). `--repo` defaults to `duskfleet/duskfleet`, so
+the website repository is `--repo duskfleet/duskfleet-website`. Every day keeps its own file; a
+second run on the same day overwrites that day's file, since the later answer covers the same
+window plus the hours since. The traffic API needs push access: without a `gh` login, with an
+invalid token or with a read-only one the script exits 1 with a message naming the cause.
+
+Run it at least once every 14 days. A weekly Duskfleet schedule does it, for example cron
+`0 9 * * 1` (Mondays 09:00) on an agent whose prompt runs the script once per repository and
+whose `allowed_tools` are `Bash(node scripts/traffic-snapshot.mjs:*)` and `Bash(gh api:*)`
+(permission mode `dontAsk`, a small budget, `model: haiku`). The owner creates the schedule;
+nothing in the repo runs it.
+
 ## Security model
 
 - The project path is passed as the child's **working directory**; a Claude Code run is never
