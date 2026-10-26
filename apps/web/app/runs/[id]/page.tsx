@@ -466,7 +466,7 @@ export default async function RunPage({
                 </dd>
               </dl>
               <div>
-                <div className="muted" style={{ fontSize: 13, marginBottom: 6 }}>
+                <div className="muted" style={{ fontSize: 14, marginBottom: 6 }}>
                   Exact command
                 </div>
                 <div className="cmd">
