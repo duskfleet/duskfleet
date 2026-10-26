@@ -89,6 +89,25 @@ file outside the allow-list, test files, source maps, `data/`, `.env*`, `@duskfl
 published dependency field, or two different versions; it prints both tarball sizes. To try the
 real thing: `npm pack -w duskfleet`, then `npx ./duskfleet-0.1.0.tgz --help` from another directory.
 
+### Publishing
+
+Nothing is published from a laptop. `.github/workflows/publish.yml` has two jobs:
+
+- `publish`, on a pushed tag `v*`: it first checks that the tag matches the `version` of **both**
+  packages (`v0.1.0` and `"0.1.0"`) and fails before anything else otherwise, then runs `npm ci`,
+  `npm run check`, `npm run build:web` and `npm run check:pack -- --require-web-build`, and
+  publishes `duskfleet`, then `@duskfleet/web`, with `npm publish --provenance --access public`
+  from their package directories. The job has `id-token: write` (npm signs the provenance
+  statement through GitHub's OIDC token) and takes `NODE_AUTH_TOKEN` from the `NPM_TOKEN`
+  repository secret, a granular npm token that can publish those two packages only. A version
+  already on the registry is skipped, so re-running a release whose second publish failed
+  finishes it. Provenance requires each `package.json` `repository` to name this repository.
+- `publish dry-run`, on every pull request: the same steps without a token, ending in
+  `npm publish --dry-run` for both packages, so a broken pack shows up before the tag. Instead of
+  the tag guard it checks that the two versions are equal.
+
+Like every workflow here, it pins its actions by commit SHA.
+
 One home per module: a test that only calls core functions (state machine, loader, parser, cron,
 tool summaries) lives in `packages/core/test` and imports `@duskfleet/core`; a test that needs the
 CLI, the MCP server or a spawned fake Claude lives in `packages/mcp/test`. Both import the built

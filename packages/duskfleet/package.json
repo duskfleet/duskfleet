@@ -11,6 +11,11 @@
   },
   "bugs": "https://github.com/duskfleet/duskfleet/issues",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/duskfleet/duskfleet.git",
+    "directory": "packages/duskfleet"
+  },
   "type": "module",
   "engines": {
     "node": ">=24"
