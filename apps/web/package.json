@@ -3,6 +3,13 @@
   "version": "0.1.0",
   "type": "module",
   "description": "Duskfleet dashboard: agents, running and past runs (read-only)",
+  "homepage": "https://duskfleet.com",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/duskfleet/duskfleet.git",
+    "directory": "apps/web"
+  },
+  "bugs": "https://github.com/duskfleet/duskfleet/issues",
   "license": "MIT",
   "repository": {
     "type": "git",

@@ -1,7 +1,15 @@
 {
   "name": "duskfleet",
   "version": "0.1.0",
-  "description": "A fleet of agents for your own machine.",
+  "description": "A fleet of agents for your own machine",
+  "keywords": ["claude-code", "claude", "agents", "scheduler", "cron", "mcp", "local-first", "cli"],
+  "homepage": "https://duskfleet.com",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/duskfleet/duskfleet.git",
+    "directory": "packages/duskfleet"
+  },
+  "bugs": "https://github.com/duskfleet/duskfleet/issues",
   "license": "MIT",
   "repository": {
     "type": "git",
