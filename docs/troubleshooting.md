@@ -11,7 +11,8 @@
   `/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin` in front, to find `claude` and for every
   process it starts (runs, schedule gate commands, the git reads of a run's diff). `doctor`
   prints the effective `path` and `pathDefaulted: true` when that happened. On Linux and
-  Windows the `PATH` is used as it is, even a minimal one. Such hosts also do not expand `~` in
+  Windows (experimental, [platform support](../README.md#platform-support)) the `PATH` is used
+  as it is, even a minimal one. Such hosts also do not expand `~` in
   `claude_desktop_config.json` ("No executable file at ~/..."): use absolute paths.
 - **Is `claude` logged in, will a hook block scheduled runs?** `npm run cli -- doctor --probe`
   makes one real hello run on haiku (cents) and says which of the two it hit

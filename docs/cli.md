@@ -33,6 +33,12 @@ install directories were put in front ([Troubleshooting](troubleshooting.md)).
 the lease (`serve`, `mcp`, `cli`) and whether the service is installed and running. See
 [Schedules](schedules.md#who-ticks) for the service.
 
+> [!NOTE]
+> On Windows the CLI and `install-service` (Task Scheduler) are **experimental**: implemented,
+> not run by the maintainers ([platform support](../README.md#platform-support)). The service
+> logs to `data/logs/serve.log` and keeps its task XML under `%LOCALAPPDATA%\Duskfleet`; the
+> [Windows test plan](windows-test-plan.md) lists what to check.
+
 `doctor --probe` adds a live check that `claude --version` cannot do: one minimal real run
 (`--model haiku`, a few cents at most, capped by `--max-budget-usd 0.05`; the command says so on
 stderr before spending). It runs in an empty temporary directory with the same unattended

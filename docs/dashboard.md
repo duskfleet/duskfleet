@@ -9,7 +9,7 @@ A Next.js app that reads the database the MCP server writes (SQLite WAL mode). I
 while the MCP server is running or not; it only needs `config/` and `data/duskfleet.db`. It
 has no authentication and answers on localhost only (see [Remote access](#remote-access)).
 It sends no telemetry: the `dev` and `build` scripts set `NEXT_TELEMETRY_DISABLED=1` (on
-Windows, set it in your shell first), and `start` / `duskfleet-web` (`bin/start.mjs`) default it
+Windows, an [experimental platform](../README.md#platform-support), set it in your shell first), and `start` / `duskfleet-web` (`bin/start.mjs`) default it
 to `1` on every platform.
 
 Five views. The runs list and a running run's detail auto-refresh every 3 seconds (pause button
