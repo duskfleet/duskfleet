@@ -232,6 +232,140 @@ test("cli schedules run-now stamps run_requested_at by id or name and spawns not
   }
 });
 
+/** A fresh clone: no config/agents directory at all, default_agent null, claude found through CLAUDE_BIN. */
+function makeFreshRoot() {
+  const root = mkdtempSync(path.join(tmpdir(), "duskfleet-cli-fresh-"));
+  const configDir = path.join(root, "config");
+  mkdirSync(configDir);
+  const project = path.join(root, "project");
+  mkdirSync(project);
+  writeFileSync(
+    path.join(configDir, "duskfleet.yaml"),
+    "data_dir: ../data\ndefault_agent: null\nclaude:\n  default_timeout_minutes: 0.05\n",
+  );
+  writeFileSync(path.join(configDir, "projects.yaml"), "projects: {}\n");
+  return { root, configDir, project: realpathSync(project), agentsDir: path.join(root, "data", "agents") };
+}
+
+const QUICK_START_PROMPT =
+  "You fix the failing test in this project. Run the tests, read the failure, change the minimum code, run them again. No git, no installs.";
+
+test("README Quick start on a fresh clone: no agents, agents create fixer, then run --agent fixer completes", () => {
+  const { root, configDir, project, agentsDir } = makeFreshRoot();
+  const env = { CLAUDE_BIN: fakeBinary };
+  try {
+    const empty = cli(configDir, ["agents"], env);
+    assert.equal(empty.status, 0, empty.stderr);
+    assert.deepEqual(JSON.parse(empty.stdout), []);
+    assert.match(empty.stderr, /Duskfleet ships none.*\n.*agents create <id>/);
+
+    const doctor = cli(configDir, ["doctor"], env);
+    assert.deepEqual(JSON.parse(doctor.stdout).agents, []);
+
+    const noAgent = cli(configDir, ["run", "--project", project, "--", "Fix the failing test"], env);
+    assert.notEqual(noAgent.status, 0);
+    assert.match(
+      noAgent.stderr,
+      /Known agents: \(none: no agent file in .+ or .+; create one with "agents create <id>"\)/,
+    );
+
+    const created = cli(configDir, ["agents", "create", "fixer", "--model", "haiku", "--", QUICK_START_PROMPT], env);
+    assert.equal(created.status, 0, created.stderr);
+    const out = JSON.parse(created.stdout);
+    assert.equal(out.created, true);
+    assert.equal(out.agent.id, "fixer");
+    assert.equal(out.agent.source, "user");
+    assert.equal(out.agent.model, "haiku");
+    assert.equal(out.agent.maxBudgetUsd, 0.5);
+    assert.equal(out.agent.permissionMode, "dontAsk");
+    assert.equal(out.agent.timeoutMinutes, 10);
+    assert.ok(out.agent.allowedTools.includes("Bash(npm test:*)"));
+    assert.ok(out.agent.allowedTools.includes("Edit"));
+    assert.deepEqual(readdirSync(agentsDir), ["fixer.md"], "written to the user agents dir, never config/agents");
+    assert.deepEqual(readdirSync(configDir).sort(), ["duskfleet.yaml", "projects.yaml"]);
+
+    const listed = JSON.parse(cli(configDir, ["agents"], env).stdout);
+    assert.deepEqual(
+      listed.map((a) => a.id),
+      ["fixer"],
+    );
+
+    const run = cli(configDir, ["run", "--project", project, "--agent", "fixer", "--", "Fix the failing test"], env);
+    assert.equal(run.status, 0, run.stderr);
+    const r = JSON.parse(run.stdout);
+    assert.equal(r.status, "completed");
+    assert.equal(r.agentId, "fixer");
+    assert.equal(r.command.binary, fakeBinary);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("agents create refuses an existing id without --force, home paths, secrets and empty prompts, leaving no file", () => {
+  const { root, configDir, agentsDir } = makeFreshRoot();
+  const env = { CLAUDE_BIN: fakeBinary };
+  const files = () => {
+    try {
+      return readdirSync(agentsDir).sort();
+    } catch {
+      return [];
+    }
+  };
+  try {
+    const first = cli(configDir, ["agents", "create", "fixer", "--", "Be brief."], env);
+    assert.equal(first.status, 0, first.stderr);
+
+    const again = cli(configDir, ["agents", "create", "fixer", "--model", "sonnet", "--", "Be brief."], env);
+    assert.notEqual(again.status, 0);
+    assert.match(again.stderr, /agent "fixer" already exists \(.+fixer\.md\)\. Pass --force to replace it\./);
+
+    const forced = cli(
+      configDir,
+      ["agents", "create", "fixer", "--force", "--model", "sonnet", "--", "Be brief."],
+      env,
+    );
+    assert.equal(forced.status, 0, forced.stderr);
+    assert.equal(JSON.parse(forced.stdout).agent.model, "sonnet");
+    assert.equal(JSON.parse(forced.stdout).overrode, "user");
+
+    const home = ["", "Users", "alice"].join("/");
+    const homePath = cli(
+      configDir,
+      ["agents", "create", "leaky", "--description", `notes in ${home}/x`, "--", "Hi."],
+      env,
+    );
+    assert.notEqual(homePath.status, 0);
+    assert.match(homePath.stderr, /macOS home path/);
+
+    const secret = cli(configDir, ["agents", "create", "secret", "--", `Use sk-ant-${"a".repeat(20)} for calls.`], env);
+    assert.notEqual(secret.status, 0);
+    assert.match(secret.stderr, /Anthropic API key/);
+
+    const noPrompt = cli(configDir, ["agents", "create", "mute"], env);
+    assert.notEqual(noPrompt.status, 0);
+    assert.match(noPrompt.stderr, /needs a system prompt/);
+
+    const badBudget = cli(configDir, ["agents", "create", "cheap", "--budget", "lots", "--", "Hi."], env);
+    assert.notEqual(badBudget.status, 0);
+    assert.match(badBudget.stderr, /--budget must be a number/);
+
+    const bypass = cli(
+      configDir,
+      ["agents", "create", "wild", "--permission-mode", "bypassPermissions", "--", "Hi."],
+      env,
+    );
+    assert.notEqual(bypass.status, 0);
+    assert.match(bypass.stderr, /bypassPermissions cannot be set here/);
+
+    const badId = cli(configDir, ["agents", "create", "Bad Id", "--", "Hi."], env);
+    assert.notEqual(badId.status, 0);
+
+    assert.deepEqual(files(), ["fixer.md"], "no file left behind by a refused create");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("a CLAUDE_BIN that does not exist falls through to claude.binary and never reaches the run's child", () => {
   const { root, configDir } = makeRoot();
   try {

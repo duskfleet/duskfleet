@@ -20,8 +20,20 @@ entry that does the job, link it; write a persona only when nothing exists.
 
 | Where | Who writes it | Purpose |
 |---|---|---|
-| `config/agents/<id>.md` | you, in Git | **builtin** agents committed with the repo |
-| `data/agents/<id>.md` (`user_agents_dir`) | `create_agent` over MCP, or by hand | **user** agents, git-ignored. Same id as a builtin = override |
+| `config/agents/<id>.md` | you, in Git | **builtin** agents: where a checkout *may* keep agents it commits |
+| `data/agents/<id>.md` (`user_agents_dir`) | `agents create` on the CLI, `create_agent` over MCP, or by hand | **user** agents, git-ignored. Same id as a builtin = override |
+
+Duskfleet ships no starter or default agent (`default_agent: null`): your first agent is one you
+create. From the CLI, `agents create` writes an own agent with safe defaults (a $0.50 budget,
+`dontAsk`, file tools plus the common test commands, 10 minutes):
+
+```bash
+npm run cli -- agents create fixer --model haiku -- "You fix the failing test in this project. Run the tests, read the failure, change the minimum code, run them again. No git, no installs."
+```
+
+It goes through the same validate, write, reload and roll-back path as `create_agent` and refuses
+an existing id unless `--force` ([CLI](cli.md#agents-create) lists the flags). Use `create_agent`
+over MCP for a link agent.
 
 Both are re-read on every run and every `list_agents` call, so edits apply without restarting
 anything. Code never writes into `config/agents`. Because a user agent may later be committed,
@@ -31,7 +43,8 @@ field, and store `add_dirs` inside your home directory as `~/...`
 
 ## Builtin agents
 
-General-purpose patterns shipped in `config/agents/`, not bound to any project. Point them at a
+Two specialised patterns sit in this repository's `config/agents/`, not bound to any project.
+They are not a starter agent and no run uses them unless you name them. Point them at a
 project with `run_agent` or a schedule; to change their envelope (model, allow-list, budget),
 copy the file into `data/agents/` with the same id and edit the copy.
 

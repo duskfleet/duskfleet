@@ -1056,14 +1056,16 @@ export class RunManager {
 
   private resolveAgent(agentId: string | undefined): AgentDefinition {
     const id = agentId ?? this.config.defaultAgent;
+    const known =
+      this.config.agents.size > 0
+        ? [...this.config.agents.keys()].join(", ")
+        : `(none: no agent file in ${path.join(this.config.configDir, "agents")} or ${this.config.userAgentsDir}; create one with "agents create <id>")`;
     if (!id) {
-      throw new Error(
-        `no agent given and no default_agent in duskfleet.yaml. Known agents: ${[...this.config.agents.keys()].join(", ")}`,
-      );
+      throw new Error(`no agent given and no default_agent in duskfleet.yaml. Known agents: ${known}`);
     }
     const agent = this.config.agents.get(id);
     if (!agent) {
-      throw new Error(`unknown agent "${id}". Known agents: ${[...this.config.agents.keys()].join(", ")}`);
+      throw new Error(`unknown agent "${id}". Known agents: ${known}`);
     }
     return agent;
   }

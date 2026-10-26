@@ -4,9 +4,9 @@
 # Where runtime data lives (SQLite database and per-run logs). Git-ignored.
 data_dir: ../data
 
-# Where agents created at runtime (create_agent over MCP, or by hand) are stored.
-# Agents in config/agents are the versioned builtins; a user agent with the same id
-# overrides the builtin. Default: <data_dir>/agents (git-ignored).
+# Where agents created at runtime (`agents create` on the CLI, create_agent over MCP,
+# or by hand) are stored. Agent files a checkout commits go in config/agents (builtins);
+# a user agent with the same id overrides the builtin. Default: <data_dir>/agents (git-ignored).
 user_agents_dir: null
 
 # Private project registry, merged over config/projects.yaml (same id = private wins).
@@ -20,8 +20,9 @@ user_projects_file: null
 allowed_project_roots: []
 #  - ~/Documents/Projects
 
-# Agent used by run_agent when no agent_id is supplied. Leave unset (null) to make
-# agent_id mandatory: every agent here is bound to a project, so there is no sensible default.
+# Agent used by run_agent (and `run` without --agent) when none is supplied. null makes
+# the agent mandatory: Duskfleet ships no starter agent, so there is no sensible default.
+# Create your first one with `npm run cli -- agents create <id> --model haiku -- "<prompt>"`.
 default_agent: null
 
 # Maximum number of Claude Code processes running at the same time.

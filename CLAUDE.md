@@ -17,6 +17,7 @@ npm run check:pack   # npm pack --dry-run of duskfleet + @duskfleet/web: allow-l
 npm run typecheck    # core + mcp;  web: npm run typecheck -w @duskfleet/web
 npm test             # packages/core/test then packages/mcp/test, node --test, ~25 s, no network, no cost
 npm run cli -- doctor | agents | projects | run | runs | run-info | schedules
+npm run cli -- agents create <id> --model haiku -- "<system prompt>"   # own agent in data/agents, same path as create_agent
 npm run cli -- schedules run-now <id or name>   # stamps run_requested_at; the lease holder fires it next tick.
                      # The command for git hooks / scripts: `run --no-wait` leaves the run unread once the CLI exits
 npm run cli -- serve  # long-running scheduler process; the MCP server also ticks
@@ -55,13 +56,15 @@ npm workspaces, one `config/` and one SQLite database shared by three deliverabl
   (`app/schedules/actions.ts`: pause/resume, cron + time zone, delete, run now, through core's
   `updateSchedule` / `requestRun`; run now only stamps `run_requested_at`, the lease holder
   fires it on its next tick). No auth, localhost only.
-- `config/`: `duskfleet.yaml`, `agents/*.md` (builtin agents: YAML frontmatter + system
-  prompt body), `projects.yaml` (repo-relative examples only). Meant to be committed.
+- `config/`: `duskfleet.yaml`, `agents/*.md` (where a checkout may commit agents, "builtin":
+  YAML frontmatter + system prompt body; only specialised patterns here, never a starter or
+  default agent: owner decision 2026-10-26, a user's first agent comes from `agents create`),
+  `projects.yaml` (repo-relative examples only). Meant to be committed.
   **This repo is public: no usernames, home paths or machine-specific values in versioned
   files, docs or examples** (`npm run check:public` enforces it in CI; placeholders `<you>`, `me` are fine). Personal projects live in `data/projects.yaml`, personal agents
   in `data/agents/`, the MCP registration in `.mcp.json` (all git-ignored).
 - `data/`: `duskfleet.db`, `logs/<run_id>.jsonl` and `agents/*.md` (user agents written by
-  `create_agent`; same id as a builtin overrides it). Git-ignored runtime state. Code must
+  `create_agent` or the CLI's `agents create`; same id as a builtin overrides it). Git-ignored runtime state. Code must
   never write into `config/agents`; agent file I/O lives in `core/src/config/agent-files.ts`.
 - `playground/`: ignored scratch directory for a local run target when trying things out.
   Not part of the repo; register it in the private `data/projects.yaml` if needed.
@@ -133,9 +136,10 @@ npm workspaces, one `config/` and one SQLite database shared by three deliverabl
   real claude instead of fake-claude.js. Test files import `test/helpers.js` (drops it) before
   `@duskfleet/core` and spawn processes with `testEnv()`; `childEnv()` never passes it to runs.
 - **Agents can be bound to a project** (`project: <id>`): grouped, default target, refused
-  elsewhere. `create_agent`/`update_agent` validate the spec *before* writing, and roll the
-  file back if the config no longer loads: one bad agent file would otherwise break every
-  later config reload. They also refuse home paths and secret-looking values in any field
+  elsewhere. `create_agent`/`update_agent` and the CLI's `agents create` validate the spec
+  *before* writing, and roll the file back if the config no longer loads: one bad agent file
+  would otherwise break every later config reload. That path is one, in core
+  (`core/src/config/agent-create.ts`); never re-implement it in a caller. They also refuse home paths and secret-looking values in any field
   (`assertAgentSpecClean`, `core/src/config/agent-lint.ts`); `add_dirs` under home become `~/...`.
 - **Two agent kinds, always explicit**: `own` (persona written here, body = system prompt,
   no `claude_agent`) or `link` (`claude_agent` + a project folder given as `project_path` or a

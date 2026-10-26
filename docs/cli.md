@@ -12,7 +12,8 @@ npm run cli -- run --no-wait --project /path -- "..."     # return immediately (
 npm run cli -- runs --status completed --limit 10
 npm run cli -- run-info <run_id> --events   # includes subagents; --events adds the timeline
 npm run cli -- repair-subagents             # backfill subagent rows of finished runs from their logs
-npm run cli -- agents
+npm run cli -- agents                                     # empty list + a hint to agents create on a fresh install
+npm run cli -- agents create fixer --model haiku -- "You fix the failing test in this project. ..."   # see below
 npm run cli -- projects
 npm run cli -- schedules
 npm run cli -- schedules run-now "pr review"              # schedule id or name; the lease holder fires it on its next tick
@@ -24,6 +25,45 @@ npm run cli -- install-service [--print]                  # register `serve` wit
 npm run cli -- uninstall-service
 npm run cli -- tools                                      # the MCP tool catalogue
 ```
+
+## First run
+
+Duskfleet ships no starter agent and `default_agent` is `null`, so a run needs `--agent`. The
+README Quick start creates one, then runs it:
+
+```bash
+npm run cli -- doctor
+npm run cli -- agents create fixer --model haiku -- "You fix the failing test in this project. Run the tests, read the failure, change the minimum code, run them again. No git, no installs."
+npm run cli -- run --project /abs/path/to/scratch-project --agent fixer -- "Fix the failing test"
+```
+
+A run with no agent, when none exists, fails with
+`Known agents: (none: no agent file in <config>/agents or <user agents dir>; create one with "agents create <id>")`.
+
+## agents create
+
+`agents create <id> [flags] -- "<system prompt>"` writes an **own** agent (the prompt is its
+persona) to `user_agents_dir` (`data/agents/<id>.md`), the same file and the same checks as the
+MCP tool `create_agent`: the spec is validated before anything is written, home directory paths
+and secret-looking values are refused in every field, and the file is removed again if the
+config no longer loads. An existing id is refused unless `--force` is given. For a **link**
+agent use `create_agent` over MCP ([Agents](agents.md)).
+
+| Flag | Frontmatter field | Default when omitted |
+|---|---|---|
+| `--model <m>` | `model` | none: the Claude Code default, which can be the most expensive model |
+| `--budget <usd>` | `max_budget_usd` | `0.5` |
+| `--permission-mode <mode>` | `permission_mode` | `dontAsk` (`bypassPermissions` is refused, as in `create_agent`) |
+| `--allowed-tools <a,b>` | `allowed_tools` | `Read`, `Grep`, `Glob`, `Edit`, `Write` and `Bash(...)` for `npm test`, `npm run test`, `npx vitest`, `npx jest`, `pytest`, `python -m pytest`, `cargo test`, `go test`, `make test` |
+| `--disallowed-tools <a,b>` | `disallowed_tools` | none |
+| `--timeout <minutes>` | `timeout_minutes` | `10` |
+| `--description <text>` | `description` | empty |
+| `--prompt-file <file>` | body (system prompt) | instead of the text after `--` |
+| `--force` | | overwrite an agent with the same id (a builtin id becomes a user override) |
+
+It prints `{ created, overrode, agent }` as JSON and the next command on stderr.
+
+## doctor, logs and diffs
 
 `doctor` prints the effective `path` used to find `claude` and passed to runs; `pathDefaulted`
 is true on macOS when the inherited `PATH` was missing or minimal (a GUI-launched host) and the usual
