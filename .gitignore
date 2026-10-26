@@ -3,6 +3,8 @@ dist/
 .next/
 next-env.d.ts
 data/
+# snapshots written by scripts/traffic-snapshot.mjs (already under data/, listed to be explicit)
+data/traffic/
 *.tsbuildinfo
 *.log
 *.tgz
