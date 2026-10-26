@@ -42,10 +42,20 @@ project on your disk and keeps a record of what happened.
 
 ## Quick start
 
-Requirements: macOS or Linux, Node.js **24+** (built-in `node:sqlite`, no native addons; `.nvmrc`
-pins it, and an older Node gets `Duskfleet needs Node 24 or newer; you have vX.Y.Z`), and
-[Claude Code](https://docs.anthropic.com/en/docs/claude-code) installed and **logged in** for
-the user that runs Duskfleet (Duskfleet does not manage authentication).
+Requirements: a supported platform (below), Node.js **24+** (built-in `node:sqlite`, no native
+addons; `.nvmrc` pins it, and an older Node gets `Duskfleet needs Node 24 or newer; you have
+vX.Y.Z`), and [Claude Code](https://docs.anthropic.com/en/docs/claude-code) installed and
+**logged in** for the user that runs Duskfleet (Duskfleet does not manage authentication).
+
+### Platform support
+
+| Platform | Status | Notes |
+|---|---|---|
+| macOS | Supported | Developed and run daily by the maintainers; `install-service` uses launchd |
+| Linux | Supported | `install-service` uses a systemd user unit |
+| Windows | **Experimental** | Implemented (`install-service` registers a Task Scheduler logon task) but not run by the maintainers. The service log is `data/logs/serve.log`, the task XML is kept under `%LOCALAPPDATA%\Duskfleet`. Help verify it with the [Windows test plan](docs/windows-test-plan.md) |
+
+This table is the one place that states platform support; other pages link here.
 
 ```bash
 git clone https://github.com/duskfleet/duskfleet.git
@@ -127,6 +137,7 @@ start.
 | [Security](docs/security.md) | Process, filesystem, permissions, dashboard and local run-data boundaries |
 | [Development](docs/development.md) | Repository layout, code map, build and tests, extending |
 | [Troubleshooting](docs/troubleshooting.md) | Stuck runs, denials, orphaned runs, `doctor` failures |
+| [Windows test plan](docs/windows-test-plan.md) | Step-by-step checks to verify the experimental Windows support, with a results column |
 
 ## License
 
