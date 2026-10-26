@@ -9,7 +9,8 @@
  * declarations, no source maps. No bundler, no new dependency.
  *
  * It also copies README.md and LICENSE next to the package.json of both published packages
- * (git-ignored copies: npm only packs files inside the package folder) and fails when the
+ * (git-ignored copies: npm only packs files inside the package folder; the README gets absolute
+ * image and link URLs for npmjs.com, see npmReadme) and fails when the
  * runtime dependencies of `duskfleet` drift from those of core + mcp.
  *
  * Usage: node scripts/assemble-package.mjs   (after `npm run build`; run by `npm run build`)
@@ -86,9 +87,37 @@ if (drift.length) {
 for (const target of [pkgDir, path.join(root, "apps", "web")]) {
   copyFileSync(path.join(root, "LICENSE"), path.join(target, "LICENSE"));
 }
-copyFileSync(path.join(root, "README.md"), path.join(pkgDir, "README.md"));
+writeFileSync(path.join(pkgDir, "README.md"), npmReadme(readFileSync(path.join(root, "README.md"), "utf8")));
 
 console.log(`assemble-package: ${path.relative(root, out)} ready (${rewritten} ${CORE} imports rewritten)`);
+
+/**
+ * The README as npmjs.com renders it: relative image paths (`src`, `srcset`) become
+ * raw.githubusercontent.com URLs so the banner renders, relative links become GitHub URLs, and
+ * the duskfleet.com links carry the npm UTM parameters instead of the GitHub ones.
+ */
+function npmReadme(text) {
+  const RAW = "https://raw.githubusercontent.com/duskfleet/duskfleet/main/";
+  const BLOB = "https://github.com/duskfleet/duskfleet/blob/main/";
+  const SITE = "https://duskfleet.com/?utm_source=npm&utm_medium=referral&utm_campaign=always-on&utm_content=readme";
+  const relative = (url) => !/^([a-z][a-z0-9+.-]*:|#|\/)/i.test(url);
+  let images = 0;
+  let site = 0;
+  const out = text
+    .replace(/\b(src|srcset)="([^"]+)"/g, (m, attr, url) => {
+      if (!relative(url)) return m;
+      images++;
+      return `${attr}="${RAW}${url}"`;
+    })
+    .replace(/\]\(([^)\s]+)\)/g, (m, url) => (relative(url) ? `](${BLOB}${url})` : m))
+    .replace(/https:\/\/duskfleet\.com\/?(\?[^)\s"]*)?(?=[)\s"])/g, () => {
+      site++;
+      return SITE;
+    });
+  if (images === 0) fail("README.md: no relative image to rewrite for npm (did the banner move?)");
+  if (site === 0) fail("README.md: no duskfleet.com link to tag for npm");
+  return out;
+}
 
 function copyTree(from, to, keep) {
   for (const file of walk(from)) {
