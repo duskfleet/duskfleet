@@ -64,6 +64,9 @@ npm run cli -- runs
 npm run web                    # dashboard on http://localhost:4777
 ```
 
+Before running agents unattended, review the [security boundaries](docs/security.md) and set
+[`allowed_project_roots`](docs/configuration.md#configduskfleetyaml) to the project directories you intend to expose.
+
 > [!WARNING]
 > Real runs cost money. An agent without an explicit `model` uses the Claude Code default; set
 > `haiku` or `sonnet` while experimenting.
@@ -121,7 +124,8 @@ start.
 | [MCP server](docs/mcp-server.md) | Registering in Claude Desktop and Claude Code, the tool catalogue, a typical conversation |
 | [CLI](docs/cli.md) | Commands, and what a run records |
 | [Dashboard](docs/dashboard.md) | The five views and what "needs review" means |
-| [Development](docs/development.md) | Repository layout, code map, build and tests, security model, extending |
+| [Security](docs/security.md) | Process, filesystem, permissions, dashboard and local run-data boundaries |
+| [Development](docs/development.md) | Repository layout, code map, build and tests, extending |
 | [Troubleshooting](docs/troubleshooting.md) | Stuck runs, denials, orphaned runs, `doctor` failures |
 
 ## License
