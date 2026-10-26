@@ -340,4 +340,13 @@ local run-data handling, and recommended configuration.
   | `--setting-sources <list>` | Restrict which settings files the child loads (`claude.setting_sources`) |
   | `-r, --resume <id>` | Not used by the executor; surfaced as the "resume this run" command |
 
+  `duskfleet mcp register --target claude-code` runs one more command, `claude mcp add`, with
+  the flags checked against `claude mcp add --help` on 2026-10-21:
+
+  | Flag | Purpose in Duskfleet |
+  |---|---|
+  | `-s, --scope <local\|user\|project>` | `--scope user`: the server is available in every project |
+  | `-e, --env <KEY=value>` | `CLAUDE_BIN`, and `DUSKFLEET_CONFIG` when the server would not find its config |
+  | `<name> -- <command> [args...]` | Name `duskfleet`, then the server command; stdio is the default transport |
+
 Keep these pages in sync when behaviour changes.

@@ -19,7 +19,9 @@ import { fileURLToPath } from "node:url";
  *   duskfleet serve            # long-running scheduler process (what the service runs)
  *   duskfleet install-service [--print]   # register `serve` with launchd / systemd --user / Task Scheduler
  *   duskfleet uninstall-service
- *   duskfleet doctor           # also reports the service and who holds the scheduler lease
+ *   duskfleet mcp register --target claude-code|claude-desktop [--dry-run] [--yes]   # preview, backup, write
+ *   duskfleet mcp status       # which Claude hosts have a duskfleet entry, and what it runs
+ *   duskfleet doctor         # also reports the service and who holds the scheduler lease
  *   duskfleet doctor --probe   # plus one real hello run on haiku (costs cents): auth, blocking hooks
  *   duskfleet --version        # handled in cli.ts, before the Node version check
  */
@@ -39,6 +41,17 @@ import {
   summarizeRun,
 } from "@duskfleet/core";
 import { bootstrap } from "./bootstrap.js";
+import {
+  applyDesktop,
+  desktopConfigPath,
+  MCP_TARGETS,
+  type McpTarget,
+  mcpStatus,
+  planClaudeCode,
+  planDesktop,
+  runClaudeCodeAdd,
+  serverEntry,
+} from "./mcp-register.js";
 import { PROBE_COST_NOTE, type ProbeReport, probeNotRun, runProbe } from "./probe.js";
 import {
   installService,
@@ -49,6 +62,7 @@ import {
   uninstallService,
 } from "./service.js";
 import { buildToolCatalog } from "./tools-catalog.js";
+import { packageVersion } from "./version.js";
 
 function print(value: unknown): void {
   process.stdout.write(JSON.stringify(value, null, 2) + "\n");
@@ -82,6 +96,8 @@ function usage(asked = false): never {
       "  duskfleet serve",
       "  duskfleet install-service [--print]",
       "  duskfleet uninstall-service",
+      "  duskfleet mcp register --target claude-code|claude-desktop [--dry-run] [--yes]",
+      "  duskfleet mcp status",
       "  duskfleet doctor [--probe]",
       "  duskfleet --help",
       "  duskfleet --version",
@@ -198,6 +214,84 @@ function serviceTarget(claudeBin: string | null, dataDir: string, configDir: str
   };
 }
 
+/** Ask y/N on a terminal; anything but a terminal (a script, CI) needs --yes instead. */
+async function confirm(question: string): Promise<boolean> {
+  if (!process.stdin.isTTY) {
+    process.stderr.write("not a terminal: pass --yes to apply the change without asking (nothing was changed)\n");
+    return false;
+  }
+  const { createInterface } = await import("node:readline/promises");
+  const rl = createInterface({ input: process.stdin, output: process.stderr });
+  try {
+    return /^y(es)?$/i.test((await rl.question(`${question} [y/N] `)).trim());
+  } finally {
+    rl.close();
+  }
+}
+
+/**
+ * `mcp register`: print exactly what changes (the `claude mcp add` command, or the diff of the
+ * Claude Desktop entry), stop there on --dry-run, else confirm (or --yes), back up, write.
+ * Returns the exit code.
+ */
+async function mcpRegister(
+  app: Awaited<ReturnType<typeof bootstrap>>,
+  target: McpTarget,
+  dryRun: boolean,
+  yes: boolean,
+): Promise<number> {
+  // dist/index.js sits next to this module; the config is exported only when the server would
+  // not find it by walking up from there (same rule as the service unit).
+  const entryFile = path.join(path.dirname(fileURLToPath(import.meta.url)), "index.js");
+  const { entry, form } = serverEntry({
+    nodeBin: process.execPath,
+    serverEntry: entryFile,
+    claudeBin: app.executor.binary,
+    configDir: serviceDirs(findRepoRoot(entryFile), app.config.configDir).configDir,
+    version: packageVersion(),
+  });
+  const out = (s: string) => process.stdout.write(`${s}\n`);
+  out(
+    form === "npx"
+      ? `server command: npx, pinned to duskfleet@${packageVersion()} (this CLI runs from npx's temporary cache)`
+      : "server command: node + the absolute path of this install's MCP server",
+  );
+
+  if (target === "claude-code") {
+    const plan = planClaudeCode(entry);
+    if (plan.upToDate) {
+      out(`Claude Code already has "duskfleet" with this command; nothing to do.`);
+      return 0;
+    }
+    if (plan.conflict) {
+      process.stderr.write(
+        `Claude Code already has a user-scope "duskfleet" entry running ${[plan.conflict.command, ...plan.conflict.args].join(" ")}.\nRemove it first (claude mcp remove duskfleet), then run this again.\n`,
+      );
+      return 1;
+    }
+    out(`will run:\n  ${plan.display}`);
+    if (dryRun) return 0;
+    if (!yes && !(await confirm("Run it?"))) return 1;
+    return runClaudeCodeAdd(app.executor.binary ?? "claude", plan.args);
+  }
+
+  const plan = planDesktop(desktopConfigPath(), entry);
+  if (!plan.changed) {
+    out(`${plan.path} already has this "duskfleet" entry; nothing to do.`);
+    return 0;
+  }
+  out(plan.diff);
+  if (dryRun) {
+    out("dry run: nothing was written");
+    return 0;
+  }
+  if (!yes && !(await confirm(`Write ${plan.path}${plan.exists ? " (a .bak copy is made first)" : ""}?`))) return 1;
+  const { backup } = applyDesktop(plan);
+  if (backup) out(`backup: ${backup}`);
+  out(`written: ${plan.path}\nRestart Claude Desktop to load the duskfleet tools.`);
+  return 0;
+}
+
 async function main(): Promise<void> {
   const [command, ...rest] = process.argv.slice(2);
   if (!command) usage();
@@ -205,6 +299,11 @@ async function main(): Promise<void> {
   if (command === "--help" || command === "-h" || command === "help") usage(true);
   if (command === "tools") {
     print(await buildToolCatalog());
+    return;
+  }
+  // Read-only and config-free: works before `init`.
+  if (command === "mcp" && rest[0] === "status" && rest.length === 1) {
+    print(mcpStatus());
     return;
   }
 
@@ -243,6 +342,23 @@ async function main(): Promise<void> {
       const r = uninstallService(process.platform);
       print({ uninstalled: true, ...r });
       return done();
+    }
+    case "mcp": {
+      const [sub, ...args] = rest;
+      if (sub !== "register") usage();
+      const { values } = parseArgs({
+        args,
+        options: {
+          target: { type: "string" },
+          "dry-run": { type: "boolean", default: false },
+          yes: { type: "boolean", default: false },
+        },
+      });
+      const target = values.target as McpTarget | undefined;
+      if (!target || !MCP_TARGETS.includes(target)) {
+        throw new Error(`mcp register needs --target ${MCP_TARGETS.join(" or ")}`);
+      }
+      return done(await mcpRegister(app, target, values["dry-run"], values.yes));
     }
     case "agents": {
       const [sub, ...args] = rest;
