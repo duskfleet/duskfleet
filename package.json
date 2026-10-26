@@ -25,8 +25,9 @@
     "check:public": "node scripts/check-public.mjs",
     "check:docs": "node scripts/check-docs.mjs",
     "check:pack": "node scripts/check-pack.mjs",
+    "check:quickstart": "node scripts/check-quickstart.mjs",
     "test:coverage": "npm run test:coverage -w @duskfleet/mcp",
-    "check": "npm run check:public && npm run lint && npm run build && npm run check:docs && npm run check:pack && npm run typecheck && npm run typecheck -w @duskfleet/web && npm test"
+    "check": "npm run check:public && npm run lint && npm run build && npm run check:docs && npm run check:quickstart && npm run check:pack && npm run typecheck && npm run typecheck -w @duskfleet/web && npm test"
   },
   "devDependencies": {
     "@biomejs/biome": "^2.5.15",
