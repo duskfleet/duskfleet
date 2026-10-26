@@ -69,7 +69,11 @@ Two packages go to npm, always at the same version (one bump touches both `packa
   `@duskfleet/mcp` stay private and are never published; the runtime dependencies of `duskfleet`
   must equal those of core + mcp (the script fails otherwise). A thin package rather than renaming
   `packages/mcp`: the workspace keeps importing `@duskfleet/core` and the tests keep running on
-  `packages/mcp/dist`, and only the copy is rewritten.
+  `packages/mcp/dist`, and only the copy is rewritten. The script also writes the npm copy of
+  `README.md`: relative image paths become `raw.githubusercontent.com` URLs (so the banner renders
+  on npmjs.com), relative links become GitHub URLs, and the duskfleet.com links carry
+  `utm_source=npm` instead of the GitHub parameters. Both manifests carry `homepage`,
+  `repository` (with `directory`) and `bugs`.
 - `@duskfleet/web` (`apps/web`): the built dashboard (`.next/`, `public/`, `next.config.mjs`, and
   `tools.json`, the MCP catalogue copied from `packages/mcp/dist` by `scripts/copy-tools.mjs` at
   the end of its build, so run `npm run build` first) and
