@@ -8,7 +8,15 @@ import { NavTabs } from "@/components/NavTabs";
 import { schedulerEnabled, schedulerLease } from "@/lib/data";
 
 // Self-hosted at build time by next/font; globals.css maps these to --font-display/-sans/-mono.
-const outfit = Outfit({ subsets: ["latin"], weight: ["600", "700"], variable: "--font-outfit", display: "swap" });
+// Every font-weight in globals.css and the components must be one of these instances, never synthesized:
+// Outfit 500/600/700, Plex Sans 400/500/600, Plex Mono 400/500.
+// Outfit 500: the muted counts next to page titles and the scheduler strip's secondary values.
+const outfit = Outfit({
+  subsets: ["latin"],
+  weight: ["500", "600", "700"],
+  variable: "--font-outfit",
+  display: "swap",
+});
 // 600 on top of the brand's 400/500: the dashboard bolds labels and badges, which would otherwise be synthesized.
 const plexSans = IBM_Plex_Sans({
   subsets: ["latin"],
