@@ -63,13 +63,19 @@ jobs:
       - name: Pack check with the dashboard build
         run: npm run check:pack -- --require-web-build
 
+      # npm "auto-corrects" a manifest it dislikes (it dropped the `bin` entries on 2026-10-28)
+      # and only warns; here that warning is a failure, so the tag is never cut on such a pack.
       - name: npm publish --dry-run (duskfleet)
         working-directory: packages/duskfleet
-        run: npm publish --dry-run --access public
+        run: |
+          npm publish --dry-run --access public 2>&1 | tee "$RUNNER_TEMP/dry-run-duskfleet.log"
+          ! grep -q "auto-corrected" "$RUNNER_TEMP/dry-run-duskfleet.log"
 
       - name: npm publish --dry-run (@duskfleet/web)
         working-directory: apps/web
-        run: npm publish --dry-run --access public
+        run: |
+          npm publish --dry-run --access public 2>&1 | tee "$RUNNER_TEMP/dry-run-web.log"
+          ! grep -q "auto-corrected" "$RUNNER_TEMP/dry-run-web.log"
 
   publish:
     name: publish

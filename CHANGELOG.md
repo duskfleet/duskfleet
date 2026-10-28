@@ -16,6 +16,10 @@ All notable changes to Duskfleet are listed here. The format follows
 
 - Runs and schedule command gates get an allow-list of Duskfleet's environment instead of all of it: `GITHUB_TOKEN`, `NPM_TOKEN`, `AWS_*` and the like no longer reach an agent unless named in `claude.env_passthrough` or an agent's `env_passthrough` ([#185](https://github.com/duskfleet/duskfleet/issues/185)). An agent that used `gh` with a token from the server's environment now needs `env_passthrough: [GH_TOKEN]`.
 
+### Fixed
+
+- The published packages had `bin` paths with a `./` prefix, which npm 11 drops at publish time, so `npx duskfleet` would have had no executable; the pack gate now refuses such entries and `publish --dry-run` fails when npm auto-corrects the manifest ([#277](https://github.com/duskfleet/duskfleet/pull/277)).
+
 ## [0.1.0] - 2026-10-26
 
 First public release. Duskfleet runs Claude Code agents unattended in your projects, from an MCP
