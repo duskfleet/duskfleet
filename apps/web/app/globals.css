@@ -60,6 +60,14 @@ body {
   font-weight: 500;
   line-height: 1.5;
   letter-spacing: 0.01em;
+  /* greyscale antialiasing, as Figma renders text: subpixel smoothing thickens light text on the dark ground */
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+/* the default "bolder" would ask Plex Sans for 700, which is not loaded (app/layout.tsx) */
+strong,
+b {
+  font-weight: 600;
 }
 a {
   color: var(--accent);
@@ -1165,7 +1173,7 @@ details.tech > .body {
   gap: 10px;
 }
 .agent .name {
-  font-weight: 650;
+  font-weight: 600;
   font-size: 1.05rem;
   display: flex;
   align-items: center;
@@ -1184,7 +1192,7 @@ details.tech > .body {
   padding: 10px 12px;
 }
 .agent .numbers .n {
-  font-weight: 650;
+  font-weight: 600;
   font-size: 1.05rem;
 }
 .agent .numbers .l {
@@ -1362,7 +1370,7 @@ h2 .h2-id {
   font-size: 14px;
 }
 .ac-linked-desc .l {
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-family: var(--font-mono);
   font-size: 14px;
   color: var(--faint);
 }
@@ -2173,7 +2181,7 @@ summary:focus-visible {
   font-family: var(--font-mono);
   font-size: 15px;
   line-height: 22px;
-  font-weight: 600;
+  font-weight: 500;
 }
 .tool-name:hover {
   color: var(--accent);
