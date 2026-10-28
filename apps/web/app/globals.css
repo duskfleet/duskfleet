@@ -23,11 +23,11 @@
   --coral: #e24b5a;
   --dusk: #5a3f7a;
   --brand-gradient: linear-gradient(90deg, var(--amber), var(--sunset), var(--coral));
-  /* logo mark: sunset gradient + night sail in Dark, dawn gradient + night-ink sail in Light */
-  --mark-from: light-dark(#e9a233, var(--amber));
-  --mark-via: light-dark(#d8622a, var(--sunset));
-  --mark-to: light-dark(#c83a4c, var(--coral));
-  --mark-sail: light-dark(#1b1a2e, var(--bg));
+  /* logo mark (DS-09): the same sunset gradient and night sail in both modes */
+  --mark-from: var(--amber);
+  --mark-via: var(--sunset);
+  --mark-to: var(--coral);
+  --mark-sail: #0b0d1a;
 
   /* surfaces and text */
   /* night readability (DS-02): lifted ground, toned-down text, faint >= 4.5:1 on every surface */
@@ -135,17 +135,19 @@ code,
   margin-bottom: 24px;
   flex-wrap: wrap;
 }
+/* DS-09: 38 px wordmark on a 54.9 px line, mark the same size (26 px drawing x 2.111);
+   gap 5.2 px = 12.5 px visible hull-to-wordmark minus the mark's 3.47 px x 2.111 inner margin */
 .nav .brand {
   font-family: var(--font-display);
   font-weight: 700;
-  font-size: 18px;
-  line-height: 26px;
+  font-size: 38px;
+  line-height: 54.9px;
   letter-spacing: -0.02em;
   color: var(--text);
   margin-right: 18px;
   display: inline-flex;
   align-items: center;
-  gap: 9px;
+  gap: 5.2px;
   border-radius: 6px;
 }
 .nav .brand:hover {
@@ -154,6 +156,8 @@ code,
 .nav .brand .mark {
   display: block;
   flex: none;
+  width: 54.9px;
+  height: 54.9px;
 }
 .mark .from {
   stop-color: var(--mark-from);
@@ -167,9 +171,14 @@ code,
 .mark .sail {
   fill: var(--mark-sail);
 }
+/* a logotype, identical in both modes (WCAG 1.4.3 exemption) */
 .nav .brand .fleet {
-  color: var(--accent);
+  background: linear-gradient(90deg, var(--amber), var(--sunset) 55%, var(--coral));
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
 }
+/* tabs and meta sit on the wordmark's lowercase line, not on the box centre (DS-09) */
 .nav a.tab {
   color: var(--muted);
   padding: 6px 12px;
@@ -177,6 +186,7 @@ code,
   font-size: 1rem;
   line-height: 22px;
   font-weight: 500;
+  transform: translateY(4px);
 }
 .nav a.tab:hover {
   color: var(--text);
@@ -198,6 +208,7 @@ code,
   display: flex;
   gap: 10px;
   align-items: center;
+  transform: translateY(6px);
 }
 .nav .meta .scheduler {
   color: var(--muted);
@@ -2461,15 +2472,25 @@ details.desc ul {
   }
 }
 @media (max-width: 600px) {
+  /* DS-09 drew only the desktop nav: the narrow frame keeps the earlier brand size and the centred tabs */
   .nav .brand {
     margin-right: 6px;
+    font-size: 18px;
+    line-height: 26px;
+    gap: 9px;
+  }
+  .nav .brand .mark {
+    width: 26px;
+    height: 26px;
   }
   .nav a.tab {
     padding: 6px 8px;
+    transform: none;
   }
   .nav .meta {
     width: 100%;
     margin-left: 0;
+    transform: none;
   }
   .runs .col-duration {
     display: none;

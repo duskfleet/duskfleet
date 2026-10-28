@@ -62,8 +62,8 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         <div className="shell">
           <nav className="nav" aria-label="Main">
             <Link href="/" className="brand">
-              {/* public/brand/mark.svg inline, so the --mark-* tokens of the current theme colour it */}
-              <svg className="mark" width={26} height={26} viewBox="0 0 110 110" fill="none" aria-hidden="true">
+              {/* public/brand/mark.svg inline, coloured by the --mark-* tokens; globals.css sets its size */}
+              <svg className="mark" width={55} height={55} viewBox="0 0 110 110" fill="none" aria-hidden="true">
                 <defs>
                   <linearGradient
                     id="mark-gradient"
