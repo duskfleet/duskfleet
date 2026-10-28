@@ -16,6 +16,7 @@ import { existsSync, mkdirSync, readdirSync, readFileSync, unlinkSync, writeFile
 import path from "node:path";
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 import { z } from "zod";
+import { ENV_PASSTHROUGH_PATTERN } from "../execution/child-env.js";
 import { type AgentDefinition, EFFORT_LEVELS, ON_FAILURE_POLICIES, PERMISSION_MODES } from "./types.js";
 
 export const AGENT_ID_PATTERN = /^[a-z0-9][a-z0-9-_]*$/;
@@ -36,6 +37,13 @@ export const maxDailyRunsSchema = z
 export const maxDailyCostUsdSchema = z
   .number({ error: "max_daily_cost_usd must be a number > 0" })
   .positive("max_daily_cost_usd must be a number > 0");
+
+/** `env_passthrough` (global and per agent): exact variable names or `PREFIX_*`. */
+export const envPassthroughSchema = z.array(
+  z
+    .string()
+    .regex(ENV_PASSTHROUGH_PATTERN, "env_passthrough entries are variable names or PREFIX_* (letters, digits, _)"),
+);
 
 /** Everything an agent file can contain, flattened (frontmatter + body). */
 export const agentSpecSchema = z.object({
@@ -60,6 +68,7 @@ export const agentSpecSchema = z.object({
   isolated: z.boolean().optional(),
   max_daily_runs: maxDailyRunsSchema.optional(),
   max_daily_cost_usd: maxDailyCostUsdSchema.optional(),
+  env_passthrough: envPassthroughSchema.optional(),
   system_prompt: z.string().default(""),
 });
 export type AgentSpec = z.infer<typeof agentSpecSchema>;
@@ -118,6 +127,7 @@ export function agentToSpec(a: AgentDefinition): AgentSpec {
   if (a.isolated !== undefined) spec.isolated = a.isolated;
   if (a.maxDailyRuns !== undefined) spec.max_daily_runs = a.maxDailyRuns;
   if (a.maxDailyCostUsd !== undefined) spec.max_daily_cost_usd = a.maxDailyCostUsd;
+  if (a.envPassthrough !== undefined) spec.env_passthrough = a.envPassthrough;
   return spec;
 }
 

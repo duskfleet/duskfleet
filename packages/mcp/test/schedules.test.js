@@ -37,7 +37,7 @@ const serverEntry = path.join(here, "..", "dist", "index.js");
 /** The test config; command gates are on unless `allowCommandGates` is false (then the key is absent: the default). */
 function globalYaml({ allowCommandGates = true } = {}) {
   const gates = allowCommandGates ? "  allow_command_gates: true\n" : "";
-  return `data_dir: ../data\ndefault_agent: coder\nscheduler:\n  enabled: true\n  tick_seconds: 5\n${gates}claude:\n  binary: "${fakeBinary}"\n  default_timeout_minutes: 0.05\n`;
+  return `data_dir: ../data\ndefault_agent: coder\nscheduler:\n  enabled: true\n  tick_seconds: 5\n${gates}claude:\n  binary: "${fakeBinary}"\n  default_timeout_minutes: 0.05\n  env_passthrough: ["FAKE_CLAUDE_*"]\n`;
 }
 
 function makeRoot(options = {}) {
