@@ -7,7 +7,8 @@
 # The tag is created with the workflow's own GITHUB_TOKEN, and GitHub never starts another
 # workflow from an event that token caused: that is why publish.yml is called from here
 # (`workflow_call`) instead of waiting for the tag push. Re-running a release whose publish
-# failed is safe: the `tag` job skips what exists, and publish skips versions already on npm.
+# failed is safe: the `tag` job keeps an existing tag (even when main has moved on: the release
+# is what the tag points to) and release, and publish skips versions already on npm.
 name: Release
 
 on:
@@ -69,7 +70,8 @@ jobs:
           fi
           echo "tag=v$VERSION" >> "$GITHUB_OUTPUT"
 
-      # The section's body, without its heading, is the release notes.
+      # The section's body, without its heading, is the release notes. The section ends at the
+      # next "## [" heading or at the link definitions ("[0.1.0]: https://...") that close the file.
       - name: Release notes from the CHANGELOG section
         env:
           VERSION: ${{ inputs.version }}
@@ -77,6 +79,7 @@ jobs:
           awk -v v="$VERSION" '
             $0 ~ "^## \\[" v "\\] - " { on = 1; next }
             on && /^## \[/ { exit }
+            on && /^\[[^]]+\]: / { exit }
             on { print }
           ' CHANGELOG.md | sed -e :a -e '/^\n*$/{$d;N;ba' -e '}' > "$RUNNER_TEMP/notes.md"
           if [ ! -s "$RUNNER_TEMP/notes.md" ]; then
@@ -90,10 +93,13 @@ jobs:
           TAG: ${{ steps.meta.outputs.tag }}
           VERSION: ${{ inputs.version }}
         run: |
+          # A re-run keeps an existing tag: the release is what the tag points to (publish checks
+          # out the tag, not main), so main may have moved on, but the tag must be on main's history.
           if git rev-parse -q --verify "refs/tags/$TAG" > /dev/null; then
-            echo "tag $TAG exists at $(git rev-parse "$TAG^{commit}")"
-            if [ "$(git rev-parse "$TAG^{commit}")" != "$(git rev-parse HEAD)" ]; then
-              echo "::error::$TAG points elsewhere than main; delete it first if that is intended"
+            tagged=$(git rev-parse "$TAG^{commit}")
+            echo "tag $TAG exists at $tagged, keeping it"
+            if ! git merge-base --is-ancestor "$tagged" HEAD; then
+              echo "::error::$TAG points at $tagged, which is not on main; delete the tag first if that is intended"
               exit 1
             fi
           else
