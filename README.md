@@ -143,6 +143,7 @@ start.
 | [Dashboard](docs/dashboard.md) | The five views and what "needs review" means |
 | [Security](docs/security.md) | Process, filesystem, permissions, dashboard and local run-data boundaries |
 | [Development](docs/development.md) | Repository layout, code map, build and tests, extending |
+| [How Duskfleet builds itself](docs/self-hosting-development.md) | The agents that plan, build and review this repository through `flow:` labels, their schedules, example files, and how to reproduce the loop |
 | [Troubleshooting](docs/troubleshooting.md) | Stuck runs, denials, orphaned runs, `doctor` failures |
 | [Windows test plan](docs/windows-test-plan.md) | Step-by-step checks to verify the experimental Windows support, with a results column |
 

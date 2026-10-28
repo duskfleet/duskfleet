@@ -1,5 +1,5 @@
-# Keeps the GitHub Project "DuskFleet Flow" in step with the flow labels (docs/development.md
-# "Issue and review flow by agents"): every label change on an issue or PR, and an hourly
+# Keeps the GitHub Project "DuskFleet Flow" in step with the flow labels
+# (docs/self-hosting-development.md "The project board"): every label change on an issue or PR, and an hourly
 # safety net, run scripts/project-sync.mjs. Labels stay the source of truth; this only moves
 # the board. The website repository shares the board: this run syncs it too, and its own
 # project-sync workflow (which checks out this repository for the script) covers its label
