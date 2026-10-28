@@ -264,8 +264,9 @@ async function mcpRegister(
       return 0;
     }
     if (plan.conflict) {
+      const envList = Object.entries(plan.conflict.env).map(([k, v]) => `${k}=${v}`);
       process.stderr.write(
-        `Claude Code already has a user-scope "duskfleet" entry running ${[plan.conflict.command, ...plan.conflict.args].join(" ")}.\nRemove it first (claude mcp remove duskfleet), then run this again.\n`,
+        `Claude Code already has a user-scope "duskfleet" entry running ${[plan.conflict.command, ...plan.conflict.args].join(" ")} (env: ${envList.length ? envList.join(" ") : "none"}), which differs from this one.\nRemove it first (claude mcp remove duskfleet), then run this again.\n`,
       );
       return 1;
     }

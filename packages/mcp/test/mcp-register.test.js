@@ -142,6 +142,35 @@ test("applyDesktop: backup first, then the write; no backup for a new file; refu
   }
 });
 
+test("applyDesktop: an edit made to the file while the prompt was open is kept", () => {
+  const dir = tempDir("duskfleet-reg-");
+  try {
+    const file = path.join(dir, "claude_desktop_config.json");
+    writeFileSync(file, JSON.stringify({ mcpServers: { other: { command: "o" } } }));
+    const plan = planDesktop(file, entry);
+    const edited = JSON.stringify({
+      globalShortcut: "y",
+      mcpServers: { other: { command: "o" }, added: { command: "a" } },
+    });
+    writeFileSync(file, edited);
+    const r = applyDesktop(plan);
+    assert.equal(r.written, true);
+    assert.equal(readFileSync(r.backup, "utf8"), edited);
+    const written = JSON.parse(readFileSync(file, "utf8"));
+    assert.equal(written.globalShortcut, "y");
+    assert.deepEqual(written.mcpServers.added, { command: "a" });
+    assert.deepEqual(written.mcpServers.other, { command: "o" });
+    assert.deepEqual(written.mcpServers.duskfleet, entry);
+
+    // Someone registered the same entry meanwhile: nothing left to write.
+    const again = planDesktop(file, { ...entry, args: ["/other"] });
+    writeFileSync(file, JSON.stringify({ mcpServers: { duskfleet: { ...entry, args: ["/other"] } } }));
+    assert.deepEqual(applyDesktop(again), { written: false, backup: null });
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("claude mcp add: name first (before the variadic -e), user scope, env flags, then the command; status and conflicts from ~/.claude.json", () => {
   assert.deepEqual(claudeCodeAddArgs(entry), [
     "mcp",
@@ -169,6 +198,21 @@ test("claude mcp add: name first (before the variadic -e), user scope, env flags
     assert.equal(planClaudeCode(entry, home).upToDate, true);
     const conflict = planClaudeCode({ ...entry, args: ["/elsewhere"] }, home);
     assert.equal(conflict.conflict?.command, entry.command);
+    // Same command and args, but a stale or missing CLAUDE_BIN: a conflict, never "up to date".
+    const stale = planClaudeCode({ ...entry, env: { CLAUDE_BIN: "/new/claude" } }, home);
+    assert.equal(stale.upToDate, false);
+    assert.deepEqual(stale.conflict?.env, entry.env);
+    writeFileSync(
+      path.join(home, ".claude.json"),
+      JSON.stringify({ mcpServers: { duskfleet: { type: "stdio", command: entry.command, args: entry.args } } }),
+    );
+    const missing = planClaudeCode(entry, home);
+    assert.equal(missing.upToDate, false);
+    assert.deepEqual(missing.conflict?.env, {});
+    writeFileSync(
+      path.join(home, ".claude.json"),
+      JSON.stringify({ mcpServers: { duskfleet: { type: "stdio", ...entry } } }),
+    );
 
     const [code, desktop] = mcpStatus("linux", home, {});
     assert.deepEqual(

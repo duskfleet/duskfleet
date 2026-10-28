@@ -34,7 +34,9 @@ change first and asks before applying it; `--yes` skips the question, and outsid
 - **Claude Desktop**: the `mcpServers.duskfleet` entry of `claude_desktop_config.json` is added
   or replaced; every other key and server is kept. The diff of that entry is printed, the file
   is copied to `claude_desktop_config.json.bak-<timestamp>` next to it, then written (as
-  2-space JSON). A file that is not valid JSON is refused and left as it is. Restart Claude
+  2-space JSON). If the file changed while the question was open (Claude Desktop or you editing
+  it), the new content is rebuilt from the file as it is then, so that edit is kept. A file that
+  is not valid JSON is refused and left as it is. Restart Claude
   Desktop afterwards. The config lives at:
 
   | Platform | Path |
@@ -45,8 +47,9 @@ change first and asks before applying it; `--yes` skips the question, and outsid
 
 - **Claude Code**: `claude mcp add duskfleet --scope user -e CLAUDE_BIN=... -- <command>` is
   printed, then run (the name comes first: `-e` takes several values and would swallow it). When a user-scope `duskfleet` entry already exists (read from
-  `~/.claude.json`) with the same command nothing runs; with another command the CLI stops and
-  asks you to `claude mcp remove duskfleet` first.
+  `~/.claude.json`) with the same command, arguments and environment nothing runs; when any of
+  them differs (a missing or stale `CLAUDE_BIN` included) the CLI stops and asks you to
+  `claude mcp remove duskfleet` first.
 
 **The command registered** is `node` and the server's `dist/index.js`, both as absolute paths
 of the install that ran `mcp register`, with `CLAUDE_BIN` (and `DUSKFLEET_CONFIG` when the

@@ -161,10 +161,19 @@ export interface DesktopPlan {
   diff: string;
   /** Full new content of the file. */
   content: string;
+  /** The entry to register, kept to rebuild the content if the file changes before the write. */
+  entry: McpServerEntry;
+  /** Raw text the plan was built from (null: the file did not exist). */
+  source: string | null;
+}
+
+function readText(file: string): string | null {
+  return existsSync(file) ? readFileSync(file, "utf8") : null;
 }
 
 /** What `register --target claude-desktop` would change. Reads only; throws on a malformed file. */
 export function planDesktop(file: string, entry: McpServerEntry): DesktopPlan {
+  const source = readText(file);
   const before = readJsonObject(file);
   const servers = before?.["mcpServers"];
   if (servers !== undefined && !isObject(servers)) {
@@ -186,6 +195,8 @@ export function planDesktop(file: string, entry: McpServerEntry): DesktopPlan {
     current,
     diff,
     content: `${JSON.stringify(after, null, 2)}\n`,
+    entry,
+    source,
   };
 }
 
@@ -194,13 +205,18 @@ export function backupPath(file: string, now = new Date()): string {
   return `${file}.bak-${now.toISOString().replace(/[:.]/g, "-")}`;
 }
 
-/** Back the file up (when it exists), then write the plan. Nothing is written when unchanged. */
-export function applyDesktop(plan: DesktopPlan, now = new Date()): { written: boolean; backup: string | null } {
+/**
+ * Back the file up (when it exists), then write the plan. Nothing is written when unchanged.
+ * The file may have changed while the confirmation prompt was open (Claude Desktop or the user
+ * editing another key): then the content is rebuilt from the file as it is now, so that edit is
+ * kept, and a file that no longer parses is refused.
+ */
+export function applyDesktop(previewed: DesktopPlan, now = new Date()): { written: boolean; backup: string | null } {
+  if (!previewed.changed) return { written: false, backup: null };
+  const plan = readText(previewed.path) === previewed.source ? previewed : planDesktop(previewed.path, previewed.entry);
   if (!plan.changed) return { written: false, backup: null };
   let backup: string | null = null;
   if (plan.exists) {
-    // Re-check: the file must still parse (it may have changed since the preview).
-    readJsonObject(plan.path);
     backup = backupPath(plan.path, now);
     copyFileSync(plan.path, backup);
   } else {
@@ -241,12 +257,25 @@ export interface McpTargetStatus {
   registered: boolean;
   command: string | null;
   args: string[];
+  /** Environment of the entry (string values only). */
+  env: Record<string, string>;
   /** Set when the config could not be read (left untouched). */
   error: string | null;
 }
 
+function stringRecord(v: unknown): Record<string, string> {
+  if (!isObject(v)) return {};
+  return Object.fromEntries(Object.entries(v).filter((e): e is [string, string] => typeof e[1] === "string"));
+}
+
+/** Same env, whatever the key order. */
+function sameEnv(a: Record<string, string>, b: Record<string, string>): boolean {
+  const keys = Object.keys(a);
+  return keys.length === Object.keys(b).length && keys.every((k) => b[k] === a[k]);
+}
+
 function statusFrom(target: McpTarget, file: string): McpTargetStatus {
-  const base = { target, configPath: file, registered: false, command: null, args: [], error: null };
+  const base = { target, configPath: file, registered: false, command: null, args: [], env: {}, error: null };
   try {
     const servers = readJsonObject(file)?.["mcpServers"];
     const entry = isObject(servers) ? servers[SERVER_NAME] : undefined;
@@ -256,6 +285,7 @@ function statusFrom(target: McpTarget, file: string): McpTargetStatus {
       registered: true,
       command: typeof entry["command"] === "string" ? entry["command"] : null,
       args: Array.isArray(entry["args"]) ? entry["args"].map(String) : [],
+      env: stringRecord(entry["env"]),
     };
   } catch (err) {
     return { ...base, error: err instanceof Error ? err.message : String(err) };
@@ -278,9 +308,12 @@ export interface ClaudeCodePlan {
   /** What the preview prints. */
   display: string;
   args: string[];
-  /** Already registered with the same command and args: nothing to run. */
+  /** Already registered with the same command, args and env: nothing to run. */
   upToDate: boolean;
-  /** Registered with something else: `claude mcp add` would refuse, the user removes it first. */
+  /**
+   * Registered with something else (a missing or stale CLAUDE_BIN counts): `claude mcp add`
+   * would refuse, the user removes it first.
+   */
   conflict: McpTargetStatus | null;
 }
 
@@ -288,7 +321,10 @@ export function planClaudeCode(entry: McpServerEntry, home = homedir()): ClaudeC
   const args = claudeCodeAddArgs(entry);
   const status = statusFrom("claude-code", claudeCodeConfigPath(home));
   const same =
-    status.registered && status.command === entry.command && JSON.stringify(status.args) === JSON.stringify(entry.args);
+    status.registered &&
+    status.command === entry.command &&
+    JSON.stringify(status.args) === JSON.stringify(entry.args) &&
+    sameEnv(status.env, entry.env);
   return {
     display: shellLine("claude", args),
     args,
