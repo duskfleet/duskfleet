@@ -1,5 +1,11 @@
 # Development
 
+## Getting started as a contributor
+
+[CONTRIBUTING.md](../CONTRIBUTING.md) is the entry point: setup from a fresh clone to a green
+`npm run check`, the rules a pull request must keep, branch naming, the issue and pull request
+templates, and the `good first issue` label to start from. This page is the reference behind it.
+
 ## Repository layout
 
 npm workspaces, three deliverables sharing one `config/` and one SQLite database:
