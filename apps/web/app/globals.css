@@ -1947,7 +1947,8 @@ summary:focus-visible {
   padding: 16px 18px 12px;
 }
 /* paused: the pill, the empty firing cells and a muted title, never a layer opacity (faint text would drop under 4.5:1) */
-.sched-card.paused h3 {
+.sched-card.paused h3,
+.sched-card.paused h3 a {
   color: var(--muted);
 }
 .sched-card:target {
@@ -1982,9 +1983,6 @@ summary:focus-visible {
 }
 .sched-card .sep {
   color: var(--faint);
-}
-.sched-card .meta a.agent {
-  color: var(--warn);
 }
 .sched-card .meta .model {
   font-family: var(--font-mono);
@@ -2631,5 +2629,18 @@ details.desc ul {
   }
   .copy-btn {
     align-self: flex-end;
+  }
+  .sched-strip {
+    grid-template-columns: 1fr;
+  }
+  .sched-strip .cell {
+    border-right: none;
+    border-bottom: 1px solid var(--border);
+  }
+  .sched-strip .cell:last-child {
+    border-bottom: none;
+  }
+  .sched-card .last {
+    flex-wrap: wrap;
   }
 }
