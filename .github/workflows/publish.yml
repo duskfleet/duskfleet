@@ -68,12 +68,14 @@ jobs:
       - name: npm publish --dry-run (duskfleet)
         working-directory: packages/duskfleet
         run: |
+          set -o pipefail
           npm publish --dry-run --access public 2>&1 | tee "$RUNNER_TEMP/dry-run-duskfleet.log"
           ! grep -q "auto-corrected" "$RUNNER_TEMP/dry-run-duskfleet.log"
 
       - name: npm publish --dry-run (@duskfleet/web)
         working-directory: apps/web
         run: |
+          set -o pipefail
           npm publish --dry-run --access public 2>&1 | tee "$RUNNER_TEMP/dry-run-web.log"
           ! grep -q "auto-corrected" "$RUNNER_TEMP/dry-run-web.log"
 
