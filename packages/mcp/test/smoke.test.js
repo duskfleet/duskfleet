@@ -45,7 +45,7 @@ function makeApp({ extraYaml = "", agents = {} } = {}) {
   const realProject = realpathSync(project); // validation resolves symlinks (/tmp -> /private/tmp on macOS)
   writeFileSync(
     path.join(configDir, "duskfleet.yaml"),
-    `data_dir: ../data\nallowed_project_roots: ["${root}"]\ndefault_agent: coder\nclaude:\n  binary: "${fakeBinary}"\n  default_timeout_minutes: 0.05\n${extraYaml}`,
+    `data_dir: ../data\nallowed_project_roots: ["${root}"]\ndefault_agent: coder\nclaude:\n  binary: "${fakeBinary}"\n  default_timeout_minutes: 0.05\n  env_passthrough: ["FAKE_CLAUDE_*"]\n${extraYaml}`,
   );
   writeFileSync(path.join(configDir, "agents", "coder.md"), `---\npermission_mode: acceptEdits\n---\nBe brief.\n`);
   for (const [id, content] of Object.entries(agents)) {
@@ -504,6 +504,31 @@ test("CLAUDE_BIN is not passed on to the run's child", async () => {
     assert.equal(run.resultText, "CLAUDE_BIN unset");
   } finally {
     delete process.env.CLAUDE_BIN;
+    await app.cleanup();
+  }
+});
+
+test("a variable outside the env allow-list does not reach the run's child; env_passthrough adds it", async () => {
+  const app = makeApp({
+    agents: { "gh-user": `---\nenv_passthrough: ["DF_TEST_SECRET"]\n---\nUses gh.\n` },
+  });
+  process.env.DF_TEST_SECRET = "1";
+  try {
+    const plain = await app.runs.waitForRun(
+      (await app.runs.startRun({ prompt: "env-secret", projectPath: app.project })).id,
+      10_000,
+    );
+    assert.equal(plain.status, "completed");
+    assert.equal(plain.resultText, "DF_TEST_SECRET unset; PATH set; HOME set", "PATH and HOME still reach the child");
+
+    const passed = await app.runs.waitForRun(
+      (await app.runs.startRun({ prompt: "env-secret", projectPath: app.project, agentId: "gh-user" })).id,
+      10_000,
+    );
+    assert.equal(passed.status, "completed");
+    assert.equal(passed.resultText, "DF_TEST_SECRET 1; PATH set; HOME set");
+  } finally {
+    delete process.env.DF_TEST_SECRET;
     await app.cleanup();
   }
 });

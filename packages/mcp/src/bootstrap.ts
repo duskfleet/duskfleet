@@ -44,6 +44,7 @@ export async function bootstrap(entryFileUrl: string, options: BootstrapOptions 
     strictMcpConfig: config.claude.strictMcpConfig,
     settingSources: config.claude.settingSources,
     allowBypassPermissions: config.claude.allowBypassPermissions,
+    envPassthrough: config.claude.envPassthrough,
   });
   log.info("executor ready", { binary: executor.binary });
 

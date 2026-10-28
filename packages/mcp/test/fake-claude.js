@@ -16,6 +16,8 @@
  *                 line has a main-session-only `usage` and a two-model `modelUsage`
  *   "subagent-hang" -> same, but the process is killed before the hand-back
  *   "env"      -> like "ok", result text says whether CLAUDE_BIN reached the child
+ *   "env-secret" -> like "ok", result text says what DF_TEST_SECRET is in the child and
+ *                 whether PATH and HOME reached it (the environment allow-list)
  *   "gate-nowork" / "gate-work" / "gate-mention" -> like "ok"; a schedule gate agent's answer:
  *                 the marker alone on the last line (as **no_work**), work found, and the
  *                 marker only mentioned mid-sentence (must not skip)
@@ -516,17 +518,19 @@ if (resumeIdx >= 0) {
       : "API Error: something went wrong"
     : prompt === "env"
       ? `CLAUDE_BIN ${process.env.CLAUDE_BIN === undefined ? "unset" : "set"}`
-      : prompt === "noop"
-        ? "Nothing to do: no tickets in Ready."
-        : prompt === "gate-nowork"
-          ? "Checked the board: nothing in Ready.\n\n**no_work**"
-          : prompt === "gate-work"
-            ? "Ready ticket found: SL-9."
-            : prompt === "gate-mention"
-              ? "Found SL-9 in Ready, so this is not NO_WORK"
-              : prompt === "prose-exit"
-                ? "The 503 retry test now passes; the not logged in banner is fixed."
-                : "Done: created hello.txt";
+      : prompt === "env-secret"
+        ? `DF_TEST_SECRET ${process.env.DF_TEST_SECRET ?? "unset"}; PATH ${process.env.PATH ? "set" : "unset"}; HOME ${process.env.HOME ? "set" : "unset"}`
+        : prompt === "noop"
+          ? "Nothing to do: no tickets in Ready."
+          : prompt === "gate-nowork"
+            ? "Checked the board: nothing in Ready.\n\n**no_work**"
+            : prompt === "gate-work"
+              ? "Ready ticket found: SL-9."
+              : prompt === "gate-mention"
+                ? "Found SL-9 in Ready, so this is not NO_WORK"
+                : prompt === "prose-exit"
+                  ? "The 503 retry test now passes; the not logged in banner is fixed."
+                  : "Done: created hello.txt";
   out({
     type: "result",
     subtype: isError ? "error_during_execution" : "success",
