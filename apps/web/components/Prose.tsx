@@ -35,7 +35,7 @@ function renderBlocks(text: string): ReactNode[] {
     const heading = /^(#{1,6})\s+(.*)$/.exec(line);
     if (heading) {
       out.push(
-        <p key={key++} style={{ margin: "0 0 6px", fontWeight: 650 }}>
+        <p key={key++} style={{ margin: "0 0 6px", fontWeight: 600 }}>
           {renderInline(heading[2]!)}
         </p>,
       );
