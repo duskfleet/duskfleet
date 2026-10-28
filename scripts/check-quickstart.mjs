@@ -123,7 +123,9 @@ function main() {
         process.stdout.write(`skip  ${line}\n`);
         continue;
       }
-      const words = splitWords(line.replaceAll(PROJECT_PLACEHOLDER, project));
+      // Split first, then substitute: splitWords reads a backslash as an escape, so a Windows
+      // temp path substituted before splitting would be mangled.
+      const words = splitWords(line).map((w) => w.replaceAll(PROJECT_PLACEHOLDER, project));
       if (words[0] !== "npm" || words[1] !== "run" || words[2] !== "cli" || words[3] !== "--") {
         fail(`unknown Quick start step (replay it or add it to SKIP in scripts/check-quickstart.mjs): ${line}`);
       }
