@@ -95,9 +95,19 @@ real thing: `npm pack -w duskfleet`, then `npx ./duskfleet-0.1.0.tgz --help` fro
 
 ### Publishing
 
-Nothing is published from a laptop. `.github/workflows/publish.yml` has two jobs:
+Nothing is published from a laptop. `.github/workflows/release.yml` is the one the maintainer
+runs, from the Actions tab (`workflow_dispatch` on `main`, input: the version). Its `tag` job
+checks that `main` already carries that version (both packages and a dated
+`## [<version>] - YYYY-MM-DD` section in `CHANGELOG.md`), creates the annotated tag `v<version>`
+and the GitHub release with that section as its notes, then calls the `publish` job below for
+the tag. GitHub never starts a workflow from a tag that a workflow's own token pushed, which is
+why the release workflow calls publish.yml (`workflow_call`) instead of relying on the tag event.
+Re-running it is safe: an existing tag or release is kept, a published version is skipped.
 
-- `publish`, on a pushed tag `v*`: it first checks that the tag matches the `version` of **both**
+`.github/workflows/publish.yml` has two jobs:
+
+- `publish`, called by release.yml with the tag, or on a tag `v*` pushed by hand: it first checks
+  that the tag matches the `version` of **both**
   packages (`v0.1.0` and `"0.1.0"`) and fails before anything else otherwise, then runs `npm ci`,
   `npm run check`, `npm run build:web` and `npm run check:pack -- --require-web-build`, and
   publishes `duskfleet`, then `@duskfleet/web`, with `npm publish --provenance --access public`
@@ -127,7 +137,7 @@ MCP server driven over stdio. Add a case to the fake binary when the parser lear
 
 `CHANGELOG.md` ([Keep a Changelog](https://keepachangelog.com/en/1.1.0/)) is the release notes:
 every user-facing pull request adds a line, linking itself, under `## [Unreleased]` (Added,
-Changed or Fixed). A release is one pull request, then a tag pushed by the maintainer. In order,
+Changed or Fixed). A release is one pull request, then the Release workflow run by the maintainer. In order,
 with `0.2.0` standing for the new version:
 
 1. **Bump the version, in one commit on a branch.** Set `"version": "0.2.0"` in all five
@@ -146,27 +156,26 @@ with `0.2.0` standing for the new version:
 3. **Open the pull request** with both commits and the release notes (the CHANGELOG section
    without its heading) in its description; `npm run check` must pass, and the `publish dry-run`
    job proves the packages build and pack.
-4. **After the merge, tag `main`** (maintainer only, annotated tag):
+4. **After the merge, run the Release workflow** (maintainer only): Actions tab, "Release",
+   "Run workflow" on `main`, version `0.2.0`. From the terminal:
 
    ```bash
-   git switch main
-   git pull --ff-only
-   git tag -a v0.2.0 -m "Duskfleet 0.2.0"
-   git push origin v0.2.0
+   gh workflow run release.yml --ref main -f version=0.2.0
+   gh run list --workflow release.yml --limit 1
+   gh run watch <run id>
    ```
 
-5. **Create the GitHub release** from that tag, with the CHANGELOG section as its notes (save it
-   to a file first, outside the repository):
-
-   ```bash
-   gh release create v0.2.0 --verify-tag --title "Duskfleet 0.2.0" --notes-file <notes file>
-   ```
-
-6. **Watch the publish.** The tag runs the `publish` job of `.github/workflows/publish.yml`
-   ([Publishing](#publishing)): `gh run list --workflow publish.yml --limit 1`, then
-   `gh run watch <run id>`. A failure after the first package published is fixed by re-running
-   the job: a version already on the registry is skipped.
-7. **Verify from outside the repository**:
+   It refuses to run when `main` does not carry the version or the CHANGELOG section is not
+   dated, creates the annotated tag `v0.2.0` and the GitHub release with the CHANGELOG section
+   as its notes, and runs the `publish` job ([Publishing](#publishing)). A failure after the
+   first package published is fixed by dispatching the workflow again with the same version,
+   even once `main` has moved on: when the tag exists, the checks and the notes read from the
+   tag, the tag and the release are kept, and a version already on the registry is skipped.
+5. **By hand, if the Actions tab is not an option:** an annotated tag
+   (`git tag -a v0.2.0 -m "Duskfleet 0.2.0"`, then `git push origin v0.2.0`, which runs the
+   `publish` job on its own) and `gh release create v0.2.0 --verify-tag --title "Duskfleet 0.2.0"
+   --notes-file <notes file>` with the CHANGELOG section saved outside the repository.
+6. **Verify from outside the repository**:
 
    ```bash
    npx duskfleet@latest --version        # prints 0.2.0

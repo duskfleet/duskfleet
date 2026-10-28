@@ -1,6 +1,7 @@
 # Publishes the two npm packages, `duskfleet` and `@duskfleet/web`, at the same version with npm
-# provenance (docs/development.md "Publishing"). A tag `v<version>` pushed by the owner runs the
-# `publish` job; every pull request runs the `dry-run` job, the same steps ending in
+# provenance (docs/development.md "Publishing"). The `publish` job runs for a tag `v<version>`:
+# called by release.yml right after it creates the tag (the usual path), or on a tag pushed by
+# hand. Every pull request runs the `dry-run` job, the same steps ending in
 # `npm publish --dry-run`, so a broken pack is caught before the tag.
 #
 # The `publish` job needs the NPM_TOKEN repository secret: a granular npm access token that can
@@ -13,6 +14,12 @@ on:
   push:
     tags: ["v*"]
   pull_request:
+  workflow_call:
+    inputs:
+      tag:
+        description: "The tag to publish (v<version>), already pushed"
+        required: true
+        type: string
 
 permissions:
   contents: read
@@ -66,17 +73,22 @@ jobs:
 
   publish:
     name: publish
-    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    if: inputs.tag != '' || (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v'))
     runs-on: ubuntu-latest
     timeout-minutes: 20
     permissions:
       contents: read
       id-token: write
     concurrency:
-      group: publish-${{ github.ref }}
+      group: publish-${{ inputs.tag || github.ref_name }}
       cancel-in-progress: false
+    env:
+      # The tag being published: the caller's input, or the pushed tag.
+      TAG: ${{ inputs.tag || github.ref_name }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.tag || github.ref }}
 
       # No dependency cache on the publishing job: what ships is built from a clean install.
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
@@ -86,11 +98,11 @@ jobs:
 
       - name: Tag matches the version of both packages
         run: |
-          tag="${GITHUB_REF_NAME#v}"
+          tag="${TAG#v}"
           core=$(node -p "require('./packages/duskfleet/package.json').version")
           web=$(node -p "require('./apps/web/package.json').version")
           if [ "$tag" != "$core" ] || [ "$tag" != "$web" ]; then
-            echo "::error::tag $GITHUB_REF_NAME does not match duskfleet $core and @duskfleet/web $web"
+            echo "::error::tag $TAG does not match duskfleet $core and @duskfleet/web $web"
             exit 1
           fi
           echo "publishing version $tag"
@@ -114,8 +126,8 @@ jobs:
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: |
-          if npm view "duskfleet@${GITHUB_REF_NAME#v}" version > /dev/null 2>&1; then
-            echo "duskfleet@${GITHUB_REF_NAME#v} is already published, skipping"
+          if npm view "duskfleet@${TAG#v}" version > /dev/null 2>&1; then
+            echo "duskfleet@${TAG#v} is already published, skipping"
           else
             npm publish --provenance --access public
           fi
@@ -125,8 +137,8 @@ jobs:
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: |
-          if npm view "@duskfleet/web@${GITHUB_REF_NAME#v}" version > /dev/null 2>&1; then
-            echo "@duskfleet/web@${GITHUB_REF_NAME#v} is already published, skipping"
+          if npm view "@duskfleet/web@${TAG#v}" version > /dev/null 2>&1; then
+            echo "@duskfleet/web@${TAG#v} is already published, skipping"
           else
             npm publish --provenance --access public
           fi
