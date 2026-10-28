@@ -399,7 +399,7 @@ local run-data handling, and recommended configuration.
   | Flag | Purpose in Duskfleet |
   |---|---|
   | `-s, --scope <local\|user\|project>` | `--scope user`: the server is available in every project |
-  | `-e, --env <KEY=value>` | `CLAUDE_BIN`, and `DUSKFLEET_CONFIG` when the server would not find its config |
-  | `<name> -- <command> [args...]` | Name `duskfleet`, then the server command; stdio is the default transport |
+  | `-e, --env <KEY=value...>` | `CLAUDE_BIN`, and `DUSKFLEET_CONFIG` when the server would not find its config. Variadic: it would take a following name as one more value, so the name goes right after `add` |
+  | `<name> ... -- <command> [args...]` | Name `duskfleet` first, then the options, then `--` and the server command; stdio is the default transport |
 
 Keep these pages in sync when behaviour changes.

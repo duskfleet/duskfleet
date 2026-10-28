@@ -43,8 +43,8 @@ change first and asks before applying it; `--yes` skips the question, and outsid
   | Windows | `%APPDATA%\Claude\claude_desktop_config.json` |
   | Linux | `$XDG_CONFIG_HOME/Claude/claude_desktop_config.json` (default `~/.config/Claude/...`) |
 
-- **Claude Code**: `claude mcp add --scope user -e CLAUDE_BIN=... duskfleet -- <command>` is
-  printed, then run. When a user-scope `duskfleet` entry already exists (read from
+- **Claude Code**: `claude mcp add duskfleet --scope user -e CLAUDE_BIN=... -- <command>` is
+  printed, then run (the name comes first: `-e` takes several values and would swallow it). When a user-scope `duskfleet` entry already exists (read from
   `~/.claude.json`) with the same command nothing runs; with another command the CLI stops and
   asks you to `claude mcp remove duskfleet` first.
 

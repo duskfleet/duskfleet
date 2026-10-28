@@ -222,10 +222,12 @@ export function claudeCodeConfigPath(home = homedir()): string {
 /**
  * Arguments of `claude mcp add` for the entry (flags verified against `claude mcp add --help`,
  * see docs/development.md): user scope, stdio (the default transport), `-e KEY=value` per env.
+ * The name comes right after `add`: `-e, --env <env...>` is variadic, so a name placed after it
+ * would be read as one more env value. `--` then ends the options before the command.
  */
 export function claudeCodeAddArgs(entry: McpServerEntry): string[] {
   const env = Object.entries(entry.env).flatMap(([k, v]) => ["-e", `${k}=${v}`]);
-  return ["mcp", "add", "--scope", "user", ...env, SERVER_NAME, "--", entry.command, ...entry.args];
+  return ["mcp", "add", SERVER_NAME, "--scope", "user", ...env, "--", entry.command, ...entry.args];
 }
 
 /** Shell-readable rendering of a command, for the preview. */

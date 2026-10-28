@@ -142,15 +142,15 @@ test("applyDesktop: backup first, then the write; no backup for a new file; refu
   }
 });
 
-test("claude mcp add: user scope, env flags, name, then the command; status and conflicts from ~/.claude.json", () => {
+test("claude mcp add: name first (before the variadic -e), user scope, env flags, then the command; status and conflicts from ~/.claude.json", () => {
   assert.deepEqual(claudeCodeAddArgs(entry), [
     "mcp",
     "add",
+    "duskfleet",
     "--scope",
     "user",
     "-e",
     "CLAUDE_BIN=/opt/claude",
-    "duskfleet",
     "--",
     "/opt/node/bin/node",
     "/opt/duskfleet/dist/index.js",
@@ -160,7 +160,7 @@ test("claude mcp add: user scope, env flags, name, then the command; status and 
     const fresh = planClaudeCode(entry, home);
     assert.equal(fresh.upToDate, false);
     assert.equal(fresh.conflict, null);
-    assert.match(fresh.display, /^claude mcp add --scope user -e CLAUDE_BIN=\/opt\/claude duskfleet -- /);
+    assert.match(fresh.display, /^claude mcp add duskfleet --scope user -e CLAUDE_BIN=\/opt\/claude -- /);
 
     writeFileSync(
       path.join(home, ".claude.json"),
@@ -271,7 +271,7 @@ test("cli: claude-code --dry-run prints the claude mcp add command; mcp status r
   try {
     const r = cli(env, ["mcp", "register", "--target", "claude-code", "--dry-run"]);
     assert.equal(r.status, 0, r.stderr);
-    assert.match(r.stdout, /will run:\n {2}claude mcp add --scope user .*duskfleet -- /);
+    assert.match(r.stdout, /will run:\n {2}claude mcp add duskfleet --scope user .*-- /);
 
     const wrong = cli(env, ["mcp", "register", "--target", "cowork"]);
     assert.equal(wrong.status, 1);
