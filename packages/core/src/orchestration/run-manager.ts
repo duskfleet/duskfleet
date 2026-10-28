@@ -9,6 +9,7 @@ import path from "node:path";
 import { agentDefinitionHash, listProjectAgents, projectAgentDefinitionHash } from "../config/agent-files.js";
 import { loadConfig } from "../config/loader.js";
 import type { AgentDefinition, DuskFleetConfig, ProjectDefinition } from "../config/types.js";
+import { mergeEnvPassthrough } from "../execution/child-env.js";
 import { mergeSubagent, needsRepair, sameSubagent, subagentsFromLog } from "../execution/log-replay.js";
 import { allowListedMcpPrefixes, mcpToolPrefix } from "../execution/mcp.js";
 import { mergeUsageByModel } from "../execution/stream-json.js";
@@ -444,6 +445,8 @@ export class RunManager {
     }
     const addDirs = [...new Set([...(project?.addDirs ?? []), ...(agent.addDirs ?? [])])];
     if (addDirs.length) request.addDirs = addDirs;
+    const envPassthrough = mergeEnvPassthrough(this.config.claude.envPassthrough, agent.envPassthrough);
+    if (envPassthrough.length) request.envPassthrough = envPassthrough;
 
     // Record the run (with the exact command) *before* launching it.
     const run: Run = {

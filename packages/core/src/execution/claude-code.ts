@@ -15,8 +15,9 @@ import { createInterface } from "node:readline";
 import { classifyFailure } from "../observability/failure.js";
 import type { BillingType, RecordedCommand } from "../observability/run.js";
 import { logger } from "../util/log.js";
+import { childEnv } from "./child-env.js";
 import { missingMcpServers } from "./mcp.js";
-import { effectivePath, withEffectivePath } from "./search-path.js";
+import { effectivePath } from "./search-path.js";
 import { createStreamState, ingestLine, looksLikeContextExhaustion } from "./stream-json.js";
 import {
   type ExecutionEvent,
@@ -42,6 +43,11 @@ export interface ClaudeCodeExecutorOptions {
    * (then SIGKILL after the kill grace). Default 5 s; tests shorten it.
    */
   resultGraceMs?: number;
+  /**
+   * `claude.env_passthrough`, for `claude --version` (which has no request). A run gets its own
+   * list in `ExecutionRequest.envPassthrough`, re-read from the config on every run.
+   */
+  envPassthrough?: string[];
 }
 
 /** Grace period between SIGTERM and SIGKILL when cancelling or timing out. */
@@ -67,10 +73,15 @@ export class ClaudeCodeExecutor implements Executor {
 
   version(): Promise<string> {
     return new Promise((resolve, reject) => {
-      execFile(this.binary, ["--version"], { timeout: 15_000, env: childEnv() }, (err, stdout) => {
-        if (err) reject(err);
-        else resolve(stdout.trim());
-      });
+      execFile(
+        this.binary,
+        ["--version"],
+        { timeout: 15_000, env: childEnv(this.options.envPassthrough) },
+        (err, stdout) => {
+          if (err) reject(err);
+          else resolve(stdout.trim());
+        },
+      );
     });
   }
 
@@ -147,7 +158,8 @@ export class ClaudeCodeExecutor implements Executor {
       if (req.resumeSessionId) logStream.write(`#resume ${req.resumeSessionId} ${startedAt.toISOString()}\n`);
     }
 
-    const env = childEnv();
+    // An allow-list of ours (auth, PATH, HOME...) plus what the config passes through (child-env.ts).
+    const env = childEnv(req.envPassthrough);
     const billingType = billingTypeOf(env);
     const required = req.resumeSessionId ? [] : (req.requiredMcpServers ?? []);
     const resultGraceMs = this.options.resultGraceMs ?? RESULT_GRACE_MS;
@@ -430,22 +442,6 @@ function finalResult(input: {
     rawResult: r?.raw ?? null,
     subagents: [...input.state.subagents.values()],
   };
-}
-
-/**
- * Environment for the child. Starts from ours (so auth, PATH and HOME work)
- * and removes markers that make Claude Code believe it is nested inside
- * another Claude Code session.
- */
-function childEnv(): NodeJS.ProcessEnv {
-  const env: NodeJS.ProcessEnv = { ...process.env };
-  for (const key of Object.keys(env)) {
-    if (key === "CLAUDECODE" || key === "CLAUDE_CODE_ENTRYPOINT" || key.startsWith("CLAUDE_CODE_SSE_")) delete env[key];
-  }
-  // Duskfleet's own variable: an agent running `npm test` here would launch the real claude.
-  delete env["CLAUDE_BIN"];
-  // A GUI host's minimal PATH would hide node, git and claude from the run (see search-path.ts).
-  return withEffectivePath(env);
 }
 
 /**

@@ -128,8 +128,9 @@ schedule, set with `gate` on `create_schedule` / `update_schedule` (`clear_gate:
 it). Two kinds:
 
 **Command gate** (off by default): a shell command run with `/bin/sh -c` in the project
-directory, with the full environment of the DuskFleet process that holds the lease, outside
-every Claude Code allow-list. Anything that can call `create_schedule` could otherwise make the
+directory, outside every Claude Code allow-list, with the environment a run of the schedule's
+agent would get (the default allow-list plus `claude.env_passthrough` and the agent's
+`env_passthrough`, see [configuration](configuration.md#what-reaches-a-run)). Anything that can call `create_schedule` could otherwise make the
 scheduler run arbitrary shell on every tick, so command gates are refused unless
 `config/duskfleet.yaml` sets:
 
