@@ -6,7 +6,20 @@
  */
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import {
+  chmodSync,
+  existsSync,
+  lstatSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  statSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { test } from "node:test";
@@ -21,6 +34,7 @@ import {
   planClaudeCode,
   planDesktop,
   serverEntry,
+  writeAtomically,
 } from "../dist/mcp-register.js";
 import { testEnv } from "./helpers.js";
 
@@ -166,6 +180,33 @@ test("applyDesktop: an edit made to the file while the prompt was open is kept",
     const again = planDesktop(file, { ...entry, args: ["/other"] });
     writeFileSync(file, JSON.stringify({ mcpServers: { duskfleet: { ...entry, args: ["/other"] } } }));
     assert.deepEqual(applyDesktop(again), { written: false, backup: null });
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("applyDesktop keeps the file mode and a symlinked config; the tmp file never outlives a failed write", () => {
+  const dir = tempDir("duskfleet-reg-");
+  try {
+    const real = path.join(dir, "dotfiles", "claude_desktop_config.json");
+    mkdirSync(path.dirname(real));
+    writeFileSync(real, JSON.stringify({ mcpServers: { other: { command: "o", env: { TOKEN: "t" } } } }));
+    if (process.platform !== "win32") chmodSync(real, 0o600);
+    const link = path.join(dir, "claude_desktop_config.json");
+    symlinkSync(real, link);
+
+    const r = applyDesktop(planDesktop(link, entry));
+    assert.equal(r.written, true);
+    assert.equal(lstatSync(link).isSymbolicLink(), true, "the link is kept");
+    assert.deepEqual(JSON.parse(readFileSync(real, "utf8")).mcpServers.duskfleet, entry, "the target is written");
+    if (process.platform !== "win32") assert.equal(statSync(real).mode & 0o777, 0o600, "mode kept");
+    assert.deepEqual(readdirSync(path.dirname(real)), ["claude_desktop_config.json"], "no tmp file left");
+
+    // A rename that fails (a directory in the way) leaves no tmp file behind.
+    const blocked = path.join(dir, "blocked");
+    mkdirSync(blocked);
+    assert.throws(() => writeAtomically(blocked, "{}"));
+    assert.equal(existsSync(`${blocked}.duskfleet-tmp`), false);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

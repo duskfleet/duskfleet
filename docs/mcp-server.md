@@ -35,7 +35,9 @@ change first and asks before applying it; `--yes` skips the question, and outsid
   or replaced; every other key and server is kept. The diff of that entry is printed, the file
   is copied to `claude_desktop_config.json.bak-<timestamp>` next to it, then written (as
   2-space JSON). If the file changed while the question was open (Claude Desktop or you editing
-  it), the new content is rebuilt from the file as it is then, so that edit is kept. A file that
+  it), the new content is rebuilt from the file as it is then, so that edit is kept. The write
+  keeps the file's permissions (a `600` config stays `600`) and, when the config is a symlink
+  (a dotfiles manager), replaces the file it points to, not the link. A file that
   is not valid JSON is refused and left as it is. Restart Claude
   Desktop afterwards. The config lives at:
 

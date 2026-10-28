@@ -16,7 +16,18 @@
  * the host's first start.
  */
 import { spawnSync } from "node:child_process";
-import { copyFileSync, existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import {
+  chmodSync,
+  copyFileSync,
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  realpathSync,
+  renameSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from "node:fs";
 import { homedir } from "node:os";
 import path from "node:path";
 
@@ -222,10 +233,30 @@ export function applyDesktop(previewed: DesktopPlan, now = new Date()): { writte
   } else {
     mkdirSync(path.dirname(plan.path), { recursive: true });
   }
-  const tmp = `${plan.path}.duskfleet-tmp`;
-  writeFileSync(tmp, plan.content);
-  renameSync(tmp, plan.path);
+  writeAtomically(plan.path, plan.content);
   return { written: true, backup };
+}
+
+/**
+ * Replace `file` through a tmp file and a rename, without changing what the file is: a symlinked
+ * config (dotfiles manager) keeps its link and the target is replaced, the original mode is kept
+ * (a 600 config holding other servers' tokens stays 600) and the tmp file never outlives a failure.
+ */
+export function writeAtomically(file: string, content: string): void {
+  const target = existsSync(file) ? realpathSync(file) : file;
+  const mode = existsSync(target) ? statSync(target).mode & 0o777 : null;
+  const tmp = `${target}.duskfleet-tmp`;
+  rmSync(tmp, { force: true });
+  let renamed = false;
+  try {
+    // Created owner-only, so the content is never readable by others before the chmod.
+    writeFileSync(tmp, content, { mode: 0o600, flag: "wx" });
+    if (mode !== null) chmodSync(tmp, mode);
+    renameSync(tmp, target);
+    renamed = true;
+  } finally {
+    if (!renamed) rmSync(tmp, { force: true });
+  }
 }
 
 // ---- Claude Code ----------------------------------------------------------------
