@@ -17,7 +17,53 @@ process that owns them, named in the error). The server also ticks the
 After `npm run build`, restart the host (Claude Desktop, or the Claude Code session) to load
 the new code. Config under `config/` needs no restart.
 
-## Connect from Claude Desktop / Claude Cowork
+## Register with a Claude host
+
+```bash
+duskfleet mcp register --target claude-desktop --dry-run   # print the diff, change nothing
+duskfleet mcp register --target claude-desktop             # print the diff, ask, back up, write
+duskfleet mcp register --target claude-code --dry-run      # print the claude mcp add command only
+duskfleet mcp register --target claude-code --yes          # print it and run it without asking
+duskfleet mcp status                                       # which host has a duskfleet entry, and what it runs
+```
+
+(From a checkout: `npm run cli -- mcp register ...`.) The command always shows the exact
+change first and asks before applying it; `--yes` skips the question, and outside a terminal
+(a script) it is required, otherwise nothing is changed.
+
+- **Claude Desktop**: the `mcpServers.duskfleet` entry of `claude_desktop_config.json` is added
+  or replaced; every other key and server is kept. The diff of that entry is printed, the file
+  is copied to `claude_desktop_config.json.bak-<timestamp>` next to it, then written (as
+  2-space JSON). If the file changed while the question was open (Claude Desktop or you editing
+  it), the new content is rebuilt from the file as it is then, so that edit is kept. The write
+  keeps the file's permissions (a `600` config stays `600`) and, when the config is a symlink
+  (a dotfiles manager), replaces the file it points to, not the link. A file that
+  is not valid JSON is refused and left as it is. Restart Claude
+  Desktop afterwards. The config lives at:
+
+  | Platform | Path |
+  |---|---|
+  | macOS | `~/Library/Application Support/Claude/claude_desktop_config.json` |
+  | Windows | `%APPDATA%\Claude\claude_desktop_config.json` |
+  | Linux | `$XDG_CONFIG_HOME/Claude/claude_desktop_config.json` (default `~/.config/Claude/...`) |
+
+- **Claude Code**: `claude mcp add duskfleet --scope user -e CLAUDE_BIN=... -- <command>` is
+  printed, then run (the name comes first: `-e` takes several values and would swallow it). When a user-scope `duskfleet` entry already exists (read from
+  `~/.claude.json`) with the same command, arguments and environment nothing runs; when any of
+  them differs (a missing or stale `CLAUDE_BIN` included) the CLI stops and asks you to
+  `claude mcp remove duskfleet` first.
+
+**The command registered** is `node` and the server's `dist/index.js`, both as absolute paths
+of the install that ran `mcp register`, with `CLAUDE_BIN` (and `DUSKFLEET_CONFIG` when the
+server would not find its config by itself). Absolute paths because GUI hosts start with a
+minimal `PATH` and Claude Desktop does not expand `~`; the cost is that the entry points at
+this install, so moving or removing it means registering again. The alternative,
+`npx -y -p duskfleet@<version> duskfleet-mcp`, is used only when the CLI itself runs from
+npx's temporary cache (`npx duskfleet mcp register`), because that cache is evicted by npm at
+any time: it is pinned to the installed version and called through npx's absolute path next
+to `node`, but needs the network on the host's first start. The preview names the form used.
+
+### By hand: Claude Desktop / Claude Cowork
 
 Add to `~/Library/Application Support/Claude/claude_desktop_config.json` (macOS):
 
@@ -40,10 +86,10 @@ Use absolute paths for `node` (`which node`) and set `CLAUDE_BIN`: GUI apps star
 server then fails with "No executable file at ~/..."). Restart Claude Desktop and the
 `duskfleet` tools appear. The dashboard's MCP page prints this snippet with your real paths.
 
-## Connect from Claude Code
+### By hand: Claude Code
 
 ```bash
-claude mcp add duskfleet -- node /absolute/path/to/duskfleet/packages/mcp/dist/index.js
+claude mcp add --scope user duskfleet -- node /absolute/path/to/duskfleet/packages/mcp/dist/index.js
 ```
 
 Or copy `.mcp.json.example` to `.mcp.json` in this repo (git-ignored, machine-specific) and
