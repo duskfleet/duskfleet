@@ -88,6 +88,11 @@ export interface AgentDefinition {
    * stopped; its own max_budget_usd bounds the overshoot. Unset = no cap.
    */
   maxDailyCostUsd?: number;
+  /**
+   * Environment variables (exact names or `PREFIX_*`) this agent's runs get on top of the default
+   * allow-list and `claude.env_passthrough` (e.g. `GH_TOKEN` for an agent that uses `gh`).
+   */
+  envPassthrough?: string[];
   /** Markdown body of the agent file. Sent via --append-system-prompt when non-empty. */
   systemPrompt: string;
   /** Absolute path of the file this agent was loaded from. */
@@ -113,6 +118,11 @@ export interface ClaudeConfig {
   allowBypassPermissions: boolean;
   defaultTimeoutMinutes: number;
   defaultMaxBudgetUsd: number;
+  /**
+   * Environment variables (exact names or `PREFIX_*`) passed to every run and command gate on top
+   * of the default allow-list (`DEFAULT_ENV_ALLOW`). Everything else is dropped. Default none.
+   */
+  envPassthrough: string[];
 }
 
 export interface SchedulerConfig {

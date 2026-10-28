@@ -6,7 +6,13 @@ import { parse as parseYaml } from "yaml";
 import { z } from "zod";
 import { DEFAULT_NOOP_PATTERN, parseNoopPattern } from "../scheduler/idle.js";
 import { logger } from "../util/log.js";
-import { AGENT_ID_PATTERN, maxConcurrentSchema, maxDailyCostUsdSchema, maxDailyRunsSchema } from "./agent-files.js";
+import {
+  AGENT_ID_PATTERN,
+  envPassthroughSchema,
+  maxConcurrentSchema,
+  maxDailyCostUsdSchema,
+  maxDailyRunsSchema,
+} from "./agent-files.js";
 import {
   type AgentDefinition,
   type AgentSource,
@@ -83,6 +89,7 @@ const globalSchema = z.object({
       allow_bypass_permissions: z.boolean().default(false),
       default_timeout_minutes: z.number().positive().default(30),
       default_max_budget_usd: z.number().positive().default(5),
+      env_passthrough: envPassthroughSchema.default([]),
     })
     .prefault({}),
   scheduler: z
@@ -135,6 +142,7 @@ const agentFrontmatterSchema = z.object({
   isolated: z.boolean().optional(),
   max_daily_runs: maxDailyRunsSchema.optional(),
   max_daily_cost_usd: maxDailyCostUsdSchema.optional(),
+  env_passthrough: envPassthroughSchema.optional(),
 });
 
 const projectsSchema = z.object({
@@ -208,6 +216,7 @@ export function loadConfig(configDir: string): DuskFleetConfig {
       allowBypassPermissions: g.claude.allow_bypass_permissions,
       defaultTimeoutMinutes: g.claude.default_timeout_minutes,
       defaultMaxBudgetUsd: g.claude.default_max_budget_usd,
+      envPassthrough: g.claude.env_passthrough,
     },
     scheduler: {
       enabled: g.scheduler.enabled,
@@ -275,6 +284,7 @@ export function loadAgents(agentsDir: string, source: AgentSource = "builtin"): 
     if (fm.isolated !== undefined) agent.isolated = fm.isolated;
     if (fm.max_daily_runs !== undefined) agent.maxDailyRuns = fm.max_daily_runs;
     if (fm.max_daily_cost_usd !== undefined) agent.maxDailyCostUsd = fm.max_daily_cost_usd;
+    if (fm.env_passthrough !== undefined) agent.envPassthrough = fm.env_passthrough;
     agents.set(id, agent);
   }
   return agents;

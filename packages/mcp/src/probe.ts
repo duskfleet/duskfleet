@@ -41,7 +41,7 @@ const AUTH_PATTERN =
 
 export async function runProbe(
   executor: Executor,
-  claude: Pick<ClaudeConfig, "defaultTimeoutMinutes">,
+  claude: Pick<ClaudeConfig, "defaultTimeoutMinutes"> & Partial<Pick<ClaudeConfig, "envPassthrough">>,
 ): Promise<ProbeReport> {
   const cwd = mkdtempSync(path.join(tmpdir(), "duskfleet-probe-"));
   const timeoutMs = Math.min(PROBE_MAX_TIMEOUT_MS, claude.defaultTimeoutMinutes * 60 * 1000);
@@ -60,6 +60,8 @@ export async function runProbe(
         model: PROBE_MODEL,
         maxBudgetUsd: PROBE_MAX_BUDGET_USD,
         timeoutMs,
+        // The same environment as every run: the global passthrough (no agent here).
+        ...(claude.envPassthrough?.length ? { envPassthrough: claude.envPassthrough } : {}),
       },
       (event) => {
         if (event.type === "grace_kill") lingered = true;

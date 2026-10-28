@@ -82,7 +82,7 @@ npm workspaces, one `config/` and one SQLite database shared by three deliverabl
   `pause_scheduler` (one `scheduler_pause` row, migration 21) stops all firing until an instant,
   also read every tick (the holder keeps the lease and the sweep). `trigger_kind` is only `cron`.
   Create/update validation is `scheduler/crud.ts`, shared by MCP, CLI and dashboard.
-  Command gates (`sh -c`, full env) are opt-in: `scheduler.allow_command_gates` (default false)
+  Command gates (`sh -c`, the runs' env allow-list) are opt-in: `scheduler.allow_command_gates` (default false)
   is checked on create/update (`assertCommandGateAllowed`) and again in `evaluateGate` per tick.
   Auto-pause (`autoPauseReason`, migration 16): before a scheduled fire, the last
   `scheduler.auto_pause_after` ended runs all empty (0 tool calls) or needs review = pause with
@@ -135,6 +135,10 @@ npm workspaces, one `config/` and one SQLite database shared by three deliverabl
 - **`CLAUDE_BIN` beats `claude.binary`**, so an inherited one would make the tests launch the
   real claude instead of fake-claude.js. Test files import `test/helpers.js` (drops it) before
   `@duskfleet/core` and spawn processes with `testEnv()`; `childEnv()` never passes it to runs.
+- **Runs get an env allow-list, not our env** (`execution/child-env.ts`, `DEFAULT_ENV_ALLOW`):
+  the Claude child and command gates see only PATH, HOME, locale, `ANTHROPIC_*`, `CLAUDE_*`,
+  `NODE_*`, ... plus `claude.env_passthrough` and the agent's `env_passthrough` (merged). A test
+  knob read by fake-claude.js (`FAKE_CLAUDE_*`) only reaches it because the test config passes it.
 - **Agents can be bound to a project** (`project: <id>`): grouped, default target, refused
   elsewhere. `create_agent`/`update_agent` and the CLI's `agents create` validate the spec
   *before* writing, and roll the file back if the config no longer loads: one bad agent file
