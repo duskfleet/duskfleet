@@ -245,7 +245,11 @@ export default function SchedulesPage() {
                     <article key={s.id} id={s.id} className={`sched-card${s.enabled ? "" : " paused"}`}>
                       <div className="main">
                         <div className="title-row">
-                          <h3>{s.name}</h3>
+                          <h3>
+                            <Link href={`/agents#${encodeURIComponent(s.agentId)}`} title={`Agent ${s.agentId}`}>
+                              {s.agentId}
+                            </Link>
+                          </h3>
                           <span
                             className={`badge ${s.enabled ? "completed" : "cancelled"}`}
                             title={
@@ -288,9 +292,13 @@ export default function SchedulesPage() {
                           </span>
                           <span title={s.timeZone}>{s.cronHuman}</span>
                           <span className="sep">·</span>
-                          <Link className="agent" href={`/?agent=${encodeURIComponent(s.agentId)}`}>
-                            {s.agentId}
-                          </Link>
+                          <span title={`Schedule ${s.id}`}>“{s.name}”</span>
+                          {s.effectiveProjectId && (
+                            <>
+                              <span className="sep">·</span>
+                              <span>{s.effectiveProjectId}</span>
+                            </>
+                          )}
                           {s.model && (
                             <>
                               <span className="sep">·</span>
