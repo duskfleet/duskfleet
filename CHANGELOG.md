@@ -18,7 +18,7 @@ All notable changes to Duskfleet are listed here. The format follows
 
 ### Fixed
 
-- The published packages had `bin` paths with a `./` prefix, which npm 11 drops at publish time, so `npx duskfleet` would have had no executable; the pack gate now refuses such entries and `publish --dry-run` fails when npm auto-corrects the manifest ([#277](https://github.com/duskfleet/duskfleet/pull/277)).
+- The published packages had `bin` paths with a `./` prefix, which npm 11 drops at publish time, so `npx duskfleet` would have had no executable; the pack gate now refuses such entries and `publish --dry-run` fails when npm auto-corrects the manifest ([#278](https://github.com/duskfleet/duskfleet/pull/278)).
 
 ## [0.1.0] - 2026-10-26
 
