@@ -106,8 +106,15 @@ for (const spec of PACKAGES) {
   const bins = typeof manifest.bin === "string" ? { [manifest.name]: manifest.bin } : (manifest.bin ?? {});
   if (!Object.keys(bins).length) problems.push(`${spec.name}: package.json has no bin`);
   for (const [name, target] of Object.entries(bins)) {
-    if (typeof target !== "string" || target.startsWith("./") || target.startsWith("/") || /(^|\/)\.\.(\/|$)/.test(target))
-      problems.push(`${spec.name}: bin ${name} -> ${target}: npm drops this entry at publish (use a plain relative path such as dist/cli.js)`);
+    if (
+      typeof target !== "string" ||
+      target.startsWith("./") ||
+      target.startsWith("/") ||
+      /(^|\/)\.\.(\/|$)/.test(target)
+    )
+      problems.push(
+        `${spec.name}: bin ${name} -> ${target}: npm drops this entry at publish (use a plain relative path such as dist/cli.js)`,
+      );
     else if (!files.includes(target)) problems.push(`${spec.name}: bin ${name} -> ${target} is not in the tarball`);
   }
   if (spec.name === "@duskfleet/web" && !files.includes(".next/BUILD_ID")) {
