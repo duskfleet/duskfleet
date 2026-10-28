@@ -18,13 +18,14 @@ claude:
   allow_bypass_permissions: false
   default_timeout_minutes: 30
   default_max_budget_usd: 5
+  env_passthrough: []           # variables every run (and command gate) gets beyond the default allow-list, e.g. [GH_TOKEN]
 scheduler:
   enabled: true                 # kill switch, re-read every tick
   tick_seconds: 30
   default_time_zone: Europe/London
   noop_pattern: '/^\s*(nothing to do|no .* in ready)/i'   # final message of a run that found no work (idle-cost stats)
   auto_pause_after: 5           # pause a schedule after this many empty / needs-review runs in a row; 0 = never
-  allow_command_gates: false    # schedule command gates (`sh -c`, full environment) are refused unless true
+  allow_command_gates: false    # schedule command gates (`sh -c`, outside Claude Code's allow-lists) are refused unless true
 ```
 
 Config is re-read on every run and every `list_*` tool call: edits apply without restarting
@@ -77,3 +78,25 @@ for it). `max_concurrent_runs` always stays the hard cap. See
 | `DUSKFLEET_CONFIG` | Directory containing `duskfleet.yaml` (default: the closest ancestor `config/` of the running package / cwd) |
 | `CLAUDE_BIN` | Path to the Claude Code binary (overrides `claude.binary`). Read by Duskfleet only: it is not passed on to agent runs. |
 | `DUSKFLEET_LOG_LEVEL` | `debug` \| `info` \| `warn` \| `error` |
+
+### What reaches a run
+
+A run's Claude Code child, and a schedule's command gate, get an allow-list of Duskfleet's own
+environment, not a copy of it. By default: `PATH`, `HOME`, `USER`, `LOGNAME`, `SHELL`, `LANG`,
+`LC_*`, `TMPDIR`, `TERM`, `TZ`, `ANTHROPIC_*`, `CLAUDE_*`, `NODE_*`, `npm_config_*`, `XDG_*`, and
+on Windows `SystemRoot`, `windir`, `ComSpec`, `PATHEXT`, `APPDATA`, `LOCALAPPDATA`,
+`USERPROFILE`, `USERNAME`, `TEMP`, `TMP`. `CLAUDE_BIN` and the markers of a nested Claude Code
+session (`CLAUDECODE`, `CLAUDE_CODE_ENTRYPOINT`, `CLAUDE_CODE_SSE_*`) never reach it. Anything
+else (`GITHUB_TOKEN`, `NPM_TOKEN`, `AWS_*`, ...) is dropped.
+
+To pass more, name it, as an exact name or `PREFIX_*`:
+
+```yaml
+claude:
+  env_passthrough: [GH_TOKEN]   # every run and command gate
+```
+
+or per agent, in its frontmatter (`env_passthrough: [NPM_TOKEN]`, see
+[agents](agents.md#frontmatter)). The two lists are merged. The usual one is `GH_TOKEN` for an
+agent that runs `gh`. A command gate gets the global list plus its schedule agent's. See
+[security](security.md#process-and-environment).

@@ -22,6 +22,7 @@ export {
   assertAgentKind,
   assertWrapUpReserve,
   deleteAgentFile,
+  envPassthroughSchema,
   listProjectAgents,
   type ProjectAgentInfo,
   projectAgentDefinitionHash,
@@ -48,6 +49,13 @@ export {
 } from "./config/project-files.js";
 export * from "./config/types.js";
 export * from "./evals/types.js";
+export {
+  childEnv,
+  DEFAULT_ENV_ALLOW,
+  ENV_PASSTHROUGH_PATTERN,
+  envNameMatches,
+  mergeEnvPassthrough,
+} from "./execution/child-env.js";
 export {
   billingTypeOf,
   ClaudeCodeExecutor,
