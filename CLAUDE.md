@@ -24,7 +24,8 @@ npm run cli -- serve  # long-running scheduler process; the MCP server also tick
 npm run cli -- install-service [--print] | uninstall-service   # register `serve` with launchd / systemd --user / Task Scheduler
 npm run cli -- run --project <project id or abs path> --agent <agent id> --model haiku -- "task"
 npm run web          # Next.js dashboard, http://localhost:4777
-npm run check        # what CI runs, same order: check:public, lint (biome ci), build, check:docs, check:pack, typecheck, test
+npm run check        # what CI runs, same order: check:public, lint (biome ci), build, check:docs, check:quickstart, check:pack, typecheck, test
+npm run check:quickstart  # replays the README Quick start's `npm run cli --` lines against fake-claude.js (after build)
 npm run lint:fix     # Biome: format + safe fixes
 ```
 
@@ -106,7 +107,9 @@ npm workspaces, one `config/` and one SQLite database shared by three deliverabl
   (cents) and say so. An agent without an explicit model uses the CLI default,
   which can be 100x more expensive.
 - Dashboard: no component library, design tokens live in `apps/web/app/globals.css`
-  (dark only, brand palette: night ground, sunset accent; fonts via `next/font` in
+  (Dark and Light modes of the same tokens, each `light-dark(<light>, <dark>)`: Dark by default,
+  `prefers-color-scheme: light` or `data-theme` on `<html>` switch; brand palette: night ground,
+  sunset accent; fonts via `next/font` in
   `app/layout.tsx`). A completed run that hit a permission denial is "needs review"
   (amber), never plain green. One rule decides needs-review (`reviewReasons` in
   `core/src/observability/run.ts`: budget exhausted, timed out, orphaned, non-zero exit,

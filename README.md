@@ -24,6 +24,7 @@ Website: [duskfleet.com](https://duskfleet.com/?utm_source=github&utm_medium=rea
 [What you get](#what-you-get) ·
 [Status and roadmap](#status-and-roadmap) ·
 [Documentation](#documentation) ·
+[Contributing](#contributing) ·
 [License](#license) ·
 [Website](https://duskfleet.com/?utm_source=github&utm_medium=readme&utm_campaign=always-on&utm_content=readme)
 
@@ -152,6 +153,10 @@ Guides:
 | Guide | Contents |
 |---|---|
 | [Run Claude Code on a schedule on your own machine](docs/guides/run-claude-code-on-a-schedule.md) | `claude -p` from cron, launchd and systemd, the failure modes unattended (PATH and login, permission prompts, overlapping runs, silent failures, sleep) and what Duskfleet does about each |
+
+## Contributing
+
+Setup, rules and good first issues: [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## License
 
