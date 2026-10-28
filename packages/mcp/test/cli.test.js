@@ -25,7 +25,7 @@ function makeRoot() {
   // JSON strings are valid YAML: paths with quotes, `: `, `#` or backslashes stay intact.
   writeFileSync(
     path.join(configDir, "duskfleet.yaml"),
-    `data_dir: ../data\ndefault_agent: coder\nclaude:\n  binary: ${JSON.stringify(fakeBinary)}\n  default_timeout_minutes: 0.05\n`,
+    `data_dir: ../data\ndefault_agent: coder\nclaude:\n  binary: ${JSON.stringify(fakeBinary)}\n  default_timeout_minutes: 0.05\n  env_passthrough: ["FAKE_CLAUDE_*"]\n`,
   );
   writeFileSync(
     path.join(configDir, "projects.yaml"),

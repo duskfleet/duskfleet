@@ -14,6 +14,7 @@ import {
   type DuskFleetConfig,
   deleteAgentFile,
   EFFORT_LEVELS,
+  envPassthroughSchema,
   listProjectAgents,
   loadAgents,
   ON_FAILURE_POLICIES,
@@ -107,6 +108,8 @@ function presentAgent(a: AgentDefinition, config: DuskFleetConfig) {
     /** Daily caps (UTC day); null = no cap. */
     maxDailyRuns: a.maxDailyRuns ?? null,
     maxDailyCostUsd: a.maxDailyCostUsd ?? null,
+    /** Variables this agent's runs get beyond the default allow-list (claude.env_passthrough adds to them). */
+    envPassthrough: a.envPassthrough ?? [],
     systemPrompt: a.systemPrompt,
     path: a.sourcePath,
   };
@@ -222,6 +225,11 @@ const agentFields = {
     .describe(
       "Spend of this agent allowed per UTC day: once the recorded cost of its runs since 00:00 UTC reaches it, the next run is refused (a schedule records skipped_daily_cap). A run in progress is not stopped. Omit for no cap",
     ),
+  env_passthrough: envPassthroughSchema
+    .optional()
+    .describe(
+      'Environment variables (exact names or PREFIX_*) the runs get on top of the default allow-list (PATH, HOME, ANTHROPIC_*, CLAUDE_*...), e.g. ["GH_TOKEN"] for an agent that uses gh. Everything else in the server\'s environment is dropped',
+    ),
   system_prompt: z.string().optional().describe("Appended to Claude Code's system prompt for every run of this agent"),
 };
 
@@ -334,6 +342,7 @@ export function registerAgentTools(server: McpServer, ctx: ToolContext): void {
               "project",
               "max_daily_runs",
               "max_daily_cost_usd",
+              "env_passthrough",
             ]),
           )
           .optional()

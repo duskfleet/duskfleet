@@ -38,6 +38,11 @@ export interface ExecutionRequest {
   addDirs?: string[];
   /** Passed as --agent: adopt a project-defined Claude Code agent. */
   claudeAgent?: string;
+  /**
+   * Variables (exact names or `PREFIX_*`) passed to the child on top of the default allow-list
+   * (`DEFAULT_ENV_ALLOW` in child-env.ts). Everything else in our environment is dropped.
+   */
+  envPassthrough?: string[];
   timeoutMs?: number;
   /** Absolute path of the file that receives every raw event line. */
   logPath?: string;
