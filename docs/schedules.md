@@ -15,6 +15,10 @@ to one) and model override.
 The cron parser is in-house (no dependency) and DST-safe: it re-derives local time per
 candidate minute, so a schedule at 08:00 fires at 08:00 on both sides of a clock change.
 
+Coming from `claude -p` in cron, launchd or a systemd timer? The guide
+[Run Claude Code on a schedule on your own machine](guides/run-claude-code-on-a-schedule.md)
+compares the plain approach with what a schedule here adds.
+
 ## Who ticks
 
 Any Duskfleet process can: the MCP server that Claude Desktop or Claude Code keeps alive, or

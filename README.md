@@ -147,6 +147,12 @@ start.
 | [Troubleshooting](docs/troubleshooting.md) | Stuck runs, denials, orphaned runs, `doctor` failures |
 | [Windows test plan](docs/windows-test-plan.md) | Step-by-step checks to verify the experimental Windows support, with a results column |
 
+Guides:
+
+| Guide | Contents |
+|---|---|
+| [Run Claude Code on a schedule on your own machine](docs/guides/run-claude-code-on-a-schedule.md) | `claude -p` from cron, launchd and systemd, the failure modes unattended (PATH and login, permission prompts, overlapping runs, silent failures, sleep) and what Duskfleet does about each |
+
 ## License
 
 [MIT](LICENSE)
