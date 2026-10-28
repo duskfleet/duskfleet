@@ -44,6 +44,10 @@ jobs:
       - name: Docs sync (every MCP tool in docs/mcp-server.md, every docs page linked from README.md)
         run: npm run check:docs
 
+      # After the build: replays the README Quick start through dist/cli.js against fake-claude.js.
+      - name: README Quick start (doctor, agents create, run, runs against the fake Claude)
+        run: npm run check:quickstart
+
       - name: Typecheck (core, mcp, web)
         run: |
           npm run typecheck
