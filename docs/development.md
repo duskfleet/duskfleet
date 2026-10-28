@@ -168,8 +168,9 @@ with `0.2.0` standing for the new version:
    It refuses to run when `main` does not carry the version or the CHANGELOG section is not
    dated, creates the annotated tag `v0.2.0` and the GitHub release with the CHANGELOG section
    as its notes, and runs the `publish` job ([Publishing](#publishing)). A failure after the
-   first package published is fixed by re-running the workflow: the tag, the release and a
-   version already on the registry are skipped.
+   first package published is fixed by dispatching the workflow again with the same version,
+   even once `main` has moved on: when the tag exists, the checks and the notes read from the
+   tag, the tag and the release are kept, and a version already on the registry is skipped.
 5. **By hand, if the Actions tab is not an option:** an annotated tag
    (`git tag -a v0.2.0 -m "Duskfleet 0.2.0"`, then `git push origin v0.2.0`, which runs the
    `publish` job on its own) and `gh release create v0.2.0 --verify-tag --title "Duskfleet 0.2.0"

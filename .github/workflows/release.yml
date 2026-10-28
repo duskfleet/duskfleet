@@ -7,8 +7,9 @@
 # The tag is created with the workflow's own GITHUB_TOKEN, and GitHub never starts another
 # workflow from an event that token caused: that is why publish.yml is called from here
 # (`workflow_call`) instead of waiting for the tag push. Re-running a release whose publish
-# failed is safe: the `tag` job keeps an existing tag (even when main has moved on: the release
-# is what the tag points to) and release, and publish skips versions already on npm.
+# failed is safe, even after main moved on or bumped the next version: when the tag exists the
+# checks and the notes read from the tag (the release is what the tag points to), the tag and
+# the release are kept, and publish skips versions already on npm.
 name: Release
 
 on:
@@ -49,23 +50,44 @@ jobs:
         with:
           node-version: 24
 
-      - name: main carries the version
+      # The release is what the tag points to. On the first dispatch that is main's HEAD; on a
+      # re-run the tag already exists and main may have moved on (even past the next version
+      # bump), so every check below reads the files from the tag, never from main.
+      - name: Source commit (main, or the existing tag)
+        id: src
+        env:
+          TAG: v${{ inputs.version }}
+        run: |
+          if git rev-parse -q --verify "refs/tags/$TAG" > /dev/null; then
+            tagged=$(git rev-parse "$TAG^{commit}")
+            if ! git merge-base --is-ancestor "$tagged" HEAD; then
+              echo "::error::$TAG points at $tagged, which is not on main; delete the tag first if that is intended"
+              exit 1
+            fi
+            echo "tag $TAG exists at $tagged, reading the release from it"
+            echo "ref=$TAG" >> "$GITHUB_OUTPUT"
+          else
+            echo "ref=HEAD" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: The source carries the version
         id: meta
         env:
           VERSION: ${{ inputs.version }}
+          REF: ${{ steps.src.outputs.ref }}
         run: |
           case "$VERSION" in
             [0-9]*.[0-9]*.[0-9]*) ;;
             *) echo "::error::version '$VERSION' is not x.y.z"; exit 1 ;;
           esac
-          core=$(node -p "require('./packages/duskfleet/package.json').version")
-          web=$(node -p "require('./apps/web/package.json').version")
+          core=$(git show "$REF:packages/duskfleet/package.json" | node -p "JSON.parse(require('fs').readFileSync(0,'utf8')).version")
+          web=$(git show "$REF:apps/web/package.json" | node -p "JSON.parse(require('fs').readFileSync(0,'utf8')).version")
           if [ "$VERSION" != "$core" ] || [ "$VERSION" != "$web" ]; then
-            echo "::error::main has duskfleet $core and @duskfleet/web $web, not $VERSION: merge the version bump first"
+            echo "::error::$REF has duskfleet $core and @duskfleet/web $web, not $VERSION: merge the version bump first"
             exit 1
           fi
-          if ! grep -Eq "^## \[$VERSION\] - [0-9]{4}-[0-9]{2}-[0-9]{2}$" CHANGELOG.md; then
-            echo "::error::CHANGELOG.md has no dated section '## [$VERSION] - YYYY-MM-DD'"
+          if ! git show "$REF:CHANGELOG.md" | grep -Eq "^## \[$VERSION\] - [0-9]{4}-[0-9]{2}-[0-9]{2}$"; then
+            echo "::error::CHANGELOG.md at $REF has no dated section '## [$VERSION] - YYYY-MM-DD'"
             exit 1
           fi
           echo "tag=v$VERSION" >> "$GITHUB_OUTPUT"
@@ -75,13 +97,14 @@ jobs:
       - name: Release notes from the CHANGELOG section
         env:
           VERSION: ${{ inputs.version }}
+          REF: ${{ steps.src.outputs.ref }}
         run: |
-          awk -v v="$VERSION" '
+          git show "$REF:CHANGELOG.md" | awk -v v="$VERSION" '
             $0 ~ "^## \\[" v "\\] - " { on = 1; next }
             on && /^## \[/ { exit }
             on && /^\[[^]]+\]: / { exit }
             on { print }
-          ' CHANGELOG.md | sed -e :a -e '/^\n*$/{$d;N;ba' -e '}' > "$RUNNER_TEMP/notes.md"
+          ' | sed -e :a -e '/^\n*$/{$d;N;ba' -e '}' > "$RUNNER_TEMP/notes.md"
           if [ ! -s "$RUNNER_TEMP/notes.md" ]; then
             echo "::error::the CHANGELOG section for $VERSION is empty"
             exit 1
@@ -93,15 +116,9 @@ jobs:
           TAG: ${{ steps.meta.outputs.tag }}
           VERSION: ${{ inputs.version }}
         run: |
-          # A re-run keeps an existing tag: the release is what the tag points to (publish checks
-          # out the tag, not main), so main may have moved on, but the tag must be on main's history.
+          # A re-run keeps the existing tag (checked above to be on main's history).
           if git rev-parse -q --verify "refs/tags/$TAG" > /dev/null; then
-            tagged=$(git rev-parse "$TAG^{commit}")
-            echo "tag $TAG exists at $tagged, keeping it"
-            if ! git merge-base --is-ancestor "$tagged" HEAD; then
-              echo "::error::$TAG points at $tagged, which is not on main; delete the tag first if that is intended"
-              exit 1
-            fi
+            echo "tag $TAG exists, keeping it"
           else
             git config user.name "github-actions[bot]"
             git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
