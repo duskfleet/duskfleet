@@ -1,47 +1,71 @@
-/* Duskfleet brand: night ground, sunset accent. Dark only. */
+/* Duskfleet brand: night ground, sunset accent. Two modes of the same tokens (DS-03):
+   every theme-dependent token is light-dark(<Light>, <Dark>), resolved by color-scheme.
+   Dark is the default; prefers-color-scheme: light switches to Light; data-theme="light" / "dark"
+   on <html> overrides both. */
 :root {
-  /* brand */
+  color-scheme: dark;
+}
+@media (prefers-color-scheme: light) {
+  :root {
+    color-scheme: light;
+  }
+}
+:root[data-theme="dark"] {
+  color-scheme: dark;
+}
+:root[data-theme="light"] {
+  color-scheme: light;
+}
+:root {
+  /* brand primitives, the same in both modes (text uses the semantic tokens below) */
   --amber: #f6b24a;
   --sunset: #f0783a;
   --coral: #e24b5a;
   --dusk: #5a3f7a;
   --brand-gradient: linear-gradient(90deg, var(--amber), var(--sunset), var(--coral));
+  /* logo mark: sunset gradient + night sail in Dark, dawn gradient + night-ink sail in Light */
+  --mark-from: light-dark(#e9a233, var(--amber));
+  --mark-via: light-dark(#d8622a, var(--sunset));
+  --mark-to: light-dark(#c83a4c, var(--coral));
+  --mark-sail: light-dark(#1b1a2e, var(--bg));
 
   /* surfaces and text */
   /* night readability (DS-02): lifted ground, toned-down text, faint >= 4.5:1 on every surface */
-  --bg: #1a1d2f;
-  --panel: #212539;
-  --panel-2: #292e45;
-  --inverse: #f7f3ec; /* light surface: the cream tile behind the mark */
-  --border: #383d58; /* decorative edges and dividers */
-  --border-strong: #767da2; /* component and state outlines (inputs, buttons): >= 3:1 */
-  --text: #e0dace;
-  --muted: #c2bccf;
-  --faint: #9b96b1;
+  --bg: light-dark(#f7f3ec, #1a1d2f);
+  --panel: light-dark(#fffdf9, #212539);
+  --panel-2: light-dark(#efe9df, #292e45);
+  --inverse: light-dark(#1a1d2f, #f7f3ec); /* the opposite surface: the tile behind the mark */
+  --border: light-dark(#d9cfbf, #383d58); /* decorative edges and dividers */
+  --border-strong: light-dark(#857c8f, #767da2); /* component and state outlines (inputs, buttons): >= 3:1 */
+  --text: light-dark(#1b1a2e, #e0dace);
+  --muted: light-dark(#4a4458, #c2bccf);
+  --faint: light-dark(#625c6f, #9b96b1);
   --on-accent: #1b1a2e; /* text and ink on brand fills (amber, sunset; not small text on coral) */
 
   /* semantic: accent = sunset; status = running sky, clean green, review amber, failed coral */
-  --accent: var(--sunset);
-  --accent-bg: rgba(240, 120, 58, 0.14);
-  --ok: #86c98a;
-  --ok-bg: rgba(134, 201, 138, 0.14);
-  --warn: var(--amber);
-  --warn-bg: rgba(246, 178, 74, 0.14);
-  --warn-tint: rgba(246, 178, 74, 0.07); /* banners and highlighted rows */
-  --bad: var(--coral);
-  --bad-bg: rgba(226, 75, 90, 0.16);
-  --bad-ink: #f4949c; /* coral lifted for small text on --bad-bg (AA on panel); coral itself is never small text */
-  --bad-tint: rgba(226, 75, 90, 0.08);
-  --run: #6fc4e8;
-  --run-bg: rgba(111, 196, 232, 0.14);
-  --shadow: 0 1px 0 rgba(0, 0, 0, 0.3);
+  --accent: light-dark(#a8440f, var(--sunset));
+  --accent-bg: light-dark(rgba(168, 68, 15, 0.1), rgba(240, 120, 58, 0.14));
+  --ok: light-dark(#2a6c31, #86c98a);
+  --ok-bg: light-dark(rgba(42, 108, 49, 0.1), rgba(134, 201, 138, 0.14));
+  --warn: light-dark(#855400, var(--amber));
+  --warn-bg: light-dark(rgba(184, 115, 15, 0.14), rgba(246, 178, 74, 0.14));
+  --warn-tint: light-dark(rgba(184, 115, 15, 0.07), rgba(246, 178, 74, 0.07)); /* banners and highlighted rows */
+  --warn-border: light-dark(rgba(184, 115, 15, 0.5), rgba(246, 178, 74, 0.4)); /* decorative edge of warn-tint fills */
+  --bad: light-dark(#b02c3b, var(--coral));
+  --bad-bg: light-dark(rgba(176, 44, 59, 0.1), rgba(226, 75, 90, 0.16));
+  /* coral lifted (Dark) / deepened (Light) for small text on --bad-bg; --bad itself is never small text */
+  --bad-ink: light-dark(#a12636, #f4949c);
+  --bad-tint: light-dark(rgba(176, 44, 59, 0.05), rgba(226, 75, 90, 0.08));
+  --run: light-dark(#1a6488, #6fc4e8);
+  --run-bg: light-dark(rgba(26, 100, 136, 0.1), rgba(111, 196, 232, 0.14));
+  /* Light has no drop shadow: a 1 px border-coloured edge instead */
+  --shadow: 0 1px 0 light-dark(var(--border), rgba(0, 0, 0, 0.3));
 
   /* type: next/font sets --font-outfit / --font-plex-sans / --font-plex-mono on <html> (app/layout.tsx) */
   --font-display: var(--font-outfit), ui-sans-serif, system-ui, sans-serif;
   --font-sans: var(--font-plex-sans), ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
   --font-mono: var(--font-plex-mono), ui-monospace, SFMono-Regular, Menlo, monospace;
 
-  color-scheme: dark;
   font-family: var(--font-sans);
   /* type ramp: body 16/1.5 medium, nothing under 14 px, uppercase labels +0.04em */
   font-size: 16px;
@@ -127,9 +151,21 @@ code,
 .nav .brand:hover {
   text-decoration: none;
 }
-.nav .brand img {
+.nav .brand .mark {
   display: block;
   flex: none;
+}
+.mark .from {
+  stop-color: var(--mark-from);
+}
+.mark .via {
+  stop-color: var(--mark-via);
+}
+.mark .to {
+  stop-color: var(--mark-to);
+}
+.mark .sail {
+  fill: var(--mark-sail);
 }
 .nav .brand .fleet {
   color: var(--accent);
@@ -825,7 +861,7 @@ h2 .count {
   line-height: 21px;
 }
 .callout.warn {
-  border-color: color-mix(in srgb, var(--warn) 55%, transparent);
+  border-color: var(--warn-border);
   background: var(--warn-tint);
   color: var(--text);
 }
@@ -952,7 +988,6 @@ pre.block.bad {
 }
 .copy-btn.danger {
   color: var(--bad-ink);
-  border-color: color-mix(in srgb, var(--bad) 45%, transparent);
 }
 .copy-btn.danger:hover {
   background: var(--bad-bg);
@@ -1535,7 +1570,7 @@ summary:focus-visible {
   flex-wrap: wrap;
 }
 .more a {
-  color: var(--amber);
+  color: var(--warn);
 }
 /* "By model": a narrower card, totals row in amber */
 .model-card {
@@ -1550,7 +1585,7 @@ summary:focus-visible {
   font-weight: 600;
 }
 .model-card .table tfoot td {
-  color: var(--amber);
+  color: var(--warn);
 }
 .badge-link {
   color: inherit;
@@ -1561,8 +1596,10 @@ summary:focus-visible {
 }
 
 /* ---- timeline extras ----------------------------------------------------- */
+/* inset edge, not a border: the row keeps its height and its divider */
 .timeline li.denied {
   background: var(--warn-tint);
+  box-shadow: inset 0 0 0 1px var(--warn-border);
 }
 .timeline .detail {
   cursor: text;
@@ -1812,7 +1849,7 @@ summary:focus-visible {
   color: var(--faint);
 }
 .sched-card .meta a.agent {
-  color: var(--amber);
+  color: var(--warn);
 }
 .sched-card .meta .model {
   font-family: var(--font-mono);
@@ -1879,7 +1916,7 @@ summary:focus-visible {
   color: var(--muted);
 }
 .sched-card .last a {
-  color: var(--amber);
+  color: var(--warn);
   white-space: nowrap;
 }
 .sched-card .last .v.clean {
@@ -1943,7 +1980,7 @@ summary:focus-visible {
   background: var(--warn);
 }
 .sq.failed {
-  background: var(--coral);
+  background: var(--bad);
 }
 .sq.cancelled {
   background: var(--muted);
@@ -1955,13 +1992,13 @@ summary:focus-visible {
 .sq.capped,
 .sq.budget,
 .sq.skipped {
-  border-color: var(--faint);
+  border-color: var(--border-strong);
 }
 .sq.skipped {
   border-style: dashed;
 }
 .sq.gate {
-  border-color: var(--faint);
+  border-color: var(--border-strong);
   border-style: dotted;
 }
 .sq.paused {
