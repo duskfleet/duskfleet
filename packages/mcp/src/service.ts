@@ -32,6 +32,12 @@ export interface ServiceTarget {
    * Null or absent: the service finds `<repoRoot>/config` itself.
    */
   configDir?: string | null;
+  /**
+   * Data directory exported as DUSKFLEET_DATA, set only when the installing process got it from
+   * DUSKFLEET_DATA: without it the service would open another database (data_dir or the default)
+   * than the CLI and the dashboard. Null or absent: the service resolves it like the CLI does.
+   */
+  dataDir?: string | null;
   /** Absolute path of the node binary that runs the CLI. */
   nodeBin: string;
   /** Absolute path of packages/mcp/dist/cli.js. */
@@ -149,6 +155,7 @@ export function renderService(t: ServiceTarget): ServiceUnit {
     ];
     if (t.claudeBin) env.push(["CLAUDE_BIN", t.claudeBin]);
     if (t.configDir) env.push(["DUSKFLEET_CONFIG", t.configDir]);
+    if (t.dataDir) env.push(["DUSKFLEET_DATA", t.dataDir]);
     const content = [
       '<?xml version="1.0" encoding="UTF-8"?>',
       '<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">',
@@ -213,6 +220,7 @@ export function renderService(t: ServiceTarget): ServiceUnit {
       `Environment=${quote(`PATH=${pathEnv}`)}`,
       ...(t.claudeBin ? [`Environment=${quote(`CLAUDE_BIN=${t.claudeBin}`)}`] : []),
       ...(t.configDir ? [`Environment=${quote(`DUSKFLEET_CONFIG=${t.configDir}`)}`] : []),
+      ...(t.dataDir ? [`Environment=${quote(`DUSKFLEET_DATA=${t.dataDir}`)}`] : []),
       `StandardOutput=append:${t.logPath}`,
       `StandardError=append:${t.logPath}`,
       "",
@@ -247,9 +255,10 @@ export function renderService(t: ServiceTarget): ServiceUnit {
   // "no time limit" or "restart on failure"; XML can. The command goes through
   // cmd.exe so stdout/stderr can be appended to the log file.
   const user = t.user ?? windowsUser();
-  // A task has no environment block: the config dir is set by cmd.exe before node starts.
+  // A task has no environment block: the config and data dirs are set by cmd.exe before node starts.
   const setConfig = t.configDir ? `set "DUSKFLEET_CONFIG=${t.configDir}"&& ` : "";
-  const cmd = `/c "${setConfig}"${t.nodeBin}" "${t.cliEntry}" serve >> "${t.logPath}" 2>&1"`;
+  const setData = t.dataDir ? `set "DUSKFLEET_DATA=${t.dataDir}"&& ` : "";
+  const cmd = `/c "${setConfig}${setData}"${t.nodeBin}" "${t.cliEntry}" serve >> "${t.logPath}" 2>&1"`;
   const content = [
     '<?xml version="1.0" encoding="UTF-16"?>',
     '<Task version="1.4" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">',

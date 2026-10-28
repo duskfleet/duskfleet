@@ -49,9 +49,10 @@ DUSKFLEET_DATA=~/.local/share/duskfleet npx duskfleet doctor    # dataDir points
 
 An installed package with a user-level config finds the copy on its own. While you still run from
 the clone, set `data_dir: ~/.local/share/duskfleet` in its `duskfleet.yaml` rather than relying on
-`DUSKFLEET_DATA`: the service unit written by `install-service` carries `DUSKFLEET_CONFIG` when it
-needs it, not `DUSKFLEET_DATA`. Re-run `install-service` afterwards so the service picks up the
-new paths, and remove the old `data/` once runs and schedules show up as expected.
+`DUSKFLEET_DATA`, which every shell, MCP host and dashboard would need too. The service unit written
+by `install-service` carries `DUSKFLEET_CONFIG` when it needs it, and `DUSKFLEET_DATA` when it was
+set in the shell that ran the command. Re-run `install-service` afterwards so the service picks up
+the new paths, and remove the old `data/` once runs and schedules show up as expected.
 
 ## `config/duskfleet.yaml`
 

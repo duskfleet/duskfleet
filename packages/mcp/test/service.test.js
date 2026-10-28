@@ -110,6 +110,30 @@ test("installed package: no repo root, the unit runs beside the config and expor
   assert.doesNotMatch(renderService({ ...base, platform: "linux" }).content, /DUSKFLEET_CONFIG/);
 });
 
+test("DUSKFLEET_DATA set at install time is carried by the unit, so the service opens the same database", () => {
+  const t = { ...base, dataDir: "/srv/df/data", logPath: "/srv/df/data/logs/serve.log" };
+  const mac = renderService({ ...t, platform: "darwin" });
+  assert.match(mac.content, /<key>DUSKFLEET_DATA<\/key><string>\/srv\/df\/data<\/string>/);
+  const lin = renderService({ ...t, platform: "linux" });
+  assert.match(lin.content, /^Environment="DUSKFLEET_DATA=\/srv\/df\/data"$/m);
+  const win = renderService({
+    ...t,
+    platform: "win32",
+    configDir: "C:\\df\\config",
+    dataDir: "D:\\df data",
+    nodeBin: "C:\\node\\node.exe",
+    user: "PC\\me",
+  });
+  assert.match(
+    win.content,
+    /<Arguments>\/c &quot;set &quot;DUSKFLEET_CONFIG=C:\\df\\config&quot;&amp;&amp; set &quot;DUSKFLEET_DATA=D:\\df data&quot;&amp;&amp; &quot;C:\\node\\node\.exe&quot;/,
+  );
+  // not set (data_dir or the default): the service resolves it itself, nothing exported
+  for (const platform of ["darwin", "linux", "win32"]) {
+    assert.doesNotMatch(renderService({ ...base, platform, user: "PC\\me" }).content, /DUSKFLEET_DATA/);
+  }
+});
+
 test("a cli.js inside the npx cache is refused: the unit would break once npm evicts it", () => {
   const npx = { ...base, cliEntry: "/home/me/.npm/_npx/1a2b/node_modules/duskfleet/dist/cli.js" };
   for (const platform of ["darwin", "linux"]) {

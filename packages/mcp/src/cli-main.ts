@@ -182,7 +182,12 @@ function parseAgentCreate(args: string[]): { id: string; fields: Record<string, 
 }
 
 /** What the service runs: this node, this dist/cli.js, this repo (or config), the resolved claude binary. */
-function serviceTarget(claudeBin: string | null, dataDir: string, configDir: string): ServiceTarget {
+function serviceTarget(
+  claudeBin: string | null,
+  dataDir: string,
+  configDir: string,
+  dataFromEnv: boolean,
+): ServiceTarget {
   // The bin is dist/cli.js (the Node version check); this module sits next to it.
   const cliEntry = path.join(path.dirname(fileURLToPath(import.meta.url)), "cli.js");
   // An installed package has no repo root above its cli.js: the unit then carries the config dir.
@@ -191,6 +196,8 @@ function serviceTarget(claudeBin: string | null, dataDir: string, configDir: str
     platform: process.platform,
     repoRoot: dirs.repoRoot,
     configDir: dirs.configDir,
+    // DUSKFLEET_DATA lives only in this shell: the unit carries it, or the service opens another database.
+    dataDir: dataFromEnv ? path.resolve(dataDir) : null,
     nodeBin: process.execPath,
     cliEntry,
     logPath: path.join(dataDir, "logs", "serve.log"),
@@ -217,7 +224,12 @@ async function main(): Promise<void> {
   switch (command) {
     case "install-service": {
       const { values } = parseArgs({ args: rest, options: { print: { type: "boolean", default: false } } });
-      const target = serviceTarget(app.executor.binary, app.config.dataDir, app.config.configDir);
+      const target = serviceTarget(
+        app.executor.binary,
+        app.config.dataDir,
+        app.config.configDir,
+        app.config.dataSource === "env",
+      );
       if (values.print) {
         const unit = renderService(target);
         process.stderr.write(`# ${unit.unitPath}\n`);
