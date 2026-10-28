@@ -343,12 +343,15 @@ test("tick fires due schedules, honours the kill switch, and only the lease hold
     // make it due now
     repo.update(s.id, { nextRunAt: new Date(Date.now() - 1000).toISOString() });
 
+    // compare with the clock before the tick: next is derived from the tick's own now, and a
+    // Date.now() read after it can already be past that minute boundary (flaked on CI)
+    const beforeTick = Date.now();
     await a.tick();
     assert.equal(a.status().leaseHeldByThisProcess, true);
     let after = repo.get(s.id);
     assert.equal(after.lastOutcome, "started");
     assert.ok(after.lastRunId);
-    assert.ok(new Date(after.nextRunAt).getTime() > Date.now(), "advanced to the next minute");
+    assert.ok(new Date(after.nextRunAt).getTime() > beforeTick, "advanced to the next minute");
     assert.equal(runs.getRun(after.lastRunId).projectPath, project);
 
     // B cannot take the lease while A holds it
