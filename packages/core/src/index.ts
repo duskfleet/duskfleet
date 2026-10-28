@@ -31,15 +31,28 @@ export {
 } from "./config/agent-files.js";
 export { type AgentLintProblem, assertAgentSpecClean, collapseHome, lintAgentSpec } from "./config/agent-lint.js";
 export {
+  type ConfigLocation,
   ConfigNotFoundError,
+  type ConfigSource,
+  dataDirFor,
   expandHome,
   findRepoRoot,
   isDirectory,
   loadAgents,
   loadConfig,
+  locateConfig,
   resolveConfigDir,
   splitFrontmatter,
 } from "./config/loader.js";
+export {
+  dataDirFromEnv,
+  type InitUserConfigResult,
+  initUserConfig,
+  type LocationContext,
+  STARTER_CONFIG,
+  userConfigDir,
+  userDataDir,
+} from "./config/locations.js";
 export {
   PROJECT_ID_PATTERN,
   projectIdFromPath,

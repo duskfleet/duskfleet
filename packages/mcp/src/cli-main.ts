@@ -334,7 +334,12 @@ async function main(): Promise<void> {
         pathDefaulted: pathDefaulted(process.env["PATH"]),
         error,
         configDir: app.config.configDir,
+        // env (DUSKFLEET_CONFIG) > repo (config/ found walking up) > user (user-level directory)
+        configSource: app.location.source,
+        configLookup: app.location.lookup,
         dataDir: app.config.dataDir,
+        // env (DUSKFLEET_DATA) > config (data_dir, or ../data next to a repo config) > user
+        dataSource: app.config.dataSource,
         agents: [...app.config.agents.keys()],
         scheduler,
         ...(doctorFlags.probe ? { probe } : {}),

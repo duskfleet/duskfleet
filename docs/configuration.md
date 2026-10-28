@@ -4,10 +4,59 @@ Everything declarative lives in `config/` and is meant to be committed to Git. M
 values (your own projects, your own agents, the MCP registration) live in git-ignored files:
 `data/projects.yaml`, `data/agents/`, `.mcp.json`.
 
+## Where config and data live
+
+The config directory (the one holding `duskfleet.yaml`, `agents/`, `projects.yaml`) is the first
+of these that applies:
+
+1. `DUSKFLEET_CONFIG`, a path to the directory.
+2. A repo-local `config/`: the closest directory above the CLI (or the MCP server, or the
+   dashboard's working directory) that contains `config/duskfleet.yaml`. A clone of this
+   repository uses this one with no variable set.
+3. The user-level directory, for an installed package (`npx duskfleet`) with no checkout above it:
+
+| Platform | Config | Data |
+|---|---|---|
+| Linux, macOS | `$XDG_CONFIG_HOME/duskfleet` (default `~/.config/duskfleet`) | `$XDG_DATA_HOME/duskfleet` (default `~/.local/share/duskfleet`) |
+| Windows (experimental) | `%APPDATA%\duskfleet` | `%LOCALAPPDATA%\duskfleet` |
+
+A relative `XDG_*` value is ignored, as the XDG specification says. macOS uses the XDG paths
+rather than `~/Library/Application Support`: Duskfleet is a terminal tool (like `~/.claude` or
+`~/.config/gh`), the paths carry no space to quote in service units, shell commands and
+`add_dirs`, and Linux and macOS share one set of paths in these docs.
+
+The data directory (SQLite database, `logs/`, user agents, the private `projects.yaml`) is the
+first of: `DUSKFLEET_DATA`; `data_dir` in `duskfleet.yaml` (relative to the config directory);
+the user-level data directory when the config is the user-level one; otherwise `../data` next to
+the config directory (a clone's `data/`). `duskfleet doctor` prints both directories, where each
+came from (`configSource`, `dataSource`) and every config candidate (`configLookup`).
+
+A user-level config directory starts with a starter `duskfleet.yaml` (no agent: Duskfleet ships
+none), written by the onboarding command; it is never overwritten. Until it exists, every
+command but `--help` / `--version` fails with `Config file not found` and the
+`npx duskfleet init` hint.
+
+### Moving a repo-local `data/` to the user-level directory
+
+There is no automatic migration. With nothing running (stop `serve`, the service and any MCP
+host), copy the directory, including the SQLite `-wal` / `-shm` files, then check:
+
+```bash
+mkdir -p ~/.local/share/duskfleet
+cp -R /path/to/duskfleet/data/. ~/.local/share/duskfleet/
+DUSKFLEET_DATA=~/.local/share/duskfleet npx duskfleet doctor    # dataDir points at the copy
+```
+
+An installed package with a user-level config finds the copy on its own. While you still run from
+the clone, set `data_dir: ~/.local/share/duskfleet` in its `duskfleet.yaml` rather than relying on
+`DUSKFLEET_DATA`: the service unit written by `install-service` carries `DUSKFLEET_CONFIG` when it
+needs it, not `DUSKFLEET_DATA`. Re-run `install-service` afterwards so the service picks up the
+new paths, and remove the old `data/` once runs and schedules show up as expected.
+
 ## `config/duskfleet.yaml`
 
 ```yaml
-data_dir: ../data               # SQLite + logs (git-ignored)
+data_dir: ../data               # SQLite + logs (git-ignored); omitted = see "Where config and data live"
 allowed_project_roots: []       # e.g. [~/Documents/Projects]; empty = any directory except / and ~
 default_agent: null              # or an agent id; null = run_agent requires agent_id
 max_concurrent_runs: 8

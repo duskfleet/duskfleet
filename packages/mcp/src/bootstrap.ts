@@ -3,16 +3,16 @@
  * database, build the executor and the RunManager.
  */
 
-import type { DuskFleetConfig, SchedulerRole } from "@duskfleet/core";
+import type { ConfigLocation, DuskFleetConfig, SchedulerRole } from "@duskfleet/core";
 import {
   ClaudeCodeExecutor,
   loadConfig,
+  locateConfig,
   logger,
   openDatabase,
   processIdentity,
   RunManager,
   RunRepository,
-  resolveConfigDir,
   ScheduleRepository,
   Scheduler,
 } from "@duskfleet/core";
@@ -21,6 +21,8 @@ const log = logger("bootstrap");
 
 export interface App {
   config: DuskFleetConfig;
+  /** How the config directory was found (DUSKFLEET_CONFIG, repo-local, user-level). */
+  location: ConfigLocation;
   runs: RunManager;
   scheduler: Scheduler;
   executor: ClaudeCodeExecutor;
@@ -33,9 +35,15 @@ export interface BootstrapOptions {
 }
 
 export async function bootstrap(entryFileUrl: string, options: BootstrapOptions = {}): Promise<App> {
-  const configDir = resolveConfigDir(entryFileUrl);
+  const location = locateConfig(entryFileUrl);
+  const configDir = location.configDir;
   const config = loadConfig(configDir);
-  log.info("config loaded", { configDir, dataDir: config.dataDir, agents: [...config.agents.keys()] });
+  log.info("config loaded", {
+    configDir,
+    configSource: location.source,
+    dataDir: config.dataDir,
+    agents: [...config.agents.keys()],
+  });
 
   const db = openDatabase(config.dataDir);
   const repo = new RunRepository(db);
@@ -58,6 +66,7 @@ export async function bootstrap(entryFileUrl: string, options: BootstrapOptions 
 
   return {
     config,
+    location,
     runs,
     scheduler,
     executor,
