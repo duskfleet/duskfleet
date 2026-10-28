@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Keeps the review flow (docs/development.md "Issue and review flow by agents") honest about
+// Keeps the review flow (docs/self-hosting-development.md "The PR gate") honest about
 // the merge state of its pull requests. A PR labelled `flow: needs-review` or
 // `flow: ready-to-merge` was good when it got the label; once `main` moves it can conflict,
 // and a red required check can appear after a re-run. Nobody in the flow looks at either, so
@@ -233,7 +233,7 @@ function expirePrLock(pr, labels) {
   comment(pr.number, [
     `${MARKER} Stale lock: ${lock} since ${new Date(since).toISOString()}, ${why}. The run that took it is gone: no run outlives its timeout.`,
     "",
-    `Back to ${target} so the next tick picks it up (docs/development.md, "Issue and review flow by agents").`,
+    `Back to ${target} so the next tick picks it up (docs/self-hosting-development.md, "The PR gate").`,
   ]);
   return "expired";
 }
@@ -253,7 +253,7 @@ function reviveContributorPr(pr, labels) {
   if (dryRun) return "revived";
   swapLabel(pr.number, CONTRIBUTOR_LABEL, "flow: needs-review");
   comment(pr.number, [
-    `${MARKER} New commits since the last review, head ${pr.headRefOid}: back to flow: needs-review for the next round (docs/development.md, "Issue and review flow by agents").`,
+    `${MARKER} New commits since the last review, head ${pr.headRefOid}: back to flow: needs-review for the next round (docs/self-hosting-development.md, "The PR gate").`,
   ]);
   return "revived";
 }
@@ -273,7 +273,7 @@ function expireIssueLock(issue, closedBy) {
   comment(issue.number, [
     `${MARKER} Stale lock: ${lock} since ${new Date(since).toISOString()} and no open PR closes this issue. The run that took it is gone: no run outlives its timeout.`,
     "",
-    `Back to ${target} so the next developer tick picks it up (docs/development.md, "Issue and review flow by agents").`,
+    `Back to ${target} so the next developer tick picks it up (docs/self-hosting-development.md, "The PR gate").`,
   ]);
   return "expired";
 }
@@ -319,7 +319,7 @@ function gate(pr) {
     `${MARKER} Rework needed before review or merge, head ${pr.headRefOid}:`,
     ...why.map((line) => `- ${line}`),
     "",
-    `Handed ${pr.isCrossRepository ? "back to the contributor" : "to the developer"} with ${handoff} (docs/development.md, "Issue and review flow by agents").`,
+    `Handed ${pr.isCrossRepository ? "back to the contributor" : "to the developer"} with ${handoff} (docs/self-hosting-development.md, "The PR gate").`,
   ]);
   return "handed";
 }

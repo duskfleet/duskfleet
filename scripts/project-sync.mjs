@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Mirrors the label flow (docs/development.md "Issue and review flow by agents") into the
+// Mirrors the label flow (docs/self-hosting-development.md "The project board") into the
 // GitHub Project "DuskFleet Flow": every open issue and PR of each synced repository is an
 // item, and the item's Status is derived from its `flow:` label. Labels stay the source of
 // truth: the agents move labels, this script moves the board. Without `--repo` it syncs the
