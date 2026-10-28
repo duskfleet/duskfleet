@@ -5,7 +5,9 @@ import { IBM_Plex_Mono, IBM_Plex_Sans, Outfit } from "next/font/google";
 import Link from "next/link";
 import "./globals.css";
 import { NavTabs } from "@/components/NavTabs";
+import { ThemeSwitch } from "@/components/ThemeSwitch";
 import { schedulerEnabled, schedulerLease } from "@/lib/data";
+import { THEME_INIT_SCRIPT } from "@/lib/theme";
 
 // Self-hosted at build time by next/font; globals.css maps these to --font-display/-sans/-mono.
 // Every font-weight in globals.css and the components must be one of these instances, never synthesized:
@@ -56,8 +58,14 @@ function schedulerStatus(): { label: string; title: string } {
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   const scheduler = schedulerStatus();
+  const version = process.env.DUSKFLEET_VERSION;
   return (
-    <html lang="en" className={`${outfit.variable} ${plexSans.variable} ${plexMono.variable}`}>
+    // suppressHydrationWarning: THEME_INIT_SCRIPT may set data-theme on <html> before hydration
+    <html lang="en" className={`${outfit.variable} ${plexSans.variable} ${plexMono.variable}`} suppressHydrationWarning>
+      <head>
+        {/* biome-ignore lint/security/noDangerouslySetInnerHtml: a constant of ours (lib/theme.ts), no user input */}
+        <script dangerouslySetInnerHTML={{ __html: THEME_INIT_SCRIPT }} />
+      </head>
       <body>
         <div className="shell">
           <nav className="nav" aria-label="Main">
@@ -95,6 +103,10 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
             </span>
           </nav>
           {children}
+          <footer className="footer">
+            <span className="version">{version ? `duskfleet ${version}` : ""}</span>
+            <ThemeSwitch />
+          </footer>
         </div>
       </body>
     </html>
