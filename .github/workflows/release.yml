@@ -1,0 +1,150 @@
+# Cuts a release from the Actions tab (docs/development.md "Releasing"): the maintainer runs this
+# workflow on `main` with the version to release. It checks that `main` already carries that
+# version (both packages, one dated CHANGELOG section, no tag yet), creates the annotated tag
+# `v<version>` and the GitHub release with the CHANGELOG section as its notes, then runs the
+# `publish` job of publish.yml for that tag. Nothing is published from a laptop.
+#
+# The tag is created with the workflow's own GITHUB_TOKEN, and GitHub never starts another
+# workflow from an event that token caused: that is why publish.yml is called from here
+# (`workflow_call`) instead of waiting for the tag push. Re-running a release whose publish
+# failed is safe, even after main moved on or bumped the next version: when the tag exists the
+# checks and the notes read from the tag (the release is what the tag points to), the tag and
+# the release are kept, and publish skips versions already on npm.
+name: Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version to release, as in package.json (for example 0.1.0). main must already carry it."
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  tag:
+    name: tag and GitHub release
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    concurrency:
+      group: release
+      cancel-in-progress: false
+    outputs:
+      tag: ${{ steps.meta.outputs.tag }}
+    steps:
+      - name: Only from main
+        if: github.ref != 'refs/heads/main'
+        run: |
+          echo "::error::run this workflow on main (got $GITHUB_REF)"
+          exit 1
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+
+      # The release is what the tag points to. On the first dispatch that is main's HEAD; on a
+      # re-run the tag already exists and main may have moved on (even past the next version
+      # bump), so every check below reads the files from the tag, never from main.
+      - name: Source commit (main, or the existing tag)
+        id: src
+        env:
+          TAG: v${{ inputs.version }}
+        run: |
+          if git rev-parse -q --verify "refs/tags/$TAG" > /dev/null; then
+            tagged=$(git rev-parse "$TAG^{commit}")
+            if ! git merge-base --is-ancestor "$tagged" HEAD; then
+              echo "::error::$TAG points at $tagged, which is not on main; delete the tag first if that is intended"
+              exit 1
+            fi
+            echo "tag $TAG exists at $tagged, reading the release from it"
+            echo "ref=$TAG" >> "$GITHUB_OUTPUT"
+          else
+            echo "ref=HEAD" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: The source carries the version
+        id: meta
+        env:
+          VERSION: ${{ inputs.version }}
+          REF: ${{ steps.src.outputs.ref }}
+        run: |
+          case "$VERSION" in
+            [0-9]*.[0-9]*.[0-9]*) ;;
+            *) echo "::error::version '$VERSION' is not x.y.z"; exit 1 ;;
+          esac
+          core=$(git show "$REF:packages/duskfleet/package.json" | node -p "JSON.parse(require('fs').readFileSync(0,'utf8')).version")
+          web=$(git show "$REF:apps/web/package.json" | node -p "JSON.parse(require('fs').readFileSync(0,'utf8')).version")
+          if [ "$VERSION" != "$core" ] || [ "$VERSION" != "$web" ]; then
+            echo "::error::$REF has duskfleet $core and @duskfleet/web $web, not $VERSION: merge the version bump first"
+            exit 1
+          fi
+          if ! git show "$REF:CHANGELOG.md" | grep -Eq "^## \[$VERSION\] - [0-9]{4}-[0-9]{2}-[0-9]{2}$"; then
+            echo "::error::CHANGELOG.md at $REF has no dated section '## [$VERSION] - YYYY-MM-DD'"
+            exit 1
+          fi
+          echo "tag=v$VERSION" >> "$GITHUB_OUTPUT"
+
+      # The section's body, without its heading, is the release notes. The section ends at the
+      # next "## [" heading or at the link definitions ("[0.1.0]: https://...") that close the file.
+      - name: Release notes from the CHANGELOG section
+        env:
+          VERSION: ${{ inputs.version }}
+          REF: ${{ steps.src.outputs.ref }}
+        run: |
+          git show "$REF:CHANGELOG.md" | awk -v v="$VERSION" '
+            $0 ~ "^## \\[" v "\\] - " { on = 1; next }
+            on && /^## \[/ { exit }
+            on && /^\[[^]]+\]: / { exit }
+            on { print }
+          ' | sed -e :a -e '/^\n*$/{$d;N;ba' -e '}' > "$RUNNER_TEMP/notes.md"
+          if [ ! -s "$RUNNER_TEMP/notes.md" ]; then
+            echo "::error::the CHANGELOG section for $VERSION is empty"
+            exit 1
+          fi
+          cat "$RUNNER_TEMP/notes.md"
+
+      - name: Annotated tag
+        env:
+          TAG: ${{ steps.meta.outputs.tag }}
+          VERSION: ${{ inputs.version }}
+        run: |
+          # A re-run keeps the existing tag (checked above to be on main's history).
+          if git rev-parse -q --verify "refs/tags/$TAG" > /dev/null; then
+            echo "tag $TAG exists, keeping it"
+          else
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git tag -a "$TAG" -m "Duskfleet $VERSION"
+            git push origin "$TAG"
+          fi
+
+      - name: GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.meta.outputs.tag }}
+          VERSION: ${{ inputs.version }}
+        run: |
+          if gh release view "$TAG" > /dev/null 2>&1; then
+            echo "release $TAG exists"
+          else
+            gh release create "$TAG" --verify-tag --title "Duskfleet $VERSION" --notes-file "$RUNNER_TEMP/notes.md"
+          fi
+
+  publish:
+    name: publish
+    needs: tag
+    uses: ./.github/workflows/publish.yml
+    with:
+      tag: ${{ needs.tag.outputs.tag }}
+    secrets: inherit
+    permissions:
+      contents: read
+      id-token: write

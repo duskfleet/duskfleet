@@ -8,6 +8,10 @@ All notable changes to Duskfleet are listed here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- A Release workflow in the Actions tab: run it on `main` with the version, it tags, creates the GitHub release from the CHANGELOG section and publishes both packages ([#273](https://github.com/duskfleet/duskfleet/pull/273)).
+
 ### Changed
 
 - Runs and schedule command gates get an allow-list of Duskfleet's environment instead of all of it: `GITHUB_TOKEN`, `NPM_TOKEN`, `AWS_*` and the like no longer reach an agent unless named in `claude.env_passthrough` or an agent's `env_passthrough` ([#185](https://github.com/duskfleet/duskfleet/issues/185)). An agent that used `gh` with a token from the server's environment now needs `env_passthrough: [GH_TOKEN]`.
