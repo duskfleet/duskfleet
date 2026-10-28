@@ -25,6 +25,7 @@ Website: [duskfleet.com](https://duskfleet.com/?utm_source=github&utm_medium=rea
 [Status and roadmap](#status-and-roadmap) ·
 [Documentation](#documentation) ·
 [Contributing](#contributing) ·
+[Star history](#star-history) ·
 [License](#license) ·
 [Website](https://duskfleet.com/?utm_source=github&utm_medium=readme&utm_campaign=always-on&utm_content=readme)
 
@@ -151,6 +152,16 @@ start.
 ## Contributing
 
 Setup, rules and good first issues: [CONTRIBUTING.md](CONTRIBUTING.md).
+
+## Star history
+
+<a href="https://star-history.com/#duskfleet/duskfleet&Date">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/svg?repos=duskfleet/duskfleet&type=Date&theme=dark">
+    <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/svg?repos=duskfleet/duskfleet&type=Date">
+    <img alt="Star history of duskfleet/duskfleet" src="https://api.star-history.com/svg?repos=duskfleet/duskfleet&type=Date">
+  </picture>
+</a>
 
 ## License
 
