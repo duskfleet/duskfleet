@@ -1,0 +1,59 @@
+# EXAMPLE, not loaded by the config: the schedules that drive Duskfleet's own development loop
+# (docs/self-hosting-development.md). Schedules are database rows, not files: each entry below
+# is the argument object of one `create_schedule` MCP call. Times are Europe/London; the
+# minutes are staggered so a PR opened by a developer meets the reviewer within the half hour
+# and a planner pass lands just before a developer tick. df-design-promoter has no schedule:
+# the owner starts it with run_agent after approving a design.
+
+- name: "Back-end developer (every 30 min :20/:50)"
+  agent_id: df-back-end-developer
+  cron: "20,50 * * * *"
+  time_zone: Europe/London
+  prompt: >-
+    Work one unit of the label flow, following your instructions: first a PR labelled
+    "flow: changes-requested" (or an unlabelled one with open review threads) via the
+    duskfleet-pr-fix skill, else the top "flow: ready" issue via the duskfleet-issue-implement
+    skill. Issues labelled "area: web" and PRs on ui/* branches are not yours: skip them. If
+    there is nothing to do, report that and stop.
+
+- name: "UI developer (every 30 min :00/:30)"
+  agent_id: df-ui-developer
+  cron: "0,30 * * * *"
+  time_zone: Europe/London
+  prompt: >-
+    Work one unit of the front-end label flow, following your instructions: first a PR on a
+    ui/* branch labelled "flow: changes-requested" via the duskfleet-pr-fix skill, else the top
+    "flow: ready" issue labelled "area: web" via the duskfleet-issue-implement skill, studying
+    its Figma frames first. If there is nothing to do, report that and stop.
+
+- name: "PR review (every 30 min :10/:40)"
+  agent_id: df-pr-reviewer
+  cron: "10,40 * * * *"
+  time_zone: Europe/London
+  prompt: >-
+    Review the oldest open pull request whose verdict is missing or stale, following your
+    instructions.
+
+- name: "Issue planner (half-hourly :17/:47, 07-21)"
+  agent_id: df-planner
+  cron: "17,47 7-21 * * *"
+  time_zone: Europe/London
+  prompt: >-
+    Run one planning pass, following your instructions and the duskfleet-issue-plan skill:
+    snapshot the flow with node scripts/issue-plan.mjs, add or remove "blocked" from declared
+    blockers, declare missing dependencies with one-line "[df-planner] Blocked by #n: reason"
+    comments, park vague issues with "flow: needs-human" (at most three), then fill the
+    "flow: ready" queue up to six within the WIP caps. Never promote an issue without a
+    priority label, a roadmap issue or one with an open PR. If there is nothing to change,
+    report that and stop.
+
+- name: "Designer (every 30 min :25/:55)"
+  agent_id: df-designer
+  cron: "25,55 8-20 * * 1-5"
+  time_zone: Europe/London
+  prompt: >-
+    Work one "area: design" issue, following your instructions: pick by the
+    "flow: design-ready" label, changes-requested first, do the Figma work on the WIP page,
+    verify contrast in both modes, then hand the issue to review with a comment listing the
+    Figma nodes and the label "flow: needs-review". If there is nothing to do, report that and
+    stop.

@@ -62,7 +62,25 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         <div className="shell">
           <nav className="nav" aria-label="Main">
             <Link href="/" className="brand">
-              <img src="/brand/mark.svg" width={26} height={26} alt="" />
+              {/* public/brand/mark.svg inline, so the --mark-* tokens of the current theme colour it */}
+              <svg className="mark" width={26} height={26} viewBox="0 0 110 110" fill="none" aria-hidden="true">
+                <defs>
+                  <linearGradient
+                    id="mark-gradient"
+                    x1="22"
+                    y1="14.67"
+                    x2="102.3"
+                    y2="87.67"
+                    gradientUnits="userSpaceOnUse"
+                  >
+                    <stop className="from" />
+                    <stop className="via" offset=".55" />
+                    <stop className="to" offset="1" />
+                  </linearGradient>
+                </defs>
+                <path fill="url(#mark-gradient)" d="M22 14.67H55A40.33 40.33 0 0 1 55 95.33H22Z" />
+                <path className="sail" d="M36.67 31.17V78.83H75.17Z" />
+              </svg>
               <span className="wordmark">
                 dusk<span className="fleet">fleet</span>
               </span>
