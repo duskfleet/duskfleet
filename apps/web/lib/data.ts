@@ -2,8 +2,9 @@
  * Server-only data access for the dashboard. Reads the same config/ and
  * data/duskfleet.db the MCP server uses. The dashboard never mutates runs;
  * cancelling goes through the MCP server (cancel_run) or the CLI. Its writes
- * are server actions on user agent files (app/agents/actions.ts) and on
- * schedule rows (app/schedules/actions.ts), both on the core API.
+ * are server actions on user agent files (app/agents/actions.ts), on
+ * schedule rows (app/schedules/actions.ts) and on config/duskfleet.yaml
+ * (app/settings/actions.ts), all on the core API.
  */
 import "server-only";
 import { existsSync, readFileSync } from "node:fs";
