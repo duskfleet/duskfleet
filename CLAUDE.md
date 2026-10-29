@@ -56,7 +56,10 @@ npm workspaces, one `config/` and one SQLite database shared by three deliverabl
   files (`app/agents/actions.ts`: delete, unlink) and on schedule rows
   (`app/schedules/actions.ts`: pause/resume, cron + time zone, delete, run now, through core's
   `updateSchedule` / `requestRun`; run now only stamps `run_requested_at`, the lease holder
-  fires it on its next tick). No auth, localhost only.
+  fires it on its next tick) and on the editable keys of `config/duskfleet.yaml`
+  (`app/settings/actions.ts`, through core's `writeGlobalFile`: comments kept, rolled back when
+  `loadConfig` refuses the result; `scheduler.enabled` only through its own action). No auth,
+  localhost only.
 - `config/`: `duskfleet.yaml`, `agents/*.md` (where a checkout may commit agents, "builtin":
   YAML frontmatter + system prompt body; only specialised patterns here, never a starter or
   default agent: owner decision 2026-10-26, a user's first agent comes from `agents create`),
