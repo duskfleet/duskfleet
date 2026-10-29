@@ -195,6 +195,13 @@ code,
   background-clip: text;
   color: transparent;
 }
+/* forced colors drop backgrounds: without this the transparent "fleet" would vanish */
+@media (forced-colors: active) {
+  .nav .brand .fleet {
+    background: none;
+    color: inherit;
+  }
+}
 /* tabs and meta sit on the wordmark's lowercase line, not on the box centre (DS-09);
    DS-08 filled pill: the tinted pill with a strong edge is the only active signal */
 .nav a.tab {
