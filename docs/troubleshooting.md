@@ -92,9 +92,10 @@ the scheduler records on a firing ([schedules](schedules.md#policies)).
   - **A `plan` agent does nothing**: `plan` blocks Bash, MCP and writes regardless of allow-lists.
     Use `dontAsk` with `disallowed_tools: [Edit, Write, NotebookEdit]` for read-only agents.
   - **`bypassPermissions` rejected**: Claude Code refuses it together with
-    `--permission-prompts none`, so Duskfleet rejects it before spawning unless
-    `claude.allow_bypass_permissions` is enabled deliberately; it maps to
-    `--dangerously-skip-permissions`.
+    `--permission-prompts none`, so Duskfleet rejects it before spawning.
+    `claude.allow_bypass_permissions: true` does not change that: the option exists, but
+    unattended runs still refuse `bypassPermissions` (enabling it only changes the error
+    message). Use `dontAsk` with an `allowed_tools` list instead.
 - **An allow-listed MCP server never mounted** (reason `mcp_missing`, the same amber badge):
   `mcp.allowListedMissing` on the run names the server. Fix the agent's `allowed_tools` (or
   `inherit_mcp`). One exception: when the mounted list has no claude.ai connector at all, Claude
