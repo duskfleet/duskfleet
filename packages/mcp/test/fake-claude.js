@@ -69,6 +69,13 @@ if (args[0] === "--version") {
   process.exit(0);
 }
 
+// `claude auth status --json` (duskfleet init): always logged in. The logged-out case is a
+// separate tiny binary written by test/init.test.js (FAKE_CLAUDE_* does not reach this child).
+if (args[0] === "auth" && args[1] === "status") {
+  process.stdout.write(`${JSON.stringify({ loggedIn: true, authMethod: "claude.ai", apiProvider: "firstParty" })}\n`);
+  process.exit(0);
+}
+
 // Read after --version: execFile leaves stdin open, so reading it there would block forever.
 // FAKE_CLAUDE_MODE picks the behaviour when the prompt is fixed by Duskfleet (doctor --probe).
 // stdin is read either way so the executor's write never hits a closed pipe.
