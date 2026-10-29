@@ -214,9 +214,9 @@ function serviceTarget(
     platform: process.platform,
     repoRoot: dirs.repoRoot,
     configDir: dirs.configDir,
-    // DUSKFLEET_DATA / XDG_DATA_HOME live only in this shell: the unit carries the resolved
-    // directory, or the service opens another database.
-    dataDir: exportedDataDir(dataDir, dataSource),
+    // DUSKFLEET_DATA / XDG_* live only in this shell: the unit carries the resolved directory,
+    // or the service opens another database.
+    dataDir: exportedDataDir(dataDir, dataSource, configDir),
     nodeBin: process.execPath,
     cliEntry,
     logPath: path.join(dataDir, "logs", "serve.log"),
@@ -258,8 +258,8 @@ async function mcpRegister(
     serverEntry: entryFile,
     claudeBin: app.executor.binary,
     configDir: serviceDirs(findRepoRoot(entryFile), app.config.configDir).configDir,
-    // A GUI host does not see this shell's DUSKFLEET_DATA / XDG_DATA_HOME either.
-    dataDir: exportedDataDir(app.config.dataDir, app.config.dataSource),
+    // A GUI host does not see this shell's DUSKFLEET_DATA / XDG_* variables either.
+    dataDir: exportedDataDir(app.config.dataDir, app.config.dataSource, app.config.configDir),
     version: packageVersion(),
   });
   const out = (s: string) => process.stdout.write(`${s}\n`);

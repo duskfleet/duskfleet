@@ -19,7 +19,7 @@ import { spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { homedir, userInfo } from "node:os";
 import path from "node:path";
-import { type DataSource, type LocationContext, userDataDir } from "@duskfleet/core";
+import { type DataSource, dataDirFor, type LocationContext } from "@duskfleet/core";
 
 export type ServicePlatform = "darwin" | "linux" | "win32";
 
@@ -126,18 +126,26 @@ export function serviceDirs(
  * The data directory a service unit or an MCP host entry must carry as DUSKFLEET_DATA, or null
  * when the process it starts resolves the same directory by itself. A unit (launchd, systemd,
  * Task Scheduler) and a GUI host do not see this shell's DUSKFLEET_DATA or XDG_* variables:
- * from DUSKFLEET_DATA always, from the user-level default whenever it differs from the one
- * derived without XDG variables. A data dir from duskfleet.yaml (data_dir or ../data) follows
- * the config, which is exported separately.
+ * from DUSKFLEET_DATA always, from the user-level default whenever the process, reading the same
+ * `configDir` without XDG variables, would derive another directory (XDG_DATA_HOME set here, or
+ * XDG_CONFIG_HOME: the exported config is then not its user-level config, so it would fall back to
+ * ../data next to it). A data dir from duskfleet.yaml (data_dir or ../data) follows the config,
+ * which is exported separately.
  */
-export function exportedDataDir(dataDir: string, dataSource: DataSource, ctx: LocationContext = {}): string | null {
+export function exportedDataDir(
+  dataDir: string,
+  dataSource: DataSource,
+  configDir: string,
+  ctx: LocationContext = {},
+): string | null {
   const resolved = path.resolve(dataDir);
   if (dataSource === "env") return resolved;
   if (dataSource !== "user") return null;
   const env = ctx.env ?? process.env;
-  // What the unit derives: no XDG_* variables; Windows keeps its per-user APPDATA / LOCALAPPDATA.
+  // Simulate the unit: same config dir (data_dir is unset, or the source would be "config"), no
+  // XDG_* variables; Windows keeps its per-user APPDATA / LOCALAPPDATA.
   const unitEnv: NodeJS.ProcessEnv = { APPDATA: env["APPDATA"], LOCALAPPDATA: env["LOCALAPPDATA"] };
-  const derived = path.resolve(userDataDir({ ...ctx, env: unitEnv }));
+  const derived = path.resolve(dataDirFor(configDir, null, { ...ctx, env: unitEnv }).dataDir);
   return derived === resolved ? null : resolved;
 }
 
