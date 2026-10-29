@@ -31,6 +31,7 @@ import {
   type BudgetInput,
   ConfigNotFoundError,
   createAgentFromFields,
+  type DataSource,
   effectivePath,
   findRepoRoot,
   parseHolder,
@@ -54,6 +55,7 @@ import {
 } from "./mcp-register.js";
 import { PROBE_COST_NOTE, type ProbeReport, probeNotRun, runProbe } from "./probe.js";
 import {
+  exportedDataDir,
   installService,
   renderService,
   type ServiceTarget,
@@ -198,7 +200,12 @@ function parseAgentCreate(args: string[]): { id: string; fields: Record<string, 
 }
 
 /** What the service runs: this node, this dist/cli.js, this repo (or config), the resolved claude binary. */
-function serviceTarget(claudeBin: string | null, dataDir: string, configDir: string): ServiceTarget {
+function serviceTarget(
+  claudeBin: string | null,
+  dataDir: string,
+  configDir: string,
+  dataSource: DataSource,
+): ServiceTarget {
   // The bin is dist/cli.js (the Node version check); this module sits next to it.
   const cliEntry = path.join(path.dirname(fileURLToPath(import.meta.url)), "cli.js");
   // An installed package has no repo root above its cli.js: the unit then carries the config dir.
@@ -207,6 +214,9 @@ function serviceTarget(claudeBin: string | null, dataDir: string, configDir: str
     platform: process.platform,
     repoRoot: dirs.repoRoot,
     configDir: dirs.configDir,
+    // DUSKFLEET_DATA / XDG_* live only in this shell: the unit carries the resolved directory,
+    // or the service opens another database.
+    dataDir: exportedDataDir(dataDir, dataSource, configDir),
     nodeBin: process.execPath,
     cliEntry,
     logPath: path.join(dataDir, "logs", "serve.log"),
@@ -248,6 +258,8 @@ async function mcpRegister(
     serverEntry: entryFile,
     claudeBin: app.executor.binary,
     configDir: serviceDirs(findRepoRoot(entryFile), app.config.configDir).configDir,
+    // A GUI host does not see this shell's DUSKFLEET_DATA / XDG_* variables either.
+    dataDir: exportedDataDir(app.config.dataDir, app.config.dataSource, app.config.configDir),
     version: packageVersion(),
   });
   const out = (s: string) => process.stdout.write(`${s}\n`);
@@ -317,7 +329,12 @@ async function main(): Promise<void> {
   switch (command) {
     case "install-service": {
       const { values } = parseArgs({ args: rest, options: { print: { type: "boolean", default: false } } });
-      const target = serviceTarget(app.executor.binary, app.config.dataDir, app.config.configDir);
+      const target = serviceTarget(
+        app.executor.binary,
+        app.config.dataDir,
+        app.config.configDir,
+        app.config.dataSource,
+      );
       if (values.print) {
         const unit = renderService(target);
         process.stderr.write(`# ${unit.unitPath}\n`);
@@ -451,7 +468,12 @@ async function main(): Promise<void> {
         pathDefaulted: pathDefaulted(process.env["PATH"]),
         error,
         configDir: app.config.configDir,
+        // env (DUSKFLEET_CONFIG) > repo (config/ found walking up) > user (user-level directory)
+        configSource: app.location.source,
+        configLookup: app.location.lookup,
         dataDir: app.config.dataDir,
+        // env (DUSKFLEET_DATA) > config (data_dir, or ../data next to a repo config) > user
+        dataSource: app.config.dataSource,
         agents: [...app.config.agents.keys()],
         scheduler,
         ...(doctorFlags.probe ? { probe } : {}),

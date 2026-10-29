@@ -52,6 +52,8 @@ export interface ServerEntryInput {
   claudeBin: string | null;
   /** Config directory to export as DUSKFLEET_CONFIG; null when the server finds it by itself. */
   configDir: string | null;
+  /** Data directory to export as DUSKFLEET_DATA (`exportedDataDir`); null or absent when the server resolves it itself. */
+  dataDir?: string | null;
   /** Version of the installed package, pinned in the npx form. */
   version: string;
   platform?: NodeJS.Platform;
@@ -66,6 +68,7 @@ export function serverEntry(input: ServerEntryInput): { entry: McpServerEntry; f
   const env: Record<string, string> = {};
   if (input.claudeBin) env["CLAUDE_BIN"] = input.claudeBin;
   if (input.configDir) env["DUSKFLEET_CONFIG"] = input.configDir;
+  if (input.dataDir) env["DUSKFLEET_DATA"] = input.dataDir;
   if (inNpxCache(input.serverEntry)) {
     const npx = path.join(
       path.dirname(input.nodeBin),
