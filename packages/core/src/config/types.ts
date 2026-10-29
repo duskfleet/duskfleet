@@ -146,10 +146,14 @@ export interface SchedulerConfig {
   allowCommandGates: boolean;
 }
 
+/** Where the data directory came from: DUSKFLEET_DATA, duskfleet.yaml (data_dir or ../data), or the user-level default. */
+export type DataSource = "env" | "config" | "user";
+
 export interface DuskFleetConfig {
   /** Directory containing duskfleet.yaml. */
   configDir: string;
   dataDir: string;
+  dataSource: DataSource;
   /** Writable directory for agents created at runtime. Defaults to <dataDir>/agents. */
   userAgentsDir: string;
   /** Private project registry merged over config/projects.yaml. Defaults to <dataDir>/projects.yaml. */
