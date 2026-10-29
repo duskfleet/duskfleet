@@ -115,6 +115,21 @@ in the nav); the other pages are static.
   and a filter by tool or parameter name (`/mcp?q=agent`), plus the registration snippets for
   Claude Desktop and Claude Code with your absolute paths (outside a checkout, the `duskfleet`
   package installed next to `@duskfleet/web`).
+- **Settings** (the gear at the right end of the nav): the theme (Dark / Light / Device, the
+  same choice as the footer switch, kept in this browser) and the runtime keys of
+  `config/duskfleet.yaml`: concurrency limits, `scheduler.tick_seconds` and `auto_pause_after`,
+  the Claude defaults (timeout, budget, `strict_mcp_config`, `setting_sources`, `binary`),
+  `allowed_project_roots` and `default_agent`. Each section has its own Save, which lists the
+  changes old → new in a confirmation first; a value the loader would refuse shows inline and
+  blocks only its section. The save writes `config/duskfleet.yaml` itself, keeping its comments,
+  and is checked by loading the config: a refused change restores the file. Every process
+  re-reads the file on its next run or tick, except `claude.binary` and
+  `claude.setting_sources`, marked "Restart MCP host". The scheduler kill switch
+  (`scheduler.enabled`) sits in a Danger zone with its own confirmation, which names the active
+  schedules and the next firing. The other keys (`data_dir`, `user_agents_dir`,
+  `user_projects_file`, `scheduler.default_time_zone`, `noop_pattern`, `allow_command_gates`,
+  `claude.allow_bypass_permissions`, `env_passthrough`) stay hand edits of the file. The header
+  shows when the file last changed and whether that was a hand edit.
 
 ## Remote access
 
@@ -168,5 +183,6 @@ had died out of budget, and nobody noticed for 11 hours.
 
 The dashboard never mutates runs or builtins: the Claude Code child processes belong to the
 MCP server process, so cancelling goes through `cancel_run` (Cowork) or the CLI. Its writes are
-the actions on user agent files (delete, unlink) and on schedule rows (pause / resume, edit
-when, delete), all through the core API the MCP tools use.
+the actions on user agent files (delete, unlink), on schedule rows (pause / resume, edit
+when, delete), all through the core API the MCP tools use, and the Settings page's edits of
+`config/duskfleet.yaml` (core's `writeGlobalFile`).
