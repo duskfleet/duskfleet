@@ -83,7 +83,7 @@
      badge           Geist 600             14/1.5      0.01em    .badge, .flag, emphasised 14 px
      label           Geist 600 upper       14/1.5      0.04em    h2, th, tile labels
      mono            Geist Mono 500        14/1.5      0         code, .mono
-     mono-strong     Geist Mono 600        14/1.5      0         emphasised mono (no rule uses it yet: 600 not loaded)
+     mono-strong     Geist Mono 600        14/1.5      0         emphasised mono (no rule uses it yet)
      mono-lg         Geist Mono 500        15/1.5      0         .sched-strip .value.mono, .tool-name */
   font-size: 16px;
 }
@@ -105,7 +105,7 @@ body {
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 }
-/* the default "bolder" would ask Geist for 700, which is not loaded (app/layout.tsx) */
+/* the default "bolder" would give Geist 700, which the type ramp does not use */
 strong,
 b {
   font-weight: 600;

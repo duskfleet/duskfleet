@@ -11,7 +11,7 @@ import { THEME_INIT_SCRIPT } from "@/lib/theme";
 
 // Self-hosted at build time by next/font; globals.css maps these to --font-display/-sans/-mono.
 // Every font-weight in globals.css and the components must be one of these instances, never synthesized:
-// Outfit 500/600/700, Geist 400/500/600, Geist Mono 400/500.
+// Outfit 500/600/700; Geist and Geist Mono are their variable fonts (every weight).
 // Outfit 500: the muted counts next to page titles and the scheduler strip's secondary values.
 const outfit = Outfit({
   subsets: ["latin"],
@@ -19,17 +19,15 @@ const outfit = Outfit({
   variable: "--font-outfit",
   display: "swap",
 });
-// 600 on top of the brand's 400/500: the dashboard bolds labels and badges, which would otherwise be synthesized.
+// No weight list: Google can serve Geist's static weights as generated files whose URLs next/font
+// cannot parse (the CI build failed on them); the variable font is one plain woff2 per subset.
 const geistSans = Geist({
   subsets: ["latin"],
-  weight: ["400", "500", "600"],
   variable: "--font-geist-sans",
   display: "swap",
 });
-// No mono rule sets 600 (code and .mono pin 500), so mono-strong is not loaded.
 const geistMono = Geist_Mono({
   subsets: ["latin"],
-  weight: ["400", "500"],
   variable: "--font-geist-mono",
   display: "swap",
 });
