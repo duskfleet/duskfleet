@@ -7,11 +7,13 @@
  *   <dataDir>/web/<version>/node_modules/@duskfleet/web/bin/start.mjs
  *
  * An install goes to `<version>.partial` first and is renamed once the installed package carries
- * the right version: an older version directory stays until then, and is removed after.
+ * the right version: an older version directory stays until then, and is removed after (older
+ * semver versions only: a newer install or another run's `.partial` directory is never touched).
  * DUSKFLEET_WEB_SPEC replaces the npm spec (`@duskfleet/web@<version>`), e.g. a local tarball.
  */
 import { type ChildProcess, spawn, spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync } from "node:fs";
+import { connect, createServer } from "node:net";
 import path from "node:path";
 
 export const WEB_PACKAGE = "@duskfleet/web";
@@ -96,19 +98,69 @@ export function ensureWeb(dataDir: string, version: string, log: (line: string) 
         : `the installed package is not ${WEB_PACKAGE}@${version}`;
     throw new Error(`could not install the dashboard: ${why}; ${manualInstallHint(version)}`);
   }
-  // The new version works: replace a broken leftover of the same version, then drop the others.
+  // The new version works: replace a broken leftover of the same version, then drop older ones.
   rmSync(target, { recursive: true, force: true });
   renameSync(staging, target);
   log(`installed in ${((Date.now() - started) / 1000).toFixed(1)}s`);
   const base = path.dirname(target);
+  const dirs = readdirSync(base, { withFileTypes: true })
+    .filter((d) => d.isDirectory())
+    .map((d) => d.name);
   const removed: string[] = [];
-  for (const entryName of readdirSync(base, { withFileTypes: true })) {
-    if (!entryName.isDirectory() || entryName.name === version) continue;
-    rmSync(path.join(base, entryName.name), { recursive: true, force: true });
-    removed.push(entryName.name);
+  for (const name of olderWebVersions(dirs, version)) {
+    try {
+      rmSync(path.join(base, name), { recursive: true, force: true });
+      removed.push(name);
+    } catch (err) {
+      log(`could not remove the older dashboard install ${name}: ${(err as Error).message}`);
+    }
   }
   if (removed.length) log(`removed older dashboard install(s): ${removed.join(", ")}`);
   return { entry: installedWebEntry(target, version) as string, installed: true, removed };
+}
+
+const SEMVER = /^(\d+)\.(\d+)\.(\d+)(?:-([0-9A-Za-z.-]+))?$/;
+
+/** Semver precedence of two versions (build metadata not supported): <0, 0 or >0. */
+export function compareVersions(a: string, b: string): number {
+  const ma = SEMVER.exec(a);
+  const mb = SEMVER.exec(b);
+  if (!ma || !mb) throw new Error(`not a semver version: ${ma ? b : a}`);
+  for (let i = 1; i <= 3; i++) {
+    const d = Number(ma[i]) - Number(mb[i]);
+    if (d !== 0) return d;
+  }
+  const pa = ma[4];
+  const pb = mb[4];
+  if (pa === undefined || pb === undefined) return pa === pb ? 0 : pa === undefined ? 1 : -1;
+  const ia = pa.split(".");
+  const ib = pb.split(".");
+  for (let i = 0; i < Math.max(ia.length, ib.length); i++) {
+    const x = ia[i];
+    const y = ib[i];
+    if (x === undefined) return -1;
+    if (y === undefined) return 1;
+    if (x === y) continue;
+    const nx = /^\d+$/.test(x);
+    const ny = /^\d+$/.test(y);
+    if (nx && ny) return Number(x) - Number(y);
+    if (nx !== ny) return nx ? -1 : 1;
+    return x < y ? -1 : 1;
+  }
+  return 0;
+}
+
+/**
+ * The directories under `<dataDir>/web` that may be removed once `version` is installed: finished
+ * installs of an older semver version only. A newer version (a downgrade or a pinned older CLI,
+ * possibly running), a `.partial` staging directory (a concurrent install) and anything that is
+ * not a version stay.
+ */
+export function olderWebVersions(dirNames: string[], version: string): string[] {
+  if (!SEMVER.test(version)) return [];
+  return dirNames.filter(
+    (name) => !name.endsWith(".partial") && SEMVER.test(name) && compareVersions(name, version) < 0,
+  );
 }
 
 /**
@@ -156,16 +208,58 @@ function openBrowser(url: string, log: (line: string) => void): void {
   child.unref();
 }
 
-/** Resolves once the server answers on 127.0.0.1 (any status), false when the child exits first. */
+/**
+ * Throws when something already listens on 127.0.0.1:`port` (another dashboard, `npm run web`):
+ * the readiness probe would be answered by it and the browser opened on it, while our server dies
+ * with EADDRINUSE. Checked both ways: a connection that succeeds, and a listen that fails.
+ */
+export async function assertPortFree(port: number): Promise<void> {
+  const answered = await new Promise<boolean>((resolve) => {
+    const socket = connect({ host: "127.0.0.1", port });
+    socket.setTimeout(1000);
+    socket.once("connect", () => {
+      socket.destroy();
+      resolve(true);
+    });
+    socket.once("timeout", () => {
+      socket.destroy();
+      resolve(false);
+    });
+    socket.once("error", () => resolve(false));
+  });
+  const listenError = answered
+    ? null
+    : await new Promise<NodeJS.ErrnoException | null>((resolve) => {
+        const server = createServer();
+        server.once("error", (err: NodeJS.ErrnoException) => resolve(err));
+        server.listen(port, "127.0.0.1", () => server.close(() => resolve(null)));
+      });
+  if (!answered && !listenError) return;
+  const why =
+    answered || listenError?.code === "EADDRINUSE" ? "is already in use" : `cannot be used (${listenError?.code})`;
+  throw new Error(
+    `port ${port} on 127.0.0.1 ${why}: stop what listens there (another dashboard, npm run web?) or pick another port with --port <n>`,
+  );
+}
+
+const exitedAlready = (child: ChildProcess) => child.exitCode !== null || child.signalCode !== null;
+
+/**
+ * Resolves once the server answers on 127.0.0.1 (any status) and our child is still alive a moment
+ * later, false when the child exits first: an answer from another process that took the port
+ * after `assertPortFree` must not print the URL nor open the browser.
+ */
 async function waitUntilServing(child: ChildProcess, port: number, timeoutMs: number): Promise<boolean> {
   const deadline = Date.now() + timeoutMs;
+  const pause = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
   while (Date.now() < deadline) {
-    if (child.exitCode !== null || child.signalCode !== null) return false;
+    if (exitedAlready(child)) return false;
     try {
       await fetch(`http://127.0.0.1:${port}/`, { signal: AbortSignal.timeout(2000) });
-      return true;
+      await pause(300);
+      return !exitedAlready(child);
     } catch {
-      await new Promise((resolve) => setTimeout(resolve, 300));
+      await pause(300);
     }
   }
   return false;
@@ -181,10 +275,13 @@ export interface StartDashboardOptions {
 
 /**
  * Runs the dashboard in the foreground: bound to 127.0.0.1 by bin/start.mjs, the config of this
- * CLI through DUSKFLEET_CONFIG, no telemetry. Ctrl-C stops it. Resolves with its exit code.
+ * CLI through DUSKFLEET_CONFIG, no telemetry. Ctrl-C stops it. Resolves with its exit code, 0
+ * when it exits after a SIGINT / SIGTERM forwarded by this process (a normal stop). Throws before
+ * spawning when the port is taken.
  */
 export async function startDashboard(options: StartDashboardOptions): Promise<number> {
   const { entry, port, configDir, log } = options;
+  await assertPortFree(port);
   const child = spawn(process.execPath, [entry], {
     stdio: "inherit",
     env: {
@@ -194,9 +291,15 @@ export async function startDashboard(options: StartDashboardOptions): Promise<nu
       NEXT_TELEMETRY_DISABLED: "1",
     },
   });
-  for (const signal of ["SIGINT", "SIGTERM"] as const) process.on(signal, () => child.kill(signal));
+  let stopRequested = false;
+  for (const signal of ["SIGINT", "SIGTERM"] as const) {
+    process.on(signal, () => {
+      stopRequested = true;
+      child.kill(signal);
+    });
+  }
   const exited = new Promise<number>((resolve) => {
-    child.on("exit", (code, signal) => resolve(code ?? (signal ? 1 : 0)));
+    child.on("exit", (code, signal) => resolve(stopRequested ? 0 : (code ?? (signal ? 1 : 0))));
     child.on("error", (err) => {
       log(`could not start the dashboard: ${err.message}`);
       resolve(1);

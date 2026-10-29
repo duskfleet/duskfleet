@@ -45,7 +45,7 @@ import {
   summarizeRun,
 } from "@duskfleet/core";
 import { bootstrap } from "./bootstrap.js";
-import { ensureWeb, findWeb, parsePort, startDashboard } from "./dashboard.js";
+import { assertPortFree, ensureWeb, findWeb, parsePort, startDashboard } from "./dashboard.js";
 import {
   applyDesktop,
   desktopConfigPath,
@@ -338,6 +338,7 @@ async function main(): Promise<void> {
     const config = loadConfig(resolveConfigDir(import.meta.url));
     const log = (line: string) => process.stderr.write(`duskfleet dashboard: ${line}\n`);
     const version = packageVersion();
+    await assertPortFree(port); // before a first install that can take a minute; checked again at start
     const entry = values["no-install"]
       ? findWeb(config.dataDir, version)
       : ensureWeb(config.dataDir, version, log).entry;

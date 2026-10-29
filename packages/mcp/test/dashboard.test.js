@@ -13,7 +13,15 @@ import path from "node:path";
 import { after, test } from "node:test";
 import { fileURLToPath } from "node:url";
 import { gzipSync } from "node:zlib";
-import { manualInstallHint, openerCommand, parsePort, webInstallDir } from "../dist/dashboard.js";
+import {
+  assertPortFree,
+  compareVersions,
+  manualInstallHint,
+  olderWebVersions,
+  openerCommand,
+  parsePort,
+  webInstallDir,
+} from "../dist/dashboard.js";
 import { testEnv } from "./helpers.js";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -100,9 +108,9 @@ function freePort() {
   });
 }
 
-/** Starts `dashboard --no-open`, waits for the ready line, GETs /, stops it. */
-async function startAndFetch(configDir, extraEnv, extraArgs = []) {
-  const port = await freePort();
+/** Starts `dashboard --no-open`, waits for the ready line, GETs /, stops it with `stopSignal`. */
+async function startAndFetch(configDir, extraEnv, extraArgs = [], { port: fixedPort, stopSignal = "SIGTERM" } = {}) {
+  const port = fixedPort ?? (await freePort());
   const child = spawn(process.execPath, [cli, "dashboard", "--no-open", "--port", String(port), ...extraArgs], {
     env: testEnv({ ...npmEnv, DUSKFLEET_CONFIG: configDir, ...extraEnv }),
     stdio: ["ignore", "pipe", "pipe"],
@@ -132,7 +140,7 @@ async function startAndFetch(configDir, extraEnv, extraArgs = []) {
   }
   const res = await fetch(`http://127.0.0.1:${port}/`);
   const body = await res.json();
-  child.kill("SIGTERM");
+  child.kill(stopSignal);
   const code = await exited;
   return { ready, stderr, status: res.status, body, code };
 }
@@ -148,11 +156,56 @@ test("pure helpers: install dir, port flag, opener, manual hint", () => {
   assert.match(manualInstallHint("1.2.3"), /npm install -g @duskfleet\/web@1\.2\.3.*duskfleet dashboard --no-install/);
 });
 
+test("version cleanup keeps newer installs, staging directories and non-versions", () => {
+  assert.ok(compareVersions("0.9.0", "0.10.0") < 0);
+  assert.ok(compareVersions("1.0.0-beta.2", "1.0.0-beta.10") < 0);
+  assert.ok(compareVersions("1.0.0-beta", "1.0.0") < 0);
+  assert.ok(compareVersions("1.0.0-alpha", "1.0.0-alpha.1") < 0);
+  assert.ok(compareVersions("1.0.0-1", "1.0.0-alpha") < 0);
+  assert.equal(compareVersions("2.1.3", "2.1.3"), 0);
+  assert.ok(compareVersions("2.0.0", "1.99.99") > 0);
+  const dirs = [
+    "0.1.0",
+    "0.2.0-rc.1",
+    "0.2.0",
+    "0.3.0",
+    "0.2.0.partial",
+    "0.3.0-rc.1.partial",
+    "0.1.0-x.partial",
+    "notes",
+  ];
+  assert.deepEqual(olderWebVersions(dirs, "0.2.0"), ["0.1.0", "0.2.0-rc.1"]);
+  assert.deepEqual(olderWebVersions(dirs, "not-a-version"), []);
+});
+
+test("a port already in use is refused before any install, with a clear message", async () => {
+  const { configDir, dataDir } = makeConfig("port-taken");
+  const busy = createServer();
+  await new Promise((resolve) => busy.listen(0, "127.0.0.1", resolve));
+  const { port } = busy.address();
+  try {
+    await assert.rejects(assertPortFree(port), new RegExp(`port ${port} on 127\\.0\\.0\\.1 is already in use.*--port`));
+    const r = await startAndFetch(configDir, { DUSKFLEET_WEB_SPEC: packFakeWeb(version) }, [], { port });
+    assert.equal(r.ready, false, "no ready line: the URL is not printed, the browser not opened");
+    assert.equal(r.code, 1);
+    assert.match(r.stderr, /is already in use/);
+    assert.ok(!existsSync(path.join(dataDir, "web")), "nothing installed");
+  } finally {
+    await new Promise((resolve) => busy.close(resolve));
+  }
+  await assertPortFree(port);
+});
+
 test("first start installs @duskfleet/web at the CLI's version, serves /, drops the old version; second start installs nothing", async () => {
   const tarball = packFakeWeb(version);
   const { configDir, dataDir } = makeConfig("ok");
   const old = path.join(dataDir, "web", "0.0.0-old");
   mkdirSync(old, { recursive: true });
+  // Kept: a newer install (a downgrade must not delete it) and another run's staging directory.
+  const newer = path.join(dataDir, "web", "999.0.0");
+  const staging = path.join(dataDir, "web", "999.0.0.partial");
+  mkdirSync(newer, { recursive: true });
+  mkdirSync(staging, { recursive: true });
 
   const first = await startAndFetch(configDir, { DUSKFLEET_WEB_SPEC: tarball });
   assert.ok(first.ready, first.stderr);
@@ -172,7 +225,9 @@ test("first start installs @duskfleet/web at the CLI's version, serves /, drops 
     ),
   );
   assert.equal(installed.version, cliVersion, "installed @duskfleet/web equals duskfleet --version");
-  assert.deepEqual(readdirSync(path.join(dataDir, "web")), [cliVersion]);
+  assert.deepEqual(readdirSync(path.join(dataDir, "web")).sort(), [cliVersion, "999.0.0", "999.0.0.partial"].sort());
+  rmSync(newer, { recursive: true });
+  rmSync(staging, { recursive: true });
 
   // A spec that cannot install proves the second start does not try.
   const second = await startAndFetch(configDir, { DUSKFLEET_WEB_SPEC: path.join(root, "missing.tgz") });
@@ -180,10 +235,12 @@ test("first start installs @duskfleet/web at the CLI's version, serves /, drops 
   assert.equal(second.status, 200);
   assert.doesNotMatch(second.stderr, /installing/);
 
-  // --no-install uses the data directory install too.
-  const third = await startAndFetch(configDir, {}, ["--no-install"]);
+  // --no-install uses the data directory install too. Stopped with Ctrl-C (SIGINT, which the
+  // stand-in does not handle, so it dies by the signal): a normal stop exits 0.
+  const third = await startAndFetch(configDir, {}, ["--no-install"], { stopSignal: "SIGINT" });
   assert.ok(third.ready, third.stderr);
   assert.equal(third.status, 200);
+  assert.equal(third.code, 0);
 });
 
 test("a failed install exits 1 with the manual alternative and leaves no partial directory", async () => {

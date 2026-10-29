@@ -19,13 +19,16 @@ of the CLI starts it, `duskfleet dashboard` runs
 stderr); later starts use that copy and need no network. It then starts the dashboard in the
 foreground, bound to `127.0.0.1` on `--port` (default 4777), with the config of this CLI
 (`DUSKFLEET_CONFIG`) and telemetry off, and opens `http://localhost:<port>` with `open`,
-`xdg-open` or `start` unless `--no-open`. Ctrl-C stops it.
+`xdg-open` or `start` unless `--no-open`. Ctrl-C stops it (exit 0). When something already
+listens on that port (another dashboard, `npm run web`), the command exits 1 before installing or
+starting anything and asks for another `--port`.
 
 - **Where it lands**: `<dataDir>/web/<version>/` (`data/web/0.1.0/` with the default
   `data_dir`), with its own `node_modules` (next, react, react-dom).
 - **Upgrades**: after a CLI upgrade the matching version is installed next to the old one (first
-  into `<version>.partial`); the older version directories are removed once it is installed with
-  the right version. A failed install leaves the old ones in place.
+  into `<version>.partial`); the directories of older versions are removed once it is installed
+  with the right version. A newer version (after a downgrade), another install's `.partial`
+  directory and anything that is not a version stay. A failed install leaves the old ones in place.
 - **Install fails** (offline, registry down): the command exits 1 and says how to install it by
   hand: `npm install -g @duskfleet/web@<version>`, then `duskfleet dashboard --no-install`.
   `--no-install` never installs: it uses the data directory copy, else the global package, and
