@@ -2545,13 +2545,28 @@ details.desc ul {
   line-height: 21px;
   font-weight: 500;
 }
+.connect .cmd {
+  min-width: 0;
+}
+/* wrap, never scroll: a long command or path stays inside its column */
 .connect pre.block {
-  white-space: pre;
-  overflow-x: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  overflow-x: visible;
   font-size: 14px;
   line-height: 21px;
   padding: 11px 12px;
   min-width: 0;
+  border-color: var(--border-strong);
+}
+/* one block per source line: continuation lines hang 2ch past the line's own indentation */
+.connect .ln {
+  display: block;
+  padding-left: calc(var(--ind, 0ch) + 2ch);
+  text-indent: -2ch;
+}
+.connect .copy-btn.done {
+  border-color: var(--ok);
 }
 .connect .cmd .copy-btn {
   color: var(--text);
