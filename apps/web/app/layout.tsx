@@ -1,7 +1,7 @@
 import { hostname } from "node:os";
 import { parseHolder } from "@duskfleet/core";
 import type { Metadata } from "next";
-import { IBM_Plex_Mono, IBM_Plex_Sans, Outfit } from "next/font/google";
+import { Geist, Geist_Mono, Outfit } from "next/font/google";
 import Link from "next/link";
 import "./globals.css";
 import { NavTabs } from "@/components/NavTabs";
@@ -11,7 +11,7 @@ import { THEME_INIT_SCRIPT } from "@/lib/theme";
 
 // Self-hosted at build time by next/font; globals.css maps these to --font-display/-sans/-mono.
 // Every font-weight in globals.css and the components must be one of these instances, never synthesized:
-// Outfit 500/600/700, Plex Sans 400/500/600, Plex Mono 400/500.
+// Outfit 500/600/700, Geist 400/500/600, Geist Mono 400/500.
 // Outfit 500: the muted counts next to page titles and the scheduler strip's secondary values.
 const outfit = Outfit({
   subsets: ["latin"],
@@ -20,16 +20,17 @@ const outfit = Outfit({
   display: "swap",
 });
 // 600 on top of the brand's 400/500: the dashboard bolds labels and badges, which would otherwise be synthesized.
-const plexSans = IBM_Plex_Sans({
+const geistSans = Geist({
   subsets: ["latin"],
   weight: ["400", "500", "600"],
-  variable: "--font-plex-sans",
+  variable: "--font-geist-sans",
   display: "swap",
 });
-const plexMono = IBM_Plex_Mono({
+// No mono rule sets 600 (code and .mono pin 500), so mono-strong is not loaded.
+const geistMono = Geist_Mono({
   subsets: ["latin"],
   weight: ["400", "500"],
-  variable: "--font-plex-mono",
+  variable: "--font-geist-mono",
   display: "swap",
 });
 
@@ -61,7 +62,11 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
   const version = process.env.DUSKFLEET_VERSION;
   return (
     // suppressHydrationWarning: THEME_INIT_SCRIPT may set data-theme on <html> before hydration
-    <html lang="en" className={`${outfit.variable} ${plexSans.variable} ${plexMono.variable}`} suppressHydrationWarning>
+    <html
+      lang="en"
+      className={`${outfit.variable} ${geistSans.variable} ${geistMono.variable}`}
+      suppressHydrationWarning
+    >
       <head>
         {/* biome-ignore lint/security/noDangerouslySetInnerHtml: a constant of ours (lib/theme.ts), no user input */}
         <script dangerouslySetInnerHTML={{ __html: THEME_INIT_SCRIPT }} />

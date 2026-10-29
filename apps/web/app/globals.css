@@ -61,10 +61,10 @@
   /* Light has no drop shadow: a 1 px border-coloured edge instead */
   --shadow: 0 1px 0 light-dark(var(--border), rgba(0, 0, 0, 0.3));
 
-  /* type: next/font sets --font-outfit / --font-plex-sans / --font-plex-mono on <html> (app/layout.tsx) */
+  /* type: next/font sets --font-outfit / --font-geist-sans / --font-geist-mono on <html> (app/layout.tsx) */
   --font-display: var(--font-outfit), ui-sans-serif, system-ui, sans-serif;
-  --font-sans: var(--font-plex-sans), ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
-  --font-mono: var(--font-plex-mono), ui-monospace, SFMono-Regular, Menlo, monospace;
+  --font-sans: var(--font-geist-sans), ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-mono: var(--font-geist-mono), ui-monospace, SFMono-Regular, Menlo, monospace;
 
   font-family: var(--font-sans);
   /* type ramp: the 16 Figma text styles typography/app/* (DS-12), nothing under 14 px.
@@ -76,15 +76,15 @@
      stat            Outfit 600            30/33       -0.02em   .stat .value
      strip-value     Outfit 600            20/29       0         .sched-strip .value, .fact .value
      strip-sub       Outfit 500            16/1.45     0         .sched-strip .value .aside
-     body            Plex Sans 500         16/1.5      0.01em    body, nav tabs
-     body-md         Plex Sans 500         15/1.5      0.01em    blockquote, .prose, .table cells
-     body-md-strong  Plex Sans 600         15/1.5      0.01em    .ac-stat .v
-     body-sm         Plex Sans 500         14/1.5      0.01em    meta rows, filters, search, notes
-     badge           Plex Sans 600         14/1.5      0.01em    .badge, .flag, emphasised 14 px
-     label           Plex Sans 600 upper   14/1.5      0.04em    h2, th, tile labels
-     mono            Plex Mono 500         14/1.5      0         code, .mono
-     mono-strong     Plex Mono 600         14/1.5      0         emphasised mono
-     mono-lg         Plex Mono 500         15/1.5      0         .sched-strip .value.mono, .tool-name */
+     body            Geist 500             16/1.5      0.01em    body, nav tabs
+     body-md         Geist 500             15/1.5      0.01em    blockquote, .prose, .table cells
+     body-md-strong  Geist 600             15/1.5      0.01em    .ac-stat .v
+     body-sm         Geist 500             14/1.5      0.01em    meta rows, filters, search, notes
+     badge           Geist 600             14/1.5      0.01em    .badge, .flag, emphasised 14 px
+     label           Geist 600 upper       14/1.5      0.04em    h2, th, tile labels
+     mono            Geist Mono 500        14/1.5      0         code, .mono
+     mono-strong     Geist Mono 600        14/1.5      0         emphasised mono (no rule uses it yet: 600 not loaded)
+     mono-lg         Geist Mono 500        15/1.5      0         .sched-strip .value.mono, .tool-name */
   font-size: 16px;
 }
 
@@ -105,7 +105,7 @@ body {
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 }
-/* the default "bolder" would ask Plex Sans for 700, which is not loaded (app/layout.tsx) */
+/* the default "bolder" would ask Geist for 700, which is not loaded (app/layout.tsx) */
 strong,
 b {
   font-weight: 600;
@@ -2375,7 +2375,7 @@ summary:focus-visible {
   gap: 12px;
 }
 
-/* tool card: mono cream name, Plex Sans description, parameters as the run tables */
+/* tool card: mono cream name, Geist description, parameters as the run tables */
 .card.tool {
   scroll-margin-top: 16px;
 }
