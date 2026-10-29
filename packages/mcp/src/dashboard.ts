@@ -6,9 +6,11 @@
  *
  *   <dataDir>/web/<version>/node_modules/@duskfleet/web/bin/start.mjs
  *
- * An install goes to `<version>.partial` first and is renamed once the installed package carries
- * the right version: an older version directory stays until then, and is removed after (older
- * semver versions only: a newer install or another run's `.partial` directory is never touched).
+ * An install goes to `<version>.<pid>.partial` first (one per process) and is renamed once the
+ * installed package carries the right version; when another run installed the same version in the
+ * meantime, that install is reused. An older version directory stays until then, and is removed
+ * after (older semver versions only: a newer install or another run's `.partial` directory is
+ * never touched).
  * DUSKFLEET_WEB_SPEC replaces the npm spec (`@duskfleet/web@<version>`), e.g. a local tarball.
  */
 import { type ChildProcess, spawn, spawnSync } from "node:child_process";
@@ -82,7 +84,8 @@ export function ensureWeb(dataDir: string, version: string, log: (line: string) 
   if (present) return { entry: present, installed: false, removed: [] };
 
   const spec = process.env["DUSKFLEET_WEB_SPEC"] || `${WEB_PACKAGE}@${version}`;
-  const staging = `${target}.partial`;
+  // Per process: two concurrent first starts of one version must not delete each other's install.
+  const staging = `${target}.${process.pid}.partial`;
   rmSync(staging, { recursive: true, force: true });
   mkdirSync(staging, { recursive: true });
   log(`installing ${spec} into ${target} (first start of this version)...`);
@@ -98,9 +101,7 @@ export function ensureWeb(dataDir: string, version: string, log: (line: string) 
         : `the installed package is not ${WEB_PACKAGE}@${version}`;
     throw new Error(`could not install the dashboard: ${why}; ${manualInstallHint(version)}`);
   }
-  // The new version works: replace a broken leftover of the same version, then drop older ones.
-  rmSync(target, { recursive: true, force: true });
-  renameSync(staging, target);
+  const finalEntry = promoteStaging(staging, target, version);
   log(`installed in ${((Date.now() - started) / 1000).toFixed(1)}s`);
   const base = path.dirname(target);
   const dirs = readdirSync(base, { withFileTypes: true })
@@ -116,7 +117,34 @@ export function ensureWeb(dataDir: string, version: string, log: (line: string) 
     }
   }
   if (removed.length) log(`removed older dashboard install(s): ${removed.join(", ")}`);
-  return { entry: installedWebEntry(target, version) as string, installed: true, removed };
+  return { entry: finalEntry, installed: true, removed };
+}
+
+/**
+ * Moves a verified staging install to `target` and returns the entry there. When another run
+ * finished first (`target` already holds `version`, before the replace or by winning the rename),
+ * its install is reused and the staging directory dropped; only a broken leftover is replaced.
+ */
+export function promoteStaging(staging: string, target: string, version: string): string {
+  const reuse = () => {
+    const existing = installedWebEntry(target, version);
+    if (existing) rmSync(staging, { recursive: true, force: true });
+    return existing;
+  };
+  const before = reuse();
+  if (before) return before;
+  rmSync(target, { recursive: true, force: true });
+  try {
+    renameSync(staging, target);
+  } catch (err) {
+    const after = reuse();
+    if (after) return after;
+    rmSync(staging, { recursive: true, force: true });
+    throw err;
+  }
+  const entry = installedWebEntry(target, version);
+  if (!entry) throw new Error(`the installed package is not ${WEB_PACKAGE}@${version}; ${manualInstallHint(version)}`);
+  return entry;
 }
 
 const SEMVER = /^(\d+)\.(\d+)\.(\d+)(?:-([0-9A-Za-z.-]+))?$/;

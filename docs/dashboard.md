@@ -26,9 +26,11 @@ starting anything and asks for another `--port`.
 - **Where it lands**: `<dataDir>/web/<version>/` (`data/web/0.1.0/` with the default
   `data_dir`), with its own `node_modules` (next, react, react-dom).
 - **Upgrades**: after a CLI upgrade the matching version is installed next to the old one (first
-  into `<version>.partial`); the directories of older versions are removed once it is installed
-  with the right version. A newer version (after a downgrade), another install's `.partial`
-  directory and anything that is not a version stay. A failed install leaves the old ones in place.
+  into `<version>.<pid>.partial`, one per process); the directories of older versions are removed
+  once it is installed with the right version. Two first starts of the same version at once do not
+  clash: the one that finishes second reuses the other's install. A newer version (after a
+  downgrade), another install's `.partial` directory and anything that is not a version stay. A
+  failed install leaves the old ones in place.
 - **Install fails** (offline, registry down): the command exits 1 and says how to install it by
   hand: `npm install -g @duskfleet/web@<version>`, then `duskfleet dashboard --no-install`.
   `--no-install` never installs: it uses the data directory copy, else the global package, and

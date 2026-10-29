@@ -20,6 +20,7 @@ import {
   olderWebVersions,
   openerCommand,
   parsePort,
+  promoteStaging,
   webInstallDir,
 } from "../dist/dashboard.js";
 import { testEnv } from "./helpers.js";
@@ -178,6 +179,37 @@ test("version cleanup keeps newer installs, staging directories and non-versions
   assert.deepEqual(olderWebVersions(dirs, "not-a-version"), []);
 });
 
+/** A minimal installed @duskfleet/web of `pkgVersion` under `prefix`, as npm leaves it. */
+function fakeInstall(prefix, pkgVersion, marker) {
+  const pkgDir = path.join(prefix, "node_modules", "@duskfleet", "web");
+  mkdirSync(path.join(pkgDir, "bin"), { recursive: true });
+  writeFileSync(path.join(pkgDir, "package.json"), JSON.stringify({ name: "@duskfleet/web", version: pkgVersion }));
+  writeFileSync(path.join(pkgDir, "bin", "start.mjs"), `// ${marker}\n`);
+  return path.join(pkgDir, "bin", "start.mjs");
+}
+
+test("promoting a staging install: reuses one a concurrent run finished first, replaces a broken leftover", () => {
+  const base = path.join(root, "promote", "web");
+  const target = path.join(base, "1.2.3");
+  const mine = `${target}.111.partial`;
+  const theirs = fakeInstall(target, "1.2.3", "theirs");
+  fakeInstall(mine, "1.2.3", "mine");
+  assert.equal(promoteStaging(mine, target, "1.2.3"), theirs);
+  assert.match(readFileSync(theirs, "utf8"), /theirs/, "the other run's install is kept");
+  assert.ok(!existsSync(mine), "our staging directory is dropped");
+
+  rmSync(target, { recursive: true });
+  mkdirSync(target, { recursive: true });
+  writeFileSync(path.join(target, "leftover"), "broken");
+  const staged = `${target}.222.partial`;
+  fakeInstall(staged, "1.2.3", "mine");
+  const entry = promoteStaging(staged, target, "1.2.3");
+  assert.match(readFileSync(entry, "utf8"), /mine/);
+  assert.ok(!existsSync(path.join(target, "leftover")));
+  assert.ok(!existsSync(staged));
+  assert.deepEqual(olderWebVersions(["1.2.0.333.partial", "1.2.0"], "1.2.3"), ["1.2.0"]);
+});
+
 test("a port already in use is refused before any install, with a clear message", async () => {
   const { configDir, dataDir } = makeConfig("port-taken");
   const busy = createServer();
@@ -203,7 +235,7 @@ test("first start installs @duskfleet/web at the CLI's version, serves /, drops 
   mkdirSync(old, { recursive: true });
   // Kept: a newer install (a downgrade must not delete it) and another run's staging directory.
   const newer = path.join(dataDir, "web", "999.0.0");
-  const staging = path.join(dataDir, "web", "999.0.0.partial");
+  const staging = path.join(dataDir, "web", "999.0.0.4242.partial");
   mkdirSync(newer, { recursive: true });
   mkdirSync(staging, { recursive: true });
 
@@ -225,7 +257,10 @@ test("first start installs @duskfleet/web at the CLI's version, serves /, drops 
     ),
   );
   assert.equal(installed.version, cliVersion, "installed @duskfleet/web equals duskfleet --version");
-  assert.deepEqual(readdirSync(path.join(dataDir, "web")).sort(), [cliVersion, "999.0.0", "999.0.0.partial"].sort());
+  assert.deepEqual(
+    readdirSync(path.join(dataDir, "web")).sort(),
+    [cliVersion, "999.0.0", "999.0.0.4242.partial"].sort(),
+  );
   rmSync(newer, { recursive: true });
   rmSync(staging, { recursive: true });
 
