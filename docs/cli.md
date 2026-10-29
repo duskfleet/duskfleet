@@ -33,8 +33,9 @@ npm run cli -- --version                                  # the package version 
 
 `duskfleet` with no arguments prints the usage on stderr and exits 2; `--help` prints it on
 stdout and exits 0. Both end with `First time here? Run: npx duskfleet init`, and so does the
-error of any command that finds no config (no `config/duskfleet.yaml` above the CLI, or none in
-the directory `DUSKFLEET_CONFIG` names). `--version` prints the version of the installed
+error of any command that finds no config (no `duskfleet.yaml` in the directory the lookup picked:
+`DUSKFLEET_CONFIG`, a `config/` above the CLI, else the user-level directory; see
+[where config and data live](configuration.md#where-config-and-data-live)). `--version` prints the version of the installed
 `duskfleet` package and needs neither a config nor Node 24.
 
 ## First run
@@ -76,7 +77,14 @@ It prints `{ created, overrode, agent }` as JSON and the next command on stderr.
 
 ## doctor, logs and diffs
 
-`doctor` prints the effective `path` used to find `claude` and passed to runs; `pathDefaulted`
+`doctor` prints where the config and data come from: `configDir` with `configSource` (`env` for
+`DUSKFLEET_CONFIG`, `repo` for a `config/` found walking up from the CLI, `user` for the
+user-level directory), `configLookup` (every candidate in precedence order, `null` when it does
+not apply), and `dataDir` with `dataSource` (`env` for `DUSKFLEET_DATA`, `config` for `data_dir`
+or the `../data` next to a repo config, `user` for the user-level data directory). The rules are
+in [Configuration](configuration.md#where-config-and-data-live).
+
+`doctor` also prints the effective `path` used to find `claude` and passed to runs; `pathDefaulted`
 is true on macOS when the inherited `PATH` was missing or minimal (a GUI-launched host) and the usual
 install directories were put in front ([Troubleshooting](troubleshooting.md)).
 
