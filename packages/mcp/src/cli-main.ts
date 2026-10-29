@@ -31,6 +31,7 @@ import {
   type BudgetInput,
   ConfigNotFoundError,
   createAgentFromFields,
+  type DataSource,
   effectivePath,
   findRepoRoot,
   parseHolder,
@@ -54,6 +55,7 @@ import {
 } from "./mcp-register.js";
 import { PROBE_COST_NOTE, type ProbeReport, probeNotRun, runProbe } from "./probe.js";
 import {
+  exportedDataDir,
   installService,
   renderService,
   type ServiceTarget,
@@ -202,7 +204,7 @@ function serviceTarget(
   claudeBin: string | null,
   dataDir: string,
   configDir: string,
-  dataFromEnv: boolean,
+  dataSource: DataSource,
 ): ServiceTarget {
   // The bin is dist/cli.js (the Node version check); this module sits next to it.
   const cliEntry = path.join(path.dirname(fileURLToPath(import.meta.url)), "cli.js");
@@ -212,8 +214,9 @@ function serviceTarget(
     platform: process.platform,
     repoRoot: dirs.repoRoot,
     configDir: dirs.configDir,
-    // DUSKFLEET_DATA lives only in this shell: the unit carries it, or the service opens another database.
-    dataDir: dataFromEnv ? path.resolve(dataDir) : null,
+    // DUSKFLEET_DATA / XDG_DATA_HOME live only in this shell: the unit carries the resolved
+    // directory, or the service opens another database.
+    dataDir: exportedDataDir(dataDir, dataSource),
     nodeBin: process.execPath,
     cliEntry,
     logPath: path.join(dataDir, "logs", "serve.log"),
@@ -255,6 +258,8 @@ async function mcpRegister(
     serverEntry: entryFile,
     claudeBin: app.executor.binary,
     configDir: serviceDirs(findRepoRoot(entryFile), app.config.configDir).configDir,
+    // A GUI host does not see this shell's DUSKFLEET_DATA / XDG_DATA_HOME either.
+    dataDir: exportedDataDir(app.config.dataDir, app.config.dataSource),
     version: packageVersion(),
   });
   const out = (s: string) => process.stdout.write(`${s}\n`);
@@ -328,7 +333,7 @@ async function main(): Promise<void> {
         app.executor.binary,
         app.config.dataDir,
         app.config.configDir,
-        app.config.dataSource === "env",
+        app.config.dataSource,
       );
       if (values.print) {
         const unit = renderService(target);

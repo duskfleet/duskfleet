@@ -10,7 +10,14 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { test } from "node:test";
 import { formatHolder, parseHolder } from "@duskfleet/core";
-import { installService, renderService, serviceDirs, serviceStatus, uninstallService } from "../dist/service.js";
+import {
+  exportedDataDir,
+  installService,
+  renderService,
+  serviceDirs,
+  serviceStatus,
+  uninstallService,
+} from "../dist/service.js";
 
 const base = {
   repoRoot: "/opt/dusk fleet",
@@ -132,6 +139,19 @@ test("DUSKFLEET_DATA set at install time is carried by the unit, so the service 
   for (const platform of ["darwin", "linux", "win32"]) {
     assert.doesNotMatch(renderService({ ...base, platform, user: "PC\\me" }).content, /DUSKFLEET_DATA/);
   }
+});
+
+test("exportedDataDir: DUSKFLEET_DATA and an XDG data dir are exported, the derivable default is not", () => {
+  const ctx = { platform: "linux", home: "/home/me", env: {} };
+  // DUSKFLEET_DATA: always
+  assert.equal(exportedDataDir("/srv/df/data", "env", ctx), "/srv/df/data");
+  // data_dir or ../data in duskfleet.yaml: follows the config, nothing to export
+  assert.equal(exportedDataDir("/srv/df/data", "config", ctx), null);
+  // user-level default without XDG: the unit derives the same directory
+  assert.equal(exportedDataDir("/home/me/.local/share/duskfleet", "user", ctx), null);
+  // XDG_DATA_HOME in this shell only: the unit would fall back to ~/.local/share
+  const xdg = { ...ctx, env: { XDG_DATA_HOME: "/xdg/data" } };
+  assert.equal(exportedDataDir("/xdg/data/duskfleet", "user", xdg), "/xdg/data/duskfleet");
 });
 
 test("a cli.js inside the npx cache is refused: the unit would break once npm evicts it", () => {

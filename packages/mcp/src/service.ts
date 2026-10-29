@@ -19,6 +19,7 @@ import { spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { homedir, userInfo } from "node:os";
 import path from "node:path";
+import { type DataSource, type LocationContext, userDataDir } from "@duskfleet/core";
 
 export type ServicePlatform = "darwin" | "linux" | "win32";
 
@@ -33,9 +34,10 @@ export interface ServiceTarget {
    */
   configDir?: string | null;
   /**
-   * Data directory exported as DUSKFLEET_DATA, set only when the installing process got it from
-   * DUSKFLEET_DATA: without it the service would open another database (data_dir or the default)
-   * than the CLI and the dashboard. Null or absent: the service resolves it like the CLI does.
+   * Data directory exported as DUSKFLEET_DATA (see `exportedDataDir`): set when the installing
+   * process got it from a variable the service does not see (DUSKFLEET_DATA, XDG_DATA_HOME), or
+   * the service would open another database than the CLI and the dashboard. Null or absent: the
+   * service resolves it like the CLI does.
    */
   dataDir?: string | null;
   /** Absolute path of the node binary that runs the CLI. */
@@ -118,6 +120,25 @@ export function serviceDirs(
     return { repoRoot, configDir: resolved === path.resolve(repoRoot, "config") ? null : resolved };
   }
   return { repoRoot: path.dirname(resolved), configDir: resolved };
+}
+
+/**
+ * The data directory a service unit or an MCP host entry must carry as DUSKFLEET_DATA, or null
+ * when the process it starts resolves the same directory by itself. A unit (launchd, systemd,
+ * Task Scheduler) and a GUI host do not see this shell's DUSKFLEET_DATA or XDG_* variables:
+ * from DUSKFLEET_DATA always, from the user-level default whenever it differs from the one
+ * derived without XDG variables. A data dir from duskfleet.yaml (data_dir or ../data) follows
+ * the config, which is exported separately.
+ */
+export function exportedDataDir(dataDir: string, dataSource: DataSource, ctx: LocationContext = {}): string | null {
+  const resolved = path.resolve(dataDir);
+  if (dataSource === "env") return resolved;
+  if (dataSource !== "user") return null;
+  const env = ctx.env ?? process.env;
+  // What the unit derives: no XDG_* variables; Windows keeps its per-user APPDATA / LOCALAPPDATA.
+  const unitEnv: NodeJS.ProcessEnv = { APPDATA: env["APPDATA"], LOCALAPPDATA: env["LOCALAPPDATA"] };
+  const derived = path.resolve(userDataDir({ ...ctx, env: unitEnv }));
+  return derived === resolved ? null : resolved;
 }
 
 /**
