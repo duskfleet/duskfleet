@@ -1,7 +1,8 @@
 import { hostname } from "node:os";
 import { parseHolder } from "@duskfleet/core";
 import type { Metadata } from "next";
-import { Geist, Geist_Mono, Outfit } from "next/font/google";
+import { Outfit } from "next/font/google";
+import localFont from "next/font/local";
 import Link from "next/link";
 import "./globals.css";
 import { NavSettings, NavTabs } from "@/components/NavTabs";
@@ -11,7 +12,7 @@ import { THEME_INIT_SCRIPT } from "@/lib/theme";
 
 // Self-hosted at build time by next/font; globals.css maps these to --font-display/-sans/-mono.
 // Every font-weight in globals.css and the components must be one of these instances, never synthesized:
-// Outfit 500/600/700; Geist and Geist Mono are their variable fonts (every weight).
+// Outfit 500/600/700; Geist and Geist Mono are variable fonts covering 400-600.
 // Outfit 500: the muted counts next to page titles and the scheduler strip's secondary values.
 const outfit = Outfit({
   subsets: ["latin"],
@@ -19,17 +20,20 @@ const outfit = Outfit({
   variable: "--font-outfit",
   display: "swap",
 });
-// No weight list: Google can serve Geist's static weights as generated files whose URLs next/font
-// cannot parse (the CI build failed on them); the variable font is one plain woff2 per subset.
-const geistSans = Geist({
-  subsets: ["latin"],
+// Geist is local, not next/font/google: Google Fonts served the CI runners Geist CSS with a font URL
+// next/font cannot parse, and the build failed on it intermittently. app/fonts holds the latin
+// variable files Next ships for its dev overlay (OFL-1.1, app/fonts/OFL.txt).
+const geistSans = localFont({
+  src: [{ path: "./fonts/geist-latin.woff2", weight: "400 600", style: "normal" }],
   variable: "--font-geist-sans",
   display: "swap",
 });
-const geistMono = Geist_Mono({
-  subsets: ["latin"],
+const geistMono = localFont({
+  src: [{ path: "./fonts/geist-mono-latin.woff2", weight: "400 600", style: "normal" }],
   variable: "--font-geist-mono",
   display: "swap",
+  // next/font/local's only metric fallback is Arial; keep the monospace fallbacks of globals.css
+  adjustFontFallback: false,
 });
 
 // The nav reads the scheduler lease on every request (no prerendered shell with stale data).
