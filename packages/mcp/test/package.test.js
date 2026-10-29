@@ -155,16 +155,26 @@ test("the bundled CLI runs: --help without config, doctor on a config with the f
 });
 
 /** A minimal two-package workspace with a copy of scripts/check-pack.mjs, so the check runs on it. */
-function packWorkspace(cliVersion, webVersion) {
+function packWorkspace(cliVersion, webVersion, cliBin = "dist/cli.js") {
   const root = mkdtempSync(path.join(tmpdir(), "duskfleet-pack-"));
   const write = (rel, content) => {
     mkdirSync(path.dirname(path.join(root, rel)), { recursive: true });
     writeFileSync(path.join(root, rel), content);
   };
   write("package.json", JSON.stringify({ name: "ws", private: true, workspaces: ["packages/duskfleet", "apps/web"] }));
-  write("packages/duskfleet/package.json", JSON.stringify({ name: "duskfleet", version: cliVersion }));
+  write(
+    "packages/duskfleet/package.json",
+    JSON.stringify({
+      name: "duskfleet",
+      version: cliVersion,
+      bin: { duskfleet: cliBin, "duskfleet-mcp": "dist/index.js" },
+    }),
+  );
   for (const f of ["dist/cli.js", "dist/index.js", "dist/core/index.js"]) write(`packages/duskfleet/${f}`, "");
-  write("apps/web/package.json", JSON.stringify({ name: "@duskfleet/web", version: webVersion }));
+  write(
+    "apps/web/package.json",
+    JSON.stringify({ name: "@duskfleet/web", version: webVersion, bin: { "duskfleet-web": "bin/start.mjs" } }),
+  );
   for (const f of ["bin/start.mjs", "next.config.mjs"]) write(`apps/web/${f}`, "");
   write("scripts/check-pack.mjs", readFileSync(path.join(here, "..", "..", "..", "scripts", "check-pack.mjs")));
   return root;
@@ -193,5 +203,24 @@ test("check-pack fails when the two packages carry different versions, passes wh
     } finally {
       rmSync(root, { recursive: true, force: true });
     }
+  }
+});
+
+// npm 11 drops a bin whose path starts with "./" while publishing (seen in the release run of
+// 2026-10-28, "bin[duskfleet] script name dist/cli.js was invalid and removed"), so the gate
+// refuses it before any tag is cut.
+test("check-pack refuses a bin path npm would drop at publish time", () => {
+  const root = packWorkspace("0.1.0", "0.1.0", "./dist/cli.js");
+  try {
+    const r = spawnSync(process.execPath, [path.join(root, "scripts", "check-pack.mjs")], {
+      cwd: root,
+      env: testEnv(),
+      encoding: "utf8",
+    });
+    assert.equal(r.status, 1, r.stdout);
+    assert.match(r.stderr, /1 problem\(s\)/);
+    assert.match(r.stderr, /bin duskfleet -> \.\/dist\/cli\.js: npm drops this entry at publish/);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
   }
 });

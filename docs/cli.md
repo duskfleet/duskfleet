@@ -23,6 +23,8 @@ npm run cli -- budgets delete <budget id>
 npm run cli -- serve                                      # long-running scheduler process
 npm run cli -- install-service [--print]                  # register `serve` with launchd / systemd --user / Task Scheduler
 npm run cli -- uninstall-service
+npm run cli -- mcp register --target claude-desktop --dry-run   # or claude-code; preview, then --yes to apply (see mcp-server.md)
+npm run cli -- mcp status                                 # which Claude hosts have a duskfleet entry; no config needed
 npm run cli -- tools                                      # the MCP tool catalogue
 npm run cli -- --help                                     # the usage (also -h); no config needed
 npm run cli -- --version                                  # the package version (also -v); duskfleet-mcp --version too

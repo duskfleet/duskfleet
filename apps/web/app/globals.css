@@ -67,7 +67,24 @@
   --font-mono: var(--font-plex-mono), ui-monospace, SFMono-Regular, Menlo, monospace;
 
   font-family: var(--font-sans);
-  /* type ramp: body 16/1.5 medium, nothing under 14 px, uppercase labels +0.04em */
+  /* type ramp: the 16 Figma text styles typography/app/* (DS-12), nothing under 14 px.
+     style           font                  size/line   tracking  where
+     wordmark        Outfit 700            18/26       -0.02em   .nav .brand
+     h1              Outfit 600            24/35       -0.01em   h1
+     h1-count        Outfit 500            18/26       -0.01em   .h1-count
+     card-title      Outfit 600            18/26       0         .sched-card h3, .ac-name
+     stat            Outfit 600            30/33       -0.02em   .stat .value
+     strip-value     Outfit 600            20/29       0         .sched-strip .value, .fact .value
+     strip-sub       Outfit 500            16/1.45     0         .sched-strip .value .aside
+     body            Plex Sans 500         16/1.5      0.01em    body, nav tabs
+     body-md         Plex Sans 500         15/1.5      0.01em    blockquote, .prose, .table cells
+     body-md-strong  Plex Sans 600         15/1.5      0.01em    .ac-stat .v
+     body-sm         Plex Sans 500         14/1.5      0.01em    meta rows, filters, search, notes
+     badge           Plex Sans 600         14/1.5      0.01em    .badge, .flag, emphasised 14 px
+     label           Plex Sans 600 upper   14/1.5      0.04em    h2, th, tile labels
+     mono            Plex Mono 500         14/1.5      0         code, .mono
+     mono-strong     Plex Mono 600         14/1.5      0         emphasised mono
+     mono-lg         Plex Mono 500         15/1.5      0         .sched-strip .value.mono, .tool-name */
   font-size: 16px;
 }
 
@@ -124,7 +141,7 @@ code,
 .shell {
   max-width: 1320px;
   margin: 0 auto;
-  padding: 0 20px 64px;
+  padding: 0 20px;
 }
 .nav {
   display: flex;
@@ -170,12 +187,13 @@ code,
 .nav .brand .fleet {
   color: var(--accent);
 }
+/* DS-08 filled pill: the tinted pill with a strong edge is the only active signal */
 .nav a.tab {
   color: var(--muted);
   padding: 6px 12px;
-  border-radius: 8px;
+  border-radius: 999px;
   font-size: 1rem;
-  line-height: 22px;
+  line-height: 24px;
   font-weight: 500;
 }
 .nav a.tab:hover {
@@ -183,13 +201,14 @@ code,
   background: var(--panel-2);
   text-decoration: none;
 }
+/* the edge is an inset shadow, not a border, so the active tab keeps the size of the others */
 .nav a.tab.active {
-  color: var(--text);
-  background: var(--panel-2);
-  box-shadow: inset 0 -2px 0 var(--accent);
+  color: var(--accent);
+  background: var(--accent-bg);
+  box-shadow: inset 0 0 0 1px var(--border-strong);
 }
 .nav a.tab:focus-visible {
-  border-radius: 8px;
+  border-radius: 999px;
 }
 .nav .meta {
   margin-left: auto;
@@ -203,6 +222,7 @@ code,
   color: var(--muted);
   font-family: var(--font-mono);
   line-height: 21px;
+  letter-spacing: 0;
 }
 .nav .meta .scheduler:hover {
   color: var(--text);
@@ -239,6 +259,141 @@ code,
 .live-btn.paused .pulse {
   background: var(--muted);
   animation: none;
+}
+
+/* ---- footer (DS-15): version left, theme switch right ---------------------- */
+/* side padding comes from .shell (20 px, 16 px under 900 px), so it lines up with the nav */
+.footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  height: 48px;
+  margin-top: 64px;
+  border-top: 1px solid var(--border);
+}
+.footer .version {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 16px;
+  font-weight: 400;
+  letter-spacing: 0;
+  color: var(--faint);
+}
+.theme-switch {
+  position: relative;
+  margin-left: auto;
+}
+.theme-trigger {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  min-width: 44px;
+  height: 32px;
+  padding: 0 7px;
+  background: none;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  color: var(--muted);
+  font: inherit;
+  font-size: 14px;
+  line-height: 21px;
+  cursor: pointer;
+}
+.theme-trigger:hover,
+.theme-trigger.open {
+  background: var(--panel-2);
+  color: var(--text);
+}
+.theme-trigger.open {
+  border-color: var(--border-strong);
+}
+.theme-trigger:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: 8px;
+}
+.theme-trigger .theme-icon,
+.theme-trigger .theme-chevron {
+  flex: none;
+}
+/* touch has no hover: the value is spelled out under the mobile breakpoint */
+.theme-trigger .theme-value {
+  display: none;
+  margin: 0 2px 0 4px;
+}
+.theme-menu {
+  position: absolute;
+  right: 0;
+  bottom: calc(100% + 6px);
+  z-index: 10;
+  width: 208px;
+  padding: 4px;
+  background: var(--panel);
+  border: 1px solid var(--border-strong);
+  border-radius: 10px;
+  box-shadow: var(--shadow);
+}
+.theme-menu:focus {
+  outline: none;
+}
+.theme-menu-label {
+  padding: 5px 8px;
+  font-size: 11px;
+  line-height: 14px;
+  color: var(--faint);
+}
+.theme-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  height: 32px;
+  padding: 0 8px;
+  background: none;
+  border: 0;
+  border-radius: 6px;
+  color: var(--text);
+  font: inherit;
+  font-size: 14px;
+  line-height: 17px;
+  font-weight: 400;
+  text-align: left;
+  cursor: pointer;
+}
+.theme-item .theme-icon {
+  flex: none;
+  color: var(--muted);
+}
+.theme-item-label {
+  flex: 1 1 auto;
+}
+.theme-item:hover,
+.theme-item:focus-visible {
+  background: var(--panel-2);
+  outline: none;
+}
+.theme-item.checked {
+  font-weight: 600;
+}
+.theme-item .theme-check {
+  flex: none;
+  color: var(--accent);
+}
+@media (max-width: 600px) {
+  .footer {
+    height: 64px;
+  }
+  .theme-trigger {
+    height: 44px;
+  }
+  .theme-trigger .theme-value {
+    display: inline;
+  }
+  .theme-item {
+    height: 44px;
+  }
 }
 
 /* page header: h1 + optional muted count on the left, a muted note or timestamp on the right */
@@ -284,7 +439,7 @@ h2 {
 h2 .count {
   color: var(--faint);
   font-weight: 500;
-  letter-spacing: 0;
+  letter-spacing: 0.01em;
   text-transform: none;
 }
 
@@ -361,10 +516,10 @@ h2 .count {
   text-decoration: none;
 }
 .stat .value .today {
-  font-family: inherit;
+  font-family: var(--font-sans);
   font-size: 14px;
   font-weight: 500;
-  letter-spacing: 0;
+  letter-spacing: 0.01em;
   color: var(--muted);
   margin-left: 6px;
 }
@@ -699,7 +854,8 @@ h2 .count {
 .table {
   width: 100%;
   border-collapse: collapse;
-  font-size: 0.9rem;
+  font-size: 15px;
+  line-height: 22.5px;
 }
 .table th,
 .table td {
@@ -741,7 +897,7 @@ h2 .count {
 }
 .run-head h1 {
   font-size: 24px;
-  line-height: 31px;
+  line-height: 35px;
   max-width: 80ch;
 }
 .run-head .crumbs {
@@ -770,7 +926,7 @@ h2 .count {
   margin: 0;
   color: var(--muted);
   font-size: 14px;
-  line-height: 1.45;
+  line-height: 21px;
   max-width: 90ch;
 }
 .run-head .nav-runs .chip-link {
@@ -835,6 +991,7 @@ h2 .count {
   font-size: 20px;
   line-height: 29px;
   font-weight: 600;
+  letter-spacing: 0;
   margin-top: 2px;
   font-variant-numeric: tabular-nums;
 }
@@ -869,6 +1026,11 @@ h2 .count {
   border-color: color-mix(in srgb, var(--bad) 55%, transparent);
   background: var(--bad-tint);
   color: var(--text);
+}
+/* text, links and code wrap as one paragraph; long tokens break at narrow widths */
+.callout > div {
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 .callout strong {
   font-weight: 600;
@@ -921,7 +1083,7 @@ h2 .count {
   padding: 16px 18px;
   word-break: break-word;
   line-height: 22.5px;
-  font-size: 14.5px;
+  font-size: 15px;
   box-shadow: var(--shadow);
 }
 .prose.quiet {
@@ -1031,6 +1193,7 @@ pre.block.bad {
   font-family: var(--font-mono);
   font-size: 14px;
   line-height: 21px;
+  letter-spacing: 0;
   font-variant-numeric: tabular-nums;
 }
 .timeline .name {
@@ -1070,11 +1233,13 @@ pre.block.bad {
   font-family: var(--font-mono);
   font-size: 14px;
   line-height: 21px;
+  letter-spacing: 0;
 }
 .timeline .detail.plain {
   font-family: inherit;
   font-size: 14px;
   line-height: 21px;
+  letter-spacing: 0.01em;
   color: var(--muted);
 }
 .timeline .what .flag {
@@ -1120,16 +1285,19 @@ pre.block.bad {
   gap: 10px;
   padding: 3px 14px;
 }
-.changes .st {
+.changes .st,
+.changes .file,
+.changes .lines {
   font-family: var(--font-mono);
+  letter-spacing: 0;
+}
+.changes .st {
   color: var(--muted);
 }
 .changes .file {
-  font-family: var(--font-mono);
   overflow-wrap: anywhere;
 }
 .changes .lines {
-  font-family: var(--font-mono);
   white-space: nowrap;
 }
 .changes .add {
@@ -1256,6 +1424,8 @@ details.prompt pre {
 .h1-count {
   font-family: var(--font-display);
   font-size: 18px;
+  line-height: 26px;
+  letter-spacing: -0.01em;
   font-weight: 500;
   color: var(--muted);
   margin-left: 2px;
@@ -1325,6 +1495,7 @@ h2 .h2-id {
   font-weight: 600;
   font-size: 18px;
   line-height: 26px;
+  letter-spacing: 0;
   color: var(--text);
   overflow: hidden;
   text-overflow: ellipsis;
@@ -1407,6 +1578,7 @@ h2 .h2-id {
 .ac-linked-desc .l {
   font-family: var(--font-mono);
   font-size: 14px;
+  letter-spacing: 0;
   color: var(--faint);
 }
 .ac-stats {
@@ -1429,7 +1601,7 @@ h2 .h2-id {
 }
 .ac-stat .v {
   font-size: 15px;
-  line-height: 22px;
+  line-height: 22.5px;
   font-weight: 600;
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
@@ -1453,15 +1625,14 @@ h2 .h2-id {
   font-size: 14px;
   line-height: 21px;
 }
+/* long paths wrap inside the card rather than overflow or truncate */
 .ac-file {
   margin-left: auto;
   color: var(--faint);
   font-size: 14px;
   min-width: 0;
   max-width: 100%;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  overflow-wrap: anywhere;
 }
 
 /* project agents without a Duskfleet link */
@@ -1555,7 +1726,8 @@ summary:focus-visible {
 }
 .quiet-line {
   color: var(--muted);
-  font-size: 0.9rem;
+  font-size: 14px;
+  line-height: 21px;
   margin: 0 0 4px;
 }
 .more {
@@ -1741,6 +1913,7 @@ summary:focus-visible {
   font-size: 20px;
   line-height: 29px;
   font-weight: 600;
+  letter-spacing: 0;
   margin-top: 2px;
   color: var(--text);
   display: flex;
@@ -1759,7 +1932,7 @@ summary:focus-visible {
 .sched-strip .value.mono {
   font-family: var(--font-mono);
   font-size: 15px;
-  line-height: 22px;
+  line-height: 22.5px;
   font-weight: 500;
   margin-top: 5px;
 }
@@ -1772,8 +1945,9 @@ summary:focus-visible {
   align-self: center;
 }
 .sched-strip .value .aside {
-  font-size: 15px;
-  line-height: 22px;
+  font-family: var(--font-display);
+  font-size: 16px;
+  line-height: 1.45;
   font-weight: 500;
   color: var(--muted);
   margin-left: -4px;
@@ -1812,7 +1986,8 @@ summary:focus-visible {
   padding: 16px 18px 12px;
 }
 /* paused: the pill, the empty firing cells and a muted title, never a layer opacity (faint text would drop under 4.5:1) */
-.sched-card.paused h3 {
+.sched-card.paused h3,
+.sched-card.paused h3 a {
   color: var(--muted);
 }
 .sched-card:target {
@@ -1832,6 +2007,7 @@ summary:focus-visible {
   font-size: 18px;
   line-height: 26px;
   font-weight: 600;
+  letter-spacing: 0;
   margin: 0;
   color: var(--text);
 }
@@ -1847,9 +2023,6 @@ summary:focus-visible {
 }
 .sched-card .sep {
   color: var(--faint);
-}
-.sched-card .meta a.agent {
-  color: var(--warn);
 }
 .sched-card .meta .model {
   font-family: var(--font-mono);
@@ -2158,11 +2331,13 @@ summary:focus-visible {
   font-family: var(--font-mono);
   font-size: 14px;
   line-height: 21px;
+  letter-spacing: 0;
   display: block;
 }
 .toc a.plain {
   font-family: inherit;
   font-size: 14px;
+  letter-spacing: 0.01em;
 }
 .toc a:hover {
   color: var(--text);
@@ -2186,7 +2361,7 @@ summary:focus-visible {
   font-weight: 400;
 }
 .server-says {
-  font-size: 14.5px;
+  font-size: 15px;
   line-height: 22.5px;
 }
 .server-says ul {
@@ -2217,8 +2392,9 @@ summary:focus-visible {
   color: var(--text);
   font-family: var(--font-mono);
   font-size: 15px;
-  line-height: 22px;
+  line-height: 22.5px;
   font-weight: 500;
+  letter-spacing: 0;
 }
 .tool-name:hover {
   color: var(--accent);
@@ -2308,6 +2484,7 @@ details.desc ul {
   color: var(--muted);
   font-family: var(--font-mono);
   font-size: 14px;
+  letter-spacing: 0;
 }
 .params .req {
   margin-left: 6px;
@@ -2403,7 +2580,10 @@ details.desc ul {
 }
 @media (max-width: 900px) {
   .shell {
-    padding: 0 16px 48px;
+    padding: 0 16px;
+  }
+  .footer {
+    margin-top: 48px;
   }
   .stats {
     grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -2493,5 +2673,18 @@ details.desc ul {
   }
   .copy-btn {
     align-self: flex-end;
+  }
+  .sched-strip {
+    grid-template-columns: 1fr;
+  }
+  .sched-strip .cell {
+    border-right: none;
+    border-bottom: 1px solid var(--border);
+  }
+  .sched-strip .cell:last-child {
+    border-bottom: none;
+  }
+  .sched-card .last {
+    flex-wrap: wrap;
   }
 }
