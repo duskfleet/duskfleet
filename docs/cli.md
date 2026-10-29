@@ -20,6 +20,7 @@ npm run cli -- schedules run-now "pr review"              # schedule id or name;
 npm run cli -- budgets                                    # monthly budgets with this month's spend and state
 npm run cli -- budgets set project my-app --amount 50 [--warn 80] [--no-hard-stop]   # or: global | agent <id>
 npm run cli -- budgets delete <budget id>
+npm run cli -- dashboard [--port 4777] [--no-open] [--no-install]   # install @duskfleet/web on demand, start it (see dashboard.md)
 npm run cli -- serve                                      # long-running scheduler process
 npm run cli -- install-service [--print]                  # register `serve` with launchd / systemd --user / Task Scheduler
 npm run cli -- uninstall-service

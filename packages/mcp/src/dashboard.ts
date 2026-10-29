@@ -1,0 +1,212 @@
+/**
+ * `duskfleet dashboard`: the dashboard is the separate package `@duskfleet/web` (next, react and
+ * react-dom stay out of the `duskfleet` tarball). It is installed on demand, at this CLI's own
+ * version, under `<dataDir>/web/<version>/`, then started in the foreground on 127.0.0.1 with the
+ * current config passed through DUSKFLEET_CONFIG.
+ *
+ *   <dataDir>/web/<version>/node_modules/@duskfleet/web/bin/start.mjs
+ *
+ * An install goes to `<version>.partial` first and is renamed once the installed package carries
+ * the right version: an older version directory stays until then, and is removed after.
+ * DUSKFLEET_WEB_SPEC replaces the npm spec (`@duskfleet/web@<version>`), e.g. a local tarball.
+ */
+import { type ChildProcess, spawn, spawnSync } from "node:child_process";
+import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync } from "node:fs";
+import path from "node:path";
+
+export const WEB_PACKAGE = "@duskfleet/web";
+export const DEFAULT_DASHBOARD_PORT = 4777;
+
+/** Where the dashboard of `version` is installed: `<dataDir>/web/<version>`. */
+export function webInstallDir(dataDir: string, version: string): string {
+  return path.join(dataDir, "web", version);
+}
+
+/** Version of the `@duskfleet/web` package directory, or null when there is none. */
+function packageDirVersion(pkgDir: string): string | null {
+  try {
+    const pkg = JSON.parse(readFileSync(path.join(pkgDir, "package.json"), "utf8")) as { version?: unknown };
+    return typeof pkg.version === "string" && existsSync(path.join(pkgDir, "bin", "start.mjs")) ? pkg.version : null;
+  } catch {
+    return null;
+  }
+}
+
+/** `bin/start.mjs` of the package installed under `prefix` when it is exactly `version`, else null. */
+export function installedWebEntry(prefix: string, version: string): string | null {
+  const pkgDir = path.join(prefix, "node_modules", ...WEB_PACKAGE.split("/"));
+  return packageDirVersion(pkgDir) === version ? path.join(pkgDir, "bin", "start.mjs") : null;
+}
+
+/** The manual way out, in every message about a failed or refused install. */
+export function manualInstallHint(version: string): string {
+  return `install it by hand with "npm install -g ${WEB_PACKAGE}@${version}", then run "duskfleet dashboard --no-install"`;
+}
+
+function npmCommand(): { bin: string; shell: boolean } {
+  // npm is a .cmd script on Windows: Node refuses to spawn it without a shell.
+  return process.platform === "win32" ? { bin: "npm.cmd", shell: true } : { bin: "npm", shell: false };
+}
+
+function quoteForShell(arg: string): string {
+  return /^[\w@./:=-]+$/.test(arg) ? arg : `"${arg.replace(/"/g, '\\"')}"`;
+}
+
+function runNpm(args: string[], stdio: "pipe" | "progress") {
+  const { bin, shell } = npmCommand();
+  return spawnSync(bin, shell ? args.map(quoteForShell) : args, {
+    shell,
+    encoding: "utf8",
+    // Progress: npm's output goes to our stderr, so stdout stays free for the caller.
+    stdio: stdio === "progress" ? ["ignore", 2, 2] : ["ignore", "pipe", "pipe"],
+  });
+}
+
+export interface EnsureWebResult {
+  entry: string;
+  /** True when this call ran `npm install`. */
+  installed: boolean;
+  /** Version directories removed after a successful install. */
+  removed: string[];
+}
+
+/**
+ * The dashboard entry for `version`, installing it under `<dataDir>/web/<version>` when missing.
+ * No network when it is already there. Throws with the manual alternative when the install fails.
+ */
+export function ensureWeb(dataDir: string, version: string, log: (line: string) => void): EnsureWebResult {
+  const target = webInstallDir(dataDir, version);
+  const present = installedWebEntry(target, version);
+  if (present) return { entry: present, installed: false, removed: [] };
+
+  const spec = process.env["DUSKFLEET_WEB_SPEC"] || `${WEB_PACKAGE}@${version}`;
+  const staging = `${target}.partial`;
+  rmSync(staging, { recursive: true, force: true });
+  mkdirSync(staging, { recursive: true });
+  log(`installing ${spec} into ${target} (first start of this version)...`);
+  const started = Date.now();
+  const r = runNpm(["install", "--prefix", staging, "--no-audit", "--no-fund", spec], "progress");
+  const entry = r.status === 0 ? installedWebEntry(staging, version) : null;
+  if (!entry) {
+    rmSync(staging, { recursive: true, force: true });
+    const why = r.error
+      ? `npm could not be started (${r.error.message})`
+      : r.status !== 0
+        ? `npm install exited with ${r.status ?? r.signal} (offline, or the registry is unreachable?)`
+        : `the installed package is not ${WEB_PACKAGE}@${version}`;
+    throw new Error(`could not install the dashboard: ${why}; ${manualInstallHint(version)}`);
+  }
+  // The new version works: replace a broken leftover of the same version, then drop the others.
+  rmSync(target, { recursive: true, force: true });
+  renameSync(staging, target);
+  log(`installed in ${((Date.now() - started) / 1000).toFixed(1)}s`);
+  const base = path.dirname(target);
+  const removed: string[] = [];
+  for (const entryName of readdirSync(base, { withFileTypes: true })) {
+    if (!entryName.isDirectory() || entryName.name === version) continue;
+    rmSync(path.join(base, entryName.name), { recursive: true, force: true });
+    removed.push(entryName.name);
+  }
+  if (removed.length) log(`removed older dashboard install(s): ${removed.join(", ")}`);
+  return { entry: installedWebEntry(target, version) as string, installed: true, removed };
+}
+
+/**
+ * `--no-install`: the data directory install when it is there, else a global
+ * `npm install -g @duskfleet/web@<version>`. Never installs; throws when neither matches.
+ */
+export function findWeb(dataDir: string, version: string): string {
+  const local = installedWebEntry(webInstallDir(dataDir, version), version);
+  if (local) return local;
+  const root = runNpm(["root", "-g"], "pipe");
+  const globalRoot = root.status === 0 ? String(root.stdout).trim() : "";
+  if (globalRoot) {
+    const pkgDir = path.join(globalRoot, ...WEB_PACKAGE.split("/"));
+    const found = packageDirVersion(pkgDir);
+    if (found === version) return path.join(pkgDir, "bin", "start.mjs");
+    if (found) {
+      throw new Error(
+        `the global ${WEB_PACKAGE} is ${found}, this CLI is ${version}; ${manualInstallHint(version)}, or drop --no-install`,
+      );
+    }
+  }
+  throw new Error(`${WEB_PACKAGE}@${version} is not installed; ${manualInstallHint(version)}, or drop --no-install`);
+}
+
+/** Port flag to a number, refusing anything that is not a TCP port. */
+export function parsePort(value: string | undefined): number {
+  if (value === undefined) return DEFAULT_DASHBOARD_PORT;
+  const n = Number(value);
+  if (!/^\d+$/.test(value) || n < 1 || n > 65535)
+    throw new Error(`--port must be a TCP port (1-65535), got "${value}"`);
+  return n;
+}
+
+/** The platform opener for a URL: `open`, `xdg-open`, `start`. */
+export function openerCommand(platform: NodeJS.Platform, url: string): { bin: string; args: string[] } {
+  if (platform === "darwin") return { bin: "open", args: [url] };
+  if (platform === "win32") return { bin: "cmd", args: ["/c", "start", "", url] };
+  return { bin: "xdg-open", args: [url] };
+}
+
+function openBrowser(url: string, log: (line: string) => void): void {
+  const { bin, args } = openerCommand(process.platform, url);
+  const child = spawn(bin, args, { stdio: "ignore", detached: true });
+  child.on("error", () => log(`could not open a browser; open ${url} yourself`));
+  child.unref();
+}
+
+/** Resolves once the server answers on 127.0.0.1 (any status), false when the child exits first. */
+async function waitUntilServing(child: ChildProcess, port: number, timeoutMs: number): Promise<boolean> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (child.exitCode !== null || child.signalCode !== null) return false;
+    try {
+      await fetch(`http://127.0.0.1:${port}/`, { signal: AbortSignal.timeout(2000) });
+      return true;
+    } catch {
+      await new Promise((resolve) => setTimeout(resolve, 300));
+    }
+  }
+  return false;
+}
+
+export interface StartDashboardOptions {
+  entry: string;
+  port: number;
+  configDir: string;
+  open: boolean;
+  log: (line: string) => void;
+}
+
+/**
+ * Runs the dashboard in the foreground: bound to 127.0.0.1 by bin/start.mjs, the config of this
+ * CLI through DUSKFLEET_CONFIG, no telemetry. Ctrl-C stops it. Resolves with its exit code.
+ */
+export async function startDashboard(options: StartDashboardOptions): Promise<number> {
+  const { entry, port, configDir, log } = options;
+  const child = spawn(process.execPath, [entry], {
+    stdio: "inherit",
+    env: {
+      ...process.env,
+      DUSKFLEET_CONFIG: configDir,
+      PORT: String(port),
+      NEXT_TELEMETRY_DISABLED: "1",
+    },
+  });
+  for (const signal of ["SIGINT", "SIGTERM"] as const) process.on(signal, () => child.kill(signal));
+  const exited = new Promise<number>((resolve) => {
+    child.on("exit", (code, signal) => resolve(code ?? (signal ? 1 : 0)));
+    child.on("error", (err) => {
+      log(`could not start the dashboard: ${err.message}`);
+      resolve(1);
+    });
+  });
+  const url = `http://localhost:${port}`;
+  void waitUntilServing(child, port, 120_000).then((up) => {
+    if (!up) return;
+    log(`dashboard: ${url} (Ctrl-C to stop)`);
+    if (options.open) openBrowser(url, log);
+  });
+  return exited;
+}
