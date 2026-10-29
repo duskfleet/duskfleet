@@ -4,7 +4,7 @@ import type { Metadata } from "next";
 import { Geist, Geist_Mono, Outfit } from "next/font/google";
 import Link from "next/link";
 import "./globals.css";
-import { NavTabs } from "@/components/NavTabs";
+import { NavSettings, NavTabs } from "@/components/NavTabs";
 import { ThemeSwitch } from "@/components/ThemeSwitch";
 import { schedulerEnabled, schedulerLease } from "@/lib/data";
 import { THEME_INIT_SCRIPT } from "@/lib/theme";
@@ -106,6 +106,8 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
               {/* Pages with live data mount <AutoRefresh> here (portal). */}
               <span id="nav-meta" />
             </span>
+            <span className="nav-break" aria-hidden="true" />
+            <NavSettings />
           </nav>
           {children}
           <footer className="footer">
