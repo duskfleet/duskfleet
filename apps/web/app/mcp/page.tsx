@@ -162,7 +162,7 @@ function ConnectClient({ desktopJson, claudeCodeCmd }: { desktopJson: string; cl
         <div className="connect-box">
           <h3>Claude Desktop / Cowork</h3>
           <div className="cmd">
-            <pre className="block">{desktopJson}</pre>
+            <WrappedCode text={desktopJson} />
             <CopyButton text={desktopJson} />
           </div>
           <div className="side-note">
@@ -173,7 +173,7 @@ function ConnectClient({ desktopJson, claudeCodeCmd }: { desktopJson: string; cl
         <div className="connect-box">
           <h3>Claude Code</h3>
           <div className="cmd">
-            <pre className="block">{claudeCodeCmd}</pre>
+            <WrappedCode text={claudeCodeCmd} />
             <CopyButton text={claudeCodeCmd} />
           </div>
           <div className="side-note">
@@ -183,6 +183,37 @@ function ConnectClient({ desktopJson, claudeCodeCmd }: { desktopJson: string; cl
         </div>
       </div>
     </section>
+  );
+}
+
+/**
+ * A snippet that wraps with a hanging indent: one block per source line, its leading spaces moved
+ * into --ind so continuation lines sit 2ch past the line's own indentation (text-indent only
+ * acts on a block's first line). A <wbr> after each "/" lets long paths break at a segment.
+ * Display only: the Copy button copies the original text.
+ */
+function WrappedCode({ text }: { text: string }) {
+  return (
+    <pre className="block">
+      {text.split("\n").map((line, i) => {
+        const body = line.trimStart();
+        const parts = body.split("/");
+        return (
+          <span key={i} className="ln" style={{ "--ind": `${line.length - body.length}ch` } as React.CSSProperties}>
+            {parts.map((p, j) => (
+              <span key={j}>
+                {p}
+                {j < parts.length - 1 && (
+                  <>
+                    /<wbr />
+                  </>
+                )}
+              </span>
+            ))}
+          </span>
+        );
+      })}
+    </pre>
   );
 }
 
