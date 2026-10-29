@@ -89,6 +89,11 @@ test("server entry: absolute node + index.js; npx pinned form only from npx's ca
   assert.equal(npx.entry.command, "/opt/node/bin/npx");
   assert.deepEqual(npx.entry.args, ["-y", "-p", "duskfleet@1.2.3", "duskfleet-mcp"]);
   assert.equal(npx.entry.env.DUSKFLEET_CONFIG, "/home/me/df/config");
+  assert.equal(npx.entry.env.DUSKFLEET_DATA, undefined);
+
+  // a data dir the host would not resolve by itself (DUSKFLEET_DATA, XDG_DATA_HOME) is carried
+  const withData = serverEntry({ ...input, dataDir: "/xdg/data/duskfleet" });
+  assert.equal(withData.entry.env.DUSKFLEET_DATA, "/xdg/data/duskfleet");
 });
 
 test("line diff keeps common lines and marks the changed ones", () => {

@@ -19,6 +19,7 @@ import { spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { homedir, userInfo } from "node:os";
 import path from "node:path";
+import { type DataSource, dataDirFor, type LocationContext } from "@duskfleet/core";
 
 export type ServicePlatform = "darwin" | "linux" | "win32";
 
@@ -32,6 +33,13 @@ export interface ServiceTarget {
    * Null or absent: the service finds `<repoRoot>/config` itself.
    */
   configDir?: string | null;
+  /**
+   * Data directory exported as DUSKFLEET_DATA (see `exportedDataDir`): set when the installing
+   * process got it from a variable the service does not see (DUSKFLEET_DATA, XDG_DATA_HOME), or
+   * the service would open another database than the CLI and the dashboard. Null or absent: the
+   * service resolves it like the CLI does.
+   */
+  dataDir?: string | null;
   /** Absolute path of the node binary that runs the CLI. */
   nodeBin: string;
   /** Absolute path of packages/mcp/dist/cli.js. */
@@ -115,6 +123,33 @@ export function serviceDirs(
 }
 
 /**
+ * The data directory a service unit or an MCP host entry must carry as DUSKFLEET_DATA, or null
+ * when the process it starts resolves the same directory by itself. A unit (launchd, systemd,
+ * Task Scheduler) and a GUI host do not see this shell's DUSKFLEET_DATA or XDG_* variables:
+ * from DUSKFLEET_DATA always, from the user-level default whenever the process, reading the same
+ * `configDir` without XDG variables, would derive another directory (XDG_DATA_HOME set here, or
+ * XDG_CONFIG_HOME: the exported config is then not its user-level config, so it would fall back to
+ * ../data next to it). A data dir from duskfleet.yaml (data_dir or ../data) follows the config,
+ * which is exported separately.
+ */
+export function exportedDataDir(
+  dataDir: string,
+  dataSource: DataSource,
+  configDir: string,
+  ctx: LocationContext = {},
+): string | null {
+  const resolved = path.resolve(dataDir);
+  if (dataSource === "env") return resolved;
+  if (dataSource !== "user") return null;
+  const env = ctx.env ?? process.env;
+  // Simulate the unit: same config dir (data_dir is unset, or the source would be "config"), no
+  // XDG_* variables; Windows keeps its per-user APPDATA / LOCALAPPDATA.
+  const unitEnv: NodeJS.ProcessEnv = { APPDATA: env["APPDATA"], LOCALAPPDATA: env["LOCALAPPDATA"] };
+  const derived = path.resolve(dataDirFor(configDir, null, { ...ctx, env: unitEnv }).dataDir);
+  return derived === resolved ? null : resolved;
+}
+
+/**
  * `npx duskfleet install-service` runs from npm's temporary cache (`.../_npx/<hash>/...`):
  * a unit pointing there breaks as soon as npm evicts the cache. Refuse it.
  */
@@ -149,6 +184,7 @@ export function renderService(t: ServiceTarget): ServiceUnit {
     ];
     if (t.claudeBin) env.push(["CLAUDE_BIN", t.claudeBin]);
     if (t.configDir) env.push(["DUSKFLEET_CONFIG", t.configDir]);
+    if (t.dataDir) env.push(["DUSKFLEET_DATA", t.dataDir]);
     const content = [
       '<?xml version="1.0" encoding="UTF-8"?>',
       '<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">',
@@ -213,6 +249,7 @@ export function renderService(t: ServiceTarget): ServiceUnit {
       `Environment=${quote(`PATH=${pathEnv}`)}`,
       ...(t.claudeBin ? [`Environment=${quote(`CLAUDE_BIN=${t.claudeBin}`)}`] : []),
       ...(t.configDir ? [`Environment=${quote(`DUSKFLEET_CONFIG=${t.configDir}`)}`] : []),
+      ...(t.dataDir ? [`Environment=${quote(`DUSKFLEET_DATA=${t.dataDir}`)}`] : []),
       `StandardOutput=append:${t.logPath}`,
       `StandardError=append:${t.logPath}`,
       "",
@@ -247,9 +284,10 @@ export function renderService(t: ServiceTarget): ServiceUnit {
   // "no time limit" or "restart on failure"; XML can. The command goes through
   // cmd.exe so stdout/stderr can be appended to the log file.
   const user = t.user ?? windowsUser();
-  // A task has no environment block: the config dir is set by cmd.exe before node starts.
+  // A task has no environment block: the config and data dirs are set by cmd.exe before node starts.
   const setConfig = t.configDir ? `set "DUSKFLEET_CONFIG=${t.configDir}"&& ` : "";
-  const cmd = `/c "${setConfig}"${t.nodeBin}" "${t.cliEntry}" serve >> "${t.logPath}" 2>&1"`;
+  const setData = t.dataDir ? `set "DUSKFLEET_DATA=${t.dataDir}"&& ` : "";
+  const cmd = `/c "${setConfig}${setData}"${t.nodeBin}" "${t.cliEntry}" serve >> "${t.logPath}" 2>&1"`;
   const content = [
     '<?xml version="1.0" encoding="UTF-16"?>',
     '<Task version="1.4" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">',
