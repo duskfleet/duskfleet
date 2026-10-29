@@ -1,7 +1,7 @@
 "use client";
 
 import { type KeyboardEvent, useEffect, useRef, useState } from "react";
-import { THEME_KEY, type Theme } from "@/lib/theme";
+import { applyTheme, storedTheme, THEME_EVENT, type Theme } from "@/lib/theme";
 
 const OPTIONS: Array<{ value: Theme; label: string; name: string }> = [
   { value: "device", label: "Device", name: "Device (follow OS)" },
@@ -9,21 +9,21 @@ const OPTIONS: Array<{ value: Theme; label: string; name: string }> = [
   { value: "dark", label: "Dark", name: "Dark" },
 ];
 
-/** Light / Dark set data-theme on <html>; Device removes it, so prefers-color-scheme decides (globals.css). */
-function applyTheme(theme: Theme) {
-  const root = document.documentElement;
-  if (theme === "device") delete root.dataset.theme;
-  else root.dataset.theme = theme;
-  try {
-    if (theme === "device") localStorage.removeItem(THEME_KEY);
-    else localStorage.setItem(THEME_KEY, theme);
-  } catch {
-    // Storage can be unavailable (private mode): the choice holds for this page only.
-  }
+/** Keeps a control in step with the stored theme, including changes made by another control on the page. */
+export function useTheme(): Theme {
+  const [theme, setTheme] = useState<Theme>("device");
+  // The init script already applied the stored value; this only syncs the control with it.
+  useEffect(() => {
+    setTheme(storedTheme());
+    const onChange = (e: Event) => setTheme((e as CustomEvent<Theme>).detail);
+    window.addEventListener(THEME_EVENT, onChange);
+    return () => window.removeEventListener(THEME_EVENT, onChange);
+  }, []);
+  return theme;
 }
 
 /** 16 px line icons, stroke 1.5: monitor = Device, sun = Light, moon = Dark. */
-function ThemeIcon({ theme }: { theme: Theme }) {
+export function ThemeIcon({ theme }: { theme: Theme }) {
   return (
     <svg
       className="theme-icon"
@@ -56,22 +56,12 @@ function ThemeIcon({ theme }: { theme: Theme }) {
 
 /** DS-15 theme control: icon + chevron trigger, a menu that opens upward (Device / Light / Dark). */
 export function ThemeSwitch() {
-  const [theme, setTheme] = useState<Theme>("device");
+  const theme = useTheme();
   const [open, setOpen] = useState(false);
   const [focus, setFocus] = useState(0);
   const root = useRef<HTMLDivElement>(null);
   const trigger = useRef<HTMLButtonElement>(null);
   const items = useRef<Array<HTMLButtonElement | null>>([]);
-
-  // The init script already applied the stored value; this only syncs the control with it.
-  useEffect(() => {
-    try {
-      const stored = localStorage.getItem(THEME_KEY);
-      if (stored === "light" || stored === "dark") setTheme(stored);
-    } catch {
-      // no storage: stays on Device
-    }
-  }, []);
 
   useEffect(() => {
     if (open) items.current[focus]?.focus();
@@ -98,7 +88,6 @@ export function ThemeSwitch() {
     trigger.current?.focus();
   };
   const pick = (value: Theme) => {
-    setTheme(value);
     applyTheme(value);
     close();
   };

@@ -81,6 +81,10 @@ scheduler:
 Config is re-read on every run and every `list_*` tool call: edits apply without restarting
 anything.
 
+The dashboard's [Settings page](dashboard.md) edits most of these keys in this same file
+(comments kept; a value the loader refuses is rolled back), so a hand edit and a dashboard edit
+are the same thing. There are no overrides stored elsewhere.
+
 ## Projects: `config/projects.yaml` (optional)
 
 ```yaml
