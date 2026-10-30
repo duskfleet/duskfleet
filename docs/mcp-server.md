@@ -122,6 +122,20 @@ recurse into itself.
 | `list_runs` | Recent runs with filters (`status`, `kind` (`run` \| `gate`), `agent_id`, `project_path`, `limit`); per run `needsReview` with `reviewReasons` (budget exhausted, timed out, orphaned, non-zero exit, failed, permission denied, context exhausted, MCP missing; see [dashboard](dashboard.md#needs-review)), `terminationReason`, `errorCode` / `errorFamily` / `errorDetail` (why it failed, e.g. `auth_required`, `provider_quota` with `retryNotBefore`; see [what a run records](cli.md#what-a-run-records)), `wrapUp` (outcome and cost of the wrap-up pass, or null), `resumedFromRunId` and `resumedByRunId` (linked retry) |
 | `cancel_run` | SIGTERM (then SIGKILL) the run's process; recorded as `cancelled` |
 
+Outcomes of a schedule tick (`lastOutcome` in `list_schedules`; details in [schedules](schedules.md#policies)):
+
+| Outcome | Meaning |
+|---|---|
+| `started` | the tick started a run |
+| `resumed` | started as a resume of the previous run ([`on_failure: resume_once`](schedules.md#resume-once-on-failure)); counts as a fire |
+| `skipped_busy` | the agent or the project already had a run; never queued |
+| `skipped_daily_cap` | the agent (or its gate agent) reached `max_daily_runs` / `max_daily_cost_usd` for the UTC day |
+| `skipped_budget` | a hard-stop monthly budget covering the run (global, agent or project) is spent; the schedules of that scope were paused |
+| `skipped_gate` | the schedule's [gate](schedules.md#gates-skip-cheaply-when-there-is-no-work) said there is no work; the reason is the firing's error text |
+| `skipped_disabled` | the schedule was paused when its tick came |
+| `auto_paused` | its last `scheduler.auto_pause_after` runs were all empty or needs review: [paused](schedules.md#auto-pause) instead of fired |
+| `error` | the fire failed (spawn, gate or config error); the message is the firing's error text |
+
 `create_agent` and `update_agent` validate the spec before writing and roll the file back if
 the config no longer loads, so one bad agent file never breaks later config reloads. They
 also refuse a spec that would be unfit for a public repo: a home directory path
