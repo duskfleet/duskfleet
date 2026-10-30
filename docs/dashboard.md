@@ -47,7 +47,7 @@ It sends no telemetry: the `dev` and `build` scripts set `NEXT_TELEMETRY_DISABLE
 Windows, an [experimental platform](../README.md#platform-support), set it in your shell first), and `start` / `duskfleet-web` (`bin/start.mjs`) default it
 to `1` on every platform.
 
-Five views. The runs list and a running run's detail auto-refresh every 3 seconds (pause button
+Five views, plus the [trend](#trends) of the runs. The runs list and a running run's detail auto-refresh every 3 seconds (pause button
 in the nav); the other pages are static.
 
 - **Runs**: KPI cards (clean runs, needs review, spend) computed on the current project / agent
@@ -61,8 +61,11 @@ in the nav); the other pages are static.
   - `failed`: failed, timed out or cancelled.
 
   `clean` + `completed_review` + `failed` are the finished runs (the three links of the **Clean
-  runs** card). With `needs_review` on, the card lists one chip per review reason with its count;
-  a chip adds `?reason=<id>` (`permission_denied`, `empty_run`, `timed_out`, ...). `outcome` and
+  runs** card); the rest of that card opens the [trend](#trends) with the same agent / project
+  filter. With `needs_review` on, the card has an amber outline and splits the count into since
+  midnight (UTC) and earlier, and the list heading reads "Recent · needs review". `?reason=<id>`
+  (`permission_denied`, `empty_run`, `timed_out`, ...; the reason rows of the trend link there)
+  keeps only the runs with that stored reason. `outcome` and
   `reason` combine with the other parameters, and "× clear filters" drops them all. Runs are identified
   by a short title (first line of the prompt); the whole row links to the detail. A running run
   that produced no stream-json output for 5 minutes shows a "no output for N min" flag (amber,
@@ -148,6 +151,36 @@ in the nav); the other pages are static.
   `user_projects_file`, `scheduler.default_time_zone`, `noop_pattern`, `allow_command_gates`,
   `claude.allow_bypass_permissions`, `env_passthrough`) stay hand edits of the file. The header
   shows when the file last changed and whether that was a hand edit.
+
+## Trends
+
+`/trends` (the **Clean runs** card of the Runs page) shows how the share of clean runs moves
+over time, on the agent / project filter the page was opened with (`?agent=`, `?project=`; the
+"opened with" chips remove them). `?range=` picks the period:
+
+| `range` | Period | One point per |
+|---|---|---|
+| `1m` (default) | 30 days | UTC day |
+| `3m` | 13 weeks | ISO week (Monday to Sunday, UTC) |
+| `6m` | 26 weeks | ISO week |
+| `1y` | 12 months | UTC month |
+
+Every bucket of the period is on the axis, with or without runs. Counts are finished real runs
+(gate runs left out, running runs not yet counted) by their start time and their stored review
+verdict, the same as the KPI cards:
+
+- **Clean rate by agent**: clean / finished per bucket, one thin line per agent and a thick line
+  for all of them. A bucket without finished runs is a gap. The agent whose rate fell the most
+  (at least 5 points between its first and last point) is drawn in the accent colour, with a
+  line naming its most frequent reason among its last 10 reviews. A series with fewer than 3
+  points is drawn as dots. When the first run of the filter falls inside the period, the
+  buckets before it are one flat band ("no runs before 7 Sep").
+- **Finished runs per day / week / month**: stacked bars of clean, needs review and cancelled.
+- **Why runs needed review**: one row per review reason with its count and its share of the
+  runs that needed review in the period (a run can have several reasons); each row opens the
+  Runs page on `?outcome=needs_review&reason=<id>` with the same filter.
+
+With no finished run in the period, the page offers the 1-year view instead.
 
 ## Remote access
 

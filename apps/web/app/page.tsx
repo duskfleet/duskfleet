@@ -126,6 +126,11 @@ export default async function RunsPage({ searchParams }: { searchParams: Promise
   const total = exactTotal ?? recent.length + running.length;
   const hasMore = exactTotal !== null && recent.length >= limit && total > recent.length + running.length;
   const reviewOn = outcome === "needs_review";
+  // The trend keeps the agent / project scope of the tiles, nothing else.
+  const trendParams = new URLSearchParams();
+  if (agent) trendParams.set("agent", agent);
+  if (project) trendParams.set("project", project);
+  const trendHref = trendParams.size ? `/trends?${trendParams}` : "/trends";
 
   return (
     <>
@@ -252,11 +257,17 @@ export default async function RunsPage({ searchParams }: { searchParams: Promise
           </div>
         </div>
         <div
-          className="stat"
+          className="stat tile-link"
           title="Completed with nothing to review (no denial, context exhaustion or MCP mismatch), over all finished runs. clean + completed to review + failed = finished"
         >
-          <div className="label">Clean runs</div>
-          <div className="value">{fmtPct(o.clean, o.finished)}</div>
+          {/* The whole tile opens the trend (stretched link); the counts below stay filters, above it. */}
+          <Link href={trendHref} className="stat-hit stretched">
+            <div className="stat-head">
+              <div className="label">Clean runs</div>
+              <span className="tile-more">Trend →</span>
+            </div>
+            <div className="value">{fmtPct(o.clean, o.finished)}</div>
+          </Link>
           <div className="sub">
             {(["clean", "completed_review", "failed"] as const).map((k, i) => (
               <span key={k}>
@@ -272,37 +283,31 @@ export default async function RunsPage({ searchParams }: { searchParams: Promise
             ))}
           </div>
         </div>
-        <div className={`stat filter ${reviewOn ? "on" : ""}`}>
-          <Link
-            href={qs({ outcome: reviewOn ? undefined : "needs_review", reason: undefined, limit: undefined })}
-            className="stat-hit"
-            aria-current={reviewOn ? "true" : undefined}
-            title={reviewOn ? "Show every run again" : "Show only the runs that need review"}
-          >
+        <Link
+          href={qs({ outcome: reviewOn ? undefined : "needs_review", reason: undefined, limit: undefined })}
+          className={`stat tile-link filter ${reviewOn ? "on" : ""}`}
+          aria-current={reviewOn ? "true" : undefined}
+          title={reviewOn ? "Show every run again" : "Show only the runs that need review"}
+        >
+          <div className="stat-head">
             <div className="label">Needs review</div>
-            <div className={`value ${o.needsReview ? "warn" : ""}`}>
-              {fmtInt(o.needsReview)}
-              <span className="today" title="Started since midnight UTC, the day the daily caps count">
-                {fmtInt(o.needsReviewToday)} today
-              </span>
-            </div>
-          </Link>
-          {reviewOn && o.reviewReasons.length > 0 ? (
-            <div className="sub filters">
-              {o.reviewReasons.map((r) => (
-                <Link
-                  key={r.reason}
-                  href={qs({ reason: reason === r.reason ? undefined : r.reason, limit: undefined })}
-                  className={`chip ${reason === r.reason ? "on" : ""}`}
-                >
-                  {REVIEW_REASON_LABELS[r.reason]} {fmtInt(r.count)}
-                </Link>
-              ))}
+            {reviewOn && <span className="filter-on">filter on ✕</span>}
+          </div>
+          <div className={`value ${o.needsReview ? "warn" : ""}`}>
+            {fmtInt(o.needsReview)}
+            <span className="today" title="Started since midnight UTC, the day the daily caps count">
+              {fmtInt(o.needsReviewToday)} today
+            </span>
+          </div>
+          {reviewOn ? (
+            <div className="sub" title="Midnight UTC, the day the daily caps count">
+              {fmtInt(o.needsReviewToday)} since midnight · {fmtInt(o.needsReview - o.needsReviewToday)} earlier · list
+              filtered
             </div>
           ) : (
             <div className="sub">failed, timed out, out of budget or context, orphaned, or denied a tool</div>
           )}
-        </div>
+        </Link>
         <div className="stat" title={spend.basis === "api" ? undefined : SUBSCRIPTION_TITLE}>
           <div className="label">{spend.heading}</div>
           {spend.basis === "mixed" ? (
@@ -359,10 +364,16 @@ export default async function RunsPage({ searchParams }: { searchParams: Promise
         </h2>
       )}
 
-      <h2>
-        Recent <span className="count">{recent.length}</span>
-        {filtered && <span className="count">· filtered by {activeLabel}</span>}
-      </h2>
+      {reviewOn ? (
+        <h2>
+          Recent · needs review <span className="count">{fmtInt(total)}</span>
+        </h2>
+      ) : (
+        <h2>
+          Recent <span className="count">{recent.length}</span>
+          {filtered && <span className="count">· filtered by {activeLabel}</span>}
+        </h2>
+      )}
       <RunTable
         ended
         runs={recent}

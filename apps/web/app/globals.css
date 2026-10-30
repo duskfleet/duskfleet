@@ -519,20 +519,79 @@ h2 .count {
   color: var(--muted);
   margin-top: 4px;
 }
-/* a tile that filters the runs list (?outcome=): active like the toolbar chips */
-.stat.filter:hover {
-  border-color: var(--faint);
+/* tiles as links (DS-11, board "tile link states"): the whole tile is one link. Clean runs
+   stretches its link over the tile so the counts below stay their own filters, above it.
+   Running now stays static. */
+.stat.tile-link {
+  position: relative;
+  display: block;
+  color: inherit;
 }
-.stat.filter.on {
-  background: var(--warn-bg);
-  border-color: transparent;
+a.stat.tile-link:hover,
+.stat .stat-hit:hover {
+  text-decoration: none;
+}
+.stat.tile-link:hover {
+  border-color: var(--muted);
+}
+a.stat.tile-link:focus-visible,
+.stat.tile-link:has(.stretched:focus-visible) {
+  outline: 2px solid var(--accent);
+  outline-offset: 3px;
+  border-radius: 12px;
+}
+.stat .stretched:focus-visible {
+  outline: none;
+}
+a.stat.tile-link:active,
+.stat.tile-link:has(.stretched:active) {
+  background: var(--bg);
 }
 .stat .stat-hit {
   display: block;
   color: inherit;
 }
-.stat .stat-hit:hover {
-  text-decoration: none;
+.stat .stretched::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: 12px;
+}
+.stat .stretched ~ .sub a {
+  position: relative;
+  z-index: 1;
+}
+.stat .stat-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 8px;
+}
+.stat .tile-more {
+  color: var(--muted);
+  font-size: 14px;
+  line-height: 21px;
+  white-space: nowrap;
+}
+.stat.tile-link:hover .tile-more {
+  color: var(--text);
+}
+/* Needs review, filter on: warn outline, "filter on ✕" chip, today's count in warn */
+.stat.filter.on {
+  border: 1.5px solid var(--warn);
+  padding: 13.5px 15.5px;
+}
+.stat.filter.on .today {
+  color: var(--warn);
+}
+.stat .filter-on {
+  color: var(--warn);
+  border: 1px solid var(--warn);
+  border-radius: 999px;
+  padding: 0 8px;
+  font-size: 14px;
+  line-height: 19px;
+  white-space: nowrap;
 }
 .stat .value .today {
   font-family: var(--font-sans);
@@ -544,7 +603,7 @@ h2 .count {
 }
 .stat .sub a {
   color: var(--muted);
-  text-decoration: underline;
+  text-decoration: underline dotted;
   text-decoration-color: var(--border-strong);
   text-underline-offset: 2px;
 }
@@ -555,18 +614,6 @@ h2 .count {
   color: var(--warn);
   text-decoration-color: currentColor;
   font-weight: 500;
-}
-.stat .sub.filters {
-  gap: 6px;
-}
-.stat .sub.filters a.chip {
-  padding: 1px 9px;
-  font-size: 14px;
-  line-height: 21px;
-  text-decoration: none;
-}
-.stat .sub.filters a.chip.on {
-  border-color: var(--warn);
 }
 
 /* ---- badges & pills ------------------------------------------------------ */
@@ -3322,5 +3369,367 @@ details.desc ul {
   }
   .settings-source .source-legend {
     flex-wrap: wrap;
+  }
+}
+
+/* ---- trends (/trends, DS-11 App-Trend) ------------------------------------ */
+.page-head .back-link {
+  color: var(--muted);
+  font-size: 14px;
+  line-height: 21px;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.page-head .back-link:hover {
+  color: var(--text);
+}
+.trend-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 10px 14px;
+  flex-wrap: wrap;
+  margin: 0 0 20px;
+  font-size: 14px;
+  line-height: 21px;
+  color: var(--muted);
+}
+/* period selector: a segmented group; the selected option like the "all" chip, text primary */
+.trend-toolbar .period {
+  display: inline-flex;
+  gap: 2px;
+  padding: 4px;
+  border: 1px solid var(--border-strong);
+  border-radius: 8px;
+}
+.trend-toolbar .period a {
+  color: var(--muted);
+  padding: 3px 12px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+}
+.trend-toolbar .period a:hover {
+  color: var(--text);
+  text-decoration: none;
+}
+.trend-toolbar .period a.on {
+  color: var(--text);
+  background: var(--warn-tint);
+  border-color: var(--warn-border);
+}
+.trend-toolbar .kept {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin-left: auto;
+}
+.trend-toolbar .kept-chip {
+  color: var(--text);
+  border: 1px solid var(--border-strong);
+  border-radius: 999px;
+  padding: 2px 10px;
+  white-space: nowrap;
+}
+.trend-toolbar .kept-chip:hover {
+  text-decoration: none;
+  border-color: var(--muted);
+}
+.trend-panel {
+  padding: 16px 20px 18px;
+  min-width: 0;
+}
+.trend-panel + .trend-pair,
+.trend-pair {
+  margin-top: 20px;
+}
+.trend-panel .panel-title {
+  font-family: var(--font-display);
+  font-size: 18px;
+  line-height: 26px;
+  font-weight: 600;
+  letter-spacing: 0;
+  text-transform: none;
+  color: var(--text);
+  margin: 0;
+}
+.trend-panel .panel-sub {
+  margin: 2px 0 14px;
+  color: var(--muted);
+  font-size: 14px;
+  line-height: 21px;
+}
+.trend-pair {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+  gap: 20px;
+}
+.trend-note {
+  color: var(--muted);
+  font-size: 14px;
+  line-height: 21px;
+  margin: 20px 0 0;
+}
+.trend-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  min-height: 240px;
+  margin-top: 16px;
+  padding: 20px;
+  border: 1px dashed var(--border);
+  border-radius: 8px;
+  color: var(--muted);
+  font-size: 14px;
+  text-align: center;
+}
+.trend-empty strong {
+  color: var(--text);
+  font-size: 16px;
+}
+.trend-empty .btn {
+  margin-top: 12px;
+}
+.trend-empty .btn:hover {
+  text-decoration: none;
+  background: var(--panel-2);
+}
+
+/* charts (components/charts): an SVG plot between a y-axis column and an end-label column;
+   text and dots are HTML so they keep their size at any width */
+.chart {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  column-gap: 12px;
+  font-family: var(--font-mono);
+  font-size: 14px;
+  line-height: 21px;
+  letter-spacing: 0;
+  color: var(--muted);
+}
+.chart-y,
+.chart-ends {
+  position: relative;
+}
+.chart-y {
+  min-width: 3.2em;
+}
+.chart-y span {
+  position: absolute;
+  right: 0;
+  transform: translateY(-50%);
+  white-space: nowrap;
+}
+.chart-ends {
+  min-width: 0;
+}
+.line-chart .chart-ends {
+  min-width: 150px;
+}
+.chart-ends span {
+  position: absolute;
+  left: 0;
+  transform: translateY(-50%);
+  white-space: nowrap;
+  font-family: var(--font-sans);
+  letter-spacing: 0.01em;
+}
+.chart-ends span.tone-primary {
+  color: var(--text);
+  font-weight: 600;
+}
+.chart-ends span.tone-faint,
+.chart-ends span.tone-accent {
+  color: var(--text);
+}
+.chart-plot {
+  position: relative;
+}
+.chart-plot svg {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+}
+.chart-grid {
+  stroke: var(--border);
+  stroke-width: 1;
+  vector-effect: non-scaling-stroke;
+}
+.chart-line {
+  fill: none;
+  stroke-linejoin: round;
+  stroke-linecap: round;
+  vector-effect: non-scaling-stroke;
+}
+.chart-line.tone-primary {
+  stroke: var(--text);
+  stroke-width: 3;
+}
+.chart-line.tone-faint {
+  stroke: var(--faint);
+  stroke-width: 1.5;
+}
+.chart-line.tone-accent {
+  stroke: var(--accent);
+  stroke-width: 2.5;
+}
+.chart-dot {
+  position: absolute;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  transform: translate(-50%, -50%);
+}
+.chart-dot.tone-primary {
+  background: var(--text);
+  width: 9px;
+  height: 9px;
+}
+.chart-dot.tone-faint {
+  background: var(--faint);
+}
+.chart-dot.tone-accent {
+  background: var(--accent);
+}
+.chart-band {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  background: var(--panel-2);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  font-family: var(--font-sans);
+  color: var(--muted);
+}
+.chart-callout {
+  position: absolute;
+  left: 30%;
+  right: 0;
+  bottom: 18%;
+  padding-left: 10px;
+  border-left: 3px solid var(--accent);
+  font-family: var(--font-sans);
+  letter-spacing: 0.01em;
+  color: var(--text);
+}
+.chart-x {
+  grid-column: 2;
+  position: relative;
+  height: 21px;
+  margin-top: 8px;
+}
+.chart-x span {
+  position: absolute;
+  top: 0;
+  transform: translateX(-50%);
+  white-space: nowrap;
+}
+.chart-bar {
+  stroke: var(--panel);
+  stroke-width: 1;
+  vector-effect: non-scaling-stroke;
+}
+.chart-bar.tone-ok,
+.chart-legend .tone-ok {
+  fill: var(--ok);
+  background: var(--ok);
+}
+.chart-bar.tone-warn,
+.chart-legend .tone-warn {
+  fill: var(--warn);
+  background: var(--warn);
+}
+.chart-bar.tone-muted,
+.chart-legend .tone-muted {
+  fill: var(--muted);
+  background: var(--muted);
+}
+.chart-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 14px;
+  list-style: none;
+  margin: 4px 0 16px;
+  padding: 0;
+  color: var(--muted);
+  font-size: 14px;
+  line-height: 21px;
+}
+.chart-legend li {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.chart-legend .swatch {
+  width: 10px;
+  height: 10px;
+  border-radius: 2px;
+}
+/* why runs needed review: one link row per reason */
+.reason-rows {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.reason-rows a {
+  display: grid;
+  grid-template-columns: minmax(120px, 160px) minmax(60px, 1fr) 5.5em 16px;
+  align-items: center;
+  gap: 12px;
+  padding: 2px 8px;
+  border-radius: 6px;
+  color: var(--muted);
+  font-size: 14px;
+  line-height: 22px;
+}
+.reason-rows a:hover {
+  text-decoration: none;
+  background: var(--panel-2);
+}
+.reason-rows .reason-name {
+  color: var(--text);
+  text-decoration: underline;
+  text-decoration-color: var(--border-strong);
+  text-underline-offset: 2px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.reason-rows .reason-bar {
+  height: 8px;
+  border-radius: 4px;
+  background: var(--border);
+  overflow: hidden;
+}
+.reason-rows .reason-bar span {
+  display: block;
+  height: 100%;
+  border-radius: 4px;
+  background: var(--warn);
+}
+.reason-rows .reason-count {
+  font-family: var(--font-mono);
+  letter-spacing: 0;
+  white-space: nowrap;
+}
+.reason-rows .reason-go {
+  color: var(--text);
+}
+@media (max-width: 600px) {
+  .trend-toolbar .kept {
+    margin-left: 0;
+  }
+  .line-chart .chart-ends {
+    min-width: 0;
+  }
+  .line-chart .chart-ends span {
+    display: none;
+  }
+  .chart-callout {
+    left: 0;
   }
 }
