@@ -69,7 +69,7 @@
   font-family: var(--font-sans);
   /* type ramp: the 16 Figma text styles typography/app/* (DS-12), nothing under 14 px.
      style           font                  size/line   tracking  where
-     wordmark        Outfit 700            38/54.9     -0.02em   .nav .brand (DS-09; 18/26 under 600 px)
+     wordmark        Outfit 700            26.6/38.42  -0.02em   .nav .brand (DS-20; 18/26 under 600 px)
      h1              Outfit 600            24/35       -0.01em   h1
      h1-count        Outfit 500            18/26       -0.01em   .h1-count
      card-title      Outfit 600            18/26       0         .sched-card h3, .ac-name
@@ -152,20 +152,21 @@ code,
   margin-bottom: 24px;
   flex-wrap: wrap;
 }
-/* DS-09: 38 px wordmark on a 54.9 px line, mark the same size (26 px drawing x 2.111);
-   gap 5.2 px = 12.5 px visible hull-to-wordmark minus the mark's 3.47 px x 2.111 inner margin;
+/* DS-20: the DS-09 lockup at 70 %: 26.6 px wordmark on a 38.42 px line, mark the same size;
+   gap 7.38 px = 12.5 px visible hull-to-wordmark minus the mark's 4.8/36 inner margin (12.5 - 4.8 x 38.42 / 36);
+   nav 67.42 px = 14 + 38.42 + 14 + 1;
    DS-18: margin 48 px + the nav's 6 px gap = 54 px from the lockup to the first tab */
 .nav .brand {
   font-family: var(--font-display);
   font-weight: 700;
-  font-size: 38px;
-  line-height: 54.9px;
+  font-size: 1.6625rem;
+  line-height: 38.42px;
   letter-spacing: -0.02em;
   color: var(--text);
   margin-right: 48px;
   display: inline-flex;
   align-items: center;
-  gap: 5.2px;
+  gap: 7.38px;
   border-radius: 6px;
 }
 .nav .brand:hover {
@@ -174,8 +175,8 @@ code,
 .nav .brand .mark {
   display: block;
   flex: none;
-  width: 54.9px;
-  height: 54.9px;
+  width: 38.42px;
+  height: 38.42px;
 }
 .mark .from {
   stop-color: var(--mark-from);
@@ -203,7 +204,7 @@ code,
     color: inherit;
   }
 }
-/* tabs and meta sit on the wordmark's lowercase line, not on the box centre (DS-09);
+/* tabs and meta sit on the wordmark's lowercase line, not on the box centre (DS-09, DS-20: +2.08 / +4.08 px);
    DS-08 filled pill: the tinted pill with a strong edge is the only active signal */
 .nav a.tab {
   color: var(--muted);
@@ -212,7 +213,7 @@ code,
   font-size: 1rem;
   line-height: 24px;
   font-weight: 500;
-  transform: translateY(4px);
+  transform: translateY(2.08px);
 }
 .nav a.tab:hover {
   color: var(--text);
@@ -235,7 +236,7 @@ code,
   display: flex;
   gap: 10px;
   align-items: center;
-  transform: translateY(6px);
+  transform: translateY(4.08px);
 }
 .nav .meta .scheduler {
   color: var(--muted);
