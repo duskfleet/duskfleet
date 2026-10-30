@@ -117,8 +117,9 @@ in the nav); the other pages are static.
   setting: all `api`, "Spent"; all `subscription`, "Usage (API value)" with "included in your
   Claude subscription"; mixed, "Spent and usage" with the billed and API value amounts on two
   lines. Runs recorded before `billingType` existed count as API value: only an API key run is
-  shown as billed. The same rule names the run list's cost column, the "By model" table and the
-  agent cards' average. The tile splits into "on runs" and "on gates" once a gate agent has run; gate
+  shown as billed. The same rule names the run list's cost column, the "By model" table of
+  [Costs](#costs) and the agent cards' average. The whole tile opens `/costs` with the agent /
+  project filter. The tile splits into "on runs" and "on gates" once a gate agent has run; gate
   runs carry a `gate` flag in the run list and are left out of the run counts (total, clean,
   failed, needs review): a gate is a yes/no check, not work. When runs hit the provider's usage
   limit (`errorCode: provider_quota`) in the last 7 days, the tile says how many, with the next
@@ -181,6 +182,31 @@ verdict, the same as the KPI cards:
   Runs page on `?outcome=needs_review&reason=<id>` with the same filter.
 
 With no finished run in the period, the page offers the 1-year view instead.
+
+## Costs
+
+`/costs` (the **Spent** card of the Runs page, or the "Spend by model moved to Costs" line under
+the run list) shows where the money goes over time, on the agent / project filter the page was
+opened with. `?range=` is the same period selector as `/trends`, same UTC buckets; `?by=agent`
+(default), `project` or `model` picks the split. Runs count by their start time, as budgets do.
+
+- **KPIs**: spend this UTC month (gates included) against the budget of the scope in view; the
+  spend of the whole period with its average per bucket; the average cost of a real run this
+  month; the budget's warning threshold and whether it hard-stops.
+- **Spend per day / week / month**: stacked bars of the real runs' `cost_usd`, one segment per
+  agent, project or model. The top spender of the period is in the accent colour, every other
+  segment in the faint one (hover a segment for its name and amount). Totals sit above the bars
+  (only the current one past 13 bars), the current bucket labelled "so far". Gate runs are never
+  in the bars: their spend is one line under the chart ("on runs · on gates").
+- **Budget overlay**: the monthly [budget](agents.md#monthly-budgets) as a dashed line and its
+  `warn_percent` as a dotted one. Which budget: the global one when the page is unfiltered, the
+  agent's (else the project's) when it is filtered; a filtered view never borrows the global
+  budget. With weekly or daily bars the line is the budget pro rata (a month = 365 / 12 days),
+  so it marks where a bucket overspends. No budget for the scope: no lines, and the `budgets set`
+  command to create one.
+- **By model**: finished runs of the period per model actually used (a run that mixed models
+  counts under the one it asked for), with their average duration and cost, the total and the
+  share of spend. It used to be on the Runs page.
 
 ## Remote access
 

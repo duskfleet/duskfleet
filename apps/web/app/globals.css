@@ -3648,6 +3648,51 @@ details.desc ul {
   fill: var(--muted);
   background: var(--muted);
 }
+.chart-bar.tone-accent,
+.chart-legend .tone-accent {
+  fill: var(--accent);
+  background: var(--accent);
+}
+.chart-bar.tone-faint,
+.chart-legend .tone-faint {
+  fill: var(--faint);
+  background: var(--faint);
+}
+/* the total above a bar */
+.chart-top {
+  position: absolute;
+  transform: translate(-50%, calc(-100% - 2px));
+  white-space: nowrap;
+}
+/* budget overlay (/costs): the monthly budget dashed in bad, its warning threshold dotted in warn */
+.chart-rule {
+  stroke-width: 1.5;
+  vector-effect: non-scaling-stroke;
+}
+.chart-rule.rule-budget {
+  stroke: var(--bad);
+  stroke-dasharray: 6 4;
+}
+.chart-rule.rule-warn {
+  stroke: var(--warn);
+  stroke-dasharray: 1.5 3;
+}
+.chart-rule-label {
+  position: absolute;
+  left: 6px;
+  transform: translateY(calc(-100% - 2px));
+  padding: 0 4px;
+  background: var(--panel);
+  font-family: var(--font-sans);
+  letter-spacing: 0.01em;
+  white-space: nowrap;
+}
+.chart-rule-label.rule-budget {
+  color: var(--bad-ink);
+}
+.chart-rule-label.rule-warn {
+  color: var(--warn);
+}
 .chart-legend {
   display: flex;
   flex-wrap: wrap;
@@ -3719,8 +3764,83 @@ details.desc ul {
 .reason-rows .reason-go {
   color: var(--text);
 }
+/* /costs: split switch on the right of the toolbar, legend beside the panel title */
+.trend-toolbar .split {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin-left: auto;
+}
+.cost-kpis {
+  margin-bottom: 20px;
+}
+.stat .value.faint-value {
+  color: var(--faint);
+}
+.cost-panel .panel-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 4px 20px;
+}
+.cost-panel .panel-head .chart-legend {
+  margin: 0;
+}
+.cost-panel .panel-foot {
+  margin: 12px 0 0;
+  color: var(--muted);
+  font-size: 14px;
+  line-height: 21px;
+}
+.cost-models {
+  max-width: none;
+  margin-top: 20px;
+}
+.cost-models .table tfoot td {
+  color: var(--text);
+}
+.cost-models .share {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.cost-models .share-bar {
+  flex: 1;
+  min-width: 80px;
+  max-width: 300px;
+  height: 8px;
+  border-radius: 4px;
+  background: var(--border);
+  overflow: hidden;
+}
+.cost-models .share-bar span {
+  display: block;
+  height: 100%;
+  border-radius: 4px;
+  background: var(--accent);
+}
+.cost-models .share-pct {
+  font-family: var(--font-mono);
+  letter-spacing: 0;
+  color: var(--muted);
+  min-width: 3em;
+}
+/* Runs page: where the By model table was */
+.moved-line {
+  margin: 24px 0 0;
+  font-size: 14px;
+  line-height: 21px;
+}
+.moved-line a {
+  color: var(--muted);
+}
+.moved-line a:hover {
+  color: var(--text);
+}
 @media (max-width: 600px) {
-  .trend-toolbar .kept {
+  .trend-toolbar .kept,
+  .trend-toolbar .split {
     margin-left: 0;
   }
   .line-chart .chart-ends {
