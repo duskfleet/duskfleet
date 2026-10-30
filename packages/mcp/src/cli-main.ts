@@ -17,6 +17,7 @@ import { fileURLToPath } from "node:url";
  *   duskfleet schedules run-now <id or name>   # stamp run_requested_at; the lease holder fires it next tick
  *   duskfleet budgets [set <global | agent <id> | project <id>> --amount <usd> [--warn <pct>] [--no-hard-stop] | delete <id>]
  *   duskfleet tools           # MCP tool catalogue (names, descriptions, input schemas)
+ *   duskfleet dashboard [--port <n>] [--no-open] [--no-install]   # install @duskfleet/web on demand, start it
  *   duskfleet serve            # long-running scheduler process (what the service runs)
  *   duskfleet install-service [--print]   # register `serve` with launchd / systemd --user / Task Scheduler
  *   duskfleet uninstall-service
@@ -35,14 +36,17 @@ import {
   type DataSource,
   effectivePath,
   findRepoRoot,
+  loadConfig,
   parseHolder,
   pathDefaulted,
   RUN_STATUSES,
   type RunStatus,
+  resolveConfigDir,
   subagentView,
   summarizeRun,
 } from "@duskfleet/core";
 import { bootstrap } from "./bootstrap.js";
+import { assertPortFree, ensureWeb, findWeb, parsePort, startDashboard } from "./dashboard.js";
 import { runInit } from "./init.js";
 import {
   applyDesktop,
@@ -98,6 +102,7 @@ function usage(asked = false): never {
       "  duskfleet budgets set <global | agent <id> | project <id>> --amount <usd> [--warn <percent>] [--no-hard-stop]",
       "  duskfleet budgets delete <budget id>",
       "  duskfleet tools",
+      "  duskfleet dashboard [--port 4777] [--no-open] [--no-install]",
       "  duskfleet serve",
       "  duskfleet install-service [--print]",
       "  duskfleet uninstall-service",
@@ -321,6 +326,26 @@ async function main(): Promise<void> {
   if (command === "mcp" && rest[0] === "status" && rest.length === 1) {
     print(mcpStatus());
     return;
+  }
+  // Needs the config (data and config paths), not the database: the dashboard opens it itself.
+  if (command === "dashboard") {
+    const { values } = parseArgs({
+      args: rest,
+      options: {
+        port: { type: "string" },
+        "no-open": { type: "boolean", default: false },
+        "no-install": { type: "boolean", default: false },
+      },
+    });
+    const port = parsePort(values.port);
+    const config = loadConfig(resolveConfigDir(import.meta.url));
+    const log = (line: string) => process.stderr.write(`duskfleet dashboard: ${line}\n`);
+    const version = packageVersion();
+    await assertPortFree(port); // before a first install that can take a minute; checked again at start
+    const entry = values["no-install"]
+      ? findWeb(config.dataDir, version)
+      : ensureWeb(config.dataDir, version, log).entry;
+    process.exit(await startDashboard({ entry, port, configDir: config.configDir, open: !values["no-open"], log }));
   }
   // Before bootstrap: init is what writes the config bootstrap needs.
   if (command === "init") {

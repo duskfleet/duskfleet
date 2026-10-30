@@ -1,9 +1,44 @@
 # Dashboard
 
 ```bash
-npm run web            # dev server on http://localhost:4777
+npx duskfleet dashboard   # installed package: fetches @duskfleet/web once, opens http://localhost:4777
+npm run web               # in a checkout: dev server on http://localhost:4777
 # or: npm run build:web && npm run start -w @duskfleet/web
 ```
+
+## duskfleet dashboard
+
+```bash
+duskfleet dashboard [--port 4777] [--no-open] [--no-install]
+```
+
+The dashboard is a separate npm package, `@duskfleet/web` (Next.js and React stay out of the
+`duskfleet` package), published with the same version as `duskfleet`. The first time a version
+of the CLI starts it, `duskfleet dashboard` runs
+`npm install --prefix <dataDir>/web/<version> @duskfleet/web@<version>` (npm's progress on
+stderr); later starts use that copy and need no network. It then starts the dashboard in the
+foreground, bound to `127.0.0.1` on `--port` (default 4777), with the config of this CLI
+(`DUSKFLEET_CONFIG`) and telemetry off, and opens `http://localhost:<port>` with `open`,
+`xdg-open` or `start` unless `--no-open`. Ctrl-C stops it (exit 0). When something already
+listens on that port (another dashboard, `npm run web`), the command exits 1 before installing or
+starting anything and asks for another `--port`.
+
+- **Where it lands**: `<dataDir>/web/<version>/` (`data/web/0.1.0/` with the default
+  `data_dir`), with its own `node_modules` (next, react, react-dom).
+- **Upgrades**: after a CLI upgrade the matching version is installed next to the old one (first
+  into `<version>.<pid>.partial`, one per process); the directories of older versions are removed
+  once it is installed with the right version. Two first starts of the same version at once do not
+  clash: the one that finishes second reuses the other's install. A newer version (after a
+  downgrade), another install's `.partial` directory and anything that is not a version stay. A
+  failed install leaves the old ones in place.
+- **Install fails** (offline, registry down): the command exits 1 and says how to install it by
+  hand: `npm install -g @duskfleet/web@<version>`, then `duskfleet dashboard --no-install`.
+  `--no-install` never installs: it uses the data directory copy, else the global package, and
+  refuses one of another version.
+- **Remove it**: delete `<dataDir>/web/` (and `npm uninstall -g @duskfleet/web` if you installed it
+  globally). The next `duskfleet dashboard` installs it again.
+- `DUSKFLEET_WEB_SPEC` replaces the npm spec of the install (a local tarball, a mirror); the
+  installed package must still carry this CLI's version.
 
 A Next.js app that reads the database the MCP server writes (SQLite WAL mode). It can run
 while the MCP server is running or not; it only needs `config/` and `data/duskfleet.db`. It
