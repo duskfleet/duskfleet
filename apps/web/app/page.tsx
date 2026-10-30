@@ -1,4 +1,4 @@
-import { REVIEW_REASON_LABELS, type ReviewReason, RUN_OUTCOMES, type RunOutcome } from "@duskfleet/core";
+import { costLabels, REVIEW_REASON_LABELS, type ReviewReason, RUN_OUTCOMES, type RunOutcome } from "@duskfleet/core";
 import Link from "next/link";
 import { AutoRefresh } from "@/components/AutoRefresh";
 import { RunTable } from "@/components/RunTable";
@@ -12,7 +12,7 @@ import {
   overview,
   type RunsFilter,
 } from "@/lib/data";
-import { fmtCost, fmtDayClock, fmtDuration, fmtInt, fmtPct, shortModel } from "@/lib/format";
+import { fmtClock, fmtCost, fmtDayClock, fmtDuration, fmtInt, fmtPct, fmtSplit, shortModel } from "@/lib/format";
 
 export const dynamic = "force-dynamic";
 
@@ -35,6 +35,9 @@ const OUTCOME_LABELS: Record<RunOutcome, string> = {
   completed_review: "completed to review",
   failed: "failed",
 };
+
+const SUBSCRIPTION_TITLE =
+  "Claude Code reports what each run would cost at API prices. On a subscription that is usage, not money: it is included in your plan, and runs share its usage limits with interactive use.";
 
 const isOutcome = (v: string | undefined): v is RunOutcome => (RUN_OUTCOMES as readonly string[]).includes(v ?? "");
 const isReason = (v: string | undefined): v is ReviewReason => Boolean(v && Object.hasOwn(REVIEW_REASON_LABELS, v));
@@ -81,7 +84,13 @@ export default async function RunsPage({ searchParams }: { searchParams: Promise
   const recent = listRuns({ ...filter, limit }).filter((r) => r.status !== "running");
   // KPIs stay on the agent / project scope: the outcome tiles show the whole picture they filter.
   const o = overview({ agentId: filter.agentId, projectPath: filter.projectPath });
+  const spend = costLabels(o.cost);
   const models = modelStats();
+  const modelCost = {
+    apiUsd: models.reduce((n, m) => n + m.cost.apiUsd, 0),
+    subscriptionUsd: models.reduce((n, m) => n + m.cost.subscriptionUsd, 0),
+  };
+  const modelWords = costLabels(modelCost);
   const budgets = budgetAlerts();
   const agentName = agent ? (agents.find((a) => a.id === agent)?.name ?? agent) : null;
   const scheduleName = schedule ? (listSchedules().find((s) => s.id === schedule)?.name ?? schedule) : null;
@@ -146,18 +155,27 @@ export default async function RunsPage({ searchParams }: { searchParams: Promise
 
       {budgets.map((b) => {
         const spent = b.state === "over";
-        const label = b.scope === "global" ? "Global budget" : `Budget of ${b.scope} ${b.scopeId}`;
+        const words = costLabels(b.cost);
+        // A budget on subscription runs brakes the quota shared with interactive use: a usage budget.
+        const kind = words.basis === "subscription" ? "usage budget" : "budget";
+        const label =
+          b.scope === "global"
+            ? `Global ${kind}`
+            : `${kind[0]?.toUpperCase()}${kind.slice(1)} of ${b.scope} ${b.scopeId}`;
+        const used = words.basis === "subscription" ? `usage of your subscription, at API value` : words.verb;
+        const over = words.basis === "subscription" ? "Used up" : "Spent";
         return (
           <div key={b.id} className={`callout ${spent && b.hardStop ? "bad" : "warn"}`} style={{ margin: "0 0 16px" }}>
             <span className="icon">!</span>
             <div>
               <strong>
-                {label}: {fmtCost(b.spentUsd)} of {fmtCost(b.amountUsd)} this month ({b.percent}%).
+                {label}: {fmtCost(b.spentUsd)} of {fmtCost(b.amountUsd)} {used} this month ({b.percent}%).
               </strong>{" "}
+              {words.basis === "mixed" && <>{fmtSplit(b.cost, "mixed")}. </>}
               {spent
                 ? b.hardStop
-                  ? "Spent: new runs in this scope are refused and its schedules were paused until the month turns (UTC) or the budget is raised."
-                  : "Spent; hard_stop is off, so runs still start."
+                  ? `${over}: new runs in this scope are refused and its schedules were paused until the month turns (UTC) or the budget is raised.`
+                  : `${over}; hard_stop is off, so runs still start.`
                 : `Past its ${b.warnPercent}% warning threshold.`}
             </div>
           </div>
@@ -290,11 +308,37 @@ export default async function RunsPage({ searchParams }: { searchParams: Promise
             <div className="sub">failed, timed out, out of budget or context, orphaned, or denied a tool</div>
           )}
         </Link>
-        <div className="stat">
-          <div className="label">Spent</div>
-          <div className="value">{fmtCost(o.costUsd)}</div>
+        <div className="stat" title={spend.basis === "api" ? undefined : SUBSCRIPTION_TITLE}>
+          <div className="label">{spend.heading}</div>
+          {spend.basis === "mixed" ? (
+            <>
+              <div className="value">
+                {fmtCost(o.cost.apiUsd)} <span className="today">billed</span>
+              </div>
+              <div className="value">
+                {fmtCost(o.cost.subscriptionUsd)} <span className="today">API value</span>
+              </div>
+            </>
+          ) : (
+            <div className="value">{fmtCost(o.costUsd)}</div>
+          )}
           <div className="sub">
-            {fmtCost(o.costLast24hUsd)} in the last 24 h{filtered ? " · in this filter" : ""}
+            {spend.basis === "subscription" && (
+              <>
+                {spend.note}
+                <br />
+              </>
+            )}
+            {fmtSplit(o.cost24h, spend.basis)} in the last 24 h{filtered ? " · in this filter" : ""}
+            {o.quotaHitsWeek > 0 && (
+              <>
+                <br />
+                <span className="warn-text" title="Runs that ended on the provider's usage limit (provider_quota)">
+                  {fmtInt(o.quotaHitsWeek)} {o.quotaHitsWeek === 1 ? "run" : "runs"} hit the usage limit this week
+                  {o.quotaResetAt && ` · next reset ${fmtClock(o.quotaResetAt)}`}
+                </span>
+              </>
+            )}
             {o.costGatesUsd > 0 && (
               <>
                 <br />
@@ -358,7 +402,10 @@ export default async function RunsPage({ searchParams }: { searchParams: Promise
       {models.length > 1 && (
         <>
           <h2>
-            By model <span className="count">all runs</span>
+            By model{" "}
+            <span className="count">
+              all runs{modelWords.basis === "subscription" ? ` · API value, ${modelWords.note}` : ""}
+            </span>
           </h2>
           <div className="card model-card">
             <table className="table">
@@ -367,7 +414,7 @@ export default async function RunsPage({ searchParams }: { searchParams: Promise
                   <th>Model</th>
                   <th className="num">Runs</th>
                   <th className="num">Avg duration</th>
-                  <th className="num">Avg cost</th>
+                  <th className="num">Avg {modelWords.column === "Cost" ? "cost" : modelWords.column}</th>
                   <th className="num">Total</th>
                 </tr>
               </thead>
@@ -382,7 +429,7 @@ export default async function RunsPage({ searchParams }: { searchParams: Promise
                     <td className="num">{m.runs}</td>
                     <td className="num">{fmtDuration(m.avgDurationMs)}</td>
                     <td className="num">{fmtCost(m.avgCostUsd)}</td>
-                    <td className="num">{fmtCost(m.costUsd)}</td>
+                    <td className="num">{fmtSplit(m.cost, modelWords.basis)}</td>
                   </tr>
                 ))}
               </tbody>
@@ -392,7 +439,7 @@ export default async function RunsPage({ searchParams }: { searchParams: Promise
                   <td className="num">{models.reduce((n, m) => n + m.runs, 0)}</td>
                   <td className="num"></td>
                   <td className="num"></td>
-                  <td className="num">{fmtCost(models.reduce((n, m) => n + m.costUsd, 0))}</td>
+                  <td className="num">{fmtSplit(modelCost, modelWords.basis)}</td>
                 </tr>
               </tfoot>
             </table>

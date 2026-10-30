@@ -15,6 +15,7 @@ import {
   type BudgetStatus,
   budgetPlan,
   budgetStatuses,
+  type CostSplit,
   type DuskFleetConfig,
   describeCron,
   findRepoRoot,
@@ -71,10 +72,31 @@ export function config(): DuskFleetConfig {
 }
 
 /** Monthly budgets (UTC month) past their warn threshold or spent, most spent first. A pure read. */
-export function budgetAlerts(): BudgetStatus[] {
-  return budgetStatuses(services().runs.budgets, config())
+export function budgetAlerts(): Array<BudgetStatus & { cost: CostSplit }> {
+  const { db } = services();
+  const cfg = config();
+  return budgetStatuses(services().runs.budgets, cfg)
     .filter((b) => b.state !== "ok")
-    .sort((a, b) => b.percent - a.percent);
+    .sort((a, b) => b.percent - a.percent)
+    .map((b) => {
+      // The billed part of spentUsd, same scope and month as the budget counts it (budgets.spentSince).
+      const scope =
+        b.scope === "global"
+          ? { sql: "", args: [] as Array<string | null> }
+          : b.scope === "agent"
+            ? { sql: "AND agent_id = ?", args: [b.scopeId] }
+            : {
+                sql: "AND (project_id = ? OR project_path = ?)",
+                args: [b.scopeId, cfg.projects.get(b.scopeId ?? "")?.path ?? null],
+              };
+      const r = db
+        .prepare(
+          `SELECT COALESCE(SUM(cost_usd), 0) AS total, COALESCE(SUM(${API_COST_SQL}), 0) AS api
+           FROM runs WHERE created_at >= ? ${scope.sql}`,
+        )
+        .get(b.periodStart, ...scope.args) as { total: number; api: number };
+      return { ...b, cost: split(r.total, r.api) };
+    });
 }
 
 /**
@@ -314,6 +336,7 @@ export interface AgentStats {
   /** The most recent finished run needs review (its stored review verdict). */
   lastNeedsReview: boolean;
   costUsd: number;
+  cost: CostSplit;
   avgDurationMs: number | null;
   lastRunAt: string | null;
   /** model_used of the most recent run that reported one: what an alias like "sonnet" resolved to. */
@@ -333,6 +356,7 @@ export function agentStats(): AgentStats[] {
               SUM(status IN ('completed','failed','timed_out','cancelled')) AS finished,
               SUM(status = 'completed' AND NOT ${NEEDS_REVIEW_SQL}) AS clean,
               COALESCE(SUM(cost_usd), 0)                        AS cost_usd,
+              COALESCE(SUM(${API_COST_SQL}), 0)                 AS cost_api,
               AVG(duration_ms)                                  AS avg_duration_ms,
               MAX(created_at)                                   AS last_run_at,
               (SELECT model_used FROM runs r2 WHERE r2.agent_id = runs.agent_id AND r2.model_used IS NOT NULL
@@ -352,6 +376,7 @@ export function agentStats(): AgentStats[] {
     finished: number;
     clean: number;
     cost_usd: number;
+    cost_api: number;
     avg_duration_ms: number | null;
     last_run_at: string | null;
     last_model_used: string | null;
@@ -368,6 +393,7 @@ export function agentStats(): AgentStats[] {
     clean: r.clean,
     lastNeedsReview: r.last_needs_review === 1,
     costUsd: r.cost_usd,
+    cost: split(r.cost_usd, r.cost_api),
     avgDurationMs: r.avg_duration_ms,
     lastRunAt: r.last_run_at,
     lastModelUsed: r.last_model_used,
@@ -454,6 +480,7 @@ export interface ModelStats {
   avgDurationMs: number | null;
   avgCostUsd: number | null;
   costUsd: number;
+  cost: CostSplit;
 }
 
 /**
@@ -468,7 +495,8 @@ export function modelStats(): ModelStats[] {
               COUNT(*)                 AS runs,
               AVG(duration_ms)         AS avg_duration_ms,
               AVG(cost_usd)            AS avg_cost_usd,
-              COALESCE(SUM(cost_usd),0) AS cost_usd
+              COALESCE(SUM(cost_usd),0) AS cost_usd,
+              COALESCE(SUM(${API_COST_SQL}),0) AS cost_api
        FROM runs
        WHERE status IN ('completed','failed','timed_out','cancelled')
        GROUP BY 1 ORDER BY cost_usd DESC`,
@@ -479,6 +507,7 @@ export function modelStats(): ModelStats[] {
     avg_duration_ms: number | null;
     avg_cost_usd: number | null;
     cost_usd: number;
+    cost_api: number;
   }>;
   return rows.map((r) => ({
     model: r.model,
@@ -486,6 +515,7 @@ export function modelStats(): ModelStats[] {
     avgDurationMs: r.avg_duration_ms,
     avgCostUsd: r.avg_cost_usd,
     costUsd: r.cost_usd,
+    cost: split(r.cost_usd, r.cost_api),
   }));
 }
 
@@ -507,15 +537,32 @@ export interface Overview {
   reviewReasons: Array<{ reason: ReviewReason; count: number }>;
   costUsd: number;
   costLast24hUsd: number;
+  /** costUsd and costLast24hUsd by billing type (costLabels decides the wording). */
+  cost: CostSplit;
+  cost24h: CostSplit;
   /** Part of costUsd spent by schedule gate agents (runs of kind 'gate'). */
   costGatesUsd: number;
+  /** Runs that hit the provider's usage limit (error_code provider_quota) in the last 7 days. */
+  quotaHitsWeek: number;
+  /** Latest reset time those runs reported, when it is still ahead; null otherwise. */
+  quotaResetAt: string | null;
 }
+
+/** billing_type = 'api' is billed; anything else (subscription, or not recorded) is API value. */
+const API_COST_SQL = "CASE WHEN billing_type = 'api' THEN cost_usd END";
+
+// Rounded to a millionth: float noise of the subtraction must not read as a mixed view.
+const split = (total: number, apiUsd: number): CostSplit => ({
+  apiUsd,
+  subscriptionUsd: Math.max(0, Math.round((total - apiUsd) * 1e6) / 1e6),
+});
 
 /** KPIs for the cards. With a filter, computed on the same subset the list shows. */
 export function overview(filter: Pick<RunsFilter, "agentId" | "projectPath"> = {}): Overview {
   const { db } = services();
   const now = new Date();
   const since = new Date(now.getTime() - 24 * 3600_000).toISOString();
+  const week = new Date(now.getTime() - 7 * 24 * 3600_000).toISOString();
   const where: string[] = [];
   const values: string[] = [];
   if (filter.agentId) {
@@ -541,10 +588,15 @@ export function overview(filter: Pick<RunsFilter, "agentId" | "projectPath"> = {
               SUM(kind = 'run' AND ${NEEDS_REVIEW_SQL} AND created_at >= ?)       AS needs_review_today,
               COALESCE(SUM(cost_usd), 0)                                          AS cost_usd,
               COALESCE(SUM(CASE WHEN created_at >= ? THEN cost_usd END), 0)       AS cost_24h,
-              COALESCE(SUM(CASE WHEN kind = 'gate' THEN cost_usd END), 0)         AS cost_gates
+              COALESCE(SUM(CASE WHEN kind = 'gate' THEN cost_usd END), 0)         AS cost_gates,
+              COALESCE(SUM(${API_COST_SQL}), 0)                                   AS cost_api,
+              COALESCE(SUM(CASE WHEN created_at >= ? THEN ${API_COST_SQL} END), 0) AS cost_api_24h,
+              COALESCE(SUM(error_code = 'provider_quota' AND created_at >= ?), 0) AS quota_hits,
+              MAX(CASE WHEN error_code = 'provider_quota' AND created_at >= ?
+                       THEN json_extract(error_detail_json, '$.retryNotBefore') END) AS quota_reset
        FROM runs ${where.length ? "WHERE " + where.join(" AND ") : ""}`,
     )
-    .get(utcDayStart(now), since, ...values) as {
+    .get(utcDayStart(now), since, since, week, week, ...values) as {
     total: number;
     running: number | null;
     finished: number | null;
@@ -556,7 +608,12 @@ export function overview(filter: Pick<RunsFilter, "agentId" | "projectPath"> = {
     cost_usd: number;
     cost_24h: number;
     cost_gates: number;
+    cost_api: number;
+    cost_api_24h: number;
+    quota_hits: number;
+    quota_reset: string | null;
   };
+  const resetMs = r.quota_reset ? Date.parse(r.quota_reset) : Number.NaN;
   // One row per (run, stored reason): the counts behind the reason chips, same scope as above.
   const reasons = db
     .prepare(
@@ -578,7 +635,11 @@ export function overview(filter: Pick<RunsFilter, "agentId" | "projectPath"> = {
     reviewReasons: reasons.map((x) => ({ reason: x.reason, count: x.n })),
     costUsd: r.cost_usd,
     costLast24hUsd: r.cost_24h,
+    cost: split(r.cost_usd, r.cost_api),
+    cost24h: split(r.cost_24h, r.cost_api_24h),
     costGatesUsd: r.cost_gates,
+    quotaHitsWeek: r.quota_hits,
+    quotaResetAt: resetMs > now.getTime() ? new Date(resetMs).toISOString() : null,
   };
 }
 

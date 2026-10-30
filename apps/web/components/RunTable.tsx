@@ -1,4 +1,4 @@
-import { runSilence, wrapUpPhase } from "@duskfleet/core";
+import { costLabels, runSilence, wrapUpPhase } from "@duskfleet/core";
 import Link from "next/link";
 import type { RunWithProject } from "@/lib/data";
 import {
@@ -35,6 +35,13 @@ export function RunTable({
   ended?: boolean;
 }) {
   if (runs.length === 0) return <div className="empty">{emptyText}</div>;
+  // The column says what the listed costs are: billed, API value, or both.
+  const cost = { apiUsd: 0, subscriptionUsd: 0 };
+  for (const r of runs) {
+    if (r.billingType === "api") cost.apiUsd += r.costUsd ?? 0;
+    else cost.subscriptionUsd += r.costUsd ?? 0;
+  }
+  const costColumn = costLabels(cost).column;
   return (
     <table className="runs">
       <thead>
@@ -44,7 +51,7 @@ export function RunTable({
           <th className="col-model">Model</th>
           <th className="num col-duration">{ended ? "Duration" : "Elapsed"}</th>
           <th className="num col-turns">Turns</th>
-          <th className="num">Cost</th>
+          <th className="num">{costColumn}</th>
           <th className="col-started">{ended ? "Ended" : "Started"}</th>
         </tr>
       </thead>

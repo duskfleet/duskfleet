@@ -1,3 +1,5 @@
+import type { CostBasis, CostSplit } from "@duskfleet/core";
+
 export function fmtDuration(ms: number | null | undefined): string {
   if (ms === null || ms === undefined) return "–";
   const s = Math.round(ms / 1000);
@@ -27,10 +29,16 @@ export function fmtCost(usd: number | null | undefined): string {
   return `$${usd.toFixed(2)}`;
 }
 
+/** A cost sum in the wording of its basis (costLabels): mixed keeps billed and API value apart. */
+export function fmtSplit(split: CostSplit, basis: CostBasis): string {
+  if (basis === "mixed") return `${fmtCost(split.apiUsd)} billed · ${fmtCost(split.subscriptionUsd)} API value`;
+  return fmtCost(basis === "api" ? split.apiUsd : split.subscriptionUsd);
+}
+
 /** Tooltip for a run's cost by billing type; null when it says nothing (api is billed, unknown is unknown). */
 export function billingNote(billingType: "api" | "subscription" | null | undefined): string | null {
   return billingType === "subscription"
-    ? "Subscription run: cost reported by Claude Code, not billed"
+    ? "Subscription run: usage at API value, included in your Claude subscription, not billed"
     : billingType === "api"
       ? "API key run: billed per token"
       : null;
