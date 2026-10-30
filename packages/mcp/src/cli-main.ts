@@ -5,6 +5,7 @@ import { fileURLToPath } from "node:url";
  * Small local CLI. Same orchestration layer as the MCP server, useful for
  * testing without an MCP client.
  *
+ *   duskfleet init [--yes] [--mcp claude-code|claude-desktop]   # guided setup (init.ts)
  *   duskfleet agents
  *   duskfleet agents create <id> [--model <m>] [--budget <usd>] [...] [--force] -- "<system prompt>"
  *   duskfleet projects
@@ -46,6 +47,7 @@ import {
 } from "@duskfleet/core";
 import { bootstrap } from "./bootstrap.js";
 import { assertPortFree, ensureWeb, findWeb, parsePort, startDashboard } from "./dashboard.js";
+import { runInit } from "./init.js";
 import {
   applyDesktop,
   desktopConfigPath,
@@ -84,6 +86,7 @@ function usage(asked = false): never {
       "Duskfleet - A fleet of agents for your own machine.",
       "",
       "Usage:",
+      "  duskfleet init [--yes] [--mcp claude-code|claude-desktop]",
       "  duskfleet agents",
       "  duskfleet agents create <id> [--model <m>] [--budget <usd>] [--permission-mode <mode>]",
       "                          [--allowed-tools <a,b>] [--disallowed-tools <a,b>] [--timeout <minutes>]",
@@ -343,6 +346,28 @@ async function main(): Promise<void> {
       ? findWeb(config.dataDir, version)
       : ensureWeb(config.dataDir, version, log).entry;
     process.exit(await startDashboard({ entry, port, configDir: config.configDir, open: !values["no-open"], log }));
+  }
+  // Before bootstrap: init is what writes the config bootstrap needs.
+  if (command === "init") {
+    const { values } = parseArgs({
+      args: rest,
+      options: { yes: { type: "boolean", short: "y", default: false }, mcp: { type: "string" } },
+    });
+    const code = await runInit({
+      yes: values.yes,
+      mcp: (values.mcp as McpTarget | undefined) ?? null,
+      entryFileUrl: import.meta.url,
+      registerMcp: async (target) => {
+        const app = await bootstrap(import.meta.url, { role: "cli" });
+        try {
+          // init --yes, or the user just picked the target: no second confirmation.
+          return await mcpRegister(app, target, false, true);
+        } finally {
+          app.close();
+        }
+      },
+    });
+    process.exit(code);
   }
 
   const app = await bootstrap(import.meta.url, { role: command === "serve" ? "serve" : "cli" });

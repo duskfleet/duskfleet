@@ -273,7 +273,7 @@ local run-data handling, and recommended configuration.
   | `--strict-mcp-config` | Isolate the child from user-level MCP servers (default on, configurable) |
   | `--add-dir <dir>` | `add_dirs`: extra directories the run may touch |
   | `--setting-sources <list>` | Restrict which settings files the child loads (`claude.setting_sources`) |
-  | `-r, --resume <id>` | Not used by the executor; surfaced as the "resume this run" command |
+  | `-r, --resume <id>` | Passed instead of `--session-id` when a pass continues a session: the wrap-up pass after a budget exhaustion and a `resume_once` retry; also surfaced as the "resume this run" command |
 
   `duskfleet mcp register --target claude-code` runs one more command, `claude mcp add`, with
   the flags checked against `claude mcp add --help` on 2026-10-21:
@@ -283,5 +283,10 @@ local run-data handling, and recommended configuration.
   | `-s, --scope <local\|user\|project>` | `--scope user`: the server is available in every project |
   | `-e, --env <KEY=value...>` | `CLAUDE_BIN`, and `DUSKFLEET_CONFIG` when the server would not find its config. Variadic: it would take a following name as one more value, so the name goes right after `add` |
   | `<name> ... -- <command> [args...]` | Name `duskfleet` first, then the options, then `--` and the server command; stdio is the default transport |
+
+  `duskfleet init` runs `claude auth status --json` (checked against `claude auth status --help`
+  on 2026-10-21): JSON with a boolean `loggedIn` (and `authMethod`); a logged-out user gets
+  `loggedIn: false` and exit 1. Output without a `loggedIn` boolean stops `init` as "could not
+  read the login status". The fix it prints is `claude auth login`.
 
 Keep these pages in sync when behaviour changes.

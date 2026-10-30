@@ -64,8 +64,13 @@ git clone https://github.com/duskfleet/duskfleet.git
 cd duskfleet
 npm install
 npm run build
+npm run cli -- init --yes      # checks Node and the Claude Code login, prepares config and data
 npm run cli -- doctor          # Claude binary, version, where config and data live
 ```
+
+`init` without `--yes` asks before the optional steps (registering the MCP server in Claude Code
+or Claude Desktop); in a clone it finds the repo's `config/` and leaves it as it is. See
+[`init`](docs/cli.md#init).
 
 Duskfleet ships no starter agent: create your first one, on the cheapest model. `agents create`
 writes it to `data/agents/fixer.md` (git-ignored) with safe defaults: a $0.50 budget, no

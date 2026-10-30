@@ -4,6 +4,8 @@ The CLI uses the same orchestration code as the MCP server and is the quickest w
 `npm run cli --` is shorthand for `node packages/mcp/dist/cli.js`.
 
 ```bash
+npm run cli -- init                                       # guided setup; see "init" below
+npm run cli -- init --yes [--mcp claude-code|claude-desktop]   # the same without prompts (scripts, CI)
 npm run cli -- doctor                                     # Claude binary, version, config and data paths
 npm run cli -- doctor --probe                             # plus one real hello run on haiku (costs cents)
 npm run cli -- run --project ~/Documents/Projects/my-app -- "Add a README section describing the build"
@@ -38,12 +40,38 @@ error of any command that finds no config (no `duskfleet.yaml` in the directory 
 [where config and data live](configuration.md#where-config-and-data-live)). `--version` prints the version of the installed
 `duskfleet` package and needs neither a config nor Node 24.
 
+## init
+
+`init` prepares a first configuration. Each step prints its result; the first failure stops
+with the fix and exit 1:
+
+1. **Node**: the version (Node 24+ is checked before any command runs).
+2. **Claude Code**: the binary (same lookup as runs: `CLAUDE_BIN`, `claude.binary`, `PATH`,
+   `~/.local/bin/claude`), its version, and the login from `claude auth status --json`. Not
+   logged in: it prints `claude auth login` and stops.
+3. **Config and data**: creates the user-level config directory with a starter `duskfleet.yaml`
+   and the data directory ([where config and data live](configuration.md#where-config-and-data-live)).
+   A config that already exists (user-level, a checkout's `config/`, or `DUSKFLEET_CONFIG`) is
+   reported and left untouched, so running `init` twice is safe. `DUSKFLEET_CONFIG` pointing at
+   a directory without `duskfleet.yaml` is an error: `init` writes only the user-level directory.
+4. **MCP registration** (optional): on a terminal it asks `Register the MCP server in Claude Code
+   / Claude Desktop / skip?` and then does what `mcp register --target ... --yes` does (preview,
+   backup of an existing file, write; see [MCP server](mcp-server.md)).
+5. What was created, where, and the next commands: `doctor`, `agents create`, `run`. No agent is
+   created: Duskfleet ships none.
+
+`init --yes` asks nothing: steps 1-3 and the summary, step 4 only with `--mcp claude-code` or
+`--mcp claude-desktop`; without `--mcp` it never writes a Claude config file. Any failed check
+exits non-zero. On something that is not a terminal (a script) without `--yes`, step 4 is
+skipped.
+
 ## First run
 
 Duskfleet ships no starter agent and `default_agent` is `null`, so a run needs `--agent`. The
 README Quick start creates one, then runs it:
 
 ```bash
+npm run cli -- init --yes
 npm run cli -- doctor
 npm run cli -- agents create fixer --model haiku -- "You fix the failing test in this project. Run the tests, read the failure, change the minimum code, run them again. No git, no installs."
 npm run cli -- run --project /abs/path/to/scratch-project --agent fixer -- "Fix the failing test"

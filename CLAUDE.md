@@ -209,7 +209,7 @@ npm workspaces, one `config/` and one SQLite database shared by three deliverabl
 
 ## Roadmap
 
-Next: scheduler (`packages/core/src/scheduler/types.ts` is the contract, no implementation),
-then deterministic evals (`tests_passed`, `build_passed`, `files_exist`) as post-run hooks,
+Shipped: the scheduler (cron, gates, daily caps, monthly budgets, auto-pause, `serve` /
+`install-service`). Next: deterministic evals (`tests_passed`, `build_passed`, `files_exist`) as post-run hooks,
 then LLM evals as a second read-only run, then metrics tools and Git integration. A Codex CLI
 executor as a second runtime is assessed in the design notes (after evals).
