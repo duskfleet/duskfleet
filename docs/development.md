@@ -284,4 +284,9 @@ local run-data handling, and recommended configuration.
   | `-e, --env <KEY=value...>` | `CLAUDE_BIN`, and `DUSKFLEET_CONFIG` when the server would not find its config. Variadic: it would take a following name as one more value, so the name goes right after `add` |
   | `<name> ... -- <command> [args...]` | Name `duskfleet` first, then the options, then `--` and the server command; stdio is the default transport |
 
+  `duskfleet init` runs `claude auth status --json` (checked against `claude auth status --help`
+  on 2026-10-21): JSON with a boolean `loggedIn` (and `authMethod`); a logged-out user gets
+  `loggedIn: false` and exit 1. Output without a `loggedIn` boolean stops `init` as "could not
+  read the login status". The fix it prints is `claude auth login`.
+
 Keep these pages in sync when behaviour changes.
