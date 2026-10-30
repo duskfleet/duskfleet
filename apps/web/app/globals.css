@@ -846,38 +846,203 @@ a.stat.tile-link:active,
   border-radius: 12px;
 }
 
-/* filter chips: row label on the left, rounded outline, active = amber tint */
-.filters {
+/* Runs filters (DS-19): one multi-select per filter, the search input's look. The <summary>
+   covers the whole box; the × is its own link laid over the slot the summary leaves free. */
+.ms {
+  position: relative;
+  flex: 0 1 290px;
+  min-width: 0;
+  font-size: 14px;
+  line-height: 21px;
+}
+.ms + .ms {
+  flex-basis: 340px;
+}
+.ms summary {
   display: flex;
-  gap: 8px;
+  gap: 6px;
   align-items: center;
-  flex-wrap: wrap;
-  font-size: 14px;
-  line-height: 21px;
-  color: var(--muted);
-}
-.filters > .filter-label {
-  min-width: 56px;
-}
-.filters a.chip {
-  padding: 3px 11px;
-  border-radius: 999px;
+  height: 33px;
+  padding: 0 6px 0 10px;
+  background: var(--panel);
   border: 1px solid var(--border-strong);
-  background: none;
-  color: var(--muted);
-  font-size: 14px;
-  line-height: 21px;
-}
-.filters a.chip:hover {
-  text-decoration: none;
+  border-radius: 8px;
   color: var(--text);
+  cursor: pointer;
+  list-style: none;
+}
+.ms summary::-webkit-details-marker {
+  display: none;
+}
+.ms summary:hover {
   border-color: var(--faint);
 }
-.filters a.chip.on {
+.ms summary:focus-visible,
+.ms-clear:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+.ms summary:focus-visible {
+  border-radius: 8px;
+}
+.ms-label {
+  color: var(--muted);
+  flex: none;
+}
+.ms-values {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.ms-more,
+.ms-count {
+  flex: none;
+  padding: 0 7px;
+  border-radius: 999px;
   background: var(--warn-bg);
   color: var(--warn);
-  border-color: transparent;
-  font-weight: 500;
+}
+.ms-count {
+  display: none;
+}
+.ms-clear-slot {
+  flex: none;
+  width: 24px;
+}
+.ms-chevron {
+  flex: none;
+  fill: none;
+  stroke: var(--muted);
+  stroke-width: 1.5;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.ms-clear {
+  position: absolute;
+  top: 4.5px;
+  right: 28px;
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  border-radius: 6px;
+  color: var(--muted);
+}
+.ms-clear:hover {
+  text-decoration: none;
+  color: var(--text);
+  background: var(--panel-2);
+}
+.ms-pop {
+  position: absolute;
+  z-index: 20;
+  top: calc(100% + 6px);
+  left: 0;
+  width: 100%;
+  min-width: 260px;
+  padding: 6px;
+  background: var(--panel);
+  border: 1px solid var(--border-strong);
+  border-radius: 8px;
+  box-shadow: var(--shadow);
+}
+.ms-filter {
+  width: 100%;
+  height: 30px;
+  padding: 0 10px;
+  background: var(--panel);
+  border: 1px solid var(--border-strong);
+  border-radius: 6px;
+  color: var(--text);
+  font: inherit;
+}
+.ms-filter::placeholder {
+  color: var(--faint);
+}
+.ms-filter:focus-visible {
+  outline: none;
+  border: 2px solid var(--accent);
+  padding: 0 9px;
+}
+.ms-count-line {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 6px 10px 4px;
+  color: var(--faint);
+}
+.ms-actions {
+  display: inline-flex;
+  gap: 10px;
+}
+.ms-actions a {
+  color: var(--muted);
+  text-decoration: underline;
+}
+.ms-actions a:hover {
+  color: var(--text);
+}
+.ms-list {
+  max-height: 320px;
+  overflow-y: auto;
+}
+.ms-group {
+  padding: 8px 10px 4px;
+  color: var(--faint);
+  font-size: 13px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+.ms-option {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  height: 30px;
+  padding: 0 10px;
+  border-radius: 6px;
+  color: var(--muted);
+  white-space: nowrap;
+}
+.ms-option:hover {
+  text-decoration: none;
+}
+.ms-option.active {
+  background: var(--panel-2);
+  color: var(--text);
+}
+.ms-option.checked {
+  color: var(--text);
+}
+.ms-box {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 16px;
+  height: 16px;
+  border: 1.5px solid var(--border-strong);
+  border-radius: 4px;
+}
+.ms-option.checked .ms-box {
+  background: var(--warn);
+  border-color: var(--warn);
+}
+.ms-box svg {
+  fill: none;
+  stroke: var(--panel);
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.ms-empty,
+.ms-hint {
+  padding: 6px 10px;
+  color: var(--faint);
+}
+.ms-hint {
+  border-top: 1px solid var(--border);
+  margin-top: 4px;
 }
 
 /* search box + button */
@@ -1774,6 +1939,45 @@ summary:focus-visible {
   align-items: center;
   flex: 0 1 353px;
   min-width: 240px;
+}
+/* Runs: Project, Agent and the search on one 33 px line; the search is pushed right */
+.toolbar-row.runs-filters {
+  gap: 10px 8px;
+  justify-content: flex-start;
+  flex-wrap: nowrap;
+}
+.runs-filters .search {
+  margin-left: auto;
+}
+/* Under 600 px: the two selects share line 1 with label + count, the search takes line 2 */
+@media (max-width: 600px) {
+  .toolbar-row.runs-filters {
+    flex-wrap: wrap;
+  }
+  .runs-filters .ms {
+    flex: 1 1 0;
+  }
+  .runs-filters .search {
+    flex: 1 1 100%;
+    margin-left: 0;
+    min-width: 0;
+  }
+  .ms.has-value .ms-values,
+  .ms .ms-more {
+    display: none;
+  }
+  .ms.has-value .ms-count {
+    display: inline;
+    margin-right: auto;
+  }
+  .ms-pop {
+    position: fixed;
+    top: auto;
+    left: 20px;
+    right: 20px;
+    width: auto;
+    margin-top: 6px;
+  }
 }
 .toolbar .clear,
 .page-head .clear {

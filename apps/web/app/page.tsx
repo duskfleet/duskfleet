@@ -1,6 +1,7 @@
 import { costLabels, REVIEW_REASON_LABELS, type ReviewReason, RUN_OUTCOMES, type RunOutcome } from "@duskfleet/core";
 import Link from "next/link";
 import { AutoRefresh } from "@/components/AutoRefresh";
+import { MultiSelect, type MultiSelectOption } from "@/components/MultiSelect";
 import { RunTable } from "@/components/RunTable";
 import {
   budgetAlerts,
@@ -17,8 +18,8 @@ import { fmtClock, fmtCost, fmtDayClock, fmtDuration, fmtInt, fmtPct, fmtSplit, 
 export const dynamic = "force-dynamic";
 
 type Search = {
-  agent?: string;
-  project?: string;
+  agent?: string | string[];
+  project?: string | string[];
   schedule?: string;
   q?: string;
   outcome?: string;
@@ -41,49 +42,81 @@ const SUBSCRIPTION_TITLE =
 
 const isOutcome = (v: string | undefined): v is RunOutcome => (RUN_OUTCOMES as readonly string[]).includes(v ?? "");
 const isReason = (v: string | undefined): v is ReviewReason => Boolean(v && Object.hasOwn(REVIEW_REASON_LABELS, v));
+/** A repeated param (`?agent=a&agent=b`) as a list; a single value (old links) is a list of one. */
+const many = (v: string | string[] | undefined): string[] =>
+  [...new Set((Array.isArray(v) ? v : [v]).filter(Boolean))] as string[];
+const one = (v: string | string[] | undefined): string | undefined => (Array.isArray(v) ? v[0] : v);
 
 export async function generateMetadata({ searchParams }: { searchParams: Promise<Search> }) {
-  const { agent, project } = await searchParams;
-  const name = agent ? (listAgents().find((a) => a.id === agent)?.name ?? agent) : null;
-  const parts = ["Runs", project, name].filter(Boolean);
+  const sp = await searchParams;
+  const agents = listAgents();
+  const names = many(sp.agent).map((id) => agents.find((a) => a.id === id)?.name ?? id);
+  const parts = ["Runs", many(sp.project).join(", "), names.join(", ")].filter(Boolean);
   return { title: `${parts.join(" · ")} · Duskfleet` };
 }
 
 export default async function RunsPage({ searchParams }: { searchParams: Promise<Search> }) {
   const sp = await searchParams;
-  const { agent, project, schedule } = sp;
-  const q = sp.q?.trim() || undefined;
-  const limit = Math.min(Math.max(Number(sp.limit) || DEFAULT_LIMIT, 1), MAX_LIMIT);
+  const schedule = one(sp.schedule);
+  const q = one(sp.q)?.trim() || undefined;
+  const limit = Math.min(Math.max(Number(one(sp.limit)) || DEFAULT_LIMIT, 1), MAX_LIMIT);
   const projects = listProjects();
   const agents = listAgents();
-  const projectPath = project ? projects.find((p) => p.id === project)?.path : undefined;
   // Unknown values are ignored rather than filtering everything out.
-  const outcome = isOutcome(sp.outcome) ? sp.outcome : undefined;
-  const reason = isReason(sp.reason) ? sp.reason : undefined;
+  const projectIds = many(sp.project).filter((id) => projects.some((p) => p.id === id));
+  const agentIds = many(sp.agent);
+  const projectPaths = projectIds.map((id) => projects.find((p) => p.id === id)?.path ?? id);
+  const outcome = isOutcome(one(sp.outcome)) ? (one(sp.outcome) as RunOutcome) : undefined;
+  const reason = isReason(one(sp.reason)) ? (one(sp.reason) as ReviewReason) : undefined;
   const filter: Omit<RunsFilter, "limit" | "status"> = {};
-  if (agent) filter.agentId = agent;
-  if (projectPath) filter.projectPath = projectPath;
+  if (agentIds.length) filter.agentIds = agentIds;
+  if (projectPaths.length) filter.projectPaths = projectPaths;
   if (schedule) filter.scheduleId = schedule;
   if (q) filter.q = q;
   if (outcome) filter.outcome = outcome;
   if (reason) filter.reason = reason;
-  const filtered = Boolean(agent || project || schedule || q || outcome || reason);
+  const filtered = Boolean(agentIds.length || projectIds.length || schedule || q || outcome || reason);
 
-  const qs = (next: Partial<Search>) => {
+  type Next = { agent?: string[]; project?: string[]; q?: string; outcome?: string; reason?: string; limit?: string };
+  const qs = (next: Next) => {
     const p = new URLSearchParams();
-    const merged: Search = { agent, project, schedule, q, outcome, reason, ...next };
+    const merged = { agent: agentIds, project: projectIds, schedule, q, outcome, reason, limit: undefined, ...next };
     for (const k of ["agent", "project", "schedule", "q", "outcome", "reason", "limit"] as const) {
       const v = merged[k];
-      if (v) p.set(k, v);
+      for (const x of Array.isArray(v) ? v : [v]) if (x) p.append(k, x);
     }
     const s = p.toString();
     return s ? `/?${s}` : "/";
   };
+  const toggled = (list: string[], v: string) => (list.includes(v) ? list.filter((x) => x !== v) : [...list, v]);
+  const projectOptions: MultiSelectOption[] = projects.map((p) => ({
+    value: p.id,
+    label: p.id,
+    title: p.path,
+    href: qs({ project: toggled(projectIds, p.id) }),
+  }));
+  // Every agent, grouped under its bound project (unbound ones last); a selected id that is no
+  // longer configured stays listed so it can be unticked.
+  const projectOrder = new Map(projects.map((p, i) => [p.id, i]));
+  const agentOptions: MultiSelectOption[] = [
+    ...[...agents]
+      .sort((a, b) => (projectOrder.get(a.project ?? "") ?? 1e9) - (projectOrder.get(b.project ?? "") ?? 1e9))
+      .map((a) => ({ id: a.id, name: a.name, group: a.project ?? "any project" })),
+    ...agentIds
+      .filter((id) => !agents.some((a) => a.id === id))
+      .map((id) => ({ id, name: id, group: "not configured" })),
+  ].map((a) => ({
+    value: a.id,
+    label: a.id,
+    title: a.name,
+    group: a.group,
+    href: qs({ agent: toggled(agentIds, a.id) }),
+  }));
 
   const running = listRuns({ ...filter, status: "running", limit: 50 });
   const recent = listRuns({ ...filter, limit }).filter((r) => r.status !== "running");
   // KPIs stay on the agent / project scope: the outcome tiles show the whole picture they filter.
-  const o = overview({ agentId: filter.agentId, projectPath: filter.projectPath });
+  const o = overview({ agentIds: filter.agentIds, projectPaths: filter.projectPaths });
   const spend = costLabels(o.cost);
   const models = modelStats();
   const modelCost = {
@@ -92,11 +125,11 @@ export default async function RunsPage({ searchParams }: { searchParams: Promise
   };
   const modelWords = costLabels(modelCost);
   const budgets = budgetAlerts();
-  const agentName = agent ? (agents.find((a) => a.id === agent)?.name ?? agent) : null;
+  const agentNames = agentIds.map((id) => agents.find((a) => a.id === id)?.name ?? id).join(", ");
   const scheduleName = schedule ? (listSchedules().find((s) => s.id === schedule)?.name ?? schedule) : null;
   const activeLabel = [
-    project,
-    agentName,
+    projectIds.join(", "),
+    agentNames,
     scheduleName ? `schedule "${scheduleName}"` : null,
     q ? `"${q}"` : null,
     outcome ? OUTCOME_LABELS[outcome] : null,
@@ -126,10 +159,11 @@ export default async function RunsPage({ searchParams }: { searchParams: Promise
   const total = exactTotal ?? recent.length + running.length;
   const hasMore = exactTotal !== null && recent.length >= limit && total > recent.length + running.length;
   const reviewOn = outcome === "needs_review";
-  // The trend keeps the agent / project scope of the tiles, nothing else.
+  // The trend keeps the agent / project scope of the tiles, nothing else. It scopes to one value
+  // per dimension: a multi-value filter opens the unscoped trend for that dimension.
   const trendParams = new URLSearchParams();
-  if (agent) trendParams.set("agent", agent);
-  if (project) trendParams.set("project", project);
+  if (agentIds.length === 1 && agentIds[0]) trendParams.set("agent", agentIds[0]);
+  if (projectIds.length === 1 && projectIds[0]) trendParams.set("project", projectIds[0]);
   const trendHref = trendParams.size ? `/trends?${trendParams}` : "/trends";
 
   return (
@@ -183,45 +217,33 @@ export default async function RunsPage({ searchParams }: { searchParams: Promise
       })}
 
       <div className="toolbar">
-        <div className="filters">
-          <span className="filter-label">Project</span>
-          <Link href={qs({ project: undefined })} className={`chip ${project ? "" : "on"}`}>
-            all
-          </Link>
-          {projects.map((p) => (
-            <Link
-              key={p.id}
-              href={qs({ project: p.id })}
-              className={`chip ${project === p.id ? "on" : ""}`}
-              title={p.path}
-            >
-              {p.id}
-            </Link>
-          ))}
-        </div>
-        <div className="toolbar-row">
-          <div className="filters">
-            <span className="filter-label">Agent</span>
-            <Link href={qs({ agent: undefined })} className={`chip ${agent ? "" : "on"}`}>
-              all
-            </Link>
-            {agents
-              .filter((a) => !project || !a.project || a.project === project)
-              .map((a) => (
-                <Link
-                  key={a.id}
-                  href={qs({ agent: a.id })}
-                  className={`chip ${agent === a.id ? "on" : ""}`}
-                  title={a.name}
-                >
-                  {a.id}
-                </Link>
-              ))}
-          </div>
+        <div className="toolbar-row runs-filters">
+          <MultiSelect
+            param="project"
+            label="Project"
+            noun="projects"
+            options={projectOptions}
+            selected={projectIds}
+            clearHref={qs({ project: [] })}
+            selectAllHref={qs({ project: projects.map((p) => p.id) })}
+          />
+          <MultiSelect
+            param="agent"
+            label="Agent"
+            noun="agents"
+            options={agentOptions}
+            selected={agentIds}
+            clearHref={qs({ agent: [] })}
+            selectAllHref={qs({ agent: agentOptions.map((a) => a.value) })}
+          />
           {/* biome-ignore lint/a11y/useSemanticElements: the <search> element is not styled here; role="search" on the form is the established pattern */}
           <form className="search" action="/" method="get" role="search">
-            {agent && <input type="hidden" name="agent" value={agent} />}
-            {project && <input type="hidden" name="project" value={project} />}
+            {agentIds.map((id) => (
+              <input key={`a-${id}`} type="hidden" name="agent" value={id} />
+            ))}
+            {projectIds.map((id) => (
+              <input key={`p-${id}`} type="hidden" name="project" value={id} />
+            ))}
             {schedule && <input type="hidden" name="schedule" value={schedule} />}
             {outcome && <input type="hidden" name="outcome" value={outcome} />}
             {reason && <input type="hidden" name="reason" value={reason} />}
