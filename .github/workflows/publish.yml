@@ -8,7 +8,8 @@
 # publish `duskfleet` and `@duskfleet/web` only. `id-token: write` lets npm sign the provenance
 # statement through GitHub's OIDC token; each package.json `repository` must name this repository
 # or the registry refuses the provenance.
-name: Publish
+name: Publish to npm
+run-name: ${{ github.event_name == 'pull_request' && format('npm publish dry-run for PR #{0}', github.event.pull_request.number) || format('npm publish {0}', inputs.tag || github.ref_name) }}
 
 on:
   push:
@@ -26,7 +27,7 @@ permissions:
 
 jobs:
   dry-run:
-    name: publish dry-run
+    name: npm publish dry-run
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     timeout-minutes: 20
@@ -80,7 +81,7 @@ jobs:
           ! grep -q "auto-corrected" "$RUNNER_TEMP/dry-run-web.log"
 
   publish:
-    name: publish
+    name: npm publish (duskfleet, @duskfleet/web)
     if: inputs.tag != '' || (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v'))
     runs-on: ubuntu-latest
     timeout-minutes: 20

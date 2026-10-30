@@ -156,8 +156,8 @@ with `0.2.0` standing for the new version:
 3. **Open the pull request** with both commits and the release notes (the CHANGELOG section
    without its heading) in its description; `npm run check` must pass, and the `publish dry-run`
    job proves the packages build and pack.
-4. **After the merge, run the Release workflow** (maintainer only): Actions tab, "Release",
-   "Run workflow" on `main`, version `0.2.0`. From the terminal:
+4. **After the merge, run the Release workflow** (maintainer only): Actions tab, "Release (tag, GitHub
+   release, npm publish)", "Run workflow" on `main`, version `0.2.0`. From the terminal:
 
    ```bash
    gh workflow run release.yml --ref main -f version=0.2.0
