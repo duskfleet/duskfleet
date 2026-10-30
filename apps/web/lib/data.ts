@@ -50,6 +50,7 @@ import {
   utcDayStart,
   utcMonthStart,
 } from "@duskfleet/core";
+import { listScoped, scopeList } from "./scope";
 
 interface Services {
   configDir: string;
@@ -213,6 +214,10 @@ export interface RunsFilter {
   status?: RunStatus;
   agentId?: string;
   projectPath?: string;
+  /** Any of these agents (OR); a non-empty list takes precedence over `agentId`. */
+  agentIds?: string[];
+  /** Any of these project folders (OR), AND the agents above. */
+  projectPaths?: string[];
   /** Only runs started by this schedule (filtered in memory: no index needed for a few hundred rows). */
   scheduleId?: string;
   /** Case-insensitive substring of the prompt (in memory). */
@@ -247,13 +252,22 @@ export function listRuns(filter: RunsFilter = {}): RunWithProject[] {
   const limit = filter.limit ?? 50;
   const f: ListRunsFilter = { limit: inMemory ? 200 : limit };
   if (filter.status) f.status = filter.status;
-  if (filter.agentId) f.agentId = filter.agentId;
-  if (filter.projectPath) f.projectPath = filter.projectPath;
   if (filter.outcome) f.outcome = filter.outcome;
   if (filter.reason) f.reason = filter.reason;
   // The outcome KPIs count real runs only: a gate run must not show up under them.
   if (filter.outcome || filter.reason) f.kind = "run";
-  let list = runs.list(f);
+  // Core filters on one agent and one project: a multi-select asks once per (agent, project) pair.
+  let list: Run[] = listScoped(
+    scopeList(filter.agentId, filter.agentIds),
+    scopeList(filter.projectPath, filter.projectPaths),
+    f.limit ?? limit,
+    (agentId, projectPath) => {
+      const pair: ListRunsFilter = { ...f };
+      if (agentId) pair.agentId = agentId;
+      if (projectPath) pair.projectPath = projectPath;
+      return runs.list(pair);
+    },
+  );
   if (filter.scheduleId) list = list.filter((r) => r.scheduleId === filter.scheduleId);
   if (filter.q) {
     const q = filter.q.toLowerCase();
@@ -578,20 +592,23 @@ const split = (total: number, apiUsd: number): CostSplit => ({
 });
 
 /** KPIs for the cards. With a filter, computed on the same subset the list shows. */
-export function overview(filter: Pick<RunsFilter, "agentId" | "projectPath"> = {}): Overview {
+export function overview(
+  filter: Pick<RunsFilter, "agentId" | "projectPath" | "agentIds" | "projectPaths"> = {},
+): Overview {
   const { db } = services();
   const now = new Date();
   const since = new Date(now.getTime() - 24 * 3600_000).toISOString();
   const week = new Date(now.getTime() - 7 * 24 * 3600_000).toISOString();
   const where: string[] = [];
   const values: string[] = [];
-  if (filter.agentId) {
-    where.push("agent_id = ?");
-    values.push(filter.agentId);
-  }
-  if (filter.projectPath) {
-    where.push("project_path = ?");
-    values.push(filter.projectPath);
+  for (const [column, list] of [
+    ["agent_id", scopeList(filter.agentId, filter.agentIds)],
+    ["project_path", scopeList(filter.projectPath, filter.projectPaths)],
+  ] as const) {
+    const set = list.filter((v): v is string => Boolean(v));
+    if (!set.length) continue;
+    where.push(`${column} IN (${set.map(() => "?").join(", ")})`);
+    values.push(...set);
   }
   const r = db
     .prepare(
