@@ -45,6 +45,7 @@ import {
   type TrendRange,
   utcDayStart,
 } from "@duskfleet/core";
+import { listScoped, scopeList } from "./scope";
 
 interface Services {
   configDir: string;
@@ -240,12 +241,6 @@ function projectLabeller(): (run: Run) => string {
     run.projectPath;
 }
 
-/** The values of one scope dimension; `[undefined]` = no filter on it. */
-function scopeList(one: string | undefined, many: string[] | undefined): Array<string | undefined> {
-  if (many?.length) return many;
-  return [one];
-}
-
 export function listRuns(filter: RunsFilter = {}): RunWithProject[] {
   const { runs } = services();
   const inMemory = Boolean(filter.scheduleId || filter.q);
@@ -256,23 +251,18 @@ export function listRuns(filter: RunsFilter = {}): RunWithProject[] {
   if (filter.reason) f.reason = filter.reason;
   // The outcome KPIs count real runs only: a gate run must not show up under them.
   if (filter.outcome || filter.reason) f.kind = "run";
-  // Core filters on one agent and one project: a multi-select asks once per (agent, project)
-  // pair, and the newest `f.limit` of the merged lists are the newest of the union.
-  const agentIds = scopeList(filter.agentId, filter.agentIds);
-  const projectPaths = scopeList(filter.projectPath, filter.projectPaths);
-  let list: Run[] = [];
-  for (const agentId of agentIds) {
-    for (const projectPath of projectPaths) {
+  // Core filters on one agent and one project: a multi-select asks once per (agent, project) pair.
+  let list: Run[] = listScoped(
+    scopeList(filter.agentId, filter.agentIds),
+    scopeList(filter.projectPath, filter.projectPaths),
+    f.limit ?? limit,
+    (agentId, projectPath) => {
       const pair: ListRunsFilter = { ...f };
       if (agentId) pair.agentId = agentId;
       if (projectPath) pair.projectPath = projectPath;
-      list.push(...runs.list(pair));
-    }
-  }
-  if (agentIds.length * projectPaths.length > 1) {
-    list.sort((a, b) => (a.createdAt < b.createdAt ? 1 : a.createdAt > b.createdAt ? -1 : 0));
-    list = list.slice(0, f.limit);
-  }
+      return runs.list(pair);
+    },
+  );
   if (filter.scheduleId) list = list.filter((r) => r.scheduleId === filter.scheduleId);
   if (filter.q) {
     const q = filter.q.toLowerCase();

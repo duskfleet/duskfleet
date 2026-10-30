@@ -1,6 +1,6 @@
 "use client";
 
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { Fragment, type KeyboardEvent, useEffect, useId, useLayoutEffect, useRef, useState } from "react";
 
 export type MultiSelectOption = {
@@ -13,8 +13,21 @@ export type MultiSelectOption = {
   href: string;
 };
 
-/** Order-free key of a value list, to compare the server's list with the one applied here. */
-const listKey = (values: string[]) => [...values].sort().join("\n");
+/**
+ * Query strings the selects of this page sent with router.replace and have not seen land yet,
+ * oldest first. Shared by every select (a Project toggle then an Agent toggle chain), and the base
+ * of the next URL: window.location.search only updates once a transition commits.
+ */
+let sent: string[] = [];
+
+/**
+ * The router committed `current`. The answer to an earlier toggle leaves the later ones on their
+ * way; the latest one, or a navigation that is none of ours (clear filters, a tile), means nothing
+ * is pending any more. Idempotent: every select settles on the same commit.
+ */
+function settle(current: string) {
+  if (sent.at(-1) === current || !sent.includes(current)) sent = [];
+}
 
 /**
  * One Runs filter as a multi-select (DS-19): a <details> whose options are plain links, so
@@ -57,22 +70,16 @@ export function MultiSelect({
   // Space toggles only a row the arrow keys made active, never one under a resting pointer.
   const [keyActive, setKeyActive] = useState(false);
   const [shown, setShown] = useState(Math.min(selected.length, 1));
-  // The last list this select applied, until the server answers with it: answers to earlier
-  // toggles still in flight are stale and must not reset the local list.
-  const pendingRef = useRef<string | null>(null);
+  const search = useSearchParams().toString();
 
   useEffect(() => setMounted(true), []);
-  // The server's answer wins once it arrives (another tab, clear filters), unless a newer toggle
-  // of this select is still on its way.
-  const selectedKey = listKey(selected);
-  // biome-ignore lint/correctness/useExhaustiveDependencies: selectedKey stands for selected
+  // Every server answer (a new `selected`, also on refresh) settles the sent list. The server's
+  // list wins unless a newer toggle is still on its way: then the local list is that toggle's.
   useEffect(() => {
-    if (pendingRef.current !== null) {
-      if (pendingRef.current !== selectedKey) return;
-      pendingRef.current = null;
-    }
-    setSel(selected);
-  }, [selectedKey]);
+    settle(search);
+    const latest = sent.at(-1);
+    setSel(latest === undefined ? selected : new URLSearchParams(latest).getAll(param));
+  }, [search, selected, param]);
 
   const labelOf = (v: string) => options.find((o) => o.value === v)?.label ?? v;
   const names = sel.map(labelOf);
@@ -142,14 +149,12 @@ export function MultiSelect({
 
   const apply = (next: string[]) => {
     setSel(next);
-    // Back to what the server already shows: no answer will change selectedKey, so wait for none.
-    const key = listKey(next);
-    pendingRef.current = key === selectedKey ? null : key;
-    const p = new URLSearchParams(window.location.search);
+    const p = new URLSearchParams(sent.at(-1) ?? search);
     p.delete(param);
     p.delete("limit");
     for (const v of next) p.append(param, v);
     const s = p.toString();
+    sent.push(s);
     router.replace(s ? `/?${s}` : "/", { scroll: false });
   };
   const toggle = (v: string) => apply(sel.includes(v) ? sel.filter((x) => x !== v) : [...sel, v]);
