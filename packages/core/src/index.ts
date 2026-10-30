@@ -211,5 +211,17 @@ export {
   RunRepository,
 } from "./storage/runs.js";
 export { type EndedRunFacts, parseGate, ScheduleRepository } from "./storage/schedules.js";
+export {
+  type OutcomeCounts,
+  type OutcomeSeries,
+  type OutcomeSeriesFilter,
+  outcomeSeries,
+  recentReviewReasons,
+  TREND_RANGE_SPEC,
+  TREND_RANGES,
+  type TrendBucket,
+  type TrendRange,
+  trendBuckets,
+} from "./storage/trends.js";
 
 export { type LogLevel, logger } from "./util/log.js";

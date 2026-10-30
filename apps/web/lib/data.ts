@@ -25,7 +25,9 @@ import {
   MIXED_MODEL,
   NEEDS_REVIEW_SQL,
   nextFire,
+  type OutcomeSeries,
   openDatabase,
+  outcomeSeries,
   type ProjectAgentInfo,
   parseCron,
   type ReviewReason,
@@ -33,11 +35,13 @@ import {
   type RunOutcome,
   RunRepository,
   type RunStatus,
+  recentReviewReasons,
   resolveClaudeBinary,
   resolveConfigDir,
   ScheduleRepository,
   scheduleIdleStats,
   scheduleRunState,
+  type TrendRange,
   utcDayStart,
 } from "@duskfleet/core";
 
@@ -576,6 +580,16 @@ export function overview(filter: Pick<RunsFilter, "agentId" | "projectPath"> = {
     costLast24hUsd: r.cost_24h,
     costGatesUsd: r.cost_gates,
   };
+}
+
+/** Outcomes per bucket of `range` for /trends (core `outcomeSeries`), on the same agent / project scope as the Runs page. */
+export function trends(range: TrendRange, filter: Pick<RunsFilter, "agentId" | "projectPath"> = {}): OutcomeSeries {
+  return outcomeSeries(services().db, { range, ...filter });
+}
+
+/** Reasons of an agent's last `limit` reviews, for the worsening agent's callout on /trends. */
+export function agentRecentReviewReasons(agentId: string, projectPath?: string, limit = 10) {
+  return recentReviewReasons(services().db, agentId, limit, projectPath);
 }
 
 export function listSchedules() {
