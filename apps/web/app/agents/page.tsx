@@ -1,4 +1,5 @@
 import path from "node:path";
+import { costLabels, SUBSCRIPTION_NOTE } from "@duskfleet/core";
 import Link from "next/link";
 import type { ReactNode } from "react";
 import { AgentActions } from "@/components/AgentActions";
@@ -13,7 +14,7 @@ import {
   listSchedules,
   projectAgentsFor,
 } from "@/lib/data";
-import { fmtAgo, fmtCost, fmtPct, shortModel, tildePath } from "@/lib/format";
+import { fmtAgo, fmtCost, fmtPct, fmtSplit, shortModel, tildePath } from "@/lib/format";
 
 export const dynamic = "force-dynamic";
 
@@ -146,6 +147,7 @@ function AgentCard({
   const readOnly = a.permissionMode === "plan" || (denied.includes("Edit") && denied.includes("Write"));
   const runsHref = `/?agent=${encodeURIComponent(a.id)}${a.project ? `&project=${encodeURIComponent(a.project)}` : ""}`;
   const avgCost = s && s.total > 0 ? s.costUsd / s.total : null;
+  const costWords = costLabels(s?.cost ?? { apiUsd: 0, subscriptionUsd: 0 });
   const cleanPct = s && s.finished > 0 ? (s.clean / s.finished) * 100 : null;
   const cleanTone = cleanPct === null ? "" : cleanPct >= 90 ? "ok" : cleanPct >= 60 ? "warn" : "bad";
   const mcpAllowed = allowed.filter((t) => t.startsWith("mcp__"));
@@ -345,7 +347,15 @@ function AgentCard({
           tone={cleanTone}
           title="Completed with nothing to review, over finished runs (same rule as the runs overview)"
         />
-        <Stat label="Avg cost" value={fmtCost(avgCost)} />
+        <Stat
+          label={costWords.basis === "api" ? "Avg cost" : `Avg ${costWords.column}`}
+          value={fmtCost(avgCost)}
+          title={
+            costWords.basis === "api"
+              ? undefined
+              : `${fmtSplit(s?.cost ?? { apiUsd: 0, subscriptionUsd: 0 }, costWords.basis)} over all runs; API value is usage ${SUBSCRIPTION_NOTE}, not billed`
+          }
+        />
         <Stat
           label="Last run"
           value={s?.lastRunAt ? fmtAgo(s.lastRunAt) : "never"}

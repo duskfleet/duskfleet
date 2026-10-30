@@ -118,6 +118,7 @@ export {
   parseNumstat,
   type RunDiff,
 } from "./git/diff.js";
+export * from "./observability/billing.js";
 export * from "./observability/failure.js";
 export * from "./observability/run.js";
 export {

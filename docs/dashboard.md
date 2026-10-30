@@ -108,13 +108,26 @@ in the nav); the other pages are static.
   or not, busy = skip), so it waits while no process ticks. A callout warns when only an MCP host
   ticks, with the `install-service` command. Creating a schedule and changing its agent, project,
   prompt, model, gate or on-failure policy stay on MCP (copyable `create_schedule` example).
-- **Spent** (Runs page) splits into "on runs" and "on gates" once a gate agent has run; gate
+- **Spent / Usage (API value)** (Runs page): Claude Code reports what each run would cost at API
+  prices, also on a subscription, where it is usage included in the plan, not money. The tile's
+  wording follows the [`billingType`](cli.md#what-a-run-records) of the runs in view, never a
+  setting: all `api`, "Spent"; all `subscription`, "Usage (API value)" with "included in your
+  Claude subscription"; mixed, "Spent and usage" with the billed and API value amounts on two
+  lines. Runs recorded before `billingType` existed count as API value: only an API key run is
+  shown as billed. The same rule names the run list's cost column, the "By model" table and the
+  agent cards' average. The tile splits into "on runs" and "on gates" once a gate agent has run; gate
   runs carry a `gate` flag in the run list and are left out of the run counts (total, clean,
-  failed, needs review): a gate is a yes/no check, not work.
+  failed, needs review): a gate is a yes/no check, not work. When runs hit the provider's usage
+  limit (`errorCode: provider_quota`) in the last 7 days, the tile says how many, with the next
+  reset time when the error gave one and it is still ahead. No percentage of the quota is shown:
+  the subscription's rolling windows are not exposed to `claude -p`.
 - **Budgets** (Runs page): one banner per [monthly budget](agents.md#monthly-budgets) past its
   `warn_percent` (amber) or spent (coral when `hard_stop` refuses runs and has paused the
-  scope's schedules; amber when it only warns). Nothing shows while every budget is `ok`. A
-  tick refused by a budget shows as "skipped, monthly budget spent" in the schedule's strip.
+  scope's schedules; amber when it only warns). When the scope's runs this month are all
+  subscription runs it is a "usage budget", and the banner says "usage of your subscription, at
+  API value": same semantics, a brake on the quota shared with interactive use. Nothing shows
+  while every budget is `ok`. A tick refused by a budget shows as "skipped, monthly budget spent"
+  in the schedule's strip.
 - **MCP**: the tool catalogue (`packages/mcp/dist/tools.json`, generated at build time from the
   real server; the published `@duskfleet/web` ships a copy as `tools.json`) with a sticky index
   and a filter by tool or parameter name (`/mcp?q=agent`), plus the registration snippets for
