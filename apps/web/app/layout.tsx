@@ -1,7 +1,6 @@
 import { hostname } from "node:os";
 import { parseHolder } from "@duskfleet/core";
 import type { Metadata } from "next";
-import { Outfit } from "next/font/google";
 import localFont from "next/font/local";
 import Link from "next/link";
 import "./globals.css";
@@ -10,19 +9,19 @@ import { ThemeSwitch } from "@/components/ThemeSwitch";
 import { schedulerEnabled, schedulerLease } from "@/lib/data";
 import { THEME_INIT_SCRIPT } from "@/lib/theme";
 
-// Self-hosted at build time by next/font; globals.css maps these to --font-display/-sans/-mono.
-// Every font-weight in globals.css and the components must be one of these instances, never synthesized:
-// Outfit 500/600/700; Geist and Geist Mono are variable fonts covering 400-600.
+// Self-hosted by next/font; globals.css maps these to --font-display/-sans/-mono.
+// Every font-weight in globals.css and the components must be inside these ranges, never synthesized:
+// Outfit 500/600/700; Geist and Geist Mono 400-600.
 // Outfit 500: the muted counts next to page titles and the scheduler strip's secondary values.
-const outfit = Outfit({
-  subsets: ["latin"],
-  weight: ["500", "600", "700"],
+// All local, not next/font/google: Google Fonts intermittently served the CI runners CSS with a font
+// URL next/font cannot parse (Geist first, then Outfit), and the build failed on it. app/fonts holds
+// latin variable files (OFL-1.1, app/fonts/OFL.txt): Geist as Next ships it for its dev overlay,
+// Outfit as Google Fonts serves it.
+const outfit = localFont({
+  src: [{ path: "./fonts/outfit-latin.woff2", weight: "500 700", style: "normal" }],
   variable: "--font-outfit",
   display: "swap",
 });
-// Geist is local, not next/font/google: Google Fonts served the CI runners Geist CSS with a font URL
-// next/font cannot parse, and the build failed on it intermittently. app/fonts holds the latin
-// variable files Next ships for its dev overlay (OFL-1.1, app/fonts/OFL.txt).
 const geistSans = localFont({
   src: [{ path: "./fonts/geist-latin.woff2", weight: "400 600", style: "normal" }],
   variable: "--font-geist-sans",
