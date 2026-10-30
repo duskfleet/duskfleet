@@ -4,6 +4,7 @@
  */
 
 import type { DeniedTool, RunMcpInfo, SubagentRecord, UsageByModel } from "../execution/types.js";
+import { runCostLabel } from "./billing.js";
 import type { FailureCode, FailureDetail, FailureFamily } from "./failure.js";
 
 export const RUN_STATUSES = ["pending", "running", "completed", "failed", "cancelled", "timed_out"] as const;
@@ -347,6 +348,8 @@ export function summarizeRun(run: Run) {
     costUsd: run.costUsd,
     /** `subscription` = costUsd is reported by Claude Code, not billed; null = unknown (older run). */
     billingType: run.billingType,
+    /** What costUsd is: "Cost" (billed on an API key) or "API value" (subscription or unknown). */
+    costLabel: runCostLabel(run.billingType),
     numTurns: run.numTurns,
     toolCalls: run.toolCalls,
     deniedTools: run.deniedTools,

@@ -56,3 +56,36 @@ export function costLabels(split: CostSplit): CostLabels {
     };
   return { basis, heading: "Spent", note: null, column: "Cost", verb: "spent" };
 }
+
+/** What one run's `costUsd` is: "Cost" when billed on an API key, "API value" otherwise (same rule as the sums). */
+export function runCostLabel(billingType: string | null | undefined): string {
+  return billingType === "api" ? "Cost" : "API value";
+}
+
+/** A cost sum of the runs in view, split by billing type, with its wording (CLI `runs`, MCP `list_runs`). */
+export interface CostTotals extends CostSplit, CostLabels {
+  runs: number;
+}
+
+const roundUsd = (n: number) => Math.round(n * 10_000) / 10_000;
+
+export function costTotals(runs: readonly { costUsd: number | null; billingType: string | null }[]): CostTotals {
+  const split: CostSplit = { apiUsd: 0, subscriptionUsd: 0 };
+  for (const r of runs) {
+    if (r.billingType === "api") split.apiUsd += r.costUsd ?? 0;
+    else split.subscriptionUsd += r.costUsd ?? 0;
+  }
+  split.apiUsd = roundUsd(split.apiUsd);
+  split.subscriptionUsd = roundUsd(split.subscriptionUsd);
+  return { runs: runs.length, ...split, ...costLabels(split) };
+}
+
+/** One human line for a terminal: "Usage (API value): $3.2 over 5 runs, included in your Claude subscription". */
+export function costTotalsLine(t: CostTotals): string {
+  const amount =
+    t.basis === "mixed"
+      ? `$${t.apiUsd} billed, $${t.subscriptionUsd} API value`
+      : `$${t.basis === "api" ? t.apiUsd : t.subscriptionUsd}`;
+  const runs = `${t.runs} run${t.runs === 1 ? "" : "s"}`;
+  return `${t.heading}: ${amount} over ${runs}${t.basis === "subscription" ? `, ${SUBSCRIPTION_NOTE}` : ""}`;
+}

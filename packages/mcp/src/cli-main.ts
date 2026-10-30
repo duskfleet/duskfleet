@@ -32,6 +32,8 @@ import {
   assertAgentIdFree,
   type BudgetInput,
   ConfigNotFoundError,
+  costTotals,
+  costTotalsLine,
   createAgentFromFields,
   type DataSource,
   effectivePath,
@@ -42,6 +44,7 @@ import {
   RUN_STATUSES,
   type RunStatus,
   resolveConfigDir,
+  runCostLabel,
   subagentView,
   summarizeRun,
 } from "@duskfleet/core";
@@ -572,7 +575,10 @@ async function main(): Promise<void> {
       }
       if (values.limit) filter.limit = Number(values.limit);
       if (values.agent) filter.agentId = values.agent;
-      print(app.runs.listRuns(filter).map(summarizeRun));
+      const runs = app.runs.listRuns(filter);
+      print(runs.map(summarizeRun));
+      // The total in its true wording, on stderr so stdout stays the JSON array scripts parse.
+      if (runs.length > 0) process.stderr.write(`${costTotalsLine(costTotals(runs))}\n`);
       return done();
     }
     case "schedules": {
@@ -674,7 +680,12 @@ async function main(): Promise<void> {
       }
       const subagents = app.runs.agents(id).map((s) => subagentView(s)); // same names as get_run
       const diff = app.runs.diff(id); // same field as get_run
-      print(values.events ? { ...run, diff, subagents, events: app.runs.events(id) } : { ...run, diff, subagents });
+      const costLabel = runCostLabel(run.billingType); // same field as get_run
+      print(
+        values.events
+          ? { ...run, costLabel, diff, subagents, events: app.runs.events(id) }
+          : { ...run, costLabel, diff, subagents },
+      );
       return done();
     }
     case "repair-subagents": {
