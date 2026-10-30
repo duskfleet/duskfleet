@@ -51,7 +51,10 @@ Five views, plus the [trend](#trends) of the runs. The runs list and a running r
 in the nav); the other pages are static.
 
 - **Runs**: KPI cards (clean runs, needs review, spend) computed on the current project / agent
-  filter; project / agent chips, prompt search (`?q=`), `?schedule=` and `?limit=` (load older).
+  filter; a Project and an Agent multi-select on the search line (repeated params,
+  `?project=a&project=b&agent=x`: any of the projects AND any of the agents; a single `?agent=`
+  still works; each select's × drops its filter), prompt search (`?q=`), `?schedule=` and
+  `?limit=` (load older).
   The KPI cards filter the list by how runs ended, `?outcome=` (real runs only, gate runs left
   out, by the stored review verdict):
   - `needs_review`: every run with a review reason (click the **Needs review** card; it also shows
@@ -156,7 +159,8 @@ in the nav); the other pages are static.
 
 `/trends` (the **Clean runs** card of the Runs page) shows how the share of clean runs moves
 over time, on the agent / project filter the page was opened with (`?agent=`, `?project=`; the
-"opened with" chips remove them). `?range=` picks the period:
+"opened with" chips remove them; a Runs filter with several values in one dimension opens the
+trend unscoped in that dimension). `?range=` picks the period:
 
 | `range` | Period | One point per |
 |---|---|---|
