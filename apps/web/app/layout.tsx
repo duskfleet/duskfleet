@@ -1,7 +1,7 @@
 import { hostname } from "node:os";
 import { parseHolder } from "@duskfleet/core";
 import type { Metadata } from "next";
-import { IBM_Plex_Mono, IBM_Plex_Sans, Outfit } from "next/font/google";
+import localFont from "next/font/local";
 import Link from "next/link";
 import "./globals.css";
 import { NavSettings, NavTabs } from "@/components/NavTabs";
@@ -9,28 +9,30 @@ import { ThemeSwitch } from "@/components/ThemeSwitch";
 import { schedulerEnabled, schedulerLease } from "@/lib/data";
 import { THEME_INIT_SCRIPT } from "@/lib/theme";
 
-// Self-hosted at build time by next/font; globals.css maps these to --font-display/-sans/-mono.
-// Every font-weight in globals.css and the components must be one of these instances, never synthesized:
-// Outfit 500/600/700, Plex Sans 400/500/600, Plex Mono 400/500.
+// Self-hosted by next/font; globals.css maps these to --font-display/-sans/-mono.
+// Every font-weight in globals.css and the components must be inside these ranges, never synthesized:
+// Outfit 500/600/700; Geist and Geist Mono 400-600.
 // Outfit 500: the muted counts next to page titles and the scheduler strip's secondary values.
-const outfit = Outfit({
-  subsets: ["latin"],
-  weight: ["500", "600", "700"],
+// All local, not next/font/google: Google Fonts intermittently served the CI runners CSS with a font
+// URL next/font cannot parse (Geist first, then Outfit), and the build failed on it. app/fonts holds
+// latin variable files (OFL-1.1, app/fonts/OFL.txt): Geist as Next ships it for its dev overlay,
+// Outfit as Google Fonts serves it.
+const outfit = localFont({
+  src: [{ path: "./fonts/outfit-latin.woff2", weight: "500 700", style: "normal" }],
   variable: "--font-outfit",
   display: "swap",
 });
-// 600 on top of the brand's 400/500: the dashboard bolds labels and badges, which would otherwise be synthesized.
-const plexSans = IBM_Plex_Sans({
-  subsets: ["latin"],
-  weight: ["400", "500", "600"],
-  variable: "--font-plex-sans",
+const geistSans = localFont({
+  src: [{ path: "./fonts/geist-latin.woff2", weight: "400 600", style: "normal" }],
+  variable: "--font-geist-sans",
   display: "swap",
 });
-const plexMono = IBM_Plex_Mono({
-  subsets: ["latin"],
-  weight: ["400", "500"],
-  variable: "--font-plex-mono",
+const geistMono = localFont({
+  src: [{ path: "./fonts/geist-mono-latin.woff2", weight: "400 600", style: "normal" }],
+  variable: "--font-geist-mono",
   display: "swap",
+  // next/font/local's only metric fallback is Arial; keep the monospace fallbacks of globals.css
+  adjustFontFallback: false,
 });
 
 // The nav reads the scheduler lease on every request (no prerendered shell with stale data).
@@ -61,7 +63,11 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
   const version = process.env.DUSKFLEET_VERSION;
   return (
     // suppressHydrationWarning: THEME_INIT_SCRIPT may set data-theme on <html> before hydration
-    <html lang="en" className={`${outfit.variable} ${plexSans.variable} ${plexMono.variable}`} suppressHydrationWarning>
+    <html
+      lang="en"
+      className={`${outfit.variable} ${geistSans.variable} ${geistMono.variable}`}
+      suppressHydrationWarning
+    >
       <head>
         {/* biome-ignore lint/security/noDangerouslySetInnerHtml: a constant of ours (lib/theme.ts), no user input */}
         <script dangerouslySetInnerHTML={{ __html: THEME_INIT_SCRIPT }} />
