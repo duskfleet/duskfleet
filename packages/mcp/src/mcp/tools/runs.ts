@@ -1,4 +1,12 @@
-import { RUN_STATUSES, type Run, type RunAgent, subagentView, summarizeRun } from "@duskfleet/core";
+import {
+  costTotals,
+  RUN_STATUSES,
+  type Run,
+  type RunAgent,
+  runCostLabel,
+  subagentView,
+  summarizeRun,
+} from "@duskfleet/core";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { errorResult, jsonResult, type ToolContext } from "../server.js";
@@ -10,6 +18,8 @@ function presentRun(run: Run, includeOutput: boolean) {
   const { rawResultJson, resultText, ...rest } = run;
   return {
     ...rest,
+    /** What costUsd is: "Cost" (billed on an API key) or "API value" (subscription, not billed). */
+    costLabel: runCostLabel(run.billingType),
     resumeCommand: run.claudeSessionId ? `claude --resume ${run.claudeSessionId}` : null,
     resultText: includeOutput
       ? resultText
@@ -122,7 +132,10 @@ export function registerRunTools(server: McpServer, ctx: ToolContext): void {
     "list_runs",
     {
       title: "List runs",
-      description: "List recent runs, newest first, with optional filters.",
+      description:
+        "List recent runs, newest first, with optional filters. `cost` sums the listed runs' costUsd by billing type: " +
+        "apiUsd is billed on an API key, subscriptionUsd is the API value of subscription usage (not money paid); " +
+        "heading / note / column give the wording to use (e.g. 'Usage (API value)', never 'Spent', when all runs are subscription).",
       inputSchema: {
         status: z.enum(RUN_STATUSES).optional().describe("Only runs in this status"),
         kind: z
@@ -146,6 +159,8 @@ export function registerRunTools(server: McpServer, ctx: ToolContext): void {
       const resumedBy = ctx.runs.resumedByMany(runs.map((r) => r.id));
       return jsonResult({
         active: ctx.runs.activeCount(),
+        // The listed costs summed by billing type, with their wording: subscription costs are API value, not money.
+        cost: costTotals(runs),
         runs: runs.map((r) => ({ ...summarizeRun(r), resumedByRunId: resumedBy.get(r.id) ?? null })),
       });
     },

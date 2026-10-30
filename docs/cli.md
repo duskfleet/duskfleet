@@ -218,6 +218,16 @@ The dashboard's per-model breakdown counts a `mixed` run under the model it requ
 is then what Claude Code reports, not what you are billed). It is null for runs recorded before it
 existed. The dashboard marks subscription costs "reported, not billed".
 
+A cost is named after what it is, never after a setting. `runs`, `run-info`, `list_runs` and
+`get_run` add `costLabel` to each run: `Cost` when it is billed (`billingType: api`), `API value`
+otherwise (a subscription run, or one recorded before `billingType` existed). `list_runs` also
+returns `cost`, the listed runs summed by billing type (`apiUsd` billed, `subscriptionUsd` the API
+value of subscription usage) with the wording to show: `heading` is `Spent` when every run is
+billed, `Usage (API value)` when none is (`note`: included in your Claude subscription), `Spent and
+usage` when both kinds are listed. `runs` prints the same total as one line on stderr (stdout stays
+the JSON array), for example `Usage (API value): $3.2 over 20 runs, included in your Claude
+subscription`.
+
 `contextExhausted` comes only from structured signals (termination reason, result subtype,
 stop reason, or the error text of a failed run), never from scanning the result's prose.
 

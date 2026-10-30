@@ -113,6 +113,13 @@ test("MCP client can run an agent and inspect the run", async () => {
 
     const list = parse(await client.callTool({ name: "list_runs", arguments: { limit: 10 } }));
     assert.equal(list.runs.length, 3);
+    // Costs carry their wording: billed on an API key ("Cost") or API value of a subscription.
+    assert.equal(run.costLabel, run.billingType === "api" ? "Cost" : "API value");
+    assert.equal(list.runs[0].costLabel, list.runs[0].billingType === "api" ? "Cost" : "API value");
+    assert.equal(list.cost.runs, 3);
+    const listed = list.runs.reduce((sum, r) => sum + (r.costUsd ?? 0), 0);
+    assert.ok(Math.abs(list.cost.apiUsd + list.cost.subscriptionUsd - listed) < 1e-9);
+    assert.equal(list.cost.heading, list.cost.apiUsd > 0 ? "Spent" : "Usage (API value)");
 
     const bad = await client.callTool({
       name: "run_agent",
