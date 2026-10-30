@@ -153,7 +153,8 @@ code,
   flex-wrap: wrap;
 }
 /* DS-09: 38 px wordmark on a 54.9 px line, mark the same size (26 px drawing x 2.111);
-   gap 5.2 px = 12.5 px visible hull-to-wordmark minus the mark's 3.47 px x 2.111 inner margin */
+   gap 5.2 px = 12.5 px visible hull-to-wordmark minus the mark's 3.47 px x 2.111 inner margin;
+   DS-18: margin 48 px + the nav's 6 px gap = 54 px from the lockup to the first tab */
 .nav .brand {
   font-family: var(--font-display);
   font-weight: 700;
@@ -161,7 +162,7 @@ code,
   line-height: 54.9px;
   letter-spacing: -0.02em;
   color: var(--text);
-  margin-right: 18px;
+  margin-right: 48px;
   display: inline-flex;
   align-items: center;
   gap: 5.2px;
