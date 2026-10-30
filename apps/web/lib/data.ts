@@ -13,9 +13,13 @@ import path from "node:path";
 import type { DatabaseSync } from "node:sqlite";
 import {
   type BudgetStatus,
+  budgetForScope,
   budgetPlan,
   budgetStatuses,
+  type CostSeries,
   type CostSplit,
+  type CostSplitBy,
+  costSeries,
   type DuskFleetConfig,
   describeCron,
   findRepoRoot,
@@ -44,6 +48,7 @@ import {
   scheduleRunState,
   type TrendRange,
   utcDayStart,
+  utcMonthStart,
 } from "@duskfleet/core";
 import { listScoped, scopeList } from "./scope";
 
@@ -498,11 +503,26 @@ export interface ModelStats {
 }
 
 /**
- * Cost and speed per model actually used, for the overview breakdown. A run that spent
- * tokens on several models (model_used 'mixed') counts under the model it asked for.
+ * Cost and speed per model actually used, for the By model table of /costs. A run that spent
+ * tokens on several models (model_used 'mixed') counts under the model it asked for. Finished
+ * runs created since `from`, on the agent / project scope of the page.
  */
-export function modelStats(): ModelStats[] {
+export function modelStats(filter: Pick<RunsFilter, "agentId" | "projectPath"> & { from?: string } = {}): ModelStats[] {
   const { db } = services();
+  const where = ["status IN ('completed','failed','timed_out','cancelled')"];
+  const values: string[] = [];
+  if (filter.from) {
+    where.push("created_at >= ?");
+    values.push(filter.from);
+  }
+  if (filter.agentId) {
+    where.push("agent_id = ?");
+    values.push(filter.agentId);
+  }
+  if (filter.projectPath) {
+    where.push("project_path = ?");
+    values.push(filter.projectPath);
+  }
   const rows = db
     .prepare(
       `SELECT COALESCE(NULLIF(model_used, '${MIXED_MODEL}'), model_requested, 'default') AS model,
@@ -512,10 +532,10 @@ export function modelStats(): ModelStats[] {
               COALESCE(SUM(cost_usd),0) AS cost_usd,
               COALESCE(SUM(${API_COST_SQL}),0) AS cost_api
        FROM runs
-       WHERE status IN ('completed','failed','timed_out','cancelled')
+       WHERE ${where.join(" AND ")}
        GROUP BY 1 ORDER BY cost_usd DESC`,
     )
-    .all() as Array<{
+    .all(...values) as Array<{
     model: string;
     runs: number;
     avg_duration_ms: number | null;
@@ -663,6 +683,52 @@ export function overview(
 /** Outcomes per bucket of `range` for /trends (core `outcomeSeries`), on the same agent / project scope as the Runs page. */
 export function trends(range: TrendRange, filter: Pick<RunsFilter, "agentId" | "projectPath"> = {}): OutcomeSeries {
   return outcomeSeries(services().db, { range, ...filter });
+}
+
+/** Spend per bucket of `range` for /costs (core `costSeries`), on the agent / project scope of the Runs page. */
+export function costs(
+  range: TrendRange,
+  by: CostSplitBy,
+  filter: Pick<RunsFilter, "agentId" | "projectPath"> = {},
+): CostSeries {
+  return costSeries(services().db, { range, by, ...filter });
+}
+
+/**
+ * This UTC month's spend on a scope, for the /costs KPIs: every run (gates are spend, as budgets
+ * count them), by billing type, plus the real runs started and their spend.
+ */
+export function monthSpend(filter: Pick<RunsFilter, "agentId" | "projectPath"> = {}): {
+  costUsd: number;
+  cost: CostSplit;
+  runs: number;
+  runsCostUsd: number;
+} {
+  const where = ["created_at >= ?"];
+  const values: string[] = [utcMonthStart(new Date())];
+  if (filter.agentId) {
+    where.push("agent_id = ?");
+    values.push(filter.agentId);
+  }
+  if (filter.projectPath) {
+    where.push("project_path = ?");
+    values.push(filter.projectPath);
+  }
+  const r = services()
+    .db.prepare(
+      `SELECT COALESCE(SUM(cost_usd), 0)                                   AS cost_usd,
+              COALESCE(SUM(${API_COST_SQL}), 0)                            AS cost_api,
+              COALESCE(SUM(kind = 'run'), 0)                               AS runs,
+              COALESCE(SUM(CASE WHEN kind = 'run' THEN cost_usd END), 0)   AS runs_cost
+       FROM runs WHERE ${where.join(" AND ")}`,
+    )
+    .get(...values) as { cost_usd: number; cost_api: number; runs: number; runs_cost: number };
+  return { costUsd: r.cost_usd, cost: split(r.cost_usd, r.cost_api), runs: r.runs, runsCostUsd: r.runs_cost };
+}
+
+/** The monthly budget of the scope in view, with this month's spend (core `budgetForScope`); null when it has none. */
+export function scopeBudget(view: { agentId?: string; projectId?: string }): BudgetStatus | null {
+  return budgetForScope(budgetStatuses(services().runs.budgets, config()), view);
 }
 
 /** Reasons of an agent's last `limit` reviews, for the worsening agent's callout on /trends. */

@@ -130,6 +130,7 @@ export {
   type BudgetSource,
   type BudgetState,
   type BudgetStatus,
+  budgetForScope,
   budgetLabel,
   budgetStatus,
   budgetStatuses,
@@ -202,6 +203,13 @@ export { attachLastRun, type RunSummarySource, type ScheduleWithLastRun } from "
 export { type FireResult, Scheduler, type SchedulerOptions, type SchedulerStatus } from "./scheduler/scheduler.js";
 export * from "./scheduler/types.js";
 export { BudgetRepository } from "./storage/budgets.js";
+export {
+  COST_SPLITS,
+  type CostSeries,
+  type CostSeriesFilter,
+  type CostSplitBy,
+  costSeries,
+} from "./storage/costs.js";
 export { migrationDigests, openDatabase } from "./storage/db.js";
 export {
   type ListRunsFilter,

@@ -3,17 +3,8 @@ import Link from "next/link";
 import { AutoRefresh } from "@/components/AutoRefresh";
 import { MultiSelect, type MultiSelectOption } from "@/components/MultiSelect";
 import { RunTable } from "@/components/RunTable";
-import {
-  budgetAlerts,
-  listAgents,
-  listProjects,
-  listRuns,
-  listSchedules,
-  modelStats,
-  overview,
-  type RunsFilter,
-} from "@/lib/data";
-import { fmtClock, fmtCost, fmtDayClock, fmtDuration, fmtInt, fmtPct, fmtSplit, shortModel } from "@/lib/format";
+import { budgetAlerts, listAgents, listProjects, listRuns, listSchedules, overview, type RunsFilter } from "@/lib/data";
+import { fmtClock, fmtCost, fmtDayClock, fmtInt, fmtPct, fmtSplit } from "@/lib/format";
 
 export const dynamic = "force-dynamic";
 
@@ -118,12 +109,6 @@ export default async function RunsPage({ searchParams }: { searchParams: Promise
   // KPIs stay on the agent / project scope: the outcome tiles show the whole picture they filter.
   const o = overview({ agentIds: filter.agentIds, projectPaths: filter.projectPaths });
   const spend = costLabels(o.cost);
-  const models = modelStats();
-  const modelCost = {
-    apiUsd: models.reduce((n, m) => n + m.cost.apiUsd, 0),
-    subscriptionUsd: models.reduce((n, m) => n + m.cost.subscriptionUsd, 0),
-  };
-  const modelWords = costLabels(modelCost);
   const budgets = budgetAlerts();
   const agentNames = agentIds.map((id) => agents.find((a) => a.id === id)?.name ?? id).join(", ");
   const scheduleName = schedule ? (listSchedules().find((s) => s.id === schedule)?.name ?? schedule) : null;
@@ -165,6 +150,7 @@ export default async function RunsPage({ searchParams }: { searchParams: Promise
   if (agentIds.length === 1 && agentIds[0]) trendParams.set("agent", agentIds[0]);
   if (projectIds.length === 1 && projectIds[0]) trendParams.set("project", projectIds[0]);
   const trendHref = trendParams.size ? `/trends?${trendParams}` : "/trends";
+  const costsHref = trendParams.size ? `/costs?${trendParams}` : "/costs";
 
   return (
     <>
@@ -330,8 +316,15 @@ export default async function RunsPage({ searchParams }: { searchParams: Promise
             <div className="sub">failed, timed out, out of budget or context, orphaned, or denied a tool</div>
           )}
         </Link>
-        <div className="stat" title={spend.basis === "api" ? undefined : SUBSCRIPTION_TITLE}>
-          <div className="label">{spend.heading}</div>
+        <Link
+          href={costsHref}
+          className="stat tile-link"
+          title={spend.basis === "api" ? "Spend over time, by agent, project or model" : SUBSCRIPTION_TITLE}
+        >
+          <div className="stat-head">
+            <div className="label">{spend.heading}</div>
+            <span className="tile-more">Costs →</span>
+          </div>
           {spend.basis === "mixed" ? (
             <>
               <div className="value">
@@ -370,7 +363,7 @@ export default async function RunsPage({ searchParams }: { searchParams: Promise
               </>
             )}
           </div>
-        </div>
+        </Link>
       </section>
 
       {running.length > 0 ? (
@@ -421,53 +414,9 @@ export default async function RunsPage({ searchParams }: { searchParams: Promise
         </div>
       )}
 
-      {models.length > 1 && (
-        <>
-          <h2>
-            By model{" "}
-            <span className="count">
-              all runs{modelWords.basis === "subscription" ? ` · API value, ${modelWords.note}` : ""}
-            </span>
-          </h2>
-          <div className="card model-card">
-            <table className="table">
-              <thead>
-                <tr>
-                  <th>Model</th>
-                  <th className="num">Runs</th>
-                  <th className="num">Avg duration</th>
-                  <th className="num">Avg {modelWords.column === "Cost" ? "cost" : modelWords.column}</th>
-                  <th className="num">Total</th>
-                </tr>
-              </thead>
-              <tbody>
-                {models.map((m) => (
-                  <tr key={m.model}>
-                    <td>
-                      <span className="pill model" title={m.model}>
-                        {shortModel(m.model)}
-                      </span>
-                    </td>
-                    <td className="num">{m.runs}</td>
-                    <td className="num">{fmtDuration(m.avgDurationMs)}</td>
-                    <td className="num">{fmtCost(m.avgCostUsd)}</td>
-                    <td className="num">{fmtSplit(m.cost, modelWords.basis)}</td>
-                  </tr>
-                ))}
-              </tbody>
-              <tfoot>
-                <tr>
-                  <td>All models</td>
-                  <td className="num">{models.reduce((n, m) => n + m.runs, 0)}</td>
-                  <td className="num"></td>
-                  <td className="num"></td>
-                  <td className="num">{fmtSplit(modelCost, modelWords.basis)}</td>
-                </tr>
-              </tfoot>
-            </table>
-          </div>
-        </>
-      )}
+      <p className="moved-line">
+        <Link href={costsHref}>Spend by model moved to Costs →</Link>
+      </p>
     </>
   );
 }
