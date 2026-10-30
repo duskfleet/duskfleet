@@ -4,6 +4,9 @@ Sections: [Install and doctor](#install-and-doctor) · [Runs](#runs) ·
 [Unattended runs](#unattended-runs) · [Scheduler and service](#scheduler-and-service) ·
 [Dashboard](#dashboard).
 
+For `claude -p` scheduled by hand (cron, launchd, systemd) rather than through Duskfleet, see
+the guide [Run Claude Code on a schedule on your own machine](guides/run-claude-code-on-a-schedule.md).
+
 ## Install and doctor
 
 - **`Duskfleet needs Node 24 or newer; you have vX.Y.Z`** (exit code 1, from the CLI and the MCP
