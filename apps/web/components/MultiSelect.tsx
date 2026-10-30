@@ -13,6 +13,9 @@ export type MultiSelectOption = {
   href: string;
 };
 
+/** Order-free key of a value list, to compare the server's list with the one applied here. */
+const listKey = (values: string[]) => [...values].sort().join("\n");
+
 /**
  * One Runs filter as a multi-select (DS-19): a <details> whose options are plain links, so
  * without JS every click reloads the page with the list closed. With JS it adds a type-ahead,
@@ -51,13 +54,25 @@ export function MultiSelect({
   const [pinned, setPinned] = useState(selected);
   const [query, setQuery] = useState("");
   const [active, setActive] = useState(-1);
+  // Space toggles only a row the arrow keys made active, never one under a resting pointer.
+  const [keyActive, setKeyActive] = useState(false);
   const [shown, setShown] = useState(Math.min(selected.length, 1));
+  // The last list this select applied, until the server answers with it: answers to earlier
+  // toggles still in flight are stale and must not reset the local list.
+  const pendingRef = useRef<string | null>(null);
 
   useEffect(() => setMounted(true), []);
-  // The server's answer wins once it arrives (another tab, the × link, clear filters).
-  const selectedKey = selected.join("\n");
+  // The server's answer wins once it arrives (another tab, clear filters), unless a newer toggle
+  // of this select is still on its way.
+  const selectedKey = listKey(selected);
   // biome-ignore lint/correctness/useExhaustiveDependencies: selectedKey stands for selected
-  useEffect(() => setSel(selected), [selectedKey]);
+  useEffect(() => {
+    if (pendingRef.current !== null) {
+      if (pendingRef.current !== selectedKey) return;
+      pendingRef.current = null;
+    }
+    setSel(selected);
+  }, [selectedKey]);
 
   const labelOf = (v: string) => options.find((o) => o.value === v)?.label ?? v;
   const names = sel.map(labelOf);
@@ -121,11 +136,15 @@ export function MultiSelect({
       setQuery("");
     }
     setActive(-1);
+    setKeyActive(false);
     setOpen(next);
   };
 
   const apply = (next: string[]) => {
     setSel(next);
+    // Back to what the server already shows: no answer will change selectedKey, so wait for none.
+    const key = listKey(next);
+    pendingRef.current = key === selectedKey ? null : key;
     const p = new URLSearchParams(window.location.search);
     p.delete(param);
     p.delete("limit");
@@ -159,7 +178,8 @@ export function MultiSelect({
       if (flat.length === 0) return;
       const step = e.key === "ArrowDown" ? 1 : -1;
       setActive((a) => (a < 0 ? (step > 0 ? 0 : flat.length - 1) : (a + step + flat.length) % flat.length));
-    } else if ((e.key === " " || e.key === "Enter") && activeOpt) {
+      setKeyActive(true);
+    } else if (((e.key === " " && keyActive) || e.key === "Enter") && activeOpt) {
       e.preventDefault();
       toggle(activeOpt.value);
     } else if (e.key === "Enter") {
@@ -188,7 +208,10 @@ export function MultiSelect({
           e.preventDefault();
           toggle(o.value);
         }}
-        onMouseMove={() => setActive(flat.indexOf(o))}
+        onMouseMove={() => {
+          setActive(flat.indexOf(o));
+          setKeyActive(false);
+        }}
       >
         <span className="ms-box" aria-hidden="true">
           {checked && (
@@ -262,6 +285,7 @@ export function MultiSelect({
               onChange={(e) => {
                 setQuery(e.target.value);
                 setActive(-1);
+                setKeyActive(false);
               }}
               onKeyDown={onListKey}
             />
