@@ -179,7 +179,14 @@ verdict, the same as the KPI cards:
   (at least 5 points between its first and last point) is drawn in the accent colour, with a
   line naming its most frequent reason among its last 10 reviews. A series with fewer than 3
   points is drawn as dots. When the first run of the filter falls inside the period, the
-  buckets before it are one flat band ("no runs before 7 Sep").
+  buckets before it are one flat band ("no runs before 7 Sep"). Beside the chart, a table
+  ranks every agent, lowest current clean rate first (rate, change over the period, runs, a
+  0–100 % sparkline), with a find field. With up to 6 agents every line is drawn; above that,
+  the chart draws at most 6 lines: "all agents" plus the agents ticked in the table, 5 at most,
+  kept as a repeated `?agent=` (default: the most-worsening agent and the 4 lowest). Hovering
+  or focusing a row highlights its line, ticked or not. A single `?agent=` keeps its filter
+  meaning (the whole page on that agent); with several, the two charts below follow the ticked
+  set, as the Runs filters do.
 - **Finished runs per day / week / month**: stacked bars of clean, needs review and cancelled.
 - **Why runs needed review**: one row per review reason with its count and its share of the
   runs that needed review in the period (a run can have several reasons); each row opens the
