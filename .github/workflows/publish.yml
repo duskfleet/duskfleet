@@ -9,7 +9,7 @@
 # statement through GitHub's OIDC token; each package.json `repository` must name this repository
 # or the registry refuses the provenance.
 name: Publish to npm
-run-name: ${{ github.event_name == 'pull_request' && format('npm publish dry-run for PR #{0}', github.event.pull_request.number) || format('npm publish {0}', inputs.tag || github.ref_name) }}
+run-name: "${{ github.event_name == 'pull_request' && format('npm publish dry-run for PR #{0}', github.event.pull_request.number) || format('npm publish {0}', inputs.tag || github.ref_name) }}"
 
 on:
   push:
