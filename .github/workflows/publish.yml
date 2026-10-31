@@ -4,10 +4,11 @@
 # hand. Every pull request runs the `dry-run` job, the same steps ending in
 # `npm publish --dry-run`, so a broken pack is caught before the tag.
 #
-# The `publish` job needs the NPM_TOKEN repository secret: a granular npm access token that can
-# publish `duskfleet` and `@duskfleet/web` only. `id-token: write` lets npm sign the provenance
-# statement through GitHub's OIDC token; each package.json `repository` must name this repository
-# or the registry refuses the provenance.
+# The `publish` job authenticates with npm trusted publishing (OIDC), no npm token: each package
+# on npmjs.com names this repository and this file (`publish.yml`) as its trusted publisher, with
+# "Allow npm publish" on, and `id-token: write` lets the job mint the GitHub OIDC token that npm
+# accepts in place of a credential and uses to sign the provenance statement. Each package.json
+# `repository` must name this repository or the registry refuses the provenance.
 name: Publish to npm
 run-name: "${{ github.event_name == 'pull_request' && format('npm publish dry-run for PR #{0}', github.event.pull_request.number) || format('npm publish {0}', inputs.tag || github.ref_name) }}"
 
@@ -132,8 +133,6 @@ jobs:
       # finishes the release instead of failing on the first package.
       - name: npm publish --provenance (duskfleet)
         working-directory: packages/duskfleet
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: |
           if npm view "duskfleet@${TAG#v}" version > /dev/null 2>&1; then
             echo "duskfleet@${TAG#v} is already published, skipping"
@@ -143,8 +142,6 @@ jobs:
 
       - name: npm publish --provenance (@duskfleet/web)
         working-directory: apps/web
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: |
           if npm view "@duskfleet/web@${TAG#v}" version > /dev/null 2>&1; then
             echo "@duskfleet/web@${TAG#v} is already published, skipping"
