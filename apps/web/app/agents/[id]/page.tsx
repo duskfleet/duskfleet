@@ -10,15 +10,15 @@ import { Spark } from "@/components/Spark";
 import { agentState, cleanTone } from "@/lib/agents";
 import {
   agentDetail,
+  agentRecentRuns,
   agentReviewReasons,
   agentStats,
   agentWindows,
   bashAllowed,
   deniedBashSuggestions,
   homeDir,
-  listRuns,
   listSchedules,
-  type RunWithProject,
+  type RunBucket,
   scopeBudget,
 } from "@/lib/data";
 import { fmtClock, fmtCost, fmtInt, fmtPct, fmtTime, shortModel, tildePath } from "@/lib/format";
@@ -34,21 +34,13 @@ const RECENT = 5;
 
 type Params = { params: Promise<{ id: string }>; searchParams: Promise<{ status?: string | string[] }> };
 
-/** Recent runs Status filter: a partition of the runs by how they ended (stored review verdict). */
-const BUCKETS = [
+/** Recent runs Status filter: a partition of the runs by how they ended (stored review verdict, in SQL). */
+const BUCKETS: ReadonlyArray<{ value: RunBucket; label: string }> = [
   { value: "running", label: "running" },
   { value: "review", label: "needs review" },
   { value: "clean", label: "completed" },
   { value: "cancelled", label: "cancelled" },
-] as const;
-const bucket = (r: RunWithProject) =>
-  r.status === "running" || r.status === "pending"
-    ? "running"
-    : r.reviewReasons.length
-      ? "review"
-      : r.status === "completed"
-        ? "clean"
-        : "cancelled";
+];
 
 export async function generateMetadata({ params }: Params) {
   const { id } = await params;
@@ -75,7 +67,7 @@ export default async function AgentPage({ params, searchParams }: Params) {
     lastNeedsReview: s?.lastNeedsReview ?? false,
   });
 
-  const statuses = (Array.isArray(sp.status) ? sp.status : [sp.status]).filter((v): v is string =>
+  const statuses = (Array.isArray(sp.status) ? sp.status : [sp.status]).filter((v): v is RunBucket =>
     BUCKETS.some((b) => b.value === v),
   );
   const base = `/agents/${encodeURIComponent(id)}`;
@@ -89,9 +81,7 @@ export default async function AgentPage({ params, searchParams }: Params) {
     label: b.label,
     href: statusHref(statuses.includes(b.value) ? statuses.filter((x) => x !== b.value) : [...statuses, b.value]),
   }));
-  const recent = listRuns({ agentId: id, limit: statuses.length ? 200 : RECENT })
-    .filter((r) => !statuses.length || statuses.includes(bucket(r)))
-    .slice(0, RECENT);
+  const recent = agentRecentRuns(id, statuses, RECENT);
 
   const runsHref = `/?agent=${encodeURIComponent(id)}`;
   const tone = w ? cleanTone(w.clean, w.finished) : "";

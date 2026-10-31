@@ -279,6 +279,30 @@ export function listRuns(filter: RunsFilter = {}): RunWithProject[] {
   return list.map((r) => ({ ...r, projectLabel: label(r), resumedByRunId: resumedBy.get(r.id) ?? null }));
 }
 
+/** How a run ended, as the agent page's Recent runs Status filter partitions them (stored review verdict). */
+export type RunBucket = "running" | "review" | "clean" | "cancelled";
+
+const ACTIVE_SQL = "status IN ('running','pending')";
+const BUCKET_SQL: Record<RunBucket, string> = {
+  running: `(${ACTIVE_SQL})`,
+  review: `(NOT ${ACTIVE_SQL} AND ${NEEDS_REVIEW_SQL})`,
+  clean: `(status = 'completed' AND NOT ${NEEDS_REVIEW_SQL})`,
+  cancelled: `(NOT ${ACTIVE_SQL} AND status <> 'completed' AND NOT ${NEEDS_REVIEW_SQL})`,
+};
+
+/** One agent's newest runs in any of `buckets` (all when empty), filtered in SQL so an old rare status is still found. */
+export function agentRecentRuns(agentId: string, buckets: RunBucket[], limit: number): RunWithProject[] {
+  const { db, runs } = services();
+  const where = buckets.length ? `AND (${buckets.map((b) => BUCKET_SQL[b]).join(" OR ")})` : "";
+  const ids = db
+    .prepare(`SELECT id FROM runs WHERE agent_id = ? ${where} ORDER BY created_at DESC LIMIT ?`)
+    .all(agentId, limit) as Array<{ id: string }>;
+  const list = ids.map((r) => runs.get(r.id)).filter((r): r is Run => r !== null);
+  const label = projectLabeller();
+  const resumedBy = runs.resumedByMany(list.map((r) => r.id));
+  return list.map((r) => ({ ...r, projectLabel: label(r), resumedByRunId: resumedBy.get(r.id) ?? null }));
+}
+
 /** Label for a single run (detail page). */
 export function projectLabel(run: Run): string {
   return projectLabeller()(run);
@@ -436,18 +460,27 @@ export interface AgentWindow {
   costByDay: number[];
 }
 
-/** Every agent's window (or one agent's), from one query grouped by agent and UTC day. */
+/** First instant of the window of the last `days` UTC days, today included (ms). */
+function windowStart(days: number): number {
+  const now = new Date();
+  return Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() - (days - 1));
+}
+
+/**
+ * Every agent's window (or one agent's), from one query grouped by agent and UTC day.
+ * Counts are real runs only (`kind = 'run'`), as the overview and the Runs list they link to;
+ * the cost keeps gate runs, as everywhere else.
+ */
 export function agentWindows(days: number, agentId?: string): Map<string, AgentWindow> {
   const { db } = services();
-  const now = new Date();
-  const start = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() - (days - 1));
+  const start = windowStart(days);
   const rows = db
     .prepare(
       `SELECT agent_id, substr(created_at, 1, 10) AS day,
-              COUNT(*)                                                       AS runs,
-              SUM(status IN ('completed','failed','timed_out','cancelled'))  AS finished,
-              SUM(status = 'completed' AND NOT ${NEEDS_REVIEW_SQL})          AS clean,
-              SUM(${NEEDS_REVIEW_SQL})                                       AS needs_review,
+              COALESCE(SUM(kind = 'run'), 0)                                                AS runs,
+              COALESCE(SUM(kind = 'run' AND status IN ('completed','failed','timed_out','cancelled')), 0) AS finished,
+              COALESCE(SUM(kind = 'run' AND status = 'completed' AND NOT ${NEEDS_REVIEW_SQL}), 0) AS clean,
+              COALESCE(SUM(kind = 'run' AND ${NEEDS_REVIEW_SQL}), 0)                        AS needs_review,
               COALESCE(SUM(cost_usd), 0)                                     AS cost_usd,
               COALESCE(SUM(${API_COST_SQL}), 0)                              AS cost_api
        FROM runs WHERE created_at >= ? ${agentId ? "AND agent_id = ?" : ""}
@@ -498,16 +531,16 @@ export function agentWindows(days: number, agentId?: string): Map<string, AgentW
   return out;
 }
 
-/** Runs per stored review reason of one agent since `days` days ago, most frequent first. */
+/** Real runs per stored review reason of one agent over the same window as agentWindows, most frequent first. */
 export function agentReviewReasons(agentId: string, days: number): Array<{ reason: ReviewReason; count: number }> {
   const rows = services()
     .db.prepare(
       `SELECT j.value AS reason, COUNT(*) AS n
        FROM runs, json_each(COALESCE(runs.review_reasons_json, '[]')) AS j
-       WHERE agent_id = ? AND created_at >= ?
+       WHERE kind = 'run' AND agent_id = ? AND created_at >= ?
        GROUP BY j.value ORDER BY n DESC, j.value`,
     )
-    .all(agentId, new Date(Date.now() - days * 24 * 3600_000).toISOString()) as Array<{
+    .all(agentId, new Date(windowStart(days)).toISOString()) as Array<{
     reason: ReviewReason;
     n: number;
   }>;
