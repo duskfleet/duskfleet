@@ -145,7 +145,10 @@ jobs:
             echo "duskfleet@${TAG#v} is already published, skipping"
           else
             npm publish --dry-run --access public 2>&1 | tee "$RUNNER_TEMP/publish-duskfleet.log"
-            ! grep -q "auto-corrected" "$RUNNER_TEMP/publish-duskfleet.log"
+            if grep -q "auto-corrected" "$RUNNER_TEMP/publish-duskfleet.log"; then
+              echo "::error::npm auto-corrected the manifest, see the warnings above"
+              exit 1
+            fi
             npm publish --provenance --access public
           fi
 
@@ -157,6 +160,9 @@ jobs:
             echo "@duskfleet/web@${TAG#v} is already published, skipping"
           else
             npm publish --dry-run --access public 2>&1 | tee "$RUNNER_TEMP/publish-web.log"
-            ! grep -q "auto-corrected" "$RUNNER_TEMP/publish-web.log"
+            if grep -q "auto-corrected" "$RUNNER_TEMP/publish-web.log"; then
+              echo "::error::npm auto-corrected the manifest, see the warnings above"
+              exit 1
+            fi
             npm publish --provenance --access public
           fi
