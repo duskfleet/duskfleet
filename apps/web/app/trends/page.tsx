@@ -163,9 +163,11 @@ export default async function TrendsPage({ searchParams }: { searchParams: Promi
   const multi = agentRates.length > 1;
   const worst = multi ? worseningAgent(agentRates) : null;
   const rows = agentRows(s.byAgent);
-  // With MAX_DRAWN_LINES agents or fewer everything is drawn, as before DS-23; above, the
-  // ticks: the URL's set, else the most-worsening and the 4 lowest.
-  const selectable = !agent && agentRates.length > MAX_DRAWN_LINES;
+  // With MAX_DRAWN_LINES agents or fewer everything is drawn, as before DS-23, unless several
+  // agents are ticked in the URL (the other panels follow that set, so the chart does too);
+  // above, the ticks: the URL's set, else the most-worsening and the 4 lowest.
+  const fewAgents = agentRates.length <= MAX_DRAWN_LINES;
+  const selectable = !agent && (!fewAgents || picked.length > 1);
   const drawn = new Set(
     !multi
       ? []
@@ -205,23 +207,23 @@ export default async function TrendsPage({ searchParams }: { searchParams: Promi
   // The table's ticks: each row links to the set with that agent toggled; an empty set is the default again.
   const ticked = selectable ? [...drawn] : picked;
   const atLimit = selectable && ticked.length >= MAX_TICKED;
-  const tableRows: AgentTableRow[] = rows
-    .filter((r) => !q || r.agentId.toLowerCase().includes(q.toLowerCase()))
-    .map((r) => {
-      const checked = selectable ? drawn.has(r.agentId) : agent === r.agentId;
-      const next = checked ? ticked.filter((id) => id !== r.agentId) : [...ticked, r.agentId];
-      return {
-        agentId: r.agentId,
-        rate: r.rate === null ? "–" : `${r.rate}%`,
-        delta: deltaText(r.delta),
-        runs: fmtInt(r.runs),
-        rates: r.rates,
-        drawn: drawn.has(r.agentId),
-        worst: r.agentId === worst?.agentId,
-        checked,
-        href: !checked && atLimit ? null : trendHref({ agent: next }),
-      };
-    });
+  // Every row goes to the table, which filters by q itself (on the server render too), so
+  // clearing the find field brings the others back.
+  const tableRows: AgentTableRow[] = rows.map((r) => {
+    const checked = selectable ? drawn.has(r.agentId) : agent === r.agentId;
+    const next = checked ? ticked.filter((id) => id !== r.agentId) : [...ticked, r.agentId];
+    return {
+      agentId: r.agentId,
+      rate: r.rate === null ? "–" : `${r.rate}%`,
+      delta: deltaText(r.delta),
+      runs: fmtInt(r.runs),
+      rates: r.rates,
+      drawn: drawn.has(r.agentId),
+      worst: r.agentId === worst?.agentId,
+      checked,
+      href: !checked && atLimit ? null : trendHref({ agent: next, q: q || undefined }),
+    };
+  });
   const hiddenParams: Array<[string, string]> = [
     ...(range === "1m" ? [] : [["range", range] as [string, string]]),
     ...(project ? [["project", project.id] as [string, string]] : []),
@@ -250,7 +252,9 @@ export default async function TrendsPage({ searchParams }: { searchParams: Promi
     ? `${RANGE_LABELS[range]} selected · data since ${dayLabel(s.firstRunAt as string)} (${unitCount(s.starts.length - firstIdx, s.bucket)})`
     : `share of finished runs with no review reason, per ${unit}${
         selectable
-          ? " · tick agents in the table to draw them (kept in the URL); default: the most-worsening and the 4 lowest"
+          ? ` · tick agents in the table to draw them (kept in the URL); default: ${
+              fewAgents ? "every agent" : "the most-worsening and the 4 lowest"
+            }`
           : multi
             ? " · line ends name the agent"
             : ""

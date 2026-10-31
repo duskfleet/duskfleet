@@ -181,7 +181,8 @@ verdict, the same as the KPI cards:
   points is drawn as dots. When the first run of the filter falls inside the period, the
   buckets before it are one flat band ("no runs before 7 Sep"). Beside the chart, a table
   ranks every agent, lowest current clean rate first (rate, change over the period, runs, a
-  0–100 % sparkline), with a find field. With up to 6 agents every line is drawn; above that,
+  0–100 % sparkline), with a find field. With up to 6 agents every line is drawn, unless several
+  `?agent=` values are given (then those are the ticks, as below); above that,
   the chart draws at most 6 lines: "all agents" plus the agents ticked in the table, 5 at most,
   kept as a repeated `?agent=` (default: the most-worsening agent and the 4 lowest). Hovering
   or focusing a row highlights its line, ticked or not. A single `?agent=` keeps its filter

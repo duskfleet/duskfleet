@@ -66,6 +66,13 @@ export function AgentTable({
   };
 
   const needle = query.trim().toLowerCase();
+  // A tick keeps what is typed in the find field as ?q=, so the filtered table survives it.
+  const go = (href: string) => {
+    const url = new URL(href, window.location.origin);
+    if (query.trim()) url.searchParams.set("q", query.trim());
+    else url.searchParams.delete("q");
+    router.replace(`${url.pathname}${url.search}`, { scroll: false });
+  };
   const visible = rows.filter((r) => !needle || r.agentId.toLowerCase().includes(needle));
   const more = Math.max(0, rows.length - NARROW_ROWS);
 
@@ -112,12 +119,12 @@ export function AgentTable({
             className="at-row"
             onClick={(e) => {
               e.preventDefault();
-              router.replace(href, { scroll: false });
+              go(href);
             }}
             onKeyDown={(e: KeyboardEvent<HTMLAnchorElement>) => {
               if (e.key === " ") {
                 e.preventDefault();
-                router.replace(href, { scroll: false });
+                go(href);
               }
             }}
           >
