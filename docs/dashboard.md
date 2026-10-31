@@ -91,11 +91,22 @@ in the nav); the other pages are static.
   previous / next run of the same agent, a "run again" CLI command, the `claude --resume`
   command and the exact command executed. Home paths print as `~/…`; Copy buttons give the
   full value.
-- **Agents**: every agent grouped by project ("Any project" first) with kind ("link → name" or
-  "own prompt"), model (with a warning when not set), permission mode, allow-lists (collapsed
-  past 4 entries), limits (timeout, budget and the wrap-up reserve), prompt preview and
-  aggregate stats. User agents can be deleted or
-  unlinked from here, with an inline confirmation; builtins are read-only.
+- **Agents**: four tiles (agents, running now, needs review, auto-paused), Project / Status
+  filters, a search on id and description and a sort (last run, id, runs, clean, cost), then one
+  table per project ("Any project" first), one row per agent: status (idle, running, needs review
+  from the stored review reasons of its last run, or "paused · auto" when a bound schedule was
+  auto-paused), id and kind, a one-line description, model, runs over 7 days with a per-day
+  sparkline, clean %, cost and last run, and links to its runs and schedule. Under about 720 px
+  the same row reflows into a four-line block, each number under its column label.
+- **Agent** (`/agents/<id>`): everything that configures one agent. Header with kind, builtin /
+  override chip, status, project, model and file; 30-day tiles (runs and cost with sparklines,
+  clean %, needs review); the system prompt (own) or the link target with the project persona
+  (link), expanding in place; the 5 latest runs with a Status filter; permissions (allow-list
+  past 8 entries expands in place) and limits, including daily caps and the monthly budget; the
+  bound schedules; and the needs-review reasons over 30 days, each bar opening Runs filtered by
+  agent and reason. User agents can be deleted or unlinked here, with an inline confirmation;
+  builtins are read-only. **Run now…** appears only when a schedule runs the agent and uses that
+  schedule's run now (see Schedules below): the dashboard never starts a run itself.
 - **Schedules**: a status strip (kill switch, lease holder and when its lease expires, next
   firing, last 7 days fired / skipped busy), then the schedules grouped by project (the
   schedule's own, else its agent's; "no project" last), one card each, titled by its agent (a link to the agent's card on Agents,

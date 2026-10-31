@@ -419,6 +419,128 @@ export function agentStats(): AgentStats[] {
   }));
 }
 
+/** One agent's runs over the last `days` UTC days (today included), for the /agents rows and the agent page. */
+export interface AgentWindow {
+  agentId: string;
+  runs: number;
+  finished: number;
+  /** Completed with nothing to review (stored verdict), over `finished`. */
+  clean: number;
+  /** Runs with a stored review reason. */
+  needsReview: number;
+  needsReviewToday: number;
+  costUsd: number;
+  cost: CostSplit;
+  /** Runs per UTC day, oldest first, today last: `days` entries (the sparklines). */
+  runsByDay: number[];
+  costByDay: number[];
+}
+
+/** Every agent's window (or one agent's), from one query grouped by agent and UTC day. */
+export function agentWindows(days: number, agentId?: string): Map<string, AgentWindow> {
+  const { db } = services();
+  const now = new Date();
+  const start = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() - (days - 1));
+  const rows = db
+    .prepare(
+      `SELECT agent_id, substr(created_at, 1, 10) AS day,
+              COUNT(*)                                                       AS runs,
+              SUM(status IN ('completed','failed','timed_out','cancelled'))  AS finished,
+              SUM(status = 'completed' AND NOT ${NEEDS_REVIEW_SQL})          AS clean,
+              SUM(${NEEDS_REVIEW_SQL})                                       AS needs_review,
+              COALESCE(SUM(cost_usd), 0)                                     AS cost_usd,
+              COALESCE(SUM(${API_COST_SQL}), 0)                              AS cost_api
+       FROM runs WHERE created_at >= ? ${agentId ? "AND agent_id = ?" : ""}
+       GROUP BY agent_id, day`,
+    )
+    .all(...[new Date(start).toISOString(), ...(agentId ? [agentId] : [])]) as Array<{
+    agent_id: string;
+    day: string;
+    runs: number;
+    finished: number;
+    clean: number;
+    needs_review: number;
+    cost_usd: number;
+    cost_api: number;
+  }>;
+  const out = new Map<string, AgentWindow & { costApi: number }>();
+  for (const r of rows) {
+    let w = out.get(r.agent_id);
+    if (!w) {
+      w = {
+        agentId: r.agent_id,
+        runs: 0,
+        finished: 0,
+        clean: 0,
+        needsReview: 0,
+        needsReviewToday: 0,
+        costUsd: 0,
+        costApi: 0,
+        cost: { apiUsd: 0, subscriptionUsd: 0 },
+        runsByDay: new Array<number>(days).fill(0),
+        costByDay: new Array<number>(days).fill(0),
+      };
+      out.set(r.agent_id, w);
+    }
+    const i = Math.round((Date.parse(`${r.day}T00:00:00Z`) - start) / 86_400_000);
+    if (i < 0 || i >= days) continue;
+    w.runs += r.runs;
+    w.finished += r.finished;
+    w.clean += r.clean;
+    w.needsReview += r.needs_review;
+    if (i === days - 1) w.needsReviewToday += r.needs_review;
+    w.costUsd += r.cost_usd;
+    w.costApi += r.cost_api;
+    w.runsByDay[i] = (w.runsByDay[i] ?? 0) + r.runs;
+    w.costByDay[i] = (w.costByDay[i] ?? 0) + r.cost_usd;
+  }
+  for (const w of out.values()) w.cost = split(w.costUsd, w.costApi);
+  return out;
+}
+
+/** Runs per stored review reason of one agent since `days` days ago, most frequent first. */
+export function agentReviewReasons(agentId: string, days: number): Array<{ reason: ReviewReason; count: number }> {
+  const rows = services()
+    .db.prepare(
+      `SELECT j.value AS reason, COUNT(*) AS n
+       FROM runs, json_each(COALESCE(runs.review_reasons_json, '[]')) AS j
+       WHERE agent_id = ? AND created_at >= ?
+       GROUP BY j.value ORDER BY n DESC, j.value`,
+    )
+    .all(agentId, new Date(Date.now() - days * 24 * 3600_000).toISOString()) as Array<{
+    reason: ReviewReason;
+    n: number;
+  }>;
+  return rows.map((r) => ({ reason: r.reason, count: r.n }));
+}
+
+/**
+ * One agent for its page: the listAgents entry plus its own prompt body and, for a link,
+ * the body of the project's persona file (frontmatter dropped). null when the id is unknown.
+ */
+export function agentDetail(id: string) {
+  const cfg = config();
+  const def = cfg.agents.get(id);
+  const agent = listAgents().find((a) => a.id === id);
+  if (!def || !agent) return null;
+  let persona: string | null = null;
+  if (agent.linked?.path) {
+    try {
+      persona = readFileSync(agent.linked.path, "utf8")
+        .replace(/^---\r?\n[\s\S]*?\r?\n---\r?\n?/, "")
+        .trim();
+    } catch {
+      persona = null;
+    }
+  }
+  return {
+    agent,
+    systemPrompt: def.systemPrompt,
+    persona,
+    project: def.project ? (cfg.projects.get(def.project) ?? null) : null,
+  };
+}
+
 /**
  * Bash allow-list entries worth suggesting per agent: the commands its last
  * `perAgent` runs were denied (stored denied_tools_json), reduced to a

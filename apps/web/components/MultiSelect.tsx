@@ -44,6 +44,7 @@ export function MultiSelect({
   selected,
   clearHref,
   selectAllHref,
+  path = "/",
 }: {
   param: string;
   label: string;
@@ -52,6 +53,8 @@ export function MultiSelect({
   selected: string[];
   clearHref: string;
   selectAllHref: string;
+  /** The page the toggles navigate on (Runs is "/", Agents "/agents"). */
+  path?: string;
 }) {
   const router = useRouter();
   const id = useId();
@@ -155,7 +158,7 @@ export function MultiSelect({
     for (const v of next) p.append(param, v);
     const s = p.toString();
     sent.push(s);
-    router.replace(s ? `/?${s}` : "/", { scroll: false });
+    router.replace(s ? `${path}?${s}` : path, { scroll: false });
   };
   const toggle = (v: string) => apply(sel.includes(v) ? sel.filter((x) => x !== v) : [...sel, v]);
 
