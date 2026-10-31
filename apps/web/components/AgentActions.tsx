@@ -14,11 +14,14 @@ export function AgentActions({
   source,
   linked,
   overridesBuiltin = false,
+  afterDelete,
 }: {
   id: string;
   source: "builtin" | "user";
   linked: string | null;
   overridesBuiltin?: boolean;
+  /** Where to go once the agent is gone (its own page would 404); an override leaves the builtin, so it stays. */
+  afterDelete?: string;
 }) {
   const router = useRouter();
   const [pending, start] = useTransition();
@@ -33,7 +36,8 @@ export function AgentActions({
       const r = kind === "delete" ? await deleteAgentAction(id) : await unlinkAgentAction(id);
       setResult(r);
       setConfirm(null);
-      if (r.ok) router.refresh();
+      if (r.ok && kind === "delete" && afterDelete && !overridesBuiltin) router.push(afterDelete);
+      else if (r.ok) router.refresh();
     });
 
   return (
