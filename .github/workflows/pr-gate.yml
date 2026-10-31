@@ -21,7 +21,7 @@ on:
   push:
     branches: [main]
   workflow_run:
-    workflows: [Checks (lint, build, test)]
+    workflows: ["Checks (lint, build, test)"]
     types: [completed]
   schedule:
     - cron: "41 * * * *"
