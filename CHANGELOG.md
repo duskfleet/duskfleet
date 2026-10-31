@@ -14,7 +14,7 @@ All notable changes to Duskfleet are listed here. The format follows
 
 ### Changed
 
-- The Publish workflow authenticates with npm trusted publishing (OIDC) instead of an `NPM_TOKEN` secret; the two packages name the repository and `publish.yml` as their trusted publisher ([#310](https://github.com/duskfleet/duskfleet/pull/310)).
+- The Publish workflow authenticates with npm trusted publishing (OIDC) instead of an `NPM_TOKEN` secret; the two packages name the repository and `publish.yml` as their trusted publisher ([#311](https://github.com/duskfleet/duskfleet/pull/311)).
 - Runs and schedule command gates get an allow-list of Duskfleet's environment instead of all of it: `GITHUB_TOKEN`, `NPM_TOKEN`, `AWS_*` and the like no longer reach an agent unless named in `claude.env_passthrough` or an agent's `env_passthrough` ([#185](https://github.com/duskfleet/duskfleet/issues/185)). An agent that used `gh` with a token from the server's environment now needs `env_passthrough: [GH_TOKEN]`.
 
 ### Fixed
