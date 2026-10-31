@@ -51,6 +51,7 @@ import {
   utcMonthStart,
 } from "@duskfleet/core";
 import { listScoped, scopeList } from "./scope";
+import { mergeSeries } from "./trends";
 
 interface Services {
   configDir: string;
@@ -683,6 +684,12 @@ export function overview(
 /** Outcomes per bucket of `range` for /trends (core `outcomeSeries`), on the same agent / project scope as the Runs page. */
 export function trends(range: TrendRange, filter: Pick<RunsFilter, "agentId" | "projectPath"> = {}): OutcomeSeries {
   return outcomeSeries(services().db, { range, ...filter });
+}
+
+/** /trends on a set of agents (a multi-value ?agent=): core filters on one agent, so one series per agent, merged. */
+export function trendsForAgents(range: TrendRange, agentIds: string[], projectPath?: string): OutcomeSeries {
+  const parts = [...new Set(agentIds)].map((agentId) => trends(range, { agentId, projectPath }));
+  return mergeSeries(parts) ?? trends(range, { projectPath });
 }
 
 /** Spend per bucket of `range` for /costs (core `costSeries`), on the agent / project scope of the Runs page. */
