@@ -4,10 +4,14 @@
 # hand. Every pull request runs the `dry-run` job, the same steps ending in
 # `npm publish --dry-run`, so a broken pack is caught before the tag.
 #
-# The `publish` job needs the NPM_TOKEN repository secret: a granular npm access token that can
-# publish `duskfleet` and `@duskfleet/web` only. `id-token: write` lets npm sign the provenance
-# statement through GitHub's OIDC token; each package.json `repository` must name this repository
-# or the registry refuses the provenance.
+# The `publish` job authenticates with npm trusted publishing (OIDC), no npm token: each package
+# on npmjs.com names this repository and the workflow file that STARTS the run as its trusted
+# publisher, with "Allow npm publish" on. That file is `release.yml`: this one runs as a reusable
+# workflow it calls, and npm matches the top-level `workflow_ref` claim (with `publish.yml` the
+# registry answered 404 on 2026-10-31). A tag pushed by hand runs this file directly, so it does
+# not match and fails to authenticate: cut releases from release.yml. `id-token: write` lets the
+# job mint the OIDC token, which npm also uses to sign the provenance statement. Each package.json
+# `repository` must name this repository or the registry refuses the provenance.
 name: Publish to npm
 run-name: "${{ github.event_name == 'pull_request' && format('npm publish dry-run for PR #{0}', github.event.pull_request.number) || format('npm publish {0}', inputs.tag || github.ref_name) }}"
 
@@ -129,25 +133,36 @@ jobs:
         run: npm run check:pack -- --require-web-build
 
       # A version already on the registry is skipped, so a re-run after a failed second publish
-      # finishes the release instead of failing on the first package.
+      # finishes the release instead of failing on the first package. npm "auto-corrects" a
+      # manifest it dislikes and only warns (it dropped the `bin` entries of the v0.1.0 tag on
+      # 2026-10-31, the dry-run guard below only covers pull requests): the publish is aborted
+      # on that warning with `--dry-run` first, so a broken pack never reaches the registry.
       - name: npm publish --provenance (duskfleet)
         working-directory: packages/duskfleet
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: |
+          set -o pipefail
           if npm view "duskfleet@${TAG#v}" version > /dev/null 2>&1; then
             echo "duskfleet@${TAG#v} is already published, skipping"
           else
+            npm publish --dry-run --access public 2>&1 | tee "$RUNNER_TEMP/publish-duskfleet.log"
+            if grep -q "auto-corrected" "$RUNNER_TEMP/publish-duskfleet.log"; then
+              echo "::error::npm auto-corrected the manifest, see the warnings above"
+              exit 1
+            fi
             npm publish --provenance --access public
           fi
 
       - name: npm publish --provenance (@duskfleet/web)
         working-directory: apps/web
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: |
+          set -o pipefail
           if npm view "@duskfleet/web@${TAG#v}" version > /dev/null 2>&1; then
             echo "@duskfleet/web@${TAG#v} is already published, skipping"
           else
+            npm publish --dry-run --access public 2>&1 | tee "$RUNNER_TEMP/publish-web.log"
+            if grep -q "auto-corrected" "$RUNNER_TEMP/publish-web.log"; then
+              echo "::error::npm auto-corrected the manifest, see the warnings above"
+              exit 1
+            fi
             npm publish --provenance --access public
           fi
