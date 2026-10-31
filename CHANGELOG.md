@@ -8,20 +8,7 @@ All notable changes to Duskfleet are listed here. The format follows
 
 ## [Unreleased]
 
-### Added
-
-- A Release workflow in the Actions tab: run it on `main` with the version, it tags, creates the GitHub release from the CHANGELOG section and publishes both packages ([#273](https://github.com/duskfleet/duskfleet/pull/273)).
-
-### Changed
-
-- The Publish workflow authenticates with npm trusted publishing (OIDC) instead of an `NPM_TOKEN` secret; the two packages name the repository and `release.yml`, the workflow that starts the run, as their trusted publisher ([#311](https://github.com/duskfleet/duskfleet/pull/311), [#312](https://github.com/duskfleet/duskfleet/pull/312)).
-- Runs and schedule command gates get an allow-list of Duskfleet's environment instead of all of it: `GITHUB_TOKEN`, `NPM_TOKEN`, `AWS_*` and the like no longer reach an agent unless named in `claude.env_passthrough` or an agent's `env_passthrough` ([#185](https://github.com/duskfleet/duskfleet/issues/185)). An agent that used `gh` with a token from the server's environment now needs `env_passthrough: [GH_TOKEN]`.
-
-### Fixed
-
-- The published packages had `bin` paths with a `./` prefix, which npm 11 drops at publish time, so `npx duskfleet` would have had no executable; the pack gate now refuses such entries and `publish --dry-run` fails when npm auto-corrects the manifest ([#278](https://github.com/duskfleet/duskfleet/pull/278)); the publish job itself now runs that check before each `npm publish`, so a tag cut before the fix cannot ship without its executables ([#312](https://github.com/duskfleet/duskfleet/pull/312)).
-
-## [0.1.0] - 2026-10-26
+## [0.1.0] - 2026-10-31
 
 First public release. Duskfleet runs Claude Code agents unattended in your projects, from an MCP
 server, a CLI or a schedule, records every run in a local SQLite database, and shows them in a
@@ -80,6 +67,7 @@ localhost dashboard.
 - npm packages `duskfleet` (CLI and MCP server) and `@duskfleet/web` (dashboard) at the same version ([#230](https://github.com/duskfleet/duskfleet/pull/230), [#243](https://github.com/duskfleet/duskfleet/pull/243)), published with provenance from a tag ([#239](https://github.com/duskfleet/duskfleet/pull/239)).
 - README landing page ([#114](https://github.com/duskfleet/duskfleet/pull/114)), "How it works" with run-flow and lifecycle diagrams ([#96](https://github.com/duskfleet/duskfleet/pull/96)), troubleshooting for unattended runs ([#241](https://github.com/duskfleet/duskfleet/pull/241)), security policy and threat model ([#234](https://github.com/duskfleet/duskfleet/pull/234)).
 - Windows support marked experimental, with a test plan ([#245](https://github.com/duskfleet/duskfleet/pull/245)).
+- A Release workflow in the Actions tab: run it on `main` with the version, it tags, creates the GitHub release from the CHANGELOG section and publishes both packages ([#273](https://github.com/duskfleet/duskfleet/pull/273)).
 
 ### Changed
 
@@ -88,6 +76,8 @@ localhost dashboard.
 - The name is written "Duskfleet" everywhere, with a new tagline ([#221](https://github.com/duskfleet/duskfleet/pull/221)); brand assets rebuilt from the new design ([#212](https://github.com/duskfleet/duskfleet/pull/212)).
 - Dashboard: a more readable night palette and type ramp ([#240](https://github.com/duskfleet/duskfleet/pull/240)); the agent state badge stays on the title row ([#232](https://github.com/duskfleet/duskfleet/pull/232)).
 - Next.js telemetry is disabled in the dashboard scripts ([#231](https://github.com/duskfleet/duskfleet/pull/231)).
+- The Publish workflow authenticates with npm trusted publishing (OIDC) instead of an `NPM_TOKEN` secret; the two packages name the repository and `release.yml`, the workflow that starts the run, as their trusted publisher ([#311](https://github.com/duskfleet/duskfleet/pull/311), [#312](https://github.com/duskfleet/duskfleet/pull/312)).
+- Runs and schedule command gates get an allow-list of Duskfleet's environment instead of all of it: `GITHUB_TOKEN`, `NPM_TOKEN`, `AWS_*` and the like no longer reach an agent unless named in `claude.env_passthrough` or an agent's `env_passthrough` ([#185](https://github.com/duskfleet/duskfleet/issues/185)). An agent that used `gh` with a token from the server's environment now needs `env_passthrough: [GH_TOKEN]`.
 
 ### Fixed
 
@@ -95,6 +85,7 @@ localhost dashboard.
 - Orphan recovery no longer fails a run owned by a live process ([#16](https://github.com/duskfleet/duskfleet/pull/16)) or a fresh run without an owner ([#97](https://github.com/duskfleet/duskfleet/pull/97)).
 - An inherited `CLAUDE_BIN` no longer leaks into child runs ([#18](https://github.com/duskfleet/duskfleet/pull/18)).
 - An allow-listed MCP server that a run did not use no longer counts as missing ([#165](https://github.com/duskfleet/duskfleet/pull/165)).
+- The published packages had `bin` paths with a `./` prefix, which npm 11 drops at publish time, so `npx duskfleet` would have had no executable; the pack gate now refuses such entries and `publish --dry-run` fails when npm auto-corrects the manifest ([#278](https://github.com/duskfleet/duskfleet/pull/278)); the publish job itself now runs that check before each `npm publish`, so a tag cut before the fix cannot ship without its executables ([#312](https://github.com/duskfleet/duskfleet/pull/312)).
 
 [Unreleased]: https://github.com/duskfleet/duskfleet/compare/v0.1.0...HEAD
 [0.1.0]: https://github.com/duskfleet/duskfleet/releases/tag/v0.1.0
