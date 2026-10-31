@@ -112,9 +112,12 @@ Re-running it is safe: an existing tag or release is kept, a published version i
   `npm run check`, `npm run build:web` and `npm run check:pack -- --require-web-build`, and
   publishes `duskfleet`, then `@duskfleet/web`, with `npm publish --provenance --access public`
   from their package directories. There is no npm token: both packages on npmjs.com name this
-  repository and `publish.yml` as their trusted publisher (OIDC, "Allow npm publish" on), and
-  the job's `id-token: write` lets npm accept GitHub's OIDC token as the credential and sign the
-  provenance statement with it. A version
+  repository and `release.yml` as their trusted publisher (OIDC, "Allow npm publish" on; the
+  file is the one that starts the run, and publish.yml runs as a reusable workflow called by
+  release.yml, so a tag pushed by hand does not authenticate), and the job's `id-token: write`
+  lets npm accept GitHub's OIDC token as the credential and sign the provenance statement with
+  it. Before each publish the same command runs with `--dry-run` and the job fails if npm
+  reports an auto-corrected manifest, whatever the tag's code says. A version
   already on the registry is skipped, so re-running a release whose second publish failed
   finishes it. Provenance requires each `package.json` `repository` to name this repository.
 - `publish dry-run`, on every pull request: the same steps without publishing, ending in
