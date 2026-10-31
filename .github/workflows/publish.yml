@@ -137,6 +137,8 @@ jobs:
       # manifest it dislikes and only warns (it dropped the `bin` entries of the v0.1.0 tag on
       # 2026-10-31, the dry-run guard below only covers pull requests): the publish is aborted
       # on that warning with `--dry-run` first, so a broken pack never reaches the registry.
+      # `--loglevel verbose`: npm logs the registry's reason for refusing the OIDC token exchange
+      # only at that level, then falls back to no credential and the PUT ends in a bare 404.
       - name: npm publish --provenance (duskfleet)
         working-directory: packages/duskfleet
         run: |
@@ -149,7 +151,7 @@ jobs:
               echo "::error::npm auto-corrected the manifest, see the warnings above"
               exit 1
             fi
-            npm publish --provenance --access public
+            npm publish --provenance --access public --loglevel verbose
           fi
 
       - name: npm publish --provenance (@duskfleet/web)
@@ -164,5 +166,5 @@ jobs:
               echo "::error::npm auto-corrected the manifest, see the warnings above"
               exit 1
             fi
-            npm publish --provenance --access public
+            npm publish --provenance --access public --loglevel verbose
           fi
