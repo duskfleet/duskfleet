@@ -12,7 +12,8 @@
 #
 # `pull_request_target` runs in the context of the base branch (secrets available, the PR's
 # code is never checked out), which is what a sync of labels needs.
-name: Project sync
+name: Project board sync (flow labels)
+run-name: Board sync after ${{ github.event_name }}
 
 on:
   issues:
@@ -33,7 +34,7 @@ permissions:
 
 jobs:
   sync:
-    name: sync
+    name: sync board
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:

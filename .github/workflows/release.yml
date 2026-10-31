@@ -10,7 +10,8 @@
 # failed is safe, even after main moved on or bumped the next version: when the tag exists the
 # checks and the notes read from the tag (the release is what the tag points to), the tag and
 # the release are kept, and publish skips versions already on npm.
-name: Release
+name: Release (tag, GitHub release, npm publish)
+run-name: Release ${{ inputs.version }}
 
 on:
   workflow_dispatch:
@@ -139,7 +140,7 @@ jobs:
           fi
 
   publish:
-    name: publish
+    name: publish to npm
     needs: tag
     uses: ./.github/workflows/publish.yml
     with:

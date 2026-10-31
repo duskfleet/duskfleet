@@ -14,13 +14,14 @@
 # `repo`; fine-grained: "Contents: read and write", "Pull requests: read and write", "Issues:
 # read and write", "Metadata: read") and both work; without it the job still relabels but
 # never updates a branch.
-name: PR gate
+name: PR gate (relabel conflicting and red PRs)
+run-name: PR gate after ${{ github.event_name == 'workflow_run' && 'checks' || github.event_name }}
 
 on:
   push:
     branches: [main]
   workflow_run:
-    workflows: [CI]
+    workflows: ["Checks (lint, build, test)"]
     types: [completed]
   schedule:
     - cron: "41 * * * *"
@@ -38,7 +39,7 @@ permissions:
 
 jobs:
   gate:
-    name: gate
+    name: relabel PRs
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
