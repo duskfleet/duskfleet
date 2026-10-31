@@ -143,7 +143,9 @@ code,
   margin: 0 auto;
   padding: 0 20px;
 }
+/* DS-22: tabs, Settings and the scheduler group share one offset: centre line 35.29 px from the nav top (33.21 + 2.08) */
 .nav {
+  --nav-line: 2.08px;
   display: flex;
   gap: 6px;
   align-items: center;
@@ -204,7 +206,7 @@ code,
     color: inherit;
   }
 }
-/* tabs and meta sit on the wordmark's lowercase line, not on the box centre (DS-09, DS-20: +2.08 / +4.08 px);
+/* tabs and meta sit on the wordmark's lowercase line, not on the box centre (DS-09, DS-20, DS-22: +2.08 px);
    DS-08 filled pill: the tinted pill with a strong edge is the only active signal */
 .nav a.tab {
   color: var(--muted);
@@ -213,7 +215,7 @@ code,
   font-size: 1rem;
   line-height: 24px;
   font-weight: 500;
-  transform: translateY(2.08px);
+  transform: translateY(var(--nav-line));
 }
 .nav a.tab:hover {
   color: var(--text);
@@ -236,7 +238,7 @@ code,
   display: flex;
   gap: 10px;
   align-items: center;
-  transform: translateY(4.08px);
+  transform: translateY(var(--nav-line));
 }
 .nav .meta .scheduler {
   color: var(--muted);
@@ -2986,11 +2988,13 @@ details.desc ul {
 }
 
 /* ---- nav: Settings gear (DS-10) ------------------------------------------ */
-/* at the right end, after the scheduler meta; active = the tab treatment (pill + underline) */
+/* at the right end, after the scheduler meta; active = the tab treatment (pill + underline);
+   DS-22: 12 + the nav's 6 px gap = 18 px from the scheduler group, 30 px to the gear, as between two tab labels */
 .nav a.nav-settings {
   display: inline-flex;
   align-items: center;
   gap: 6px;
+  margin-left: 12px;
 }
 .nav a.nav-settings svg {
   flex: none;
@@ -2999,10 +3003,11 @@ details.desc ul {
   display: none;
 }
 @media (max-width: 600px) {
-  /* gear at the right of the brand row (44 px target, icon only), tabs on the next line */
+  /* gear at the right of the brand row (44 px target, icon only, centred on the lockup's box), tabs on the next line */
   .nav a.nav-settings {
     order: 1;
     margin-left: auto;
+    transform: none;
     width: 44px;
     height: 44px;
     justify-content: center;
