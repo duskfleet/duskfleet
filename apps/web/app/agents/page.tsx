@@ -141,6 +141,7 @@ export default async function AgentsPage({ searchParams }: { searchParams: Promi
 
   // KPIs: every configured agent, whatever the filters show.
   const running = rows.filter((r) => r.state === "running");
+  const review = rows.filter((r) => r.state === "review");
   const groupCount = new Set(agents.map(groupOf)).size;
   const linkCount = agents.filter((a) => a.claudeAgent).length;
 
@@ -184,10 +185,8 @@ export default async function AgentsPage({ searchParams }: { searchParams: Promi
         </div>
         <div className="stat">
           <div className="label">Needs review</div>
-          <div className={`value ${rows.some((r) => r.state === "review") ? "warn" : ""}`}>
-            {rows.filter((r) => r.stats?.lastNeedsReview).length}
-          </div>
-          <div className="sub">last run ended with a review reason</div>
+          <div className={`value ${review.length ? "warn" : ""}`}>{review.length}</div>
+          <div className="sub">last run ended with a review reason, idle now</div>
         </div>
         <div className="stat">
           <div className="label">Paused</div>

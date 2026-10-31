@@ -282,6 +282,7 @@ export function listRuns(filter: RunsFilter = {}): RunWithProject[] {
 /** How a run ended, as the agent page's Recent runs Status filter partitions them (stored review verdict). */
 export type RunBucket = "running" | "review" | "clean" | "cancelled";
 
+/** A run not ended yet: the Running bucket here and the agent's running state (agentStats). */
 const ACTIVE_SQL = "status IN ('running','pending')";
 const BUCKET_SQL: Record<RunBucket, string> = {
   running: `(${ACTIVE_SQL})`,
@@ -295,7 +296,7 @@ export function agentRecentRuns(agentId: string, buckets: RunBucket[], limit: nu
   const { db, runs } = services();
   const where = buckets.length ? `AND (${buckets.map((b) => BUCKET_SQL[b]).join(" OR ")})` : "";
   const ids = db
-    .prepare(`SELECT id FROM runs WHERE agent_id = ? ${where} ORDER BY created_at DESC LIMIT ?`)
+    .prepare(`SELECT id FROM runs WHERE kind = 'run' AND agent_id = ? ${where} ORDER BY created_at DESC LIMIT ?`)
     .all(agentId, limit) as Array<{ id: string }>;
   const list = ids.map((r) => runs.get(r.id)).filter((r): r is Run => r !== null);
   const label = projectLabeller();
@@ -392,7 +393,7 @@ export function agentStats(): AgentStats[] {
     .prepare(
       `SELECT agent_id,
               COUNT(*)                                          AS total,
-              SUM(status = 'running')                           AS running,
+              SUM(${ACTIVE_SQL})                                AS running,
               SUM(status = 'completed')                         AS completed,
               SUM(status IN ('failed','timed_out','cancelled')) AS failed,
               SUM(${NEEDS_REVIEW_SQL})                          AS needs_review,

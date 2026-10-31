@@ -93,15 +93,16 @@ in the nav); the other pages are static.
   full value.
 - **Agents**: four tiles (agents, running now, needs review, auto-paused), Project / Status
   filters, a search on id and description and a sort (last run, id, runs, clean, cost), then one
-  table per project ("Any project" first), one row per agent: status (idle, running, needs review
-  from the stored review reasons of its last run, or "paused · auto" when a bound schedule was
-  auto-paused), id and kind, a one-line description, model, runs over 7 days with a per-day
+  table per project ("Any project" first), one row per agent: status (running with a pending or
+  running run, else "paused · auto" when a bound schedule was auto-paused, else needs review from
+  the stored review reasons of its last run, else idle; the tiles and the Status filter count the
+  same status), id and kind, a one-line description, model, runs over 7 days with a per-day
   sparkline, clean %, cost and last run, and links to its runs and schedule. Under about 720 px
   the same row reflows into a four-line block, each number under its column label.
 - **Agent** (`/agents/<id>`): everything that configures one agent. Header with kind, builtin /
   override chip, status, project, model and file; 30-day tiles over UTC days (runs and cost with
   sparklines, clean %, needs review; gate runs left out of the counts, kept in the cost); the system prompt (own) or the link target with the project persona
-  (link), expanding in place; the 5 latest runs with a Status filter; permissions (allow-list
+  (link), expanding in place; the 5 latest runs (gate runs left out) with a Status filter; permissions (allow-list
   past 8 entries expands in place) and limits, including daily caps and the monthly budget; the
   bound schedules; and the needs-review reasons over 30 days, each bar opening Runs filtered by
   agent and reason. User agents can be deleted or unlinked here, with an inline confirmation;
