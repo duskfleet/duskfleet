@@ -1,10 +1,14 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
+  agentRows,
   bucketLabel,
   cleanRate,
   countAxis,
+  defaultSelection,
+  deltaText,
   granularityText,
+  mergeSeries,
   percentAxis,
   spreadLabels,
   worseningAgent,
@@ -65,6 +69,74 @@ test("spreadLabels keeps labels apart and inside the plot", () => {
       ["d", 230],
     ],
   );
+});
+
+test("percentAxis: 25-point steps from 0 under 40, else 10-point steps", () => {
+  assert.deepEqual(percentAxis([39, 90]).ticks, [0, 25, 50, 75, 100]);
+  assert.deepEqual(percentAxis([45]).ticks, [40, 50, 60, 70, 80, 90, 100]);
+});
+
+test("spreadLabels clamps every label to the plot box", () => {
+  const out = spreadLabels(
+    Array.from({ length: 6 }, (_, i) => ({ id: String(i), top: 230 })),
+    15,
+    232,
+  );
+  assert.deepEqual(
+    out.map((o) => o.top),
+    [157, 172, 187, 202, 217, 232],
+  );
+  assert.deepEqual(
+    spreadLabels([{ id: "a", top: -4 }], 15, 232).map((o) => o.top),
+    [0],
+  );
+});
+
+const counts = (...rates) =>
+  rates.map((r) => (r === null ? { finished: 0, clean: 0, needsReview: 0, cancelled: 0 } : { finished: 10, clean: r / 10, needsReview: 10 - r / 10, cancelled: 0 }));
+
+test("agentRows ranks the lowest current clean rate first with the change over the period", () => {
+  const rows = agentRows([
+    { agentId: "b", counts: counts(90, 80, 60) },
+    { agentId: "a", counts: counts(null, 20, 30) },
+    { agentId: "c", counts: counts(null, null, null) },
+    { agentId: "d", counts: counts(null, null, 60) },
+  ]);
+  assert.deepEqual(
+    rows.map((r) => [r.agentId, r.rate, r.delta, r.runs]),
+    [
+      ["a", 30, 10, 20],
+      ["b", 60, -30, 30],
+      ["d", 60, null, 10],
+      ["c", null, null, 0],
+    ],
+  );
+  assert.deepEqual(defaultSelection(rows, "b"), ["b", "a", "d"]);
+  assert.deepEqual(defaultSelection(rows, null), ["a", "b", "d"]);
+  assert.equal(deltaText(-8), "↓8");
+  assert.equal(deltaText(4), "↑4");
+  assert.equal(deltaText(0), "·0");
+  assert.equal(deltaText(null), "–");
+});
+
+test("mergeSeries sums the agents of a multi-value ?agent=", () => {
+  const part = (agentId, clean, reason, firstRunAt) => ({
+    overall: [{ finished: 2, clean, needsReview: 2 - clean, cancelled: 0 }],
+    byAgent: [{ agentId, counts: [{ finished: 2, clean, needsReview: 2 - clean, cancelled: 0 }] }],
+    totals: { finished: 2, clean, needsReview: 2 - clean, cancelled: 0 },
+    reasons: [{ reason, count: 2 - clean }],
+    firstRunAt,
+  });
+  const m = mergeSeries([part("a", 1, "denial", "2026-10-02"), part("b", 0, "denial", "2026-10-01")]);
+  assert.deepEqual(m.overall, [{ finished: 4, clean: 1, needsReview: 3, cancelled: 0 }]);
+  assert.deepEqual(m.totals, { finished: 4, clean: 1, needsReview: 3, cancelled: 0 });
+  assert.deepEqual(m.reasons, [{ reason: "denial", count: 3 }]);
+  assert.deepEqual(
+    m.byAgent.map((a) => a.agentId),
+    ["a", "b"],
+  );
+  assert.equal(m.firstRunAt, "2026-10-01");
+  assert.equal(mergeSeries([]), undefined);
 });
 
 test("labels are UTC", () => {
