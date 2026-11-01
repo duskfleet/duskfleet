@@ -207,7 +207,8 @@ export function RunTable({
               </td>
               {ended ? (
                 <td className="when col-started" title={fmtTime(finished)}>
-                  {fmtClock(finished)}
+                  {/* the agent page lists live runs among the ended ones */}
+                  {running ? "now" : fmtClock(finished)}
                 </td>
               ) : (
                 <td className="when col-started" title={fmtTime(started)}>
