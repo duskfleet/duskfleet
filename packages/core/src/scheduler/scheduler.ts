@@ -154,6 +154,11 @@ export class Scheduler {
     return this.repo.list();
   }
 
+  /** Agents with more than one schedule, left by databases from before the one-per-agent rule (doctor). */
+  duplicateAgents(): { agentId: string; schedules: Schedule[] }[] {
+    return this.repo.duplicateAgents();
+  }
+
   /** Schedules with the state of the run each last started, what their next fire does (see scheduleRunState) and their 7-day idle cost. */
   listWithLastRun(): Array<Schedule & ScheduleRunState & { idle7d: IdleStats }> {
     const now = this.now();
