@@ -2,8 +2,9 @@
  * The guided first run (#204): the optional last step of an interactive `init`, and
  * `duskfleet run --first` to repeat it later (same code). It registers a project of the user's
  * in the private registry, creates the read-only `first-run` agent through the one agent-create
- * path in core (skipped when it exists), runs it once with haiku, prints what the run did and
- * cost, and offers to delete the agent again (the run row keeps its agent id either way).
+ * path in core (an existing one is reused only when it is still read-only and cheap), runs it
+ * once with haiku, prints what the run did and cost, and offers to delete the agent again when
+ * this step created it (the run row keeps its agent id either way).
  *
  * Duskfleet ships no agent (owner decision 2026-10-26): this step creates its own, named one,
  * so no agent-less run mode exists. Answers are read line by line from stdin (a terminal, or a
@@ -11,6 +12,7 @@
  */
 import { createInterface } from "node:readline";
 import {
+  type AgentDefinition,
   createAgentFromFields,
   type DuskFleetConfig,
   deleteAgentFile,
@@ -105,15 +107,62 @@ function projectFor(app: App, input: string): string {
   return id;
 }
 
-function ensureAgent(app: App): void {
+const WRITE_TOOLS = ["Edit", "Write", "NotebookEdit"];
+
+/**
+ * Why an existing `first-run` agent may not be used for this step: the step promises a
+ * read-only haiku run that costs cents, so the agent must be read-only (dontAsk, Edit / Write /
+ * NotebookEdit disallowed, no write or Bash tool allowed, no MCP), have a budget no larger than
+ * the step's own, and not be bound to a project other than the one chosen. Empty = usable.
+ */
+export function firstRunAgentProblems(agent: AgentDefinition, projectPath: string, config: DuskFleetConfig): string[] {
+  const problems: string[] = [];
+  if (agent.claudeAgent) problems.push(`it is a link to the project agent "${agent.claudeAgent}"`);
+  if (agent.permissionMode !== FIRST_RUN_AGENT_FIELDS.permission_mode) {
+    problems.push(`permission_mode is ${agent.permissionMode}, not ${FIRST_RUN_AGENT_FIELDS.permission_mode}`);
+  }
+  const missing = WRITE_TOOLS.filter((t) => !(agent.disallowedTools ?? []).includes(t));
+  if (missing.length > 0) problems.push(`disallowed_tools lacks ${missing.join(", ")}`);
+  const writers = (agent.allowedTools ?? []).filter((t) => /^(Edit|Write|NotebookEdit|Bash|mcp__)/.test(t));
+  if (writers.length > 0) problems.push(`allowed_tools contains ${writers.join(", ")}`);
+  if (agent.inheritMcp) problems.push("inherit_mcp is true");
+  const budget = agent.maxBudgetUsd;
+  if (budget === undefined || budget > FIRST_RUN_AGENT_FIELDS.max_budget_usd) {
+    problems.push(
+      `max_budget_usd is ${budget === undefined ? "unset" : `$${budget}`}, above $${FIRST_RUN_AGENT_FIELDS.max_budget_usd}`,
+    );
+  }
+  if (agent.project && config.projects.get(agent.project)?.path !== projectPath) {
+    problems.push(`it is bound to project "${agent.project}"`);
+  }
+  return problems;
+}
+
+/**
+ * Before anything is registered: refuses an existing `first-run` agent that does not keep the
+ * step's promise (`firstRunAgentProblems`). Throws ProjectValidationError for a bad path.
+ * Returns null when the agent is usable or absent, else the message to print.
+ */
+function refuseExistingAgent(app: App, input: string): string | null {
+  const config = app.runs.reloadConfig();
+  const existing = config.agents.get(FIRST_RUN_AGENT_ID);
+  if (!existing) return null;
+  const problems = firstRunAgentProblems(existing, validateProjectPath(expandHome(input), config), config);
+  if (problems.length === 0) return null;
+  return `the existing "${FIRST_RUN_AGENT_ID}" agent (${existing.sourcePath}) is not the read-only, cheap agent this step promises: ${problems.join("; ")}. Delete or rename it (duskfleet agents), then try again.`;
+}
+
+/** Creates the agent unless it exists; true when this step wrote the file. */
+function ensureAgent(app: App): boolean {
   const config = app.runs.reloadConfig();
   const existing = config.agents.get(FIRST_RUN_AGENT_ID);
   if (existing) {
     out(`Agent "${FIRST_RUN_AGENT_ID}" already exists (${existing.sourcePath}); using it.`);
-    return;
+    return false;
   }
   const agent = createAgentFromFields("own", { ...FIRST_RUN_AGENT_FIELDS }, config, () => app.runs.reloadConfig());
   out(`Agent "${FIRST_RUN_AGENT_ID}" written to ${agent.sourcePath}`);
+  return true;
 }
 
 function seconds(ms: number | null): string {
@@ -179,6 +228,11 @@ export async function runFirstRun(app: App, options: FirstRunOptions, prompter: 
   }
   let projectId: string;
   try {
+    const refused = refuseExistingAgent(app, input);
+    if (refused) {
+      fail(`First run: ${refused}`);
+      return 1;
+    }
     projectId = projectFor(app, input);
   } catch (err) {
     if (!(err instanceof ProjectValidationError)) throw err;
@@ -190,7 +244,7 @@ export async function runFirstRun(app: App, options: FirstRunOptions, prompter: 
     }
     return 1;
   }
-  ensureAgent(app);
+  const created = ensureAgent(app);
 
   let run = await app.runs.startRun({
     prompt: FIRST_RUN_PROMPT,
@@ -202,6 +256,7 @@ export async function runFirstRun(app: App, options: FirstRunOptions, prompter: 
   run = await app.runs.waitForRun(run.id, 24 * 60 * 60 * 1000);
   for (const line of firstRunSummary(run)) out(line);
   out("");
-  await offerDelete(app, prompter);
+  // Only offer to delete a file this step wrote: a pre-existing first-run agent is the user's.
+  if (created) await offerDelete(app, prompter);
   return run.status === "completed" ? 0 : 1;
 }

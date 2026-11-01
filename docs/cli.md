@@ -91,14 +91,19 @@ skips that question), then:
 3. Creates the agent `first-run` through the same path as `agents create` (own, `model: haiku`,
    `permission_mode: dontAsk`, `allowed_tools: [Read, Grep, Glob]`, `disallowed_tools: [Edit,
    Write, NotebookEdit]`, budget $0.25, 5 minutes; system prompt "You describe projects. You
-   never change files."). When `first-run` already exists it is used as it is.
+   never change files."). When `first-run` already exists it is used only if it keeps the
+   step's promise: `permission_mode: dontAsk`, Edit, Write and NotebookEdit disallowed, no
+   write, Bash or MCP tool allowed, `inherit_mcp` off, a budget of at most $0.25, and no binding
+   to another project. Otherwise the step stops before registering anything and names what
+   to change.
 4. Runs it with `--model haiku` and the prompt `Describe this project in three sentences. Do not
    change any file.`, waits, and prints the status, the duration, the tokens, the cost (or API
    value on a subscription), what the agent said, and `duskfleet run-info <run id>` /
    `duskfleet dashboard` to see more. A run that needs review gets one line saying why, with a
    link to [the dashboard page](dashboard.md).
-5. Asks `Keep the first-run agent? [Y/n]`. `n` deletes `data/agents/first-run.md` (the same
-   rule as `delete_agent`: user files only); the run keeps its agent id either way.
+5. When step 3 created the agent, asks `Keep the first-run agent? [Y/n]`. `n` deletes
+   `data/agents/first-run.md` (the same rule as `delete_agent`: user files only); the run keeps
+   its agent id either way. An agent that existed before is never offered for deletion.
 
 `run --first` exits 0 when the run completed, 1 when the path was refused or the run did not
 complete. It takes no `--agent`, `--model` or prompt: those are fixed.
