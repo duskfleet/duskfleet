@@ -3672,6 +3672,189 @@ details.desc ul {
   grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
   gap: 20px;
 }
+/* clean rate by agent (DS-23): callout line under the subtitle, chart beside the ranked table */
+.trend-panel .trend-callout {
+  margin: -10px 0 12px;
+  padding-left: 7px;
+  border-left: 3px solid var(--accent);
+  border-radius: 1px;
+  color: var(--text);
+  font-size: 14px;
+  line-height: 18px;
+  letter-spacing: 0.01em;
+}
+.rate-body {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 408px;
+  align-items: start;
+  gap: 20px;
+}
+@media (max-width: 1000px) {
+  .rate-body {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+.agent-table {
+  background: var(--panel-2);
+  border-radius: 8px;
+  padding: 6px 8px 0;
+  font-size: 14px;
+  line-height: 21px;
+  min-width: 0;
+}
+.at-find input {
+  width: 100%;
+  box-sizing: border-box;
+  height: 28px;
+  padding: 0 8px;
+  border: 1px solid var(--border-strong);
+  border-radius: 6px;
+  background: var(--panel);
+  color: var(--text);
+  font: inherit;
+}
+.at-find input::placeholder {
+  color: var(--faint);
+}
+.at-head,
+.at-row {
+  display: grid;
+  grid-template-columns: 13px 12px minmax(0, 1fr) 40px 36px 36px 44px;
+  align-items: center;
+  column-gap: 6px;
+  padding: 0 2px;
+}
+.at-head {
+  margin-top: 4px;
+  padding-bottom: 2px;
+  border-bottom: 1px solid var(--border);
+  color: var(--faint);
+  font-size: 12px;
+}
+.at-rows {
+  list-style: none;
+  margin: 0;
+  padding: 2px 0;
+  max-height: 168px;
+  overflow-y: auto;
+}
+.at-row {
+  color: var(--muted);
+  border-radius: 4px;
+  cursor: pointer;
+}
+.at-row:hover,
+.at-row:focus-visible {
+  text-decoration: none;
+  background: var(--panel);
+}
+.at-row:focus-visible {
+  outline: 1.5px solid var(--border-strong);
+  outline-offset: -1.5px;
+}
+.at-row.disabled {
+  cursor: not-allowed;
+}
+.at-row.disabled .at-box {
+  opacity: 0.5;
+}
+.at-box {
+  width: 13px;
+  height: 13px;
+  box-sizing: border-box;
+  border: 1px solid var(--border-strong);
+  border-radius: 3px;
+  display: inline-flex;
+}
+.at-box.on {
+  background: var(--text);
+  border-color: var(--text);
+}
+.at-box svg {
+  fill: none;
+  stroke: var(--panel-2);
+  stroke-width: 2;
+}
+.at-swatch {
+  height: 3px;
+  border-radius: 2px;
+}
+.at-swatch.tone-faint {
+  background: var(--faint);
+}
+.at-swatch.tone-accent {
+  background: var(--accent);
+}
+.at-id {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.at-head .at-id {
+  grid-column: 3;
+}
+.at-rate,
+.at-delta,
+.at-runs {
+  font-family: var(--font-mono);
+  letter-spacing: 0;
+  text-align: right;
+  white-space: nowrap;
+}
+.at-head .at-rate,
+.at-head .at-delta,
+.at-head .at-runs {
+  font-family: inherit;
+}
+.at-delta {
+  text-align: left;
+  padding-left: 4px;
+}
+.at-row .at-rate {
+  color: var(--text);
+}
+.at-delta.worst {
+  color: var(--accent);
+}
+.at-spark {
+  display: block;
+  overflow: visible;
+}
+.at-spark polyline {
+  fill: none;
+  stroke: var(--faint);
+  stroke-width: 1;
+  vector-effect: non-scaling-stroke;
+}
+.at-spark circle {
+  fill: var(--faint);
+}
+.at-spark.worst polyline {
+  stroke: var(--accent);
+}
+.at-spark.worst circle {
+  fill: var(--accent);
+}
+.at-empty {
+  padding: 4px 2px;
+  color: var(--faint);
+}
+.at-foot {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  border-top: 1px solid var(--border);
+  padding: 2px 2px 4px;
+  color: var(--faint);
+  font-size: 12px;
+  line-height: 20px;
+}
+.at-all {
+  display: none;
+  color: var(--text);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
 .trend-note {
   color: var(--muted);
   font-size: 14px;
@@ -3815,16 +3998,33 @@ details.desc ul {
   font-family: var(--font-sans);
   color: var(--muted);
 }
-.chart-callout {
-  position: absolute;
-  left: 30%;
-  right: 0;
-  bottom: 18%;
-  padding-left: 10px;
-  border-left: 3px solid var(--accent);
-  font-family: var(--font-sans);
-  letter-spacing: 0.01em;
-  color: var(--text);
+/* hidden-until-highlighted series and per-point dots: shown by AgentTable's hover / focus */
+.chart-line.is-off,
+.chart-dot.is-off,
+.chart-pt {
+  display: none;
+}
+.chart-dot.chart-pt {
+  width: 5px;
+  height: 5px;
+  background: var(--text);
+}
+.has-hl .chart-line,
+.has-hl .chart-dot {
+  stroke: var(--border-strong);
+  background: var(--border-strong);
+}
+.has-hl .chart-line.is-hl {
+  display: inline;
+  stroke: var(--text);
+  stroke-width: 2.5;
+}
+.has-hl .chart-dot.is-hl {
+  display: block;
+  background: var(--text);
+}
+.has-hl .chart-ends span.is-hl {
+  font-weight: 600;
 }
 .chart-x {
   grid-column: 2;
@@ -4053,13 +4253,20 @@ details.desc ul {
   .trend-toolbar .split {
     margin-left: 0;
   }
+  /* the table names the lines: end labels keep the rate only */
   .line-chart .chart-ends {
-    min-width: 0;
+    min-width: 3em;
   }
-  .line-chart .chart-ends span {
+  .line-chart .chart-ends .end-name {
     display: none;
   }
-  .chart-callout {
-    left: 0;
+  .agent-table:not(.expanded) .at-rows .extra {
+    display: none;
+  }
+  .agent-table .at-rows {
+    max-height: none;
+  }
+  .agent-table .at-all {
+    display: inline;
   }
 }
