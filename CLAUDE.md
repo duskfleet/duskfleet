@@ -86,6 +86,8 @@ npm workspaces, one `config/` and one SQLite database shared by three deliverabl
   `pause_scheduler` (one `scheduler_pause` row, migration 21) stops all firing until an instant,
   also read every tick (the holder keeps the lease and the sweep). `trigger_kind` is only `cron`.
   Create/update validation is `scheduler/crud.ts`, shared by MCP, CLI and dashboard.
+  One schedule per agent (owner decision 2026-11-01): `assertOneSchedulePerAgent` refuses a create
+  or an agent change, a repo query, never a unique index (older DBs hold duplicates; `doctor` lists them).
   Command gates (`sh -c`, the runs' env allow-list) are opt-in: `scheduler.allow_command_gates` (default false)
   is checked on create/update (`assertCommandGateAllowed`) and again in `evaluateGate` per tick.
   Auto-pause (`autoPauseReason`, migration 16): before a scheduled fire, the last

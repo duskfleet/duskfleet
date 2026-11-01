@@ -15,6 +15,22 @@ to one) and model override.
 The cron parser is in-house (no dependency) and DST-safe: it re-derives local time per
 candidate minute, so a schedule at 08:00 fires at 08:00 on both sides of a clock change.
 
+## One schedule per agent
+
+An agent has one cadence. `create_schedule` refuses a schedule for an agent that already has
+one, and `update_schedule` refuses to move a schedule to such an agent:
+
+```
+agent "<id>" already has the schedule "<name>" (<schedule id>); one schedule per agent, edit it or delete it first
+```
+
+A second prompt for the same agent is a second agent (or a `run_agent` call), not a second
+schedule. The rule is checked on create and update, not by a database index, so a database
+from before it that already holds duplicates still opens and keeps firing them; editing or
+pausing one of them still works. `duskfleet doctor` lists them under
+`scheduler.duplicateSchedules` (agent, schedule ids and names) and the Schedules page shows a
+warning line on each of their cards; delete all but one.
+
 ## Who ticks
 
 Any Duskfleet process can: the MCP server that Claude Desktop or Claude Code keeps alive, or
