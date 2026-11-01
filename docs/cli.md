@@ -11,6 +11,7 @@ npm run cli -- doctor --probe                             # plus one real hello 
 npm run cli -- run --project ~/Documents/Projects/my-app -- "Add a README section describing the build"
 npm run cli -- run --project my-app --agent my-reviewer --model sonnet -- "Review src/ for obvious bugs"   # registered id or path (--project-id is the explicit form)
 npm run cli -- run --no-wait --project /path -- "..."     # return immediately (see the note below)
+npm run cli -- run --first [--project /path]              # the guided first run of init again (haiku, costs cents)
 npm run cli -- runs --status completed --limit 10
 npm run cli -- run-info <run_id> --events   # includes subagents; --events adds the timeline
 npm run cli -- repair-subagents             # backfill subagent rows of finished runs from their logs
@@ -57,13 +58,50 @@ with the fix and exit 1:
 4. **MCP registration** (optional): on a terminal it asks `Register the MCP server in Claude Code
    / Claude Desktop / skip?` and then does what `mcp register --target ... --yes` does (preview,
    backup of an existing file, write; see [MCP server](mcp-server.md)).
-5. What was created, where, and the next commands: `doctor`, `agents create`, `run`. No agent is
-   created: Duskfleet ships none.
+   Then, on a terminal only, it offers the [guided first run](#guided-first-run) (a real run
+   on haiku that costs cents; the answer defaults to no).
+5. What was created, where, and the next commands: `doctor`, `agents create`, `run`. Duskfleet
+   ships no agent; the only one `init` can create is `first-run`, and only when you accept the
+   guided first run.
 
 `init --yes` asks nothing: steps 1-3 and the summary, step 4 only with `--mcp claude-code` or
-`--mcp claude-desktop`; without `--mcp` it never writes a Claude config file. Any failed check
-exits non-zero. On something that is not a terminal (a script) without `--yes`, step 4 is
-skipped.
+`--mcp claude-desktop`; without `--mcp` it never writes a Claude config file, and it never
+reaches the guided first run. Any failed check exits non-zero. On something that is not a
+terminal (a script) without `--yes`, step 4 and the guided first run are skipped.
+
+## Guided first run
+
+The last, optional step of an interactive `init`, and `run --first` to repeat it at any time
+(same code). **It costs real money**: one run on haiku, usually a few cents, stated before you
+answer:
+
+```text
+Try a first run on a project of yours? It creates a read-only "first-run" agent, runs it with haiku and costs cents. [y/N]
+```
+
+On `y` it asks for the absolute path of a project directory (`run --first --project <path>`
+skips that question), then:
+
+1. Checks the path like every run does: absolute, an existing directory, not `/` or your home,
+   and inside `allowed_project_roots` when that list is set
+   ([configuration](configuration.md)). A path outside it is refused with the file to edit;
+   nothing is created.
+2. Registers the directory in the private project registry (`data/projects.yaml`), unless it
+   is already a project.
+3. Creates the agent `first-run` through the same path as `agents create` (own, `model: haiku`,
+   `permission_mode: dontAsk`, `allowed_tools: [Read, Grep, Glob]`, `disallowed_tools: [Edit,
+   Write, NotebookEdit]`, budget $0.25, 5 minutes; system prompt "You describe projects. You
+   never change files."). When `first-run` already exists it is used as it is.
+4. Runs it with `--model haiku` and the prompt `Describe this project in three sentences. Do not
+   change any file.`, waits, and prints the status, the duration, the tokens, the cost (or API
+   value on a subscription), what the agent said, and `duskfleet run-info <run id>` /
+   `duskfleet dashboard` to see more. A run that needs review gets one line saying why, with a
+   link to [the dashboard page](dashboard.md).
+5. Asks `Keep the first-run agent? [Y/n]`. `n` deletes `data/agents/first-run.md` (the same
+   rule as `delete_agent`: user files only); the run keeps its agent id either way.
+
+`run --first` exits 0 when the run completed, 1 when the path was refused or the run did not
+complete. It takes no `--agent`, `--model` or prompt: those are fixed.
 
 ## First run
 
