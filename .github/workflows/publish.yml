@@ -76,19 +76,30 @@ jobs:
 
       # npm "auto-corrects" a manifest it dislikes (it dropped the `bin` entries on 2026-10-28)
       # and only warns; here that warning is a failure, so the tag is never cut on such a pack.
+      # Between releases the manifest still carries the version already on npm, and the dry-run
+      # refuses it ("cannot publish over the previously published versions"): that refusal comes
+      # after the pack is built and checked, so it is the one failure this job accepts.
       - name: npm publish --dry-run (duskfleet)
         working-directory: packages/duskfleet
         run: |
           set -o pipefail
-          npm publish --dry-run --access public 2>&1 | tee "$RUNNER_TEMP/dry-run-duskfleet.log"
-          ! grep -q "auto-corrected" "$RUNNER_TEMP/dry-run-duskfleet.log"
+          log="$RUNNER_TEMP/dry-run-duskfleet.log"
+          if ! npm publish --dry-run --access public 2>&1 | tee "$log"; then
+            grep -q "cannot publish over the previously published versions" "$log" || exit 1
+            echo "::notice::duskfleet: this version is already on npm; the pack is checked, the version is not"
+          fi
+          ! grep -q "auto-corrected" "$log"
 
       - name: npm publish --dry-run (@duskfleet/web)
         working-directory: apps/web
         run: |
           set -o pipefail
-          npm publish --dry-run --access public 2>&1 | tee "$RUNNER_TEMP/dry-run-web.log"
-          ! grep -q "auto-corrected" "$RUNNER_TEMP/dry-run-web.log"
+          log="$RUNNER_TEMP/dry-run-web.log"
+          if ! npm publish --dry-run --access public 2>&1 | tee "$log"; then
+            grep -q "cannot publish over the previously published versions" "$log" || exit 1
+            echo "::notice::@duskfleet/web: this version is already on npm; the pack is checked, the version is not"
+          fi
+          ! grep -q "auto-corrected" "$log"
 
   publish:
     name: npm publish (duskfleet, @duskfleet/web)

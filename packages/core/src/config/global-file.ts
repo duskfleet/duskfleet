@@ -14,6 +14,7 @@ export const EDITABLE_GLOBAL_KEYS = [
   "max_concurrent_per_project",
   "max_concurrent_per_agent",
   "scheduler.tick_seconds",
+  "scheduler.auto_pause",
   "scheduler.auto_pause_after",
   "scheduler.enabled",
   "claude.default_timeout_minutes",

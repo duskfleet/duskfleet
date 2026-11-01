@@ -3617,6 +3617,18 @@ details.desc ul {
   font-size: 14px;
   line-height: 21px;
 }
+/* ignored: the switch this field depends on is off; muted text, never a layer opacity (faint text would drop under 4.5:1) */
+.field.ignored .field-label,
+.field.ignored .num-input input {
+  color: var(--muted);
+}
+.field-note {
+  margin: 2px 0;
+  color: var(--muted);
+  font-size: 14px;
+  line-height: 21px;
+  font-style: italic;
+}
 .field-control {
   display: flex;
   flex-direction: column;

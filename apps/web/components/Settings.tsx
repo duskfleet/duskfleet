@@ -469,13 +469,19 @@ export function ConfigSection({
         const fid = `f-${f.key.replace(/\./g, "-")}`;
         const resetTarget = f.resetTo ?? f.default;
         const atDefault = JSON.stringify(draft) === JSON.stringify(toDraft(f, resetTarget));
+        // Dimmed, still editable: the value is kept in the file while the switch it depends on is off.
+        const ignored = f.dependsOn !== undefined && drafts[f.dependsOn.key] === false;
         return (
-          <div key={f.key} className={`field ${dirty ? "unsaved" : ""} ${err ? "invalid" : ""}`}>
+          <div
+            key={f.key}
+            className={`field ${dirty ? "unsaved" : ""} ${err ? "invalid" : ""} ${ignored ? "ignored" : ""}`}
+          >
             <div className="field-text">
               <div className="field-label">
                 <label htmlFor={fid}>{f.label}</label> <code>{f.key}</code>
               </div>
               <p className="field-desc">{f.description}</p>
+              {ignored && <p className="field-note">{f.dependsOn!.note}</p>}
               <div className="field-default">
                 Default {f.defaultLabel}
                 {!atDefault && (

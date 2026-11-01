@@ -26,6 +26,8 @@ export interface FieldDef {
   resetTo?: GlobalValue;
   /** Read once by the MCP host: "↻ Restart MCP host" instead of "→ Next run". */
   restart?: boolean;
+  /** A `bool` field of the same section this one depends on: while its draft is off, the row is dimmed with `note`. */
+  dependsOn?: { key: EditableGlobalKey; note: string };
 }
 
 export interface SectionDef {
@@ -94,6 +96,15 @@ export const SECTIONS: SectionDef[] = [
         defaultLabel: "30",
       },
       {
+        key: "scheduler.auto_pause",
+        label: "Auto-pause",
+        description:
+          "On: a schedule whose last runs were all empty or needs review is paused before its next fire. Off keeps the threshold below and never resumes a schedule paused earlier.",
+        kind: "bool",
+        default: true,
+        defaultLabel: "on",
+      },
+      {
         key: "scheduler.auto_pause_after",
         label: "Auto-pause after",
         description:
@@ -103,6 +114,7 @@ export const SECTIONS: SectionDef[] = [
         min: 0,
         default: 5,
         defaultLabel: "5",
+        dependsOn: { key: "scheduler.auto_pause", note: "ignored while auto-pause is off" },
       },
     ],
   },
