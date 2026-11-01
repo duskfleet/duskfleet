@@ -53,6 +53,17 @@ test("a user agent in data/agents overrides the builtin with the same id", () =>
   assert.equal(config.agents.get("other").source, "builtin", "untouched builtins stay");
 });
 
+test("scheduler.auto_pause: missing = true, a boolean is kept, anything else is refused", () => {
+  const { configDir } = makeConfig();
+  assert.equal(loadConfig(configDir).scheduler.autoPause, true);
+  writeFileSync(path.join(configDir, "duskfleet.yaml"), "data_dir: ../data\nscheduler:\n  auto_pause: false\n");
+  const off = loadConfig(configDir).scheduler;
+  assert.equal(off.autoPause, false);
+  assert.equal(off.autoPauseAfter, 5, "the threshold keeps its default while off");
+  writeFileSync(path.join(configDir, "duskfleet.yaml"), 'data_dir: ../data\nscheduler:\n  auto_pause: "no"\n');
+  assert.throws(() => loadConfig(configDir), /auto_pause/);
+});
+
 test("data/projects.yaml merges over config/projects.yaml, same id = the private entry wins", () => {
   const { root, configDir } = makeConfig({
     projects: "projects:\n  shared:\n    path: ../shared-public\n  public-only:\n    path: ../pub\n",

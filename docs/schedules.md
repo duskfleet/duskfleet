@@ -245,6 +245,13 @@ dashboard): the reason is cleared, and only runs created after the pause count t
 next streak, so the schedule gets `auto_pause_after` fresh runs before it can be paused again.
 Run now still fires a paused schedule.
 
+`scheduler.auto_pause` (default `true`) is the on/off switch of the whole check, editable in
+`config/duskfleet.yaml` or as **Auto-pause** under Settings → Scheduler. `false` skips the check
+on every tick while keeping `auto_pause_after` for when it is turned back on (`auto_pause_after:
+0` still turns it off too). Both are re-read every tick, no restart. Turning the switch off never
+resumes anything: a schedule paused earlier stays paused, with its badge and reason, until you
+resume it.
+
 ## Policies
 
 Every schedule stores its two policies and its trigger kind, so the behaviour below is explicit
