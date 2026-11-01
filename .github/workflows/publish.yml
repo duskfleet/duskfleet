@@ -1,17 +1,25 @@
-# Publishes the two npm packages, `duskfleet` and `@duskfleet/web`, at the same version with npm
+# Stages the two npm packages, `duskfleet` and `@duskfleet/web`, at the same version with npm
 # provenance (docs/development.md "Publishing"). The `publish` job runs for a tag `v<version>`:
 # called by release.yml right after it creates the tag (the usual path), or on a tag pushed by
 # hand. Every pull request runs the `dry-run` job, the same steps ending in
 # `npm publish --dry-run`, so a broken pack is caught before the tag.
 #
-# The `publish` job authenticates with npm trusted publishing (OIDC), no npm token: each package
-# on npmjs.com names this repository and the workflow file that STARTS the run as its trusted
-# publisher, with "Allow npm publish" on. That file is `release.yml`: this one runs as a reusable
-# workflow it calls, and npm matches the top-level `workflow_ref` claim (with `publish.yml` the
-# registry answered 404 on 2026-10-31). A tag pushed by hand runs this file directly, so it does
-# not match and fails to authenticate: cut releases from release.yml. `id-token: write` lets the
-# job mint the OIDC token, which npm also uses to sign the provenance statement. Each package.json
-# `repository` must name this repository or the registry refuses the provenance.
+# The `publish` job STAGES both packages (`npm stage publish`): the versions reach the registry
+# but stay private until the maintainer approves them with 2FA from a laptop (`npm stage list`,
+# `npm stage approve <stage-id>`, docs/development.md "Releasing"). Staging needs no 2FA, so it
+# works with the NPM_TOKEN repository secret: a granular access token WITHOUT 2FA bypass that can
+# read and write `duskfleet` and `@duskfleet/web` only (npm expires those after 90 days at most:
+# recreate it when a release fails with E401/E403). It is also where npm is heading: bypass
+# tokens lose direct publishing in January 2027.
+#
+# npm trusted publishing (OIDC) stays configured on both packages (`release.yml`, the workflow
+# that starts the run, since this file runs as a reusable workflow it calls): npm tries the OIDC
+# exchange first and falls back to the token. Today the registry refuses this repository's OIDC
+# token with "package not found" (npm/cli#9969: GitHub's immutable `sub` claim, forced on
+# repositories created after 2026-07-15, is not understood by the registry). Once that is fixed
+# the token can be deleted. `id-token: write` is what lets npm sign the provenance statement in
+# either case; each package.json `repository` must name this repository or the registry refuses
+# the provenance.
 name: Publish to npm
 run-name: "${{ github.event_name == 'pull_request' && format('npm publish dry-run for PR #{0}', github.event.pull_request.number) || format('npm publish {0}', inputs.tag || github.ref_name) }}"
 
@@ -132,39 +140,80 @@ jobs:
       - name: Pack check with the dashboard build
         run: npm run check:pack -- --require-web-build
 
-      # A version already on the registry is skipped, so a re-run after a failed second publish
-      # finishes the release instead of failing on the first package. npm "auto-corrects" a
-      # manifest it dislikes and only warns (it dropped the `bin` entries of the v0.1.0 tag on
-      # 2026-10-31, the dry-run guard below only covers pull requests): the publish is aborted
-      # on that warning with `--dry-run` first, so a broken pack never reaches the registry.
-      # `--loglevel verbose`: npm logs the registry's reason for refusing the OIDC token exchange
-      # only at that level, then falls back to no credential and the PUT ends in a bare 404.
-      - name: npm publish --provenance (duskfleet)
+      # `npm stage` is recent: the runner's npm may predate it, so npm is updated here, after
+      # the install and the checks ran with the npm the lockfile was made with.
+      - name: npm with `npm stage`
+        run: |
+          npm install -g npm@^11.21
+          npm --version
+          npm stage --help > /dev/null
+
+      # A version already on the registry is skipped, and so is one already staged (the
+      # registry answers E409 "previously staged version"), so a re-run after a failed second
+      # package finishes the release instead of failing on the first. npm "auto-corrects" a
+      # manifest it dislikes and only warns (it dropped the `bin` entries of the first v0.1.0
+      # tag on 2026-10-31, and the dry-run guard of the other job only covers pull requests):
+      # a `--dry-run` goes first and the step fails on that warning, so a broken pack never
+      # reaches the registry. `--loglevel verbose` shows why the registry refused the OIDC
+      # exchange before npm fell back to the token.
+      - name: npm stage publish (duskfleet)
         working-directory: packages/duskfleet
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: |
           set -o pipefail
           if npm view "duskfleet@${TAG#v}" version > /dev/null 2>&1; then
             echo "duskfleet@${TAG#v} is already published, skipping"
+            exit 0
+          fi
+          npm publish --dry-run --access public 2>&1 | tee "$RUNNER_TEMP/dry-run-duskfleet.log"
+          if grep -q "auto-corrected" "$RUNNER_TEMP/dry-run-duskfleet.log"; then
+            echo "::error::npm auto-corrected the manifest, see the warnings above"
+            exit 1
+          fi
+          if npm stage publish --provenance --access public --loglevel verbose 2>&1 | tee "$RUNNER_TEMP/stage-duskfleet.log"; then
+            echo "duskfleet@${TAG#v} is staged, waiting for the maintainer's approval"
+          elif grep -q "previously staged version" "$RUNNER_TEMP/stage-duskfleet.log"; then
+            echo "duskfleet@${TAG#v} was already staged, waiting for the maintainer's approval"
           else
-            npm publish --dry-run --access public 2>&1 | tee "$RUNNER_TEMP/publish-duskfleet.log"
-            if grep -q "auto-corrected" "$RUNNER_TEMP/publish-duskfleet.log"; then
-              echo "::error::npm auto-corrected the manifest, see the warnings above"
-              exit 1
-            fi
-            npm publish --provenance --access public --loglevel verbose
+            exit 1
           fi
 
-      - name: npm publish --provenance (@duskfleet/web)
+      - name: npm stage publish (@duskfleet/web)
         working-directory: apps/web
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: |
           set -o pipefail
           if npm view "@duskfleet/web@${TAG#v}" version > /dev/null 2>&1; then
             echo "@duskfleet/web@${TAG#v} is already published, skipping"
-          else
-            npm publish --dry-run --access public 2>&1 | tee "$RUNNER_TEMP/publish-web.log"
-            if grep -q "auto-corrected" "$RUNNER_TEMP/publish-web.log"; then
-              echo "::error::npm auto-corrected the manifest, see the warnings above"
-              exit 1
-            fi
-            npm publish --provenance --access public --loglevel verbose
+            exit 0
           fi
+          npm publish --dry-run --access public 2>&1 | tee "$RUNNER_TEMP/dry-run-web.log"
+          if grep -q "auto-corrected" "$RUNNER_TEMP/dry-run-web.log"; then
+            echo "::error::npm auto-corrected the manifest, see the warnings above"
+            exit 1
+          fi
+          if npm stage publish --provenance --access public --loglevel verbose 2>&1 | tee "$RUNNER_TEMP/stage-web.log"; then
+            echo "@duskfleet/web@${TAG#v} is staged, waiting for the maintainer's approval"
+          elif grep -q "previously staged version" "$RUNNER_TEMP/stage-web.log"; then
+            echo "@duskfleet/web@${TAG#v} was already staged, waiting for the maintainer's approval"
+          else
+            exit 1
+          fi
+
+      - name: What to do next
+        run: |
+          {
+            echo "## Staged, not public yet"
+            echo
+            echo "Both packages are staged at \`${TAG#v}\`. Approve them with 2FA from a laptop:"
+            echo
+            echo '```bash'
+            echo "npm stage list duskfleet          # the stage-id of ${TAG#v}"
+            echo "npm stage approve <stage-id>"
+            echo "npm stage list @duskfleet/web"
+            echo "npm stage approve <stage-id>"
+            echo "npm view duskfleet version && npm view @duskfleet/web version"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"

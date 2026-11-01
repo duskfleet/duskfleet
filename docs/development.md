@@ -110,16 +110,25 @@ Re-running it is safe: an existing tag or release is kept, a published version i
   that the tag matches the `version` of **both**
   packages (`v0.1.0` and `"0.1.0"`) and fails before anything else otherwise, then runs `npm ci`,
   `npm run check`, `npm run build:web` and `npm run check:pack -- --require-web-build`, and
-  publishes `duskfleet`, then `@duskfleet/web`, with `npm publish --provenance --access public`
-  from their package directories. There is no npm token: both packages on npmjs.com name this
-  repository and `release.yml` as their trusted publisher (OIDC, "Allow npm publish" on; the
-  file is the one that starts the run, and publish.yml runs as a reusable workflow called by
-  release.yml, so a tag pushed by hand does not authenticate), and the job's `id-token: write`
-  lets npm accept GitHub's OIDC token as the credential and sign the provenance statement with
-  it. Before each publish the same command runs with `--dry-run` and the job fails if npm
-  reports an auto-corrected manifest, whatever the tag's code says. A version
-  already on the registry is skipped, so re-running a release whose second publish failed
-  finishes it. Provenance requires each `package.json` `repository` to name this repository.
+  **stages** `duskfleet`, then `@duskfleet/web`, with `npm stage publish --provenance --access
+  public` from their package directories. A staged version is on the registry but not public:
+  the maintainer approves it with 2FA from a laptop (step 5 of [Releasing](#releasing)), which
+  is the npm-recommended flow for CI and the only one left to tokens from January 2027. Staging
+  needs no 2FA, so the job authenticates with the `NPM_TOKEN` repository secret: a granular
+  access token **without** 2FA bypass, "read and write" on those two packages only, 90 days at
+  most (recreate it when a release fails with E401 or E403). Before each stage the same command
+  runs as `npm publish --dry-run` and the step fails if npm reports an auto-corrected manifest,
+  whatever the tag's code says. A version already published or already staged is skipped, so
+  re-running a release whose second package failed finishes it. Provenance requires
+  `id-token: write` and each `package.json` `repository` naming this repository.
+
+  npm trusted publishing (OIDC) is configured too: both packages name this repository and
+  `release.yml` (the workflow that starts the run; publish.yml runs as a reusable workflow it
+  calls) as their trusted publisher, and npm tries that exchange before the token. The registry
+  refuses this repository's OIDC token with "package not found"
+  ([npm/cli#9969](https://github.com/npm/cli/issues/9969): GitHub's immutable `sub` claim,
+  forced on repositories created after 2026-07-15, is not understood by the registry yet). When
+  that is fixed, the token can be deleted and nothing else changes.
 - `publish dry-run`, on every pull request: the same steps without publishing, ending in
   `npm publish --dry-run` for both packages, so a broken pack shows up before the tag. Instead of
   the tag guard it checks that the two versions are equal.
@@ -175,11 +184,24 @@ with `0.2.0` standing for the new version:
    first package published is fixed by dispatching the workflow again with the same version,
    even once `main` has moved on: when the tag exists, the checks and the notes read from the
    tag, the tag and the release are kept, and a version already on the registry is skipped.
-5. **By hand, if the Actions tab is not an option:** an annotated tag
+5. **Approve the two staged versions with 2FA**, from a laptop logged in to npm (the job's
+   summary repeats these lines); nothing is public until then:
+
+   ```bash
+   npm stage list duskfleet            # the stage-id of 0.2.0
+   npm stage approve <stage-id>        # prompts for the 2FA code
+   npm stage list @duskfleet/web
+   npm stage approve <stage-id>
+   ```
+
+   `npm stage reject <stage-id>` (2FA too) drops a staged version that must not ship; the
+   number can then be staged again. `npm stage` needs npm 11.21 or later (`npm install -g npm`).
+6. **By hand, if the Actions tab is not an option:** an annotated tag
    (`git tag -a v0.2.0 -m "Duskfleet 0.2.0"`, then `git push origin v0.2.0`, which runs the
-   `publish` job on its own) and `gh release create v0.2.0 --verify-tag --title "Duskfleet 0.2.0"
-   --notes-file <notes file>` with the CHANGELOG section saved outside the repository.
-6. **Verify from outside the repository**:
+   `publish` job on its own, then step 5) and `gh release create v0.2.0 --verify-tag --title
+   "Duskfleet 0.2.0" --notes-file <notes file>` with the CHANGELOG section saved outside the
+   repository.
+7. **Verify from outside the repository**:
 
    ```bash
    npx duskfleet@latest --version        # prints 0.2.0
