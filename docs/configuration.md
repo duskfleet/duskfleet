@@ -78,6 +78,7 @@ scheduler:
   tick_seconds: 30
   default_time_zone: Europe/London
   noop_pattern: '/^\s*(nothing to do|no .* in ready)/i'   # final message of a run that found no work (idle-cost stats)
+  auto_pause: true              # on/off switch of auto-pause; false keeps auto_pause_after and resumes nothing
   auto_pause_after: 5           # pause a schedule after this many empty / needs-review runs in a row; 0 = never
   allow_command_gates: false    # schedule command gates (`sh -c`, outside Claude Code's allow-lists) are refused unless true
 ```

@@ -1089,6 +1089,37 @@ test("auto-pause: three real empty runs (empty_run) pause as 'completed with 0 t
   }
 });
 
+test("auto-pause switch: scheduler.auto_pause false fires a streak of needs-review runs; true (re-read next tick) pauses it", async () => {
+  const { root, configDir } = makeRoot();
+  const yaml = (on) =>
+    `data_dir: ../data\ndefault_agent: coder\nscheduler:\n  auto_pause: ${on}\n  auto_pause_after: 3\nclaude:\n  binary: "${fakeBinary}"\n  default_timeout_minutes: 0.05\n`;
+  writeFileSync(path.join(configDir, "duskfleet.yaml"), yaml(false));
+  const t = makeScheduler(configDir);
+  try {
+    assert.equal(t.config.scheduler.autoPause, false);
+    assert.equal(t.config.scheduler.autoPauseAfter, 3, "the threshold is kept while off");
+    const s = t.scheduler.create({ name: "denied", agentId: "coder", prompt: "denied", cron: "* * * * *" });
+    for (let i = 0; i < 5; i++) {
+      const run = await t.fireAndWait(s.id);
+      assert.deepEqual(run.reviewReasons, ["permission_denied"]);
+      assert.equal(t.repo.get(s.id).lastOutcome, "started");
+    }
+    assert.equal(t.repo.get(s.id).enabled, true);
+    assert.equal(t.runs.listRuns({}).length, 5);
+
+    // Switched on in the file: the next tick reads it and pauses as before.
+    writeFileSync(path.join(configDir, "duskfleet.yaml"), yaml(true));
+    t.due(s.id);
+    await t.tickAll();
+    const paused = t.repo.get(s.id);
+    assert.equal(paused.enabled, false);
+    assert.equal(paused.lastOutcome, "auto_paused");
+    assert.equal(t.runs.listRuns({}).length, 5, "no sixth run");
+  } finally {
+    await t.close(root);
+  }
+});
+
 test("idle cost: 7-day ticks, fires, no-op runs by marker and what they cost, per schedule", async () => {
   const { root, configDir } = makeRoot();
   const t = makeScheduler(configDir);

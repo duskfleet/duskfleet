@@ -40,6 +40,22 @@ test("empty text and agent become null; values format for the dialog", () => {
   assert.equal(fromDraft(field("max_concurrent_per_agent"), "2"), 2);
 });
 
+test("auto-pause switch: a bool above the threshold, which depends on it", () => {
+  const scheduler = SECTIONS.find((s) => s.id === "scheduler").fields.map((f) => f.key);
+  assert.ok(scheduler.indexOf("scheduler.auto_pause") < scheduler.indexOf("scheduler.auto_pause_after"));
+  const sw = field("scheduler.auto_pause");
+  assert.equal(sw.kind, "bool");
+  assert.equal(sw.default, true);
+  assert.equal(fromDraft(sw, toDraft(sw, false)), false);
+  const after = field("scheduler.auto_pause_after");
+  assert.equal(after.dependsOn.key, "scheduler.auto_pause");
+  assert.equal(after.dependsOn.note, "ignored while auto-pause is off");
+  // Every dependency is a bool of the same section, so the row can read its draft.
+  for (const s of SECTIONS)
+    for (const f of s.fields.filter((x) => x.dependsOn))
+      assert.equal(s.fields.find((x) => x.key === f.dependsOn.key)?.kind, "bool", f.key);
+});
+
 test("only claude.binary and claude.setting_sources need a restart", () => {
   const restart = SECTIONS.flatMap((s) => s.fields)
     .filter((f) => f.restart)
