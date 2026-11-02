@@ -153,7 +153,12 @@ Each failure mode below: what you see, why, and the fix in the plain setup.
   be missing the same way: a job started outside your login session (cron on macOS, a systemd
   unit after logout) may not reach the place your login is stored.
 - **Fix**: set `PATH` in the script (as above) or call `claude` by its absolute path
-  (`command -v claude` in a terminal tells you where it is). Use the scheduler's "run now"
+  (`command -v claude` in a terminal tells you where it is). The `PATH` line in the script can
+  find `claude` and still miss the tools the task needs: when Node comes from nvm, fnm or volta,
+  `npm` lives in a per-version directory, and the run answers `command not found: npm`. Add the
+  directory that `dirname "$(command -v npm)"` prints in your login shell to the script's `PATH`,
+  for example `export PATH="$HOME/.nvm/versions/node/v24.11.0/bin:$PATH"` with your version
+  (and update it when you switch Node versions). Use the scheduler's "run now"
   command to check the login from the scheduler itself, not from your terminal. For a job that
   must run outside your login session, `claude setup-token` creates a long-lived token; see
   Claude Code's [headless docs](https://code.claude.com/docs/en/headless) for how to pass it.
@@ -195,8 +200,10 @@ Each failure mode below: what you see, why, and the fix in the plain setup.
   local mailbox, if anything).
 - **Fix**: write every run to its own log file and record the exit status (the script above
   does both), and check them. `--max-budget-usd` and a time limit make the bad cases end
-  instead of running on; the exit status tells you a run failed, but a run that "succeeded"
-  after a denied command still exits 0: read the log.
+  instead of running on; the exit status tells you a run failed, but a run that could not do
+  its job still exits 0: `claude -p` exits 0 whenever it answers, also when the answer is "I
+  couldn't run the tests" after a denied or missing command. Check the log text, not only the
+  exit code. (Duskfleet marks such a run empty or needs review instead of green.)
 
 ### The machine is asleep, or you are logged out
 
