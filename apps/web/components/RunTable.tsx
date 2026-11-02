@@ -17,6 +17,25 @@ import { RunRow } from "./RunRow";
 import { StatusBadge } from "./StatusBadge";
 
 /**
+ * The one column grid of every run table (DS-25): with `table-layout: fixed` every column
+ * starts at the same x in Running and Recent whatever the content. Widths live in
+ * globals.css on these classes; a column hidden at a breakpoint hides its `<col>` too.
+ */
+function RunColumns() {
+  return (
+    <colgroup>
+      <col className="c-status col-status" />
+      <col className="c-run" />
+      <col className="c-model col-model" />
+      <col className="c-duration col-duration" />
+      <col className="c-turns col-turns" />
+      <col className="c-cost" />
+      <col className="c-when col-started" />
+    </colgroup>
+  );
+}
+
+/**
  * One row per run, the whole row a link. The short title (first line of the
  * prompt) is the identity of a run; agent, project and model are secondary.
  * Counters that only matter when debugging (turns, tool calls, tokens) live on
@@ -44,15 +63,28 @@ export function RunTable({
   const costColumn = costLabels(cost).column;
   return (
     <table className="runs">
+      <RunColumns />
       <thead>
         <tr>
-          <th>Status</th>
-          <th>Run</th>
-          <th className="col-model">Model</th>
-          <th className="num col-duration">{ended ? "Duration" : "Elapsed"}</th>
-          <th className="num col-turns">Turns</th>
-          <th className="num">{costColumn}</th>
-          <th className="col-started">{ended ? "Ended" : "Started"}</th>
+          <th scope="col" className="col-status">
+            Status
+          </th>
+          <th scope="col">Run</th>
+          <th scope="col" className="col-model">
+            Model
+          </th>
+          <th scope="col" className="num col-duration">
+            {ended ? "Duration" : "Elapsed"}
+          </th>
+          <th scope="col" className="num col-turns">
+            Turns
+          </th>
+          <th scope="col" className="num">
+            {costColumn}
+          </th>
+          <th scope="col" className="col-started">
+            {ended ? "Ended" : "Started"}
+          </th>
         </tr>
       </thead>
       <tbody>
@@ -71,10 +103,14 @@ export function RunTable({
           const silence = runSilence(r);
           return (
             <RunRow key={r.id} href={href}>
-              <td className="status">
+              <td className="status col-status">
                 <StatusBadge run={r} />
               </td>
               <td className="what">
+                {/* narrow screens hide the Status column and show the badge here, above the title */}
+                <div className="status-inline">
+                  <StatusBadge run={r} />
+                </div>
                 <div className="prompt" title={r.prompt}>
                   <Link href={href}>{runTitle(r.prompt)}</Link>
                 </div>

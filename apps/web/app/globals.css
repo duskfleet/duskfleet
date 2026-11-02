@@ -712,6 +712,8 @@ a.stat.tile-link:active,
 /* separate borders so the rounded outline clips the header and rows */
 .runs {
   width: 100%;
+  /* DS-25: one column grid for every run table (RunColumns), so Running and Recent line up */
+  table-layout: fixed;
   border-collapse: separate;
   border-spacing: 0;
   background: var(--panel);
@@ -763,18 +765,37 @@ a.stat.tile-link:active,
   white-space: nowrap;
   font-variant-numeric: tabular-nums;
 }
+/* column widths include the 14 px cell padding; Run takes what is left */
+.runs .c-status {
+  width: 152px;
+}
+.runs .c-model {
+  width: 120px;
+}
+.runs .c-duration {
+  width: 116px;
+}
+.runs .c-turns {
+  width: 88px;
+}
+.runs .c-cost {
+  width: 120px;
+}
+.runs .c-when {
+  width: 156px;
+}
 .runs td.status {
-  width: 1%;
   white-space: nowrap;
 }
-.runs .what {
-  min-width: 320px;
+/* the status badge inside the Run cell, only where the Status column is hidden */
+.runs .what .status-inline {
+  display: none;
 }
+/* one line with an ellipsis; the full prompt is the title */
 .runs .what .prompt {
-  display: -webkit-box;
-  -webkit-line-clamp: 2;
-  -webkit-box-orient: vertical;
+  white-space: nowrap;
   overflow: hidden;
+  text-overflow: ellipsis;
   color: var(--text);
   font-weight: 500;
   line-height: 22px;
@@ -3328,9 +3349,6 @@ details.desc ul {
   .toolbar .search {
     flex-basis: 100%;
   }
-  .runs .what {
-    min-width: 0;
-  }
   .runs th,
   .runs td {
     padding: 9px 10px;
@@ -3393,11 +3411,26 @@ details.desc ul {
     margin-left: 0;
     transform: none;
   }
-  .runs .col-duration {
+  /* DS-25 at 390: Run and Cost only; the badge moves into the Run cell, the title takes two lines */
+  .runs .col-duration,
+  .runs .col-status {
     display: none;
   }
   .runs .when {
     display: none;
+  }
+  .runs .c-cost {
+    width: 104px;
+  }
+  .runs .what .status-inline {
+    display: flex;
+    margin-bottom: 4px;
+  }
+  .runs .what .prompt {
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    white-space: normal;
   }
   .stat .value {
     font-size: 21px;
