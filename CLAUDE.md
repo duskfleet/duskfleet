@@ -112,6 +112,10 @@ npm workspaces, one `config/` and one SQLite database shared by three deliverabl
 - Real runs cost money. When one is needed to verify something, use `--model haiku`
   (cents) and say so. An agent without an explicit model uses the CLI default,
   which can be 100x more expensive.
+- Dashboard components are tested (owner rule 2026-11-02, harness in #344): every new or changed
+  component in `apps/web/components` ships with a render test in `apps/web/test` (`react-dom/server`,
+  one assertion per visible state, no snapshots; stateful logic lives in `apps/web/lib` and is
+  tested there). A component PR without its test is incomplete. Browser tests are #79, separate.
 - Dashboard: no component library, design tokens live in `apps/web/app/globals.css`
   (Dark and Light modes of the same tokens, each `light-dark(<light>, <dark>)`: Dark by default,
   `prefers-color-scheme: light` or `data-theme` on `<html>` switch; brand palette: night ground,
