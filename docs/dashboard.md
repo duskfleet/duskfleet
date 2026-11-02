@@ -220,8 +220,7 @@ With no finished run in the period, the page offers the 1-year view instead.
 
 ## Costs
 
-`/costs` (the **Spent** card of the Runs page, or the "Spend by model moved to Costs" line under
-the run list) shows where the money goes over time, on the agent / project filter the page was
+`/costs` (the **Spent** card of the Runs page) shows where the money goes over time, on the agent / project filter the page was
 opened with. `?range=` is the same period selector as `/trends`, same UTC buckets; `?by=agent`
 (default), `project` or `model` picks the split. Runs count by their start time, as budgets do.
 
