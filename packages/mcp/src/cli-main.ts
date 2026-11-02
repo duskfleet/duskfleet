@@ -500,6 +500,12 @@ async function main(): Promise<void> {
             : service.supported
               ? `schedules fire only while an MCP host keeps the server alive${leaseLive ? "" : " (nothing is ticking right now)"}; run "duskfleet install-service" to run them unattended`
               : service.detail,
+        // One schedule per agent: create / update refuse a second one, but older databases may hold some.
+        duplicateSchedules: app.scheduler.duplicateAgents().map((d) => ({
+          agentId: d.agentId,
+          schedules: d.schedules.map((s) => ({ id: s.id, name: s.name })),
+          warning: `agent "${d.agentId}" has ${d.schedules.length} schedules; one schedule per agent, delete all but one (dashboard Schedules page or the delete_schedule MCP tool)`,
+        })),
       };
       // Opt-in live run: the only part of doctor that costs money, so say so before spending it.
       let probe: ProbeReport | null = null;

@@ -154,7 +154,8 @@ in the nav); the other pages are static.
   package installed next to `@duskfleet/web`).
 - **Settings** (the gear at the right end of the nav): the theme (Dark / Light / Device, the
   same choice as the footer switch, kept in this browser) and the runtime keys of
-  `config/duskfleet.yaml`: concurrency limits, `scheduler.tick_seconds` and `auto_pause_after`,
+  `config/duskfleet.yaml`: concurrency limits, `scheduler.tick_seconds`, the `auto_pause` switch
+  and `auto_pause_after` (dimmed, value kept, "ignored while auto-pause is off" while the switch is off),
   the Claude defaults (timeout, budget, `strict_mcp_config`, `setting_sources`, `binary`),
   `allowed_project_roots` and `default_agent`. Each section has its own Save, which lists the
   changes old → new in a confirmation first; a value the loader would refuse shows inline and
