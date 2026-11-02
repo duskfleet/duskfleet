@@ -104,11 +104,10 @@ your terminal. Unlike cron, launchd runs a missed `StartCalendarInterval` job on
 Mac wakes up, with several missed intervals coalesced into one run (`man launchd.plist`,
 `StartCalendarInterval`).
 
-This example was run as written on macOS (November 2026, a scratch project, `--model haiku`):
-`plutil -lint` and `bash -n` pass, `bootstrap` then `kickstart` ran the job at once with exit
-code 0 and the log in `~/.local/state/claude-nightly/`, and `bootout` removed it. The
+After `kickstart`, `launchctl print gui/$(id -u)/com.example.claude-nightly` shows the job's
+state and `last exit code`, and the run's log lands in `~/.local/state/claude-nightly/`. The
 `StandardOutPath` / `StandardErrorPath` files stay empty because the script writes everything
-to its own log. The wake-up behaviour above comes from the man page and was not tested.
+to its own log; they only catch what fails before the script starts.
 
 ### systemd user timer (Linux)
 
