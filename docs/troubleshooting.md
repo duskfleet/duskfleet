@@ -46,6 +46,10 @@ Sections: [Install and doctor](#install-and-doctor) · [Runs](#runs) ·
   run was started by a build without run ownership; such a row is failed only once it is older
   than the longest configured timeout plus a minute, since it may come from a process still on
   that build (a `serve` not restarted after `npm run build`: re-run `install-service`).
+  A run failed that way with no start time was left `pending`: its process died after
+  recording it and before spawning claude (the host restarted, a crash). Such a row used to
+  show as running on the dashboard forever; it is swept like a `running` one now. `doctor`
+  lists the rows its own startup sweep failed (`orphans.recovered`, with the status each `was`).
 - **A run stays `running` although nothing is running**: recovery only fails a run when its
   owner (`role@host:pid`) is provably gone. Two cases it cannot see: the owner's pid was
   reused by an unrelated live process, or the machine's hostname changed since the run

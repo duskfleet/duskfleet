@@ -535,6 +535,20 @@ async function main(): Promise<void> {
         dataSource: app.config.dataSource,
         agents: [...app.config.agents.keys()],
         scheduler,
+        // Rows whose owning process was gone, failed by this process's startup sweep: `running`
+        // ones (orphans) and `pending` ones (the process died between the insert and the spawn).
+        orphans: {
+          recovered: app.recoveredAtStartup.map((run) => ({
+            id: run.id,
+            agentId: run.agentId,
+            was: run.status,
+            owner: run.owner,
+            createdAt: run.createdAt,
+          })),
+          advice: app.recoveredAtStartup.length
+            ? `marked ${app.recoveredAtStartup.length} run(s) failed with the orphaned error: their owning process is gone`
+            : null,
+        },
         ...(doctorFlags.probe ? { probe } : {}),
       });
       return done(error || (probe && !probe.ok) ? 1 : 0);
