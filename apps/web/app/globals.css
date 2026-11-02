@@ -1802,7 +1802,7 @@ h2 .h2-id {
   border-bottom: 0;
 }
 .agent-table .c-status {
-  width: 124px;
+  width: 144px; /* the needs-review pill is ~116 px; 124 px left it 100 px */
 }
 .agent-table .c-model {
   width: 96px;
@@ -2203,6 +2203,14 @@ h2 .h2-id {
 }
 .ad-filter .ms {
   flex: 0 1 260px;
+}
+/* Recent runs on the agent page: a fixed 420 px side column leaves the table less room than the
+   Runs page, so the Run column may shrink and the table scrolls inside the panel before overlapping it */
+.ad-runs {
+  overflow-x: auto;
+}
+.ad-runs .runs .what {
+  min-width: 200px;
 }
 .ad-runs .col-model {
   display: none;
