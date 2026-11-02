@@ -8,7 +8,8 @@
  *   2. a member of the ScheduleOutcome union (packages/core/src/scheduler/types.ts) is not
  *      named in docs/mcp-server.md, or
  *   3. a docs/*.md page is not linked from README.md, or
- *   4. README.md states a tool count ("15 tools", "15 MCP tools") other than the catalogue's.
+ *   4. README.md states a tool count ("15 tools", "15 MCP tools") other than the catalogue's, or
+ *   5. the README badge "MCP tools: N" (alt text or shields.io URL) is missing or says another N.
  *
  * Tool names come from the generated catalogue packages/mcp/dist/tools.json (written by
  * `npm run build`), so this script never imports the server. Run it after the build.
@@ -69,6 +70,15 @@ for (const page of pages) {
 for (const m of readme.matchAll(/\b(\d+) (?:MCP )?tools\b/g)) {
   if (Number(m[1]) !== tools.length) {
     problems.push(`README.md: "${m[0]}" but the server registers ${tools.length} MCP tools`);
+  }
+}
+
+// 5. The "MCP tools" badge (its alt text and the shields.io number) matches the catalogue too.
+const badges = [...readme.matchAll(/MCP(?: |%20)tools(?::\s*|-)(\d+)/g)];
+if (badges.length === 0) problems.push('README.md: the "MCP tools" badge is missing');
+for (const m of badges) {
+  if (Number(m[1]) !== tools.length) {
+    problems.push(`README.md: badge "${m[0]}" but the server registers ${tools.length} MCP tools`);
   }
 }
 
