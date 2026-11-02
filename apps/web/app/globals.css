@@ -4745,18 +4745,6 @@ details.desc ul {
   color: var(--muted);
   min-width: 3em;
 }
-/* Runs page: where the By model table was */
-.moved-line {
-  margin: 24px 0 0;
-  font-size: 14px;
-  line-height: 21px;
-}
-.moved-line a {
-  color: var(--muted);
-}
-.moved-line a:hover {
-  color: var(--text);
-}
 @media (max-width: 600px) {
   .trend-toolbar .kept,
   .trend-toolbar .split {
