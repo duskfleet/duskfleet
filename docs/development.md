@@ -223,6 +223,13 @@ login and spends nothing: the tests use the fake binary. In order:
 | Packed CLI smoke | `npm pack -w duskfleet`, then `npx ./duskfleet-*.tgz --help` outside the repository | The tarball does not install or its CLI does not start. |
 | Audit | `npm audit --audit-level=high` | Report-only until the Next 16 upgrade clears the `postcss` advisory Next 15 pins; then blocking on high / critical. |
 
+Dashboard components have render tests (rule since 2026-11-02, harness and first tests in #344):
+every new or changed component in `apps/web/components` ships with a test in `apps/web/test` that
+renders it with `react-dom/server` and asserts the markup of each visible state (text, token-driving
+classes, disabled controls, `title` / `aria-*`); no snapshot files. State transitions are tested
+through the pure helpers in `apps/web/lib` the component calls. Layout and interaction in a real
+browser are not covered here (#79). The reviewer treats a component PR without its test as incomplete.
+
 Two tests are gates in themselves: `test/migrations.test.js` pins the SHA-256 of every shipped
 migration (edit one and it fails; add one and it tells you the digest to append), and the layering of
 the three packages is a Biome rule, not just this page. Dependabot opens grouped weekly PRs for npm
