@@ -119,8 +119,10 @@ in the nav); the other pages are static.
   which links its runs), with the card's actions in its header: run now, pause / resume, edit the
   cron and time zone, delete (inline confirmation); the changes go through the same validation as
   `update_schedule`. Under the header, at most one message, never truncated: the auto-pause reason
-  (its last run linked) or a monthly budget pause in an amber strip; "paused by hand", or what the
-  gate said on its run of consecutive skips, as a plain line; the error of a failed fire in red. Then
+  (its last run linked) or a monthly budget pause in an amber strip; "paused · nothing fires until
+  Resume" (by hand, or by a budget whose tick another schedule of the scope tripped), or what the
+  gate said on its run of consecutive skips, as a plain line; the error of a failed fire in red,
+  also on a paused card with that plain pause line in front. Then
   cron (raw and in plain words), the schedule name, project, model, the
   [gate](schedules.md#gates-skip-cheaply-when-there-is-no-work) and on-failure policy in force, the
   prompt, the last 10 firings as squares coloured by how the run they started **ended** (clean,

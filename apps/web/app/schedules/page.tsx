@@ -613,7 +613,7 @@ function groupByProject(schedules: ScheduleRow[]): ProjectGroup[] {
 }
 
 interface CardMessage {
-  /** warn = strip (auto-pause, budget pause); muted = plain line (paused by hand, gate skips); bad = a real fire error. */
+  /** warn = strip (auto-pause, budget pause); muted = plain line (paused with no stored cause, gate skips); bad = a real fire error. */
   tone: "warn" | "muted" | "bad";
   text: string;
   /** Run linked at the end of the text (the last run of an auto-pause streak). */
@@ -638,7 +638,12 @@ function cardMessage(
     if (last?.outcome === "skipped_budget") {
       return { tone: "warn", text: `paused by the monthly budget${last.error ? `: ${last.error}` : ""}` };
     }
-    return { tone: "muted", text: "paused by hand · nothing fires until Resume" };
+    // No stored cause: a pause by hand, or a monthly budget pause of a schedule whose own tick did
+    // not trip it (core pauses the whole scope, with a skipped_budget firing only on the one that did).
+    if (s.lastOutcome === "error" && s.lastError) {
+      return { tone: "bad", text: `paused · nothing fires until Resume · last fire failed: ${s.lastError}` };
+    }
+    return { tone: "muted", text: "paused · nothing fires until Resume" };
   }
   if (s.lastOutcome === "error" && s.lastError) return { tone: "bad", text: s.lastError };
   if (last?.outcome === "skipped_gate") {
