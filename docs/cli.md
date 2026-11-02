@@ -120,6 +120,12 @@ install directories were put in front ([Troubleshooting](troubleshooting.md)).
 the lease (`serve`, `mcp`, `cli`) and whether the service is installed and running. See
 [Schedules](schedules.md#who-ticks) for the service.
 
+Like every CLI command, `doctor` starts with the orphan sweep: `running` rows, and `pending`
+rows never spawned, whose owning process on this host is gone are marked failed as orphaned.
+`orphans.recovered` lists the rows this sweep failed (`id`, `agentId`, `was`: `running` or
+`pending`, `owner`, `createdAt`), so rows a previous build left stuck show up once; an empty list
+means nothing was stuck ([Troubleshooting](troubleshooting.md#runs)).
+
 > [!NOTE]
 > On Windows the CLI and `install-service` (Task Scheduler) are **experimental**: implemented,
 > not run by the maintainers ([platform support](../README.md#platform-support)). The service

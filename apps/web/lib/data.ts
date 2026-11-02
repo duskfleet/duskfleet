@@ -50,6 +50,7 @@ import {
   utcDayStart,
   utcMonthStart,
 } from "@duskfleet/core";
+import { ACTIVE_SQL, ACTIVE_STATUSES } from "./running";
 import { listScoped, scopeList } from "./scope";
 import { mergeSeries } from "./trends";
 
@@ -283,8 +284,13 @@ export function listRuns(filter: RunsFilter = {}): RunWithProject[] {
 /** How a run ended, as the agent page's Recent runs Status filter partitions them (stored review verdict). */
 export type RunBucket = "running" | "review" | "clean" | "cancelled";
 
-/** A run not ended yet: the Running bucket here and the agent's running state (agentStats). */
-const ACTIVE_SQL = "status IN ('running','pending')";
+/** The runs not ended yet (`running` and `pending`, see lib/running.ts), newest first: the Runs page's Running list. */
+export function activeRuns(filter: Omit<RunsFilter, "status"> = {}): RunWithProject[] {
+  const limit = filter.limit ?? 50;
+  return ACTIVE_STATUSES.flatMap((status) => listRuns({ ...filter, status, limit }))
+    .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
+    .slice(0, limit);
+}
 const BUCKET_SQL: Record<RunBucket, string> = {
   running: `(${ACTIVE_SQL})`,
   review: `(NOT ${ACTIVE_SQL} AND ${NEEDS_REVIEW_SQL})`,
@@ -773,7 +779,7 @@ export function overview(
       // budget_exhausted or with a denial must not raise the failed / needs-review KPIs. Its
       // cost is part of the spend, shown apart (cost_gates).
       `SELECT COALESCE(SUM(kind = 'run'), 0)                                     AS total,
-              SUM(kind = 'run' AND status = 'running')                            AS running,
+              SUM(kind = 'run' AND ${ACTIVE_SQL})                                 AS running,
               SUM(kind = 'run' AND status IN ('completed','failed','timed_out','cancelled')) AS finished,
               SUM(kind = 'run' AND status = 'completed')                          AS completed,
               SUM(kind = 'run' AND status = 'completed' AND NOT ${NEEDS_REVIEW_SQL}) AS clean,

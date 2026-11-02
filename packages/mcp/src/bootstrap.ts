@@ -3,7 +3,7 @@
  * database, build the executor and the RunManager.
  */
 
-import type { ConfigLocation, DuskFleetConfig, SchedulerRole } from "@duskfleet/core";
+import type { ConfigLocation, DuskFleetConfig, Run, SchedulerRole } from "@duskfleet/core";
 import {
   ClaudeCodeExecutor,
   loadConfig,
@@ -26,6 +26,11 @@ export interface App {
   runs: RunManager;
   scheduler: Scheduler;
   executor: ClaudeCodeExecutor;
+  /**
+   * Runs the startup sweep failed as orphans (owner gone), as they were before: `running`
+   * rows, and `pending` rows whose process died before the spawn. `doctor` reports them.
+   */
+  recoveredAtStartup: Run[];
   close(): void;
 }
 
@@ -58,7 +63,7 @@ export async function bootstrap(entryFileUrl: string, options: BootstrapOptions 
 
   // One identity for the runs this process owns and for the scheduler lease it may hold.
   const runs = new RunManager(config, repo, executor, { owner: processIdentity(options.role ?? "unknown") });
-  runs.recoverOrphans();
+  const recoveredAtStartup = runs.recoverOrphanRuns();
   const scheduler = new Scheduler(new ScheduleRepository(db), runs, {
     tickMs: config.scheduler.tickSeconds * 1000,
     holder: runs.owner,
@@ -70,6 +75,7 @@ export async function bootstrap(entryFileUrl: string, options: BootstrapOptions 
     runs,
     scheduler,
     executor,
+    recoveredAtStartup,
     close: () => {
       scheduler.stop();
       runs.shutdown();

@@ -232,14 +232,23 @@ export class RunManager {
   }
 
   /**
-   * Mark `running` runs whose owning process is gone as failed. Called at startup and
-   * by the scheduler lease holder. Several Duskfleet processes share the database
-   * (serve, one MCP server per host session, CLI), so a run owned by a live process,
-   * or by another host, is left alone.
+   * Mark `running` and `pending` runs whose owning process is gone as failed. Called at
+   * startup and by the scheduler lease holder. Several Duskfleet processes share the
+   * database (serve, one MCP server per host session, CLI), so a run owned by a live
+   * process, or by another host, is left alone. A `pending` row of a dead owner is a run
+   * whose process died between the insert and the spawn: it never started, nothing else
+   * would ever end it.
    */
   recoverOrphans(): number {
-    const orphans = this.runs.listByStatus("running").filter((run) => this.ownerIsGone(run));
-    let recovered = 0;
+    return this.recoverOrphanRuns().length;
+  }
+
+  /** `recoverOrphans`, returning the rows it failed as they were before (status `running` or `pending`). */
+  recoverOrphanRuns(): Run[] {
+    const orphans = [...this.runs.listByStatus("running"), ...this.runs.listByStatus("pending")].filter((run) =>
+      this.ownerIsGone(run),
+    );
+    const recovered: Run[] = [];
     for (const run of orphans) {
       assertTransition(run.status, "failed");
       // Compare-and-set: a starting process and the lease holder may sweep the same row.
@@ -249,15 +258,20 @@ export class RunManager {
         error: orphanedError(run.owner),
       };
       // Not through transition(): the write must stay a compare-and-set, so the reasons are computed here.
-      const won = this.runs.updateIfStatus(run.id, "running", {
+      const won = this.runs.updateIfStatus(run.id, run.status, {
         ...patch,
         reviewReasons: reviewReasons({ ...run, ...patch }),
       });
       if (!won) continue;
       this.runs.addEvent(run.id, "status_change", { from: run.status, to: "failed" });
-      recovered++;
+      recovered.push(run);
     }
-    if (recovered) log.warn(`marked ${recovered} orphaned run(s) as failed`);
+    if (recovered.length) {
+      const pending = recovered.filter((run) => run.status === "pending").length;
+      log.warn(
+        `marked ${recovered.length} orphaned run(s) as failed${pending ? ` (${pending} still pending: never started)` : ""}`,
+      );
+    }
     return recovered;
   }
 
