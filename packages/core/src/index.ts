@@ -31,15 +31,37 @@ export {
 } from "./config/agent-files.js";
 export { type AgentLintProblem, assertAgentSpecClean, collapseHome, lintAgentSpec } from "./config/agent-lint.js";
 export {
+  EDITABLE_GLOBAL_KEYS,
+  type EditableGlobalKey,
+  type GlobalFileInfo,
+  type GlobalValue,
+  globalConfigPath,
+  readGlobalFile,
+  writeGlobalFile,
+} from "./config/global-file.js";
+export {
+  type ConfigLocation,
   ConfigNotFoundError,
+  type ConfigSource,
+  dataDirFor,
   expandHome,
   findRepoRoot,
   isDirectory,
   loadAgents,
   loadConfig,
+  locateConfig,
   resolveConfigDir,
   splitFrontmatter,
 } from "./config/loader.js";
+export {
+  dataDirFromEnv,
+  type InitUserConfigResult,
+  initUserConfig,
+  type LocationContext,
+  STARTER_CONFIG,
+  userConfigDir,
+  userDataDir,
+} from "./config/locations.js";
 export {
   PROJECT_ID_PATTERN,
   projectIdFromPath,
@@ -96,6 +118,7 @@ export {
   parseNumstat,
   type RunDiff,
 } from "./git/diff.js";
+export * from "./observability/billing.js";
 export * from "./observability/failure.js";
 export * from "./observability/run.js";
 export {
@@ -107,6 +130,7 @@ export {
   type BudgetSource,
   type BudgetState,
   type BudgetStatus,
+  budgetForScope,
   budgetLabel,
   budgetStatus,
   budgetStatuses,
@@ -141,6 +165,7 @@ export {
 } from "./scheduler/cron.js";
 export {
   assertCommandGateAllowed,
+  assertOneSchedulePerAgent,
   autoPauseReason,
   COMMAND_GATES_OFF,
   commandGateRefusal,
@@ -179,6 +204,13 @@ export { attachLastRun, type RunSummarySource, type ScheduleWithLastRun } from "
 export { type FireResult, Scheduler, type SchedulerOptions, type SchedulerStatus } from "./scheduler/scheduler.js";
 export * from "./scheduler/types.js";
 export { BudgetRepository } from "./storage/budgets.js";
+export {
+  COST_SPLITS,
+  type CostSeries,
+  type CostSeriesFilter,
+  type CostSplitBy,
+  costSeries,
+} from "./storage/costs.js";
 export { migrationDigests, openDatabase } from "./storage/db.js";
 export {
   type ListRunsFilter,
@@ -189,5 +221,17 @@ export {
   RunRepository,
 } from "./storage/runs.js";
 export { type EndedRunFacts, parseGate, ScheduleRepository } from "./storage/schedules.js";
+export {
+  type OutcomeCounts,
+  type OutcomeSeries,
+  type OutcomeSeriesFilter,
+  outcomeSeries,
+  recentReviewReasons,
+  TREND_RANGE_SPEC,
+  TREND_RANGES,
+  type TrendBucket,
+  type TrendRange,
+  trendBuckets,
+} from "./storage/trends.js";
 
 export { type LogLevel, logger } from "./util/log.js";

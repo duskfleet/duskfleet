@@ -89,6 +89,9 @@ export default function SchedulesPage() {
     FIRINGS_SHOWN,
   );
   const groups = groupByProject(schedules);
+  // One schedule per agent: create / update refuse a second one, older databases may still hold some.
+  const perAgent = new Map<string, number>();
+  for (const s of schedules) perAgent.set(s.agentId, (perAgent.get(s.agentId) ?? 0) + 1);
   const enableExample = schedules[0]
     ? `update_schedule { "id": "${schedules[0].id}", "enabled": true }`
     : `update_schedule { "id": "<schedule id>", "enabled": true }`;
@@ -245,7 +248,11 @@ export default function SchedulesPage() {
                     <article key={s.id} id={s.id} className={`sched-card${s.enabled ? "" : " paused"}`}>
                       <div className="main">
                         <div className="title-row">
-                          <h3>{s.name}</h3>
+                          <h3>
+                            <Link href={`/agents#${encodeURIComponent(s.agentId)}`} title={`Agent ${s.agentId}`}>
+                              {s.agentId}
+                            </Link>
+                          </h3>
                           <span
                             className={`badge ${s.enabled ? "completed" : "cancelled"}`}
                             title={
@@ -288,9 +295,13 @@ export default function SchedulesPage() {
                           </span>
                           <span title={s.timeZone}>{s.cronHuman}</span>
                           <span className="sep">·</span>
-                          <Link className="agent" href={`/?agent=${encodeURIComponent(s.agentId)}`}>
-                            {s.agentId}
-                          </Link>
+                          <span title={`Schedule ${s.id}`}>“{s.name}”</span>
+                          {s.effectiveProjectId && (
+                            <>
+                              <span className="sep">·</span>
+                              <span>{s.effectiveProjectId}</span>
+                            </>
+                          )}
                           {s.model && (
                             <>
                               <span className="sep">·</span>
@@ -331,6 +342,16 @@ export default function SchedulesPage() {
                             </>
                           )}
                         </div>
+                        {(perAgent.get(s.agentId) ?? 0) > 1 && (
+                          <div className="meta">
+                            <span
+                              className="flag warn"
+                              title="Creating a second schedule for an agent is refused; this database holds older duplicates. Delete all but one."
+                            >
+                              {s.agentId} has {perAgent.get(s.agentId)} schedules; one per agent, delete one
+                            </span>
+                          </div>
+                        )}
                         <blockquote title={s.prompt}>{runTitle(s.prompt, 220)}</blockquote>
                       </div>
 

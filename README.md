@@ -25,6 +25,7 @@ Website: [duskfleet.com](https://duskfleet.com/?utm_source=github&utm_medium=rea
 [Status and roadmap](#status-and-roadmap) ·
 [Documentation](#documentation) ·
 [Contributing](#contributing) ·
+[Star history](#star-history) ·
 [License](#license) ·
 [Website](https://duskfleet.com/?utm_source=github&utm_medium=readme&utm_campaign=always-on&utm_content=readme)
 
@@ -63,8 +64,13 @@ git clone https://github.com/duskfleet/duskfleet.git
 cd duskfleet
 npm install
 npm run build
+npm run cli -- init --yes      # checks Node and the Claude Code login, prepares config and data
 npm run cli -- doctor          # Claude binary, version, where config and data live
 ```
+
+`init` without `--yes` asks before the optional steps (registering the MCP server in Claude Code
+or Claude Desktop); in a clone it finds the repo's `config/` and leaves it as it is. See
+[`init`](docs/cli.md#init).
 
 Duskfleet ships no starter agent: create your first one, on the cheapest model. `agents create`
 writes it to `data/agents/fixer.md` (git-ignored) with safe defaults: a $0.50 budget, no
@@ -157,6 +163,16 @@ Guides:
 ## Contributing
 
 Setup, rules and good first issues: [CONTRIBUTING.md](CONTRIBUTING.md).
+
+## Star history
+
+<a href="https://star-history.com/#duskfleet/duskfleet&Date">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/svg?repos=duskfleet/duskfleet&type=Date&theme=dark">
+    <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/svg?repos=duskfleet/duskfleet&type=Date">
+    <img alt="Star history of duskfleet/duskfleet" src="https://api.star-history.com/svg?repos=duskfleet/duskfleet&type=Date">
+  </picture>
+</a>
 
 ## License
 

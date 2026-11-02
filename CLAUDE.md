@@ -56,7 +56,10 @@ npm workspaces, one `config/` and one SQLite database shared by three deliverabl
   files (`app/agents/actions.ts`: delete, unlink) and on schedule rows
   (`app/schedules/actions.ts`: pause/resume, cron + time zone, delete, run now, through core's
   `updateSchedule` / `requestRun`; run now only stamps `run_requested_at`, the lease holder
-  fires it on its next tick). No auth, localhost only.
+  fires it on its next tick) and on the editable keys of `config/duskfleet.yaml`
+  (`app/settings/actions.ts`, through core's `writeGlobalFile`: comments kept, rolled back when
+  `loadConfig` refuses the result; `scheduler.enabled` only through its own action). No auth,
+  localhost only.
 - `config/`: `duskfleet.yaml`, `agents/*.md` (where a checkout may commit agents, "builtin":
   YAML frontmatter + system prompt body; only specialised patterns here, never a starter or
   default agent: owner decision 2026-10-26, a user's first agent comes from `agents create`),
@@ -83,11 +86,14 @@ npm workspaces, one `config/` and one SQLite database shared by three deliverabl
   `pause_scheduler` (one `scheduler_pause` row, migration 21) stops all firing until an instant,
   also read every tick (the holder keeps the lease and the sweep). `trigger_kind` is only `cron`.
   Create/update validation is `scheduler/crud.ts`, shared by MCP, CLI and dashboard.
+  One schedule per agent (owner decision 2026-11-01): `assertOneSchedulePerAgent` refuses a create
+  or an agent change, a repo query, never a unique index (older DBs hold duplicates; `doctor` lists them).
   Command gates (`sh -c`, the runs' env allow-list) are opt-in: `scheduler.allow_command_gates` (default false)
   is checked on create/update (`assertCommandGateAllowed`) and again in `evaluateGate` per tick.
   Auto-pause (`autoPauseReason`, migration 16): before a scheduled fire, the last
   `scheduler.auto_pause_after` ended runs all empty (0 tool calls) or needs review = pause with
   `paused_reason`, outcome `auto_paused`; resume clears it, `auto_paused_at` bounds the next streak.
+  `scheduler.auto_pause: false` (read every tick) skips the check and keeps the threshold.
   `install-service` (`packages/mcp/src/service.ts`) renders a per-user unit (launchd,
   systemd --user, Task Scheduler XML) from machine paths: never version a unit, re-run it
   after every build (it restarts the service). Not the OS crontab.
@@ -206,7 +212,7 @@ npm workspaces, one `config/` and one SQLite database shared by three deliverabl
 
 ## Roadmap
 
-Next: scheduler (`packages/core/src/scheduler/types.ts` is the contract, no implementation),
-then deterministic evals (`tests_passed`, `build_passed`, `files_exist`) as post-run hooks,
+Shipped: the scheduler (cron, gates, daily caps, monthly budgets, auto-pause, `serve` /
+`install-service`). Next: deterministic evals (`tests_passed`, `build_passed`, `files_exist`) as post-run hooks,
 then LLM evals as a second read-only run, then metrics tools and Git integration. A Codex CLI
 executor as a second runtime is assessed in the design notes (after evals).

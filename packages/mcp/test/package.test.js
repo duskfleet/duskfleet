@@ -10,7 +10,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
-import { ConfigNotFoundError, resolveConfigDir } from "@duskfleet/core";
+import { ConfigNotFoundError, loadConfig, resolveConfigDir } from "@duskfleet/core";
 import { testEnv } from "./helpers.js";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -59,18 +59,24 @@ test("a command that finds no config ends with the init hint; other errors do no
   assert.equal(missing.status, 1);
   assert.match(missing.stderr, /error: Config file not found: .*\nFirst time here\? Run: npx duskfleet init\n$/);
 
-  // The other no-config case (no DUSKFLEET_CONFIG, nothing found walking up) throws the same class;
-  // the bins live inside this repository, so check the lookup in process from a temp dir.
-  const saved = process.env["DUSKFLEET_CONFIG"];
+  // The other no-config case (no DUSKFLEET_CONFIG, nothing found walking up, no user-level
+  // duskfleet.yaml yet) throws the same class; the bins live inside this repository, so check the
+  // lookup in process from a temp dir.
+  const saved = { config: process.env["DUSKFLEET_CONFIG"], xdg: process.env["XDG_CONFIG_HOME"] };
   delete process.env["DUSKFLEET_CONFIG"];
   const outside = mkdtempSync(path.join(tmpdir(), "duskfleet-no-repo-"));
+  process.env["XDG_CONFIG_HOME"] = path.join(outside, "xdg-config");
   try {
+    const configDir = resolveConfigDir(outside);
+    assert.equal(configDir, path.join(outside, "xdg-config", "duskfleet"));
     assert.throws(
-      () => resolveConfigDir(outside),
-      (err) => err instanceof ConfigNotFoundError && /Could not find config\/duskfleet\.yaml/.test(err.message),
+      () => loadConfig(configDir),
+      (err) => err instanceof ConfigNotFoundError && /Config file not found/.test(err.message),
     );
   } finally {
-    if (saved !== undefined) process.env["DUSKFLEET_CONFIG"] = saved;
+    if (saved.config !== undefined) process.env["DUSKFLEET_CONFIG"] = saved.config;
+    if (saved.xdg !== undefined) process.env["XDG_CONFIG_HOME"] = saved.xdg;
+    else delete process.env["XDG_CONFIG_HOME"];
     rmSync(outside, { recursive: true, force: true });
   }
 
@@ -149,16 +155,26 @@ test("the bundled CLI runs: --help without config, doctor on a config with the f
 });
 
 /** A minimal two-package workspace with a copy of scripts/check-pack.mjs, so the check runs on it. */
-function packWorkspace(cliVersion, webVersion) {
+function packWorkspace(cliVersion, webVersion, cliBin = "dist/cli.js") {
   const root = mkdtempSync(path.join(tmpdir(), "duskfleet-pack-"));
   const write = (rel, content) => {
     mkdirSync(path.dirname(path.join(root, rel)), { recursive: true });
     writeFileSync(path.join(root, rel), content);
   };
   write("package.json", JSON.stringify({ name: "ws", private: true, workspaces: ["packages/duskfleet", "apps/web"] }));
-  write("packages/duskfleet/package.json", JSON.stringify({ name: "duskfleet", version: cliVersion }));
+  write(
+    "packages/duskfleet/package.json",
+    JSON.stringify({
+      name: "duskfleet",
+      version: cliVersion,
+      bin: { duskfleet: cliBin, "duskfleet-mcp": "dist/index.js" },
+    }),
+  );
   for (const f of ["dist/cli.js", "dist/index.js", "dist/core/index.js"]) write(`packages/duskfleet/${f}`, "");
-  write("apps/web/package.json", JSON.stringify({ name: "@duskfleet/web", version: webVersion }));
+  write(
+    "apps/web/package.json",
+    JSON.stringify({ name: "@duskfleet/web", version: webVersion, bin: { "duskfleet-web": "bin/start.mjs" } }),
+  );
   for (const f of ["bin/start.mjs", "next.config.mjs"]) write(`apps/web/${f}`, "");
   write("scripts/check-pack.mjs", readFileSync(path.join(here, "..", "..", "..", "scripts", "check-pack.mjs")));
   return root;
@@ -187,5 +203,24 @@ test("check-pack fails when the two packages carry different versions, passes wh
     } finally {
       rmSync(root, { recursive: true, force: true });
     }
+  }
+});
+
+// npm 11 drops a bin whose path starts with "./" while publishing (seen in the release run of
+// 2026-10-28, "bin[duskfleet] script name dist/cli.js was invalid and removed"), so the gate
+// refuses it before any tag is cut.
+test("check-pack refuses a bin path npm would drop at publish time", () => {
+  const root = packWorkspace("0.1.0", "0.1.0", "./dist/cli.js");
+  try {
+    const r = spawnSync(process.execPath, [path.join(root, "scripts", "check-pack.mjs")], {
+      cwd: root,
+      env: testEnv(),
+      encoding: "utf8",
+    });
+    assert.equal(r.status, 1, r.stdout);
+    assert.match(r.stderr, /1 problem\(s\)/);
+    assert.match(r.stderr, /bin duskfleet -> \.\/dist\/cli\.js: npm drops this entry at publish/);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
   }
 });

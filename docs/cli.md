@@ -4,6 +4,8 @@ The CLI uses the same orchestration code as the MCP server and is the quickest w
 `npm run cli --` is shorthand for `node packages/mcp/dist/cli.js`.
 
 ```bash
+npm run cli -- init                                       # guided setup; see "init" below
+npm run cli -- init --yes [--mcp claude-code|claude-desktop]   # the same without prompts (scripts, CI)
 npm run cli -- doctor                                     # Claude binary, version, config and data paths
 npm run cli -- doctor --probe                             # plus one real hello run on haiku (costs cents)
 npm run cli -- run --project ~/Documents/Projects/my-app -- "Add a README section describing the build"
@@ -20,9 +22,12 @@ npm run cli -- schedules run-now "pr review"              # schedule id or name;
 npm run cli -- budgets                                    # monthly budgets with this month's spend and state
 npm run cli -- budgets set project my-app --amount 50 [--warn 80] [--no-hard-stop]   # or: global | agent <id>
 npm run cli -- budgets delete <budget id>
+npm run cli -- dashboard [--port 4777] [--no-open] [--no-install]   # install @duskfleet/web on demand, start it (see dashboard.md)
 npm run cli -- serve                                      # long-running scheduler process
 npm run cli -- install-service [--print]                  # register `serve` with launchd / systemd --user / Task Scheduler
 npm run cli -- uninstall-service
+npm run cli -- mcp register --target claude-desktop --dry-run   # or claude-code; preview, then --yes to apply (see mcp-server.md)
+npm run cli -- mcp status                                 # which Claude hosts have a duskfleet entry; no config needed
 npm run cli -- tools                                      # the MCP tool catalogue
 npm run cli -- --help                                     # the usage (also -h); no config needed
 npm run cli -- --version                                  # the package version (also -v); duskfleet-mcp --version too
@@ -30,9 +35,35 @@ npm run cli -- --version                                  # the package version 
 
 `duskfleet` with no arguments prints the usage on stderr and exits 2; `--help` prints it on
 stdout and exits 0. Both end with `First time here? Run: npx duskfleet init`, and so does the
-error of any command that finds no config (no `config/duskfleet.yaml` above the CLI, or none in
-the directory `DUSKFLEET_CONFIG` names). `--version` prints the version of the installed
+error of any command that finds no config (no `duskfleet.yaml` in the directory the lookup picked:
+`DUSKFLEET_CONFIG`, a `config/` above the CLI, else the user-level directory; see
+[where config and data live](configuration.md#where-config-and-data-live)). `--version` prints the version of the installed
 `duskfleet` package and needs neither a config nor Node 24.
+
+## init
+
+`init` prepares a first configuration. Each step prints its result; the first failure stops
+with the fix and exit 1:
+
+1. **Node**: the version (Node 24+ is checked before any command runs).
+2. **Claude Code**: the binary (same lookup as runs: `CLAUDE_BIN`, `claude.binary`, `PATH`,
+   `~/.local/bin/claude`), its version, and the login from `claude auth status --json`. Not
+   logged in: it prints `claude auth login` and stops.
+3. **Config and data**: creates the user-level config directory with a starter `duskfleet.yaml`
+   and the data directory ([where config and data live](configuration.md#where-config-and-data-live)).
+   A config that already exists (user-level, a checkout's `config/`, or `DUSKFLEET_CONFIG`) is
+   reported and left untouched, so running `init` twice is safe. `DUSKFLEET_CONFIG` pointing at
+   a directory without `duskfleet.yaml` is an error: `init` writes only the user-level directory.
+4. **MCP registration** (optional): on a terminal it asks `Register the MCP server in Claude Code
+   / Claude Desktop / skip?` and then does what `mcp register --target ... --yes` does (preview,
+   backup of an existing file, write; see [MCP server](mcp-server.md)).
+5. What was created, where, and the next commands: `doctor`, `agents create`, `run`. No agent is
+   created: Duskfleet ships none.
+
+`init --yes` asks nothing: steps 1-3 and the summary, step 4 only with `--mcp claude-code` or
+`--mcp claude-desktop`; without `--mcp` it never writes a Claude config file. Any failed check
+exits non-zero. On something that is not a terminal (a script) without `--yes`, step 4 is
+skipped.
 
 ## First run
 
@@ -40,6 +71,7 @@ Duskfleet ships no starter agent and `default_agent` is `null`, so a run needs `
 README Quick start creates one, then runs it:
 
 ```bash
+npm run cli -- init --yes
 npm run cli -- doctor
 npm run cli -- agents create fixer --model haiku -- "You fix the failing test in this project. Run the tests, read the failure, change the minimum code, run them again. No git, no installs."
 npm run cli -- run --project /abs/path/to/scratch-project --agent fixer -- "Fix the failing test"
@@ -73,7 +105,14 @@ It prints `{ created, overrode, agent }` as JSON and the next command on stderr.
 
 ## doctor, logs and diffs
 
-`doctor` prints the effective `path` used to find `claude` and passed to runs; `pathDefaulted`
+`doctor` prints where the config and data come from: `configDir` with `configSource` (`env` for
+`DUSKFLEET_CONFIG`, `repo` for a `config/` found walking up from the CLI, `user` for the
+user-level directory), `configLookup` (every candidate in precedence order, `null` when it does
+not apply), and `dataDir` with `dataSource` (`env` for `DUSKFLEET_DATA`, `config` for `data_dir`
+or the `../data` next to a repo config, `user` for the user-level data directory). The rules are
+in [Configuration](configuration.md#where-config-and-data-live).
+
+`doctor` also prints the effective `path` used to find `claude` and passed to runs; `pathDefaulted`
 is true on macOS when the inherited `PATH` was missing or minimal (a GUI-launched host) and the usual
 install directories were put in front ([Troubleshooting](troubleshooting.md)).
 
@@ -178,6 +217,16 @@ The dashboard's per-model breakdown counts a `mixed` run under the model it requ
 `ANTHROPIC_API_KEY` (Claude Code bills that key per token), `subscription` otherwise (`costUsd`
 is then what Claude Code reports, not what you are billed). It is null for runs recorded before it
 existed. The dashboard marks subscription costs "reported, not billed".
+
+A cost is named after what it is, never after a setting. `runs`, `run-info`, `list_runs` and
+`get_run` add `costLabel` to each run: `Cost` when it is billed (`billingType: api`), `API value`
+otherwise (a subscription run, or one recorded before `billingType` existed). `list_runs` also
+returns `cost`, the listed runs summed by billing type (`apiUsd` billed, `subscriptionUsd` the API
+value of subscription usage) with the wording to show: `heading` is `Spent` when every run is
+billed, `Usage (API value)` when none is (`note`: included in your Claude subscription), `Spent and
+usage` when both kinds are listed. `runs` prints the same total as one line on stderr (stdout stays
+the JSON array), for example `Usage (API value): $3.2 over 20 runs, included in your Claude
+subscription`.
 
 `contextExhausted` comes only from structured signals (termination reason, result subtype,
 stop reason, or the error text of a failed run), never from scanning the result's prose.

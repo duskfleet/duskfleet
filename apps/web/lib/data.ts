@@ -2,8 +2,9 @@
  * Server-only data access for the dashboard. Reads the same config/ and
  * data/duskfleet.db the MCP server uses. The dashboard never mutates runs;
  * cancelling goes through the MCP server (cancel_run) or the CLI. Its writes
- * are server actions on user agent files (app/agents/actions.ts) and on
- * schedule rows (app/schedules/actions.ts), both on the core API.
+ * are server actions on user agent files (app/agents/actions.ts), on
+ * schedule rows (app/schedules/actions.ts) and on config/duskfleet.yaml
+ * (app/settings/actions.ts), all on the core API.
  */
 import "server-only";
 import { existsSync, readFileSync } from "node:fs";
@@ -12,8 +13,13 @@ import path from "node:path";
 import type { DatabaseSync } from "node:sqlite";
 import {
   type BudgetStatus,
+  budgetForScope,
   budgetPlan,
   budgetStatuses,
+  type CostSeries,
+  type CostSplit,
+  type CostSplitBy,
+  costSeries,
   type DuskFleetConfig,
   describeCron,
   findRepoRoot,
@@ -24,7 +30,9 @@ import {
   MIXED_MODEL,
   NEEDS_REVIEW_SQL,
   nextFire,
+  type OutcomeSeries,
   openDatabase,
+  outcomeSeries,
   type ProjectAgentInfo,
   parseCron,
   type ReviewReason,
@@ -32,13 +40,18 @@ import {
   type RunOutcome,
   RunRepository,
   type RunStatus,
+  recentReviewReasons,
   resolveClaudeBinary,
   resolveConfigDir,
   ScheduleRepository,
   scheduleIdleStats,
   scheduleRunState,
+  type TrendRange,
   utcDayStart,
+  utcMonthStart,
 } from "@duskfleet/core";
+import { listScoped, scopeList } from "./scope";
+import { mergeSeries } from "./trends";
 
 interface Services {
   configDir: string;
@@ -66,10 +79,31 @@ export function config(): DuskFleetConfig {
 }
 
 /** Monthly budgets (UTC month) past their warn threshold or spent, most spent first. A pure read. */
-export function budgetAlerts(): BudgetStatus[] {
-  return budgetStatuses(services().runs.budgets, config())
+export function budgetAlerts(): Array<BudgetStatus & { cost: CostSplit }> {
+  const { db } = services();
+  const cfg = config();
+  return budgetStatuses(services().runs.budgets, cfg)
     .filter((b) => b.state !== "ok")
-    .sort((a, b) => b.percent - a.percent);
+    .sort((a, b) => b.percent - a.percent)
+    .map((b) => {
+      // The billed part of spentUsd, same scope and month as the budget counts it (budgets.spentSince).
+      const scope =
+        b.scope === "global"
+          ? { sql: "", args: [] as Array<string | null> }
+          : b.scope === "agent"
+            ? { sql: "AND agent_id = ?", args: [b.scopeId] }
+            : {
+                sql: "AND (project_id = ? OR project_path = ?)",
+                args: [b.scopeId, cfg.projects.get(b.scopeId ?? "")?.path ?? null],
+              };
+      const r = db
+        .prepare(
+          `SELECT COALESCE(SUM(cost_usd), 0) AS total, COALESCE(SUM(${API_COST_SQL}), 0) AS api
+           FROM runs WHERE created_at >= ? ${scope.sql}`,
+        )
+        .get(b.periodStart, ...scope.args) as { total: number; api: number };
+      return { ...b, cost: split(r.total, r.api) };
+    });
 }
 
 /**
@@ -181,6 +215,10 @@ export interface RunsFilter {
   status?: RunStatus;
   agentId?: string;
   projectPath?: string;
+  /** Any of these agents (OR); a non-empty list takes precedence over `agentId`. */
+  agentIds?: string[];
+  /** Any of these project folders (OR), AND the agents above. */
+  projectPaths?: string[];
   /** Only runs started by this schedule (filtered in memory: no index needed for a few hundred rows). */
   scheduleId?: string;
   /** Case-insensitive substring of the prompt (in memory). */
@@ -215,19 +253,53 @@ export function listRuns(filter: RunsFilter = {}): RunWithProject[] {
   const limit = filter.limit ?? 50;
   const f: ListRunsFilter = { limit: inMemory ? 200 : limit };
   if (filter.status) f.status = filter.status;
-  if (filter.agentId) f.agentId = filter.agentId;
-  if (filter.projectPath) f.projectPath = filter.projectPath;
   if (filter.outcome) f.outcome = filter.outcome;
   if (filter.reason) f.reason = filter.reason;
   // The outcome KPIs count real runs only: a gate run must not show up under them.
   if (filter.outcome || filter.reason) f.kind = "run";
-  let list = runs.list(f);
+  // Core filters on one agent and one project: a multi-select asks once per (agent, project) pair.
+  let list: Run[] = listScoped(
+    scopeList(filter.agentId, filter.agentIds),
+    scopeList(filter.projectPath, filter.projectPaths),
+    f.limit ?? limit,
+    (agentId, projectPath) => {
+      const pair: ListRunsFilter = { ...f };
+      if (agentId) pair.agentId = agentId;
+      if (projectPath) pair.projectPath = projectPath;
+      return runs.list(pair);
+    },
+  );
   if (filter.scheduleId) list = list.filter((r) => r.scheduleId === filter.scheduleId);
   if (filter.q) {
     const q = filter.q.toLowerCase();
     list = list.filter((r) => r.prompt.toLowerCase().includes(q) || r.id.startsWith(q));
   }
   if (inMemory) list = list.slice(0, limit);
+  const label = projectLabeller();
+  const resumedBy = runs.resumedByMany(list.map((r) => r.id));
+  return list.map((r) => ({ ...r, projectLabel: label(r), resumedByRunId: resumedBy.get(r.id) ?? null }));
+}
+
+/** How a run ended, as the agent page's Recent runs Status filter partitions them (stored review verdict). */
+export type RunBucket = "running" | "review" | "clean" | "cancelled";
+
+/** A run not ended yet: the Running bucket here and the agent's running state (agentStats). */
+const ACTIVE_SQL = "status IN ('running','pending')";
+const BUCKET_SQL: Record<RunBucket, string> = {
+  running: `(${ACTIVE_SQL})`,
+  review: `(NOT ${ACTIVE_SQL} AND ${NEEDS_REVIEW_SQL})`,
+  clean: `(status = 'completed' AND NOT ${NEEDS_REVIEW_SQL})`,
+  cancelled: `(NOT ${ACTIVE_SQL} AND status <> 'completed' AND NOT ${NEEDS_REVIEW_SQL})`,
+};
+
+/** One agent's newest runs in any of `buckets` (all when empty), filtered in SQL so an old rare status is still found. */
+export function agentRecentRuns(agentId: string, buckets: RunBucket[], limit: number): RunWithProject[] {
+  const { db, runs } = services();
+  const where = buckets.length ? `AND (${buckets.map((b) => BUCKET_SQL[b]).join(" OR ")})` : "";
+  const ids = db
+    .prepare(`SELECT id FROM runs WHERE kind = 'run' AND agent_id = ? ${where} ORDER BY created_at DESC LIMIT ?`)
+    .all(agentId, limit) as Array<{ id: string }>;
+  const list = ids.map((r) => runs.get(r.id)).filter((r): r is Run => r !== null);
   const label = projectLabeller();
   const resumedBy = runs.resumedByMany(list.map((r) => r.id));
   return list.map((r) => ({ ...r, projectLabel: label(r), resumedByRunId: resumedBy.get(r.id) ?? null }));
@@ -309,6 +381,7 @@ export interface AgentStats {
   /** The most recent finished run needs review (its stored review verdict). */
   lastNeedsReview: boolean;
   costUsd: number;
+  cost: CostSplit;
   avgDurationMs: number | null;
   lastRunAt: string | null;
   /** model_used of the most recent run that reported one: what an alias like "sonnet" resolved to. */
@@ -321,13 +394,14 @@ export function agentStats(): AgentStats[] {
     .prepare(
       `SELECT agent_id,
               COUNT(*)                                          AS total,
-              SUM(status = 'running')                           AS running,
+              SUM(${ACTIVE_SQL})                                AS running,
               SUM(status = 'completed')                         AS completed,
               SUM(status IN ('failed','timed_out','cancelled')) AS failed,
               SUM(${NEEDS_REVIEW_SQL})                          AS needs_review,
               SUM(status IN ('completed','failed','timed_out','cancelled')) AS finished,
               SUM(status = 'completed' AND NOT ${NEEDS_REVIEW_SQL}) AS clean,
               COALESCE(SUM(cost_usd), 0)                        AS cost_usd,
+              COALESCE(SUM(${API_COST_SQL}), 0)                 AS cost_api,
               AVG(duration_ms)                                  AS avg_duration_ms,
               MAX(created_at)                                   AS last_run_at,
               (SELECT model_used FROM runs r2 WHERE r2.agent_id = runs.agent_id AND r2.model_used IS NOT NULL
@@ -347,6 +421,7 @@ export function agentStats(): AgentStats[] {
     finished: number;
     clean: number;
     cost_usd: number;
+    cost_api: number;
     avg_duration_ms: number | null;
     last_run_at: string | null;
     last_model_used: string | null;
@@ -363,10 +438,142 @@ export function agentStats(): AgentStats[] {
     clean: r.clean,
     lastNeedsReview: r.last_needs_review === 1,
     costUsd: r.cost_usd,
+    cost: split(r.cost_usd, r.cost_api),
     avgDurationMs: r.avg_duration_ms,
     lastRunAt: r.last_run_at,
     lastModelUsed: r.last_model_used,
   }));
+}
+
+/** One agent's runs over the last `days` UTC days (today included), for the /agents rows and the agent page. */
+export interface AgentWindow {
+  agentId: string;
+  runs: number;
+  finished: number;
+  /** Completed with nothing to review (stored verdict), over `finished`. */
+  clean: number;
+  /** Runs with a stored review reason. */
+  needsReview: number;
+  needsReviewToday: number;
+  costUsd: number;
+  cost: CostSplit;
+  /** Runs per UTC day, oldest first, today last: `days` entries (the sparklines). */
+  runsByDay: number[];
+  costByDay: number[];
+}
+
+/** First instant of the window of the last `days` UTC days, today included (ms). */
+function windowStart(days: number): number {
+  const now = new Date();
+  return Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() - (days - 1));
+}
+
+/**
+ * Every agent's window (or one agent's), from one query grouped by agent and UTC day.
+ * Counts are real runs only (`kind = 'run'`), as the overview and the Runs list they link to;
+ * the cost keeps gate runs, as everywhere else.
+ */
+export function agentWindows(days: number, agentId?: string): Map<string, AgentWindow> {
+  const { db } = services();
+  const start = windowStart(days);
+  const rows = db
+    .prepare(
+      `SELECT agent_id, substr(created_at, 1, 10) AS day,
+              COALESCE(SUM(kind = 'run'), 0)                                                AS runs,
+              COALESCE(SUM(kind = 'run' AND status IN ('completed','failed','timed_out','cancelled')), 0) AS finished,
+              COALESCE(SUM(kind = 'run' AND status = 'completed' AND NOT ${NEEDS_REVIEW_SQL}), 0) AS clean,
+              COALESCE(SUM(kind = 'run' AND ${NEEDS_REVIEW_SQL}), 0)                        AS needs_review,
+              COALESCE(SUM(cost_usd), 0)                                     AS cost_usd,
+              COALESCE(SUM(${API_COST_SQL}), 0)                              AS cost_api
+       FROM runs WHERE created_at >= ? ${agentId ? "AND agent_id = ?" : ""}
+       GROUP BY agent_id, day`,
+    )
+    .all(...[new Date(start).toISOString(), ...(agentId ? [agentId] : [])]) as Array<{
+    agent_id: string;
+    day: string;
+    runs: number;
+    finished: number;
+    clean: number;
+    needs_review: number;
+    cost_usd: number;
+    cost_api: number;
+  }>;
+  const out = new Map<string, AgentWindow & { costApi: number }>();
+  for (const r of rows) {
+    let w = out.get(r.agent_id);
+    if (!w) {
+      w = {
+        agentId: r.agent_id,
+        runs: 0,
+        finished: 0,
+        clean: 0,
+        needsReview: 0,
+        needsReviewToday: 0,
+        costUsd: 0,
+        costApi: 0,
+        cost: { apiUsd: 0, subscriptionUsd: 0 },
+        runsByDay: new Array<number>(days).fill(0),
+        costByDay: new Array<number>(days).fill(0),
+      };
+      out.set(r.agent_id, w);
+    }
+    const i = Math.round((Date.parse(`${r.day}T00:00:00Z`) - start) / 86_400_000);
+    if (i < 0 || i >= days) continue;
+    w.runs += r.runs;
+    w.finished += r.finished;
+    w.clean += r.clean;
+    w.needsReview += r.needs_review;
+    if (i === days - 1) w.needsReviewToday += r.needs_review;
+    w.costUsd += r.cost_usd;
+    w.costApi += r.cost_api;
+    w.runsByDay[i] = (w.runsByDay[i] ?? 0) + r.runs;
+    w.costByDay[i] = (w.costByDay[i] ?? 0) + r.cost_usd;
+  }
+  for (const w of out.values()) w.cost = split(w.costUsd, w.costApi);
+  return out;
+}
+
+/** Real runs per stored review reason of one agent over the same window as agentWindows, most frequent first. */
+export function agentReviewReasons(agentId: string, days: number): Array<{ reason: ReviewReason; count: number }> {
+  const rows = services()
+    .db.prepare(
+      `SELECT j.value AS reason, COUNT(*) AS n
+       FROM runs, json_each(COALESCE(runs.review_reasons_json, '[]')) AS j
+       WHERE kind = 'run' AND agent_id = ? AND created_at >= ?
+       GROUP BY j.value ORDER BY n DESC, j.value`,
+    )
+    .all(agentId, new Date(windowStart(days)).toISOString()) as Array<{
+    reason: ReviewReason;
+    n: number;
+  }>;
+  return rows.map((r) => ({ reason: r.reason, count: r.n }));
+}
+
+/**
+ * One agent for its page: the listAgents entry plus its own prompt body and, for a link,
+ * the body of the project's persona file (frontmatter dropped). null when the id is unknown.
+ */
+export function agentDetail(id: string) {
+  const cfg = config();
+  const def = cfg.agents.get(id);
+  const agent = listAgents().find((a) => a.id === id);
+  if (!def || !agent) return null;
+  let persona: string | null = null;
+  if (agent.linked?.path) {
+    try {
+      persona = readFileSync(agent.linked.path, "utf8")
+        .replace(/^---\r?\n[\s\S]*?\r?\n---\r?\n?/, "")
+        .trim();
+    } catch {
+      persona = null;
+    }
+  }
+  return {
+    agent,
+    systemPrompt: def.systemPrompt,
+    persona,
+    project: def.project ? (cfg.projects.get(def.project) ?? null) : null,
+  };
 }
 
 /**
@@ -449,31 +656,49 @@ export interface ModelStats {
   avgDurationMs: number | null;
   avgCostUsd: number | null;
   costUsd: number;
+  cost: CostSplit;
 }
 
 /**
- * Cost and speed per model actually used, for the overview breakdown. A run that spent
- * tokens on several models (model_used 'mixed') counts under the model it asked for.
+ * Cost and speed per model actually used, for the By model table of /costs. A run that spent
+ * tokens on several models (model_used 'mixed') counts under the model it asked for. Finished
+ * runs created since `from`, on the agent / project scope of the page.
  */
-export function modelStats(): ModelStats[] {
+export function modelStats(filter: Pick<RunsFilter, "agentId" | "projectPath"> & { from?: string } = {}): ModelStats[] {
   const { db } = services();
+  const where = ["status IN ('completed','failed','timed_out','cancelled')"];
+  const values: string[] = [];
+  if (filter.from) {
+    where.push("created_at >= ?");
+    values.push(filter.from);
+  }
+  if (filter.agentId) {
+    where.push("agent_id = ?");
+    values.push(filter.agentId);
+  }
+  if (filter.projectPath) {
+    where.push("project_path = ?");
+    values.push(filter.projectPath);
+  }
   const rows = db
     .prepare(
       `SELECT COALESCE(NULLIF(model_used, '${MIXED_MODEL}'), model_requested, 'default') AS model,
               COUNT(*)                 AS runs,
               AVG(duration_ms)         AS avg_duration_ms,
               AVG(cost_usd)            AS avg_cost_usd,
-              COALESCE(SUM(cost_usd),0) AS cost_usd
+              COALESCE(SUM(cost_usd),0) AS cost_usd,
+              COALESCE(SUM(${API_COST_SQL}),0) AS cost_api
        FROM runs
-       WHERE status IN ('completed','failed','timed_out','cancelled')
+       WHERE ${where.join(" AND ")}
        GROUP BY 1 ORDER BY cost_usd DESC`,
     )
-    .all() as Array<{
+    .all(...values) as Array<{
     model: string;
     runs: number;
     avg_duration_ms: number | null;
     avg_cost_usd: number | null;
     cost_usd: number;
+    cost_api: number;
   }>;
   return rows.map((r) => ({
     model: r.model,
@@ -481,6 +706,7 @@ export function modelStats(): ModelStats[] {
     avgDurationMs: r.avg_duration_ms,
     avgCostUsd: r.avg_cost_usd,
     costUsd: r.cost_usd,
+    cost: split(r.cost_usd, r.cost_api),
   }));
 }
 
@@ -502,24 +728,44 @@ export interface Overview {
   reviewReasons: Array<{ reason: ReviewReason; count: number }>;
   costUsd: number;
   costLast24hUsd: number;
+  /** costUsd and costLast24hUsd by billing type (costLabels decides the wording). */
+  cost: CostSplit;
+  cost24h: CostSplit;
   /** Part of costUsd spent by schedule gate agents (runs of kind 'gate'). */
   costGatesUsd: number;
+  /** Runs that hit the provider's usage limit (error_code provider_quota) in the last 7 days. */
+  quotaHitsWeek: number;
+  /** Latest reset time those runs reported, when it is still ahead; null otherwise. */
+  quotaResetAt: string | null;
 }
 
+/** billing_type = 'api' is billed; anything else (subscription, or not recorded) is API value. */
+const API_COST_SQL = "CASE WHEN billing_type = 'api' THEN cost_usd END";
+
+// Rounded to a millionth: float noise of the subtraction must not read as a mixed view.
+const split = (total: number, apiUsd: number): CostSplit => ({
+  apiUsd,
+  subscriptionUsd: Math.max(0, Math.round((total - apiUsd) * 1e6) / 1e6),
+});
+
 /** KPIs for the cards. With a filter, computed on the same subset the list shows. */
-export function overview(filter: Pick<RunsFilter, "agentId" | "projectPath"> = {}): Overview {
+export function overview(
+  filter: Pick<RunsFilter, "agentId" | "projectPath" | "agentIds" | "projectPaths"> = {},
+): Overview {
   const { db } = services();
   const now = new Date();
   const since = new Date(now.getTime() - 24 * 3600_000).toISOString();
+  const week = new Date(now.getTime() - 7 * 24 * 3600_000).toISOString();
   const where: string[] = [];
   const values: string[] = [];
-  if (filter.agentId) {
-    where.push("agent_id = ?");
-    values.push(filter.agentId);
-  }
-  if (filter.projectPath) {
-    where.push("project_path = ?");
-    values.push(filter.projectPath);
+  for (const [column, list] of [
+    ["agent_id", scopeList(filter.agentId, filter.agentIds)],
+    ["project_path", scopeList(filter.projectPath, filter.projectPaths)],
+  ] as const) {
+    const set = list.filter((v): v is string => Boolean(v));
+    if (!set.length) continue;
+    where.push(`${column} IN (${set.map(() => "?").join(", ")})`);
+    values.push(...set);
   }
   const r = db
     .prepare(
@@ -536,10 +782,15 @@ export function overview(filter: Pick<RunsFilter, "agentId" | "projectPath"> = {
               SUM(kind = 'run' AND ${NEEDS_REVIEW_SQL} AND created_at >= ?)       AS needs_review_today,
               COALESCE(SUM(cost_usd), 0)                                          AS cost_usd,
               COALESCE(SUM(CASE WHEN created_at >= ? THEN cost_usd END), 0)       AS cost_24h,
-              COALESCE(SUM(CASE WHEN kind = 'gate' THEN cost_usd END), 0)         AS cost_gates
+              COALESCE(SUM(CASE WHEN kind = 'gate' THEN cost_usd END), 0)         AS cost_gates,
+              COALESCE(SUM(${API_COST_SQL}), 0)                                   AS cost_api,
+              COALESCE(SUM(CASE WHEN created_at >= ? THEN ${API_COST_SQL} END), 0) AS cost_api_24h,
+              COALESCE(SUM(error_code = 'provider_quota' AND created_at >= ?), 0) AS quota_hits,
+              MAX(CASE WHEN error_code = 'provider_quota' AND created_at >= ?
+                       THEN json_extract(error_detail_json, '$.retryNotBefore') END) AS quota_reset
        FROM runs ${where.length ? "WHERE " + where.join(" AND ") : ""}`,
     )
-    .get(utcDayStart(now), since, ...values) as {
+    .get(utcDayStart(now), since, since, week, week, ...values) as {
     total: number;
     running: number | null;
     finished: number | null;
@@ -551,7 +802,12 @@ export function overview(filter: Pick<RunsFilter, "agentId" | "projectPath"> = {
     cost_usd: number;
     cost_24h: number;
     cost_gates: number;
+    cost_api: number;
+    cost_api_24h: number;
+    quota_hits: number;
+    quota_reset: string | null;
   };
+  const resetMs = r.quota_reset ? Date.parse(r.quota_reset) : Number.NaN;
   // One row per (run, stored reason): the counts behind the reason chips, same scope as above.
   const reasons = db
     .prepare(
@@ -573,8 +829,74 @@ export function overview(filter: Pick<RunsFilter, "agentId" | "projectPath"> = {
     reviewReasons: reasons.map((x) => ({ reason: x.reason, count: x.n })),
     costUsd: r.cost_usd,
     costLast24hUsd: r.cost_24h,
+    cost: split(r.cost_usd, r.cost_api),
+    cost24h: split(r.cost_24h, r.cost_api_24h),
     costGatesUsd: r.cost_gates,
+    quotaHitsWeek: r.quota_hits,
+    quotaResetAt: resetMs > now.getTime() ? new Date(resetMs).toISOString() : null,
   };
+}
+
+/** Outcomes per bucket of `range` for /trends (core `outcomeSeries`), on the same agent / project scope as the Runs page. */
+export function trends(range: TrendRange, filter: Pick<RunsFilter, "agentId" | "projectPath"> = {}): OutcomeSeries {
+  return outcomeSeries(services().db, { range, ...filter });
+}
+
+/** /trends on a set of agents (a multi-value ?agent=): core filters on one agent, so one series per agent, merged. */
+export function trendsForAgents(range: TrendRange, agentIds: string[], projectPath?: string): OutcomeSeries {
+  const parts = [...new Set(agentIds)].map((agentId) => trends(range, { agentId, projectPath }));
+  return mergeSeries(parts) ?? trends(range, { projectPath });
+}
+
+/** Spend per bucket of `range` for /costs (core `costSeries`), on the agent / project scope of the Runs page. */
+export function costs(
+  range: TrendRange,
+  by: CostSplitBy,
+  filter: Pick<RunsFilter, "agentId" | "projectPath"> = {},
+): CostSeries {
+  return costSeries(services().db, { range, by, ...filter });
+}
+
+/**
+ * This UTC month's spend on a scope, for the /costs KPIs: every run (gates are spend, as budgets
+ * count them), by billing type, plus the real runs started and their spend.
+ */
+export function monthSpend(filter: Pick<RunsFilter, "agentId" | "projectPath"> = {}): {
+  costUsd: number;
+  cost: CostSplit;
+  runs: number;
+  runsCostUsd: number;
+} {
+  const where = ["created_at >= ?"];
+  const values: string[] = [utcMonthStart(new Date())];
+  if (filter.agentId) {
+    where.push("agent_id = ?");
+    values.push(filter.agentId);
+  }
+  if (filter.projectPath) {
+    where.push("project_path = ?");
+    values.push(filter.projectPath);
+  }
+  const r = services()
+    .db.prepare(
+      `SELECT COALESCE(SUM(cost_usd), 0)                                   AS cost_usd,
+              COALESCE(SUM(${API_COST_SQL}), 0)                            AS cost_api,
+              COALESCE(SUM(kind = 'run'), 0)                               AS runs,
+              COALESCE(SUM(CASE WHEN kind = 'run' THEN cost_usd END), 0)   AS runs_cost
+       FROM runs WHERE ${where.join(" AND ")}`,
+    )
+    .get(...values) as { cost_usd: number; cost_api: number; runs: number; runs_cost: number };
+  return { costUsd: r.cost_usd, cost: split(r.cost_usd, r.cost_api), runs: r.runs, runsCostUsd: r.runs_cost };
+}
+
+/** The monthly budget of the scope in view, with this month's spend (core `budgetForScope`); null when it has none. */
+export function scopeBudget(view: { agentId?: string; projectId?: string }): BudgetStatus | null {
+  return budgetForScope(budgetStatuses(services().runs.budgets, config()), view);
+}
+
+/** Reasons of an agent's last `limit` reviews, for the worsening agent's callout on /trends. */
+export function agentRecentReviewReasons(agentId: string, projectPath?: string, limit = 10) {
+  return recentReviewReasons(services().db, agentId, limit, projectPath);
 }
 
 export function listSchedules() {

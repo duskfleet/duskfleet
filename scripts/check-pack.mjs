@@ -6,6 +6,10 @@
  *     .env*, node_modules or build caches;
  *   - a published manifest lists @duskfleet/core in any dependency field read at install
  *     time (core is bundled, never published);
+ *   - a `bin` entry is one npm would drop at publish time: a path with a `./` prefix, `..`,
+ *     an absolute path, or a file that is not in the tarball (npm 11 "auto-corrects" the
+ *     manifest by removing the entry, and `npx duskfleet` then has no executable: release
+ *     run of 2026-10-28);
  *   - the two versions differ (one bump touches both);
  *   - the `duskfleet` bundle is missing (run `npm run build`).
  * Prints both tarball sizes. The dashboard build (.next) is only required with
@@ -98,6 +102,20 @@ for (const spec of PACKAGES) {
   }
   for (const file of spec.required) {
     if (!files.includes(file)) problems.push(`${spec.name}: ${file} is missing (run npm run build)`);
+  }
+  const bins = typeof manifest.bin === "string" ? { [manifest.name]: manifest.bin } : (manifest.bin ?? {});
+  if (!Object.keys(bins).length) problems.push(`${spec.name}: package.json has no bin`);
+  for (const [name, target] of Object.entries(bins)) {
+    if (
+      typeof target !== "string" ||
+      target.startsWith("./") ||
+      target.startsWith("/") ||
+      /(^|\/)\.\.(\/|$)/.test(target)
+    )
+      problems.push(
+        `${spec.name}: bin ${name} -> ${target}: npm drops this entry at publish (use a plain relative path such as dist/cli.js)`,
+      );
+    else if (!files.includes(target)) problems.push(`${spec.name}: bin ${name} -> ${target} is not in the tarball`);
   }
   if (spec.name === "@duskfleet/web" && !files.includes(".next/BUILD_ID")) {
     const msg = `${spec.name}: no dashboard build in the tarball (run npm run build:web)`;

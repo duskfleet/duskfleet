@@ -1,25 +1,43 @@
 # Publishes the two npm packages, `duskfleet` and `@duskfleet/web`, at the same version with npm
-# provenance (docs/development.md "Publishing"). A tag `v<version>` pushed by the owner runs the
-# `publish` job; every pull request runs the `dry-run` job, the same steps ending in
+# provenance (docs/development.md "Publishing"). The `publish` job runs for a tag `v<version>`:
+# called by release.yml right after it creates the tag (the usual path), or on a tag pushed by
+# hand. Every pull request runs the `dry-run` job, the same steps ending in
 # `npm publish --dry-run`, so a broken pack is caught before the tag.
 #
-# The `publish` job needs the NPM_TOKEN repository secret: a granular npm access token that can
-# publish `duskfleet` and `@duskfleet/web` only. `id-token: write` lets npm sign the provenance
-# statement through GitHub's OIDC token; each package.json `repository` must name this repository
-# or the registry refuses the provenance.
-name: Publish
+# The `publish` job authenticates with the NPM_TOKEN repository secret: a granular access token
+# with "Read and write (publish and stage)" on `duskfleet` and `@duskfleet/web` only and "Bypass
+# two-factor authentication" on, the only kind that can run `npm publish` unattended (npm expires
+# it after 90 days at most: recreate it when a release fails with E401/E403). npm removes direct
+# publishing from such tokens in January 2027; by then the trusted publishing below should work.
+#
+# npm trusted publishing (OIDC) stays configured on both packages (`release.yml`, the workflow
+# that starts the run, since this file runs as a reusable workflow it calls): npm tries the OIDC
+# exchange first and falls back to the token. Today the registry refuses this repository's OIDC
+# token with "package not found" (npm/cli#9969: GitHub's immutable `sub` claim, forced on
+# repositories created after 2026-07-15, is not understood by the registry). Once that is fixed
+# the token can be deleted. `id-token: write` is what lets npm sign the provenance statement in
+# either case; each package.json `repository` must name this repository or the registry refuses
+# the provenance.
+name: Publish to npm
+run-name: "${{ github.event_name == 'pull_request' && format('npm publish dry-run for PR #{0}', github.event.pull_request.number) || format('npm publish {0}', inputs.tag || github.ref_name) }}"
 
 on:
   push:
     tags: ["v*"]
   pull_request:
+  workflow_call:
+    inputs:
+      tag:
+        description: "The tag to publish (v<version>), already pushed"
+        required: true
+        type: string
 
 permissions:
   contents: read
 
 jobs:
   dry-run:
-    name: publish dry-run
+    name: npm publish dry-run
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     timeout-minutes: 20
@@ -56,27 +74,51 @@ jobs:
       - name: Pack check with the dashboard build
         run: npm run check:pack -- --require-web-build
 
+      # npm "auto-corrects" a manifest it dislikes (it dropped the `bin` entries on 2026-10-28)
+      # and only warns; here that warning is a failure, so the tag is never cut on such a pack.
+      # Between releases the manifest still carries the version already on npm, and the dry-run
+      # refuses it ("cannot publish over the previously published versions"): that refusal comes
+      # after the pack is built and checked, so it is the one failure this job accepts.
       - name: npm publish --dry-run (duskfleet)
         working-directory: packages/duskfleet
-        run: npm publish --dry-run --access public
+        run: |
+          set -o pipefail
+          log="$RUNNER_TEMP/dry-run-duskfleet.log"
+          if ! npm publish --dry-run --access public 2>&1 | tee "$log"; then
+            grep -q "cannot publish over the previously published versions" "$log" || exit 1
+            echo "::notice::duskfleet: this version is already on npm; the pack is checked, the version is not"
+          fi
+          ! grep -q "auto-corrected" "$log"
 
       - name: npm publish --dry-run (@duskfleet/web)
         working-directory: apps/web
-        run: npm publish --dry-run --access public
+        run: |
+          set -o pipefail
+          log="$RUNNER_TEMP/dry-run-web.log"
+          if ! npm publish --dry-run --access public 2>&1 | tee "$log"; then
+            grep -q "cannot publish over the previously published versions" "$log" || exit 1
+            echo "::notice::@duskfleet/web: this version is already on npm; the pack is checked, the version is not"
+          fi
+          ! grep -q "auto-corrected" "$log"
 
   publish:
-    name: publish
-    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    name: npm publish (duskfleet, @duskfleet/web)
+    if: inputs.tag != '' || (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v'))
     runs-on: ubuntu-latest
     timeout-minutes: 20
     permissions:
       contents: read
       id-token: write
     concurrency:
-      group: publish-${{ github.ref }}
+      group: publish-${{ inputs.tag || github.ref_name }}
       cancel-in-progress: false
+    env:
+      # The tag being published: the caller's input, or the pushed tag.
+      TAG: ${{ inputs.tag || github.ref_name }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.tag || github.ref }}
 
       # No dependency cache on the publishing job: what ships is built from a clean install.
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
@@ -86,11 +128,11 @@ jobs:
 
       - name: Tag matches the version of both packages
         run: |
-          tag="${GITHUB_REF_NAME#v}"
+          tag="${TAG#v}"
           core=$(node -p "require('./packages/duskfleet/package.json').version")
           web=$(node -p "require('./apps/web/package.json').version")
           if [ "$tag" != "$core" ] || [ "$tag" != "$web" ]; then
-            echo "::error::tag $GITHUB_REF_NAME does not match duskfleet $core and @duskfleet/web $web"
+            echo "::error::tag $TAG does not match duskfleet $core and @duskfleet/web $web"
             exit 1
           fi
           echo "publishing version $tag"
@@ -107,17 +149,35 @@ jobs:
       - name: Pack check with the dashboard build
         run: npm run check:pack -- --require-web-build
 
-      # A version already on the registry is skipped, so a re-run after a failed second publish
-      # finishes the release instead of failing on the first package.
+      # A version already on the registry is skipped, so a re-run after a failed second package
+      # finishes the release instead of failing on the first. npm "auto-corrects" a manifest it
+      # dislikes and only warns (it dropped the `bin` entries of the first v0.1.0 tag on
+      # 2026-10-31, and the dry-run guard of the other job only covers pull requests): a
+      # `--dry-run` goes first and the step fails on that warning, so a broken pack never reaches
+      # the registry. `--loglevel verbose` shows why the registry refused the OIDC exchange
+      # before npm fell back to the token. A version left in staging (`npm stage publish` from
+      # an older run) blocks `npm publish` of the same number with E409: the maintainer approves
+      # or rejects it by hand, the step says so.
       - name: npm publish --provenance (duskfleet)
         working-directory: packages/duskfleet
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: |
-          if npm view "duskfleet@${GITHUB_REF_NAME#v}" version > /dev/null 2>&1; then
-            echo "duskfleet@${GITHUB_REF_NAME#v} is already published, skipping"
-          else
-            npm publish --provenance --access public
+          set -o pipefail
+          if npm view "duskfleet@${TAG#v}" version > /dev/null 2>&1; then
+            echo "duskfleet@${TAG#v} is already published, skipping"
+            exit 0
+          fi
+          npm publish --dry-run --access public 2>&1 | tee "$RUNNER_TEMP/dry-run-duskfleet.log"
+          if grep -q "auto-corrected" "$RUNNER_TEMP/dry-run-duskfleet.log"; then
+            echo "::error::npm auto-corrected the manifest, see the warnings above"
+            exit 1
+          fi
+          if ! npm publish --provenance --access public --loglevel verbose 2>&1 | tee "$RUNNER_TEMP/publish-duskfleet.log"; then
+            if grep -q "previously staged version" "$RUNNER_TEMP/publish-duskfleet.log"; then
+              echo "::error::duskfleet@${TAG#v} is staged on the registry: approve or reject it with npm stage (2FA), then re-run"
+            fi
+            exit 1
           fi
 
       - name: npm publish --provenance (@duskfleet/web)
@@ -125,8 +185,19 @@ jobs:
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: |
-          if npm view "@duskfleet/web@${GITHUB_REF_NAME#v}" version > /dev/null 2>&1; then
-            echo "@duskfleet/web@${GITHUB_REF_NAME#v} is already published, skipping"
-          else
-            npm publish --provenance --access public
+          set -o pipefail
+          if npm view "@duskfleet/web@${TAG#v}" version > /dev/null 2>&1; then
+            echo "@duskfleet/web@${TAG#v} is already published, skipping"
+            exit 0
+          fi
+          npm publish --dry-run --access public 2>&1 | tee "$RUNNER_TEMP/dry-run-web.log"
+          if grep -q "auto-corrected" "$RUNNER_TEMP/dry-run-web.log"; then
+            echo "::error::npm auto-corrected the manifest, see the warnings above"
+            exit 1
+          fi
+          if ! npm publish --provenance --access public --loglevel verbose 2>&1 | tee "$RUNNER_TEMP/publish-web.log"; then
+            if grep -q "previously staged version" "$RUNNER_TEMP/publish-web.log"; then
+              echo "::error::@duskfleet/web@${TAG#v} is staged on the registry: approve or reject it with npm stage (2FA), then re-run"
+            fi
+            exit 1
           fi

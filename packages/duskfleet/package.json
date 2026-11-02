@@ -11,18 +11,13 @@
   },
   "bugs": "https://github.com/duskfleet/duskfleet/issues",
   "license": "MIT",
-  "repository": {
-    "type": "git",
-    "url": "git+https://github.com/duskfleet/duskfleet.git",
-    "directory": "packages/duskfleet"
-  },
   "type": "module",
   "engines": {
     "node": ">=24"
   },
   "bin": {
-    "duskfleet": "./dist/cli.js",
-    "duskfleet-mcp": "./dist/index.js"
+    "duskfleet": "dist/cli.js",
+    "duskfleet-mcp": "dist/index.js"
   },
   "files": ["dist/", "README.md", "LICENSE"],
   "scripts": {

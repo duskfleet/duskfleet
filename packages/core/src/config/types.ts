@@ -134,8 +134,13 @@ export interface SchedulerConfig {
   /** Default no-op marker for idle-cost stats: `/regex/flags` or a plain case-insensitive regex. */
   noopPattern: string;
   /**
+   * On/off switch of auto-pause (re-read every tick). Off skips the check and keeps
+   * `autoPauseAfter`; it never resumes a schedule paused earlier. Default true.
+   */
+  autoPause: boolean;
+  /**
    * Pause a schedule after this many consecutive runs that completed with 0 tool calls or
-   * ended needs review (checked before each scheduled fire). 0 = never.
+   * ended needs review (checked before each scheduled fire, when `autoPause` is on). 0 = never.
    */
   autoPauseAfter: number;
   /**
@@ -146,10 +151,14 @@ export interface SchedulerConfig {
   allowCommandGates: boolean;
 }
 
+/** Where the data directory came from: DUSKFLEET_DATA, duskfleet.yaml (data_dir or ../data), or the user-level default. */
+export type DataSource = "env" | "config" | "user";
+
 export interface DuskFleetConfig {
   /** Directory containing duskfleet.yaml. */
   configDir: string;
   dataDir: string;
+  dataSource: DataSource;
   /** Writable directory for agents created at runtime. Defaults to <dataDir>/agents. */
   userAgentsDir: string;
   /** Private project registry merged over config/projects.yaml. Defaults to <dataDir>/projects.yaml. */

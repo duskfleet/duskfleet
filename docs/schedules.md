@@ -19,6 +19,22 @@ Coming from `claude -p` in cron, launchd or a systemd timer? The guide
 [Run Claude Code on a schedule on your own machine](guides/run-claude-code-on-a-schedule.md)
 compares the plain approach with what a schedule here adds.
 
+## One schedule per agent
+
+An agent has one cadence. `create_schedule` refuses a schedule for an agent that already has
+one, and `update_schedule` refuses to move a schedule to such an agent:
+
+```
+agent "<id>" already has the schedule "<name>" (<schedule id>); one schedule per agent, edit it or delete it first
+```
+
+A second prompt for the same agent is a second agent (or a `run_agent` call), not a second
+schedule. The rule is checked on create and update, not by a database index, so a database
+from before it that already holds duplicates still opens and keeps firing them; editing or
+pausing one of them still works. `duskfleet doctor` lists them under
+`scheduler.duplicateSchedules` (agent, schedule ids and names) and the Schedules page shows a
+warning line on each of their cards; delete all but one.
+
 ## Who ticks
 
 Any Duskfleet process can: the MCP server that Claude Desktop or Claude Code keeps alive, or
@@ -248,6 +264,13 @@ Resume it as any paused schedule (`update_schedule` with `enabled: true`, or **R
 dashboard): the reason is cleared, and only runs created after the pause count towards the
 next streak, so the schedule gets `auto_pause_after` fresh runs before it can be paused again.
 Run now still fires a paused schedule.
+
+`scheduler.auto_pause` (default `true`) is the on/off switch of the whole check, editable in
+`config/duskfleet.yaml` or as **Auto-pause** under Settings → Scheduler. `false` skips the check
+on every tick while keeping `auto_pause_after` for when it is turned back on (`auto_pause_after:
+0` still turns it off too). Both are re-read every tick, no restart. Turning the switch off never
+resumes anything: a schedule paused earlier stays paused, with its badge and reason, until you
+resume it.
 
 ## Policies
 

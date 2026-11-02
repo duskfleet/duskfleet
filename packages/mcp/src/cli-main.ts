@@ -5,6 +5,7 @@ import { fileURLToPath } from "node:url";
  * Small local CLI. Same orchestration layer as the MCP server, useful for
  * testing without an MCP client.
  *
+ *   duskfleet init [--yes] [--mcp claude-code|claude-desktop]   # guided setup (init.ts)
  *   duskfleet agents
  *   duskfleet agents create <id> [--model <m>] [--budget <usd>] [...] [--force] -- "<system prompt>"
  *   duskfleet projects
@@ -16,10 +17,13 @@ import { fileURLToPath } from "node:url";
  *   duskfleet schedules run-now <id or name>   # stamp run_requested_at; the lease holder fires it next tick
  *   duskfleet budgets [set <global | agent <id> | project <id>> --amount <usd> [--warn <pct>] [--no-hard-stop] | delete <id>]
  *   duskfleet tools           # MCP tool catalogue (names, descriptions, input schemas)
+ *   duskfleet dashboard [--port <n>] [--no-open] [--no-install]   # install @duskfleet/web on demand, start it
  *   duskfleet serve            # long-running scheduler process (what the service runs)
  *   duskfleet install-service [--print]   # register `serve` with launchd / systemd --user / Task Scheduler
  *   duskfleet uninstall-service
- *   duskfleet doctor           # also reports the service and who holds the scheduler lease
+ *   duskfleet mcp register --target claude-code|claude-desktop [--dry-run] [--yes]   # preview, backup, write
+ *   duskfleet mcp status       # which Claude hosts have a duskfleet entry, and what it runs
+ *   duskfleet doctor         # also reports the service and who holds the scheduler lease
  *   duskfleet doctor --probe   # plus one real hello run on haiku (costs cents): auth, blocking hooks
  *   duskfleet --version        # handled in cli.ts, before the Node version check
  */
@@ -28,19 +32,39 @@ import {
   assertAgentIdFree,
   type BudgetInput,
   ConfigNotFoundError,
+  costTotals,
+  costTotalsLine,
   createAgentFromFields,
+  type DataSource,
   effectivePath,
   findRepoRoot,
+  loadConfig,
   parseHolder,
   pathDefaulted,
   RUN_STATUSES,
   type RunStatus,
+  resolveConfigDir,
+  runCostLabel,
   subagentView,
   summarizeRun,
 } from "@duskfleet/core";
 import { bootstrap } from "./bootstrap.js";
+import { assertPortFree, ensureWeb, findWeb, parsePort, startDashboard } from "./dashboard.js";
+import { runInit } from "./init.js";
+import {
+  applyDesktop,
+  desktopConfigPath,
+  MCP_TARGETS,
+  type McpTarget,
+  mcpStatus,
+  planClaudeCode,
+  planDesktop,
+  runClaudeCodeAdd,
+  serverEntry,
+} from "./mcp-register.js";
 import { PROBE_COST_NOTE, type ProbeReport, probeNotRun, runProbe } from "./probe.js";
 import {
+  exportedDataDir,
   installService,
   renderService,
   type ServiceTarget,
@@ -49,6 +73,7 @@ import {
   uninstallService,
 } from "./service.js";
 import { buildToolCatalog } from "./tools-catalog.js";
+import { packageVersion } from "./version.js";
 
 function print(value: unknown): void {
   process.stdout.write(JSON.stringify(value, null, 2) + "\n");
@@ -64,6 +89,7 @@ function usage(asked = false): never {
       "Duskfleet - A fleet of agents for your own machine.",
       "",
       "Usage:",
+      "  duskfleet init [--yes] [--mcp claude-code|claude-desktop]",
       "  duskfleet agents",
       "  duskfleet agents create <id> [--model <m>] [--budget <usd>] [--permission-mode <mode>]",
       "                          [--allowed-tools <a,b>] [--disallowed-tools <a,b>] [--timeout <minutes>]",
@@ -79,9 +105,12 @@ function usage(asked = false): never {
       "  duskfleet budgets set <global | agent <id> | project <id>> --amount <usd> [--warn <percent>] [--no-hard-stop]",
       "  duskfleet budgets delete <budget id>",
       "  duskfleet tools",
+      "  duskfleet dashboard [--port 4777] [--no-open] [--no-install]",
       "  duskfleet serve",
       "  duskfleet install-service [--print]",
       "  duskfleet uninstall-service",
+      "  duskfleet mcp register --target claude-code|claude-desktop [--dry-run] [--yes]",
+      "  duskfleet mcp status",
       "  duskfleet doctor [--probe]",
       "  duskfleet --help",
       "  duskfleet --version",
@@ -182,7 +211,12 @@ function parseAgentCreate(args: string[]): { id: string; fields: Record<string, 
 }
 
 /** What the service runs: this node, this dist/cli.js, this repo (or config), the resolved claude binary. */
-function serviceTarget(claudeBin: string | null, dataDir: string, configDir: string): ServiceTarget {
+function serviceTarget(
+  claudeBin: string | null,
+  dataDir: string,
+  configDir: string,
+  dataSource: DataSource,
+): ServiceTarget {
   // The bin is dist/cli.js (the Node version check); this module sits next to it.
   const cliEntry = path.join(path.dirname(fileURLToPath(import.meta.url)), "cli.js");
   // An installed package has no repo root above its cli.js: the unit then carries the config dir.
@@ -191,11 +225,95 @@ function serviceTarget(claudeBin: string | null, dataDir: string, configDir: str
     platform: process.platform,
     repoRoot: dirs.repoRoot,
     configDir: dirs.configDir,
+    // DUSKFLEET_DATA / XDG_* live only in this shell: the unit carries the resolved directory,
+    // or the service opens another database.
+    dataDir: exportedDataDir(dataDir, dataSource, configDir),
     nodeBin: process.execPath,
     cliEntry,
     logPath: path.join(dataDir, "logs", "serve.log"),
     claudeBin,
   };
+}
+
+/** Ask y/N on a terminal; anything but a terminal (a script, CI) needs --yes instead. */
+async function confirm(question: string): Promise<boolean> {
+  if (!process.stdin.isTTY) {
+    process.stderr.write("not a terminal: pass --yes to apply the change without asking (nothing was changed)\n");
+    return false;
+  }
+  const { createInterface } = await import("node:readline/promises");
+  const rl = createInterface({ input: process.stdin, output: process.stderr });
+  try {
+    return /^y(es)?$/i.test((await rl.question(`${question} [y/N] `)).trim());
+  } finally {
+    rl.close();
+  }
+}
+
+/**
+ * `mcp register`: print exactly what changes (the `claude mcp add` command, or the diff of the
+ * Claude Desktop entry), stop there on --dry-run, else confirm (or --yes), back up, write.
+ * Returns the exit code.
+ */
+async function mcpRegister(
+  app: Awaited<ReturnType<typeof bootstrap>>,
+  target: McpTarget,
+  dryRun: boolean,
+  yes: boolean,
+): Promise<number> {
+  // dist/index.js sits next to this module; the config is exported only when the server would
+  // not find it by walking up from there (same rule as the service unit).
+  const entryFile = path.join(path.dirname(fileURLToPath(import.meta.url)), "index.js");
+  const { entry, form } = serverEntry({
+    nodeBin: process.execPath,
+    serverEntry: entryFile,
+    claudeBin: app.executor.binary,
+    configDir: serviceDirs(findRepoRoot(entryFile), app.config.configDir).configDir,
+    // A GUI host does not see this shell's DUSKFLEET_DATA / XDG_* variables either.
+    dataDir: exportedDataDir(app.config.dataDir, app.config.dataSource, app.config.configDir),
+    version: packageVersion(),
+  });
+  const out = (s: string) => process.stdout.write(`${s}\n`);
+  out(
+    form === "npx"
+      ? `server command: npx, pinned to duskfleet@${packageVersion()} (this CLI runs from npx's temporary cache)`
+      : "server command: node + the absolute path of this install's MCP server",
+  );
+
+  if (target === "claude-code") {
+    const plan = planClaudeCode(entry);
+    if (plan.upToDate) {
+      out(`Claude Code already has "duskfleet" with this command; nothing to do.`);
+      return 0;
+    }
+    if (plan.conflict) {
+      const envList = Object.entries(plan.conflict.env).map(([k, v]) => `${k}=${v}`);
+      process.stderr.write(
+        `Claude Code already has a user-scope "duskfleet" entry running ${[plan.conflict.command, ...plan.conflict.args].join(" ")} (env: ${envList.length ? envList.join(" ") : "none"}), which differs from this one.\nRemove it first (claude mcp remove duskfleet), then run this again.\n`,
+      );
+      return 1;
+    }
+    out(`will run:\n  ${plan.display}`);
+    if (dryRun) return 0;
+    if (!yes && !(await confirm("Run it?"))) return 1;
+    return runClaudeCodeAdd(app.executor.binary ?? "claude", plan.args);
+  }
+
+  const plan = planDesktop(desktopConfigPath(), entry);
+  if (!plan.changed) {
+    out(`${plan.path} already has this "duskfleet" entry; nothing to do.`);
+    return 0;
+  }
+  out(plan.diff);
+  if (dryRun) {
+    out("dry run: nothing was written");
+    return 0;
+  }
+  if (!yes && !(await confirm(`Write ${plan.path}${plan.exists ? " (a .bak copy is made first)" : ""}?`))) return 1;
+  const { backup } = applyDesktop(plan);
+  if (backup) out(`backup: ${backup}`);
+  out(`written: ${plan.path}\nRestart Claude Desktop to load the duskfleet tools.`);
+  return 0;
 }
 
 async function main(): Promise<void> {
@@ -207,6 +325,53 @@ async function main(): Promise<void> {
     print(await buildToolCatalog());
     return;
   }
+  // Read-only and config-free: works before `init`.
+  if (command === "mcp" && rest[0] === "status" && rest.length === 1) {
+    print(mcpStatus());
+    return;
+  }
+  // Needs the config (data and config paths), not the database: the dashboard opens it itself.
+  if (command === "dashboard") {
+    const { values } = parseArgs({
+      args: rest,
+      options: {
+        port: { type: "string" },
+        "no-open": { type: "boolean", default: false },
+        "no-install": { type: "boolean", default: false },
+      },
+    });
+    const port = parsePort(values.port);
+    const config = loadConfig(resolveConfigDir(import.meta.url));
+    const log = (line: string) => process.stderr.write(`duskfleet dashboard: ${line}\n`);
+    const version = packageVersion();
+    await assertPortFree(port); // before a first install that can take a minute; checked again at start
+    const entry = values["no-install"]
+      ? findWeb(config.dataDir, version)
+      : ensureWeb(config.dataDir, version, log).entry;
+    process.exit(await startDashboard({ entry, port, configDir: config.configDir, open: !values["no-open"], log }));
+  }
+  // Before bootstrap: init is what writes the config bootstrap needs.
+  if (command === "init") {
+    const { values } = parseArgs({
+      args: rest,
+      options: { yes: { type: "boolean", short: "y", default: false }, mcp: { type: "string" } },
+    });
+    const code = await runInit({
+      yes: values.yes,
+      mcp: (values.mcp as McpTarget | undefined) ?? null,
+      entryFileUrl: import.meta.url,
+      registerMcp: async (target) => {
+        const app = await bootstrap(import.meta.url, { role: "cli" });
+        try {
+          // init --yes, or the user just picked the target: no second confirmation.
+          return await mcpRegister(app, target, false, true);
+        } finally {
+          app.close();
+        }
+      },
+    });
+    process.exit(code);
+  }
 
   const app = await bootstrap(import.meta.url, { role: command === "serve" ? "serve" : "cli" });
   const done = (code = 0) => {
@@ -217,7 +382,12 @@ async function main(): Promise<void> {
   switch (command) {
     case "install-service": {
       const { values } = parseArgs({ args: rest, options: { print: { type: "boolean", default: false } } });
-      const target = serviceTarget(app.executor.binary, app.config.dataDir, app.config.configDir);
+      const target = serviceTarget(
+        app.executor.binary,
+        app.config.dataDir,
+        app.config.configDir,
+        app.config.dataSource,
+      );
       if (values.print) {
         const unit = renderService(target);
         process.stderr.write(`# ${unit.unitPath}\n`);
@@ -243,6 +413,23 @@ async function main(): Promise<void> {
       const r = uninstallService(process.platform);
       print({ uninstalled: true, ...r });
       return done();
+    }
+    case "mcp": {
+      const [sub, ...args] = rest;
+      if (sub !== "register") usage();
+      const { values } = parseArgs({
+        args,
+        options: {
+          target: { type: "string" },
+          "dry-run": { type: "boolean", default: false },
+          yes: { type: "boolean", default: false },
+        },
+      });
+      const target = values.target as McpTarget | undefined;
+      if (!target || !MCP_TARGETS.includes(target)) {
+        throw new Error(`mcp register needs --target ${MCP_TARGETS.join(" or ")}`);
+      }
+      return done(await mcpRegister(app, target, values["dry-run"], values.yes));
     }
     case "agents": {
       const [sub, ...args] = rest;
@@ -300,6 +487,12 @@ async function main(): Promise<void> {
             : service.supported
               ? `schedules fire only while an MCP host keeps the server alive${leaseLive ? "" : " (nothing is ticking right now)"}; run "duskfleet install-service" to run them unattended`
               : service.detail,
+        // One schedule per agent: create / update refuse a second one, but older databases may hold some.
+        duplicateSchedules: app.scheduler.duplicateAgents().map((d) => ({
+          agentId: d.agentId,
+          schedules: d.schedules.map((s) => ({ id: s.id, name: s.name })),
+          warning: `agent "${d.agentId}" has ${d.schedules.length} schedules; one schedule per agent, delete all but one (dashboard Schedules page or the delete_schedule MCP tool)`,
+        })),
       };
       // Opt-in live run: the only part of doctor that costs money, so say so before spending it.
       let probe: ProbeReport | null = null;
@@ -334,7 +527,12 @@ async function main(): Promise<void> {
         pathDefaulted: pathDefaulted(process.env["PATH"]),
         error,
         configDir: app.config.configDir,
+        // env (DUSKFLEET_CONFIG) > repo (config/ found walking up) > user (user-level directory)
+        configSource: app.location.source,
+        configLookup: app.location.lookup,
         dataDir: app.config.dataDir,
+        // env (DUSKFLEET_DATA) > config (data_dir, or ../data next to a repo config) > user
+        dataSource: app.config.dataSource,
         agents: [...app.config.agents.keys()],
         scheduler,
         ...(doctorFlags.probe ? { probe } : {}),
@@ -383,7 +581,10 @@ async function main(): Promise<void> {
       }
       if (values.limit) filter.limit = Number(values.limit);
       if (values.agent) filter.agentId = values.agent;
-      print(app.runs.listRuns(filter).map(summarizeRun));
+      const runs = app.runs.listRuns(filter);
+      print(runs.map(summarizeRun));
+      // The total in its true wording, on stderr so stdout stays the JSON array scripts parse.
+      if (runs.length > 0) process.stderr.write(`${costTotalsLine(costTotals(runs))}\n`);
       return done();
     }
     case "schedules": {
@@ -485,7 +686,12 @@ async function main(): Promise<void> {
       }
       const subagents = app.runs.agents(id).map((s) => subagentView(s)); // same names as get_run
       const diff = app.runs.diff(id); // same field as get_run
-      print(values.events ? { ...run, diff, subagents, events: app.runs.events(id) } : { ...run, diff, subagents });
+      const costLabel = runCostLabel(run.billingType); // same field as get_run
+      print(
+        values.events
+          ? { ...run, costLabel, diff, subagents, events: app.runs.events(id) }
+          : { ...run, costLabel, diff, subagents },
+      );
       return done();
     }
     case "repair-subagents": {

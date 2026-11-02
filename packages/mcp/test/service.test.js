@@ -10,7 +10,14 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { test } from "node:test";
 import { formatHolder, parseHolder } from "@duskfleet/core";
-import { installService, renderService, serviceDirs, serviceStatus, uninstallService } from "../dist/service.js";
+import {
+  exportedDataDir,
+  installService,
+  renderService,
+  serviceDirs,
+  serviceStatus,
+  uninstallService,
+} from "../dist/service.js";
 
 const base = {
   repoRoot: "/opt/dusk fleet",
@@ -108,6 +115,58 @@ test("installed package: no repo root, the unit runs beside the config and expor
   assert.match(win.content, /<Arguments>\/c &quot;set &quot;DUSKFLEET_CONFIG=C:\\df\\config&quot;&amp;&amp; &quot;/);
   // a checkout unit stays as it was
   assert.doesNotMatch(renderService({ ...base, platform: "linux" }).content, /DUSKFLEET_CONFIG/);
+});
+
+test("DUSKFLEET_DATA set at install time is carried by the unit, so the service opens the same database", () => {
+  const t = { ...base, dataDir: "/srv/df/data", logPath: "/srv/df/data/logs/serve.log" };
+  const mac = renderService({ ...t, platform: "darwin" });
+  assert.match(mac.content, /<key>DUSKFLEET_DATA<\/key><string>\/srv\/df\/data<\/string>/);
+  const lin = renderService({ ...t, platform: "linux" });
+  assert.match(lin.content, /^Environment="DUSKFLEET_DATA=\/srv\/df\/data"$/m);
+  const win = renderService({
+    ...t,
+    platform: "win32",
+    configDir: "C:\\df\\config",
+    dataDir: "D:\\df data",
+    nodeBin: "C:\\node\\node.exe",
+    user: "PC\\me",
+  });
+  assert.match(
+    win.content,
+    /<Arguments>\/c &quot;set &quot;DUSKFLEET_CONFIG=C:\\df\\config&quot;&amp;&amp; set &quot;DUSKFLEET_DATA=D:\\df data&quot;&amp;&amp; &quot;C:\\node\\node\.exe&quot;/,
+  );
+  // not set (data_dir or the default): the service resolves it itself, nothing exported
+  for (const platform of ["darwin", "linux", "win32"]) {
+    assert.doesNotMatch(renderService({ ...base, platform, user: "PC\\me" }).content, /DUSKFLEET_DATA/);
+  }
+});
+
+test("exportedDataDir: DUSKFLEET_DATA and an XDG data dir are exported, the derivable default is not", () => {
+  const ctx = { platform: "linux", home: "/home/me", env: {} };
+  const userConfig = "/home/me/.config/duskfleet";
+  // DUSKFLEET_DATA: always
+  assert.equal(exportedDataDir("/srv/df/data", "env", "/srv/df/config", ctx), "/srv/df/data");
+  // data_dir or ../data in duskfleet.yaml: follows the config, nothing to export
+  assert.equal(exportedDataDir("/srv/df/data", "config", "/srv/df/config", ctx), null);
+  // user-level default without XDG: the unit derives the same directory
+  assert.equal(exportedDataDir("/home/me/.local/share/duskfleet", "user", userConfig, ctx), null);
+  // XDG_DATA_HOME in this shell only: the unit would fall back to ~/.local/share
+  const xdg = { ...ctx, env: { XDG_DATA_HOME: "/xdg/data" } };
+  assert.equal(exportedDataDir("/xdg/data/duskfleet", "user", userConfig, xdg), "/xdg/data/duskfleet");
+});
+
+test("exportedDataDir: XDG_CONFIG_HOME alone still exports the data dir the unit would not derive", () => {
+  // Shell: config /x/c/duskfleet is the user-level config, data defaults to ~/.local/share/duskfleet.
+  // Unit: gets DUSKFLEET_CONFIG=/x/c/duskfleet but no XDG_CONFIG_HOME, so that config is not its
+  // user-level one and it would fall back to /x/c/data: a second database without the export.
+  const ctx = { platform: "linux", home: "/home/me", env: { XDG_CONFIG_HOME: "/x/c" } };
+  assert.equal(
+    exportedDataDir("/home/me/.local/share/duskfleet", "user", "/x/c/duskfleet", ctx),
+    "/home/me/.local/share/duskfleet",
+  );
+  // Both XDG variables set: still exported (the unit would derive /x/c/data, not /x/d/duskfleet).
+  const both = { ...ctx, env: { XDG_CONFIG_HOME: "/x/c", XDG_DATA_HOME: "/x/d" } };
+  assert.equal(exportedDataDir("/x/d/duskfleet", "user", "/x/c/duskfleet", both), "/x/d/duskfleet");
 });
 
 test("a cli.js inside the npx cache is refused: the unit would break once npm evicts it", () => {
