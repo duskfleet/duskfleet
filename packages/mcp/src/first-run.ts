@@ -10,6 +10,7 @@
  * so no agent-less run mode exists. Answers are read line by line from stdin (a terminal, or a
  * pipe in tests); end of input takes each question's default.
  */
+import { realpathSync } from "node:fs";
 import { createInterface } from "node:readline";
 import {
   type AgentDefinition,
@@ -86,11 +87,25 @@ const fail = (s: string) => process.stderr.write(`${s}\n`);
 const yes = (answer: string | null, byDefault: boolean) =>
   answer === null || answer.trim() === "" ? byDefault : /^y(es)?$/i.test(answer.trim());
 
+const realOrRaw = (p: string): string => {
+  try {
+    return realpathSync(p);
+  } catch {
+    return p;
+  }
+};
+
+/**
+ * Same directory? validateProjectPath returns a realpath, the loader only path.resolve's the
+ * registry entries: a project registered through a symlink (/tmp on macOS) must still match.
+ */
+export const sameDirectory = (a: string, b: string): boolean => a === b || realOrRaw(a) === realOrRaw(b);
+
 /** The registered project of this directory, or a new entry in the private registry. */
 function projectFor(app: App, input: string): string {
   const config = app.runs.reloadConfig();
   const resolved = validateProjectPath(expandHome(input), config);
-  const existing = [...config.projects.values()].find((p) => p.path === resolved);
+  const existing = [...config.projects.values()].find((p) => sameDirectory(p.path, resolved));
   if (existing) return existing.id;
   const base = projectIdFromPath(resolved);
   let id = base;
@@ -132,7 +147,8 @@ export function firstRunAgentProblems(agent: AgentDefinition, projectPath: strin
       `max_budget_usd is ${budget === undefined ? "unset" : `$${budget}`}, above $${FIRST_RUN_AGENT_FIELDS.max_budget_usd}`,
     );
   }
-  if (agent.project && config.projects.get(agent.project)?.path !== projectPath) {
+  const bound = agent.project ? config.projects.get(agent.project)?.path : undefined;
+  if (agent.project && (bound === undefined || !sameDirectory(bound, projectPath))) {
     problems.push(`it is bound to project "${agent.project}"`);
   }
   return problems;
@@ -246,12 +262,20 @@ export async function runFirstRun(app: App, options: FirstRunOptions, prompter: 
   }
   const created = ensureAgent(app);
 
-  let run = await app.runs.startRun({
-    prompt: FIRST_RUN_PROMPT,
-    agentId: FIRST_RUN_AGENT_ID,
-    projectId,
-    model: FIRST_RUN_MODEL,
-  });
+  let run: Run;
+  try {
+    run = await app.runs.startRun({
+      prompt: FIRST_RUN_PROMPT,
+      agentId: FIRST_RUN_AGENT_ID,
+      projectId,
+      model: FIRST_RUN_MODEL,
+    });
+  } catch (err) {
+    // Refused before any run started: busy, a daily cap, a spent monthly budget, ...
+    fail(`First run: the run was refused, nothing was run: ${err instanceof Error ? err.message : String(err)}`);
+    if (created) await offerDelete(app, prompter);
+    return 1;
+  }
   out(`Run ${run.id} started on "${projectId}" with ${FIRST_RUN_MODEL}; waiting for it to end...`);
   run = await app.runs.waitForRun(run.id, 24 * 60 * 60 * 1000);
   for (const line of firstRunSummary(run)) out(line);

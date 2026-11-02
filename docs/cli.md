@@ -87,7 +87,7 @@ skips that question), then:
    ([configuration](configuration.md)). A path outside it is refused with the file to edit;
    nothing is created.
 2. Registers the directory in the private project registry (`data/projects.yaml`), unless it
-   is already a project.
+   is already a project (also when registered through a symlink).
 3. Creates the agent `first-run` through the same path as `agents create` (own, `model: haiku`,
    `permission_mode: dontAsk`, `allowed_tools: [Read, Grep, Glob]`, `disallowed_tools: [Edit,
    Write, NotebookEdit]`, budget $0.25, 5 minutes; system prompt "You describe projects. You
@@ -100,12 +100,14 @@ skips that question), then:
    change any file.`, waits, and prints the status, the duration, the tokens, the cost (or API
    value on a subscription), what the agent said, and `duskfleet run-info <run id>` /
    `duskfleet dashboard` to see more. A run that needs review gets one line saying why, with a
-   link to [the dashboard page](dashboard.md).
+   link to [the dashboard page](dashboard.md). When the run is refused before it starts (agent
+   or project busy, a daily cap, a spent monthly budget), the step prints the reason, runs
+   nothing and goes on to step 5.
 5. When step 3 created the agent, asks `Keep the first-run agent? [Y/n]`. `n` deletes
    `data/agents/first-run.md` (the same rule as `delete_agent`: user files only); the run keeps
    its agent id either way. An agent that existed before is never offered for deletion.
 
-`run --first` exits 0 when the run completed, 1 when the path was refused or the run did not
+`run --first` exits 0 when the run completed, 1 when the path or the run was refused or the run did not
 complete. It takes no `--agent`, `--model` or prompt: those are fixed.
 
 ## First run

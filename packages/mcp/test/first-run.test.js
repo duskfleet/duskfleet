@@ -4,9 +4,19 @@
  */
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { DatabaseSync } from "node:sqlite";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 import { loadConfig } from "@duskfleet/core";
@@ -154,6 +164,53 @@ test("firstRunAgentProblems: the step's own agent passes, a project binding else
     assert.deepEqual(firstRunAgentProblems({ ...agent, project: "other" }, project, config), [
       'it is bound to project "other"',
     ]);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("run --first matches a project registered through a symlink, and an agent bound to it", () => {
+  const { root, configDir, project, agentFile } = makeRoot();
+  try {
+    const link = path.join(root, "link-to-app");
+    symlinkSync(project, link, "dir");
+    writeFileSync(path.join(configDir, "projects.yaml"), `projects:\n  linked:\n    path: ${JSON.stringify(link)}\n`);
+    const res = cli(configDir, ["run", "--first", "--project", project], "\n");
+    assert.equal(res.status, 0, res.stderr + res.stdout);
+    assert.doesNotMatch(res.stdout, /registered in/, "no duplicate entry for the same directory");
+    assert.match(res.stdout, /started on "linked"/);
+    assert.deepEqual([...loadConfig(configDir).projects.keys()], ["linked"]);
+
+    const config = loadConfig(configDir);
+    const agent = { ...config.agents.get("first-run"), project: "linked" };
+    assert.deepEqual(firstRunAgentProblems(agent, project, config), [], "bound to the same directory");
+    assert.ok(existsSync(agentFile));
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("run --first: a run refused by startRun (spent budget) is reported, and the agent it created is offered for deletion", () => {
+  const { root, configDir, project, agentFile } = makeRoot();
+  try {
+    const first = cli(configDir, ["run", "--first", "--project", project], "n\n");
+    assert.equal(first.status, 0, first.stderr + first.stdout);
+    assert.equal(existsSync(agentFile), false);
+
+    // The first run cost $0.0123: a global hard-stop budget of $0.01 is spent.
+    const db = new DatabaseSync(path.join(root, "data", "duskfleet.db"));
+    const now = new Date().toISOString();
+    db.prepare(
+      "INSERT INTO budgets (id, scope, scope_id, amount_usd, warn_percent, hard_stop, created_at, updated_at) VALUES ('b1', 'global', NULL, 0.01, 80, 1, ?, ?)",
+    ).run(now, now);
+    db.close();
+
+    const res = cli(configDir, ["run", "--first", "--project", project], "n\n");
+    assert.equal(res.status, 1, res.stderr + res.stdout);
+    assert.match(res.stderr, /First run: the run was refused, nothing was run: .*budget/i);
+    assert.match(res.stdout, /Deleted .+first-run\.md/, "the agent this pass wrote is offered for deletion");
+    assert.equal(existsSync(agentFile), false);
+    assert.equal(JSON.parse(cli(configDir, ["runs"]).stdout).length, 1, "no second run");
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
