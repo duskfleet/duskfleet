@@ -709,9 +709,17 @@ a.stat.tile-link:active,
 }
 
 /* ---- run table ----------------------------------------------------------- */
+/* a fixed layout ignores a cell's min-width, so the minimum sits on the table and the wrapper
+   scrolls; 1 px of bottom padding keeps the table's 1 px shadow */
+.runs-scroll {
+  overflow-x: auto;
+  padding-bottom: 1px;
+}
 /* separate borders so the rounded outline clips the header and rows */
 .runs {
   width: 100%;
+  /* the 752 px of fixed columns + 200 px for Run */
+  min-width: 952px;
   /* DS-25: one column grid for every run table (RunColumns), so Running and Recent line up */
   table-layout: fixed;
   border-collapse: separate;
@@ -764,6 +772,10 @@ a.stat.tile-link:active,
   text-align: right;
   white-space: nowrap;
   font-variant-numeric: tabular-nums;
+}
+/* a long header ("Cost / API value") wraps inside its fixed column instead of running into the next */
+.runs th.num {
+  white-space: normal;
 }
 /* column widths include the 14 px cell padding; Run takes what is left */
 .runs .c-status {
@@ -2226,12 +2238,10 @@ h2 .h2-id {
   flex: 0 1 260px;
 }
 /* Recent runs on the agent page: a fixed 420 px side column leaves the table less room than the
-   Runs page, so the Run column may shrink and the table scrolls inside the panel before overlapping it */
-.ad-runs {
-  overflow-x: auto;
-}
-.ad-runs .runs .what {
-  min-width: 200px;
+   Runs page, so the table scrolls inside the panel (RunTable's wrapper) before Run drops under 200 px.
+   Model is hidden here: 632 px of fixed columns + 200 */
+.ad-runs .runs {
+  min-width: 832px;
 }
 .ad-runs .col-model {
   display: none;
@@ -3389,6 +3399,11 @@ details.desc ul {
   .runs .col-turns {
     display: none;
   }
+  /* Status 152 + Elapsed 116 + Cost 120 + 200 for Run */
+  .runs,
+  .ad-runs .runs {
+    min-width: 588px;
+  }
   .toolbar .search {
     flex-basis: 100%;
   }
@@ -3464,6 +3479,11 @@ details.desc ul {
   }
   .runs .c-cost {
     width: 104px;
+  }
+  /* Cost 104 + 200 for Run */
+  .runs,
+  .ad-runs .runs {
+    min-width: 304px;
   }
   .runs .what .status-inline {
     display: flex;
