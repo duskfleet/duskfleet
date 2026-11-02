@@ -165,6 +165,7 @@ export {
 } from "./scheduler/cron.js";
 export {
   assertCommandGateAllowed,
+  assertOneSchedulePerAgent,
   autoPauseReason,
   COMMAND_GATES_OFF,
   commandGateRefusal,

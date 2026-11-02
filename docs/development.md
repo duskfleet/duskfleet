@@ -131,7 +131,10 @@ Re-running it is safe: an existing tag or release is kept, a published version i
   that is fixed, the token can be deleted and nothing else changes.
 - `publish dry-run`, on every pull request: the same steps without publishing, ending in
   `npm publish --dry-run` for both packages, so a broken pack shows up before the tag. Instead of
-  the tag guard it checks that the two versions are equal.
+  the tag guard it checks that the two versions are equal. Between releases the manifest still
+  carries the version already on npm and the dry-run refuses it ("cannot publish over the
+  previously published versions"); that refusal comes after the pack is built and checked, so
+  it is the one failure the job accepts (a notice, not a red check).
 
 Like every workflow here, it pins its actions by commit SHA.
 
