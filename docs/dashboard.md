@@ -226,7 +226,7 @@ opened with. `?range=` is the same period selector as `/trends`, same UTC bucket
 
 - **KPIs**: spend this UTC month (gates included) against the budget of the scope in view; the
   spend of the whole period with its average per bucket; the average cost of a real run this
-  month; the budget's warning threshold and whether it hard-stops.
+  month.
 - **Spend per day / week / month**: stacked bars of the real runs' `cost_usd`, one segment per
   agent, project or model. The top spender of the period is in the accent colour, every other
   segment in the faint one (hover a segment for its name and amount). Totals sit above the bars
