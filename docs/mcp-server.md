@@ -6,7 +6,7 @@ npm run mcp            # = node packages/mcp/dist/index.js
 
 The server speaks MCP over stdio; logs go to stderr. Runs execute as child processes of the
 server, so keep it alive while runs are in progress. Each run records the process that owns
-it; a run still marked `running` whose owner is gone is closed as `failed` with an "orphaned"
+it; a run still marked `running` (or `pending`, never spawned) whose owner is gone is closed as `failed` with an "orphaned"
 error, at the next start of any Duskfleet process, or within a minute by the scheduler lease
 holder while `scheduler.enabled` is true and some process holds the lease. Runs owned by
 another live process are left alone: they count toward `max_concurrent_per_project` /
