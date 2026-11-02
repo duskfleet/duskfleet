@@ -2695,7 +2695,8 @@ summary:focus-visible {
 .sched-group > h2 a {
   color: inherit;
 }
-/* one card per schedule: what it runs on the left, last firings on the right, actions below */
+/* one card per schedule (DS-24): name and actions in the header, an optional message under it,
+   what it runs on the left, last firings on the right, stats in the footer */
 .sched-list {
   display: grid;
   gap: 12px;
@@ -2704,6 +2705,7 @@ summary:focus-visible {
   display: grid;
   grid-template-columns: minmax(0, 1fr) 420px;
   column-gap: 24px;
+  row-gap: 12px;
   background: var(--panel);
   border: 1px solid var(--border);
   border-radius: 12px;
@@ -2718,14 +2720,56 @@ summary:focus-visible {
 .sched-card:target {
   border-color: var(--accent);
 }
+.sched-card .sched-head {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px 16px;
+  flex-wrap: wrap;
+  min-width: 0;
+}
+.sched-card .sched-head .sched-actions,
+.sched-card .sched-head .sched-edit {
+  flex: none;
+  margin-top: 0;
+}
+/* the card's only message home: warn strip for auto / budget pauses, muted line otherwise; never truncated */
+.sched-card .sched-msg {
+  grid-column: 1 / -1;
+  margin: 0;
+  font-size: 14px;
+  line-height: 21px;
+  letter-spacing: 0.01em;
+  color: var(--muted);
+  overflow-wrap: anywhere;
+}
+.sched-card .sched-msg.warn {
+  color: var(--warn);
+  background: var(--warn-tint);
+  border: 1px solid var(--warn-border);
+  border-radius: 6px;
+  padding: 6px 10px;
+}
+.sched-card .sched-msg.bad {
+  color: var(--bad-ink);
+}
+.sched-card .sched-msg a {
+  color: inherit;
+  text-decoration: underline;
+}
 .sched-card .main {
   min-width: 0;
+}
+.sched-card .main > .meta:first-child {
+  margin-top: 0;
 }
 .sched-card .title-row {
   display: flex;
   align-items: center;
   gap: 10px;
   flex-wrap: wrap;
+  min-width: 0;
 }
 .sched-card h3 {
   font-family: var(--font-display);
@@ -2836,7 +2880,6 @@ summary:focus-visible {
   justify-content: space-between;
   gap: 12px;
   flex-wrap: wrap;
-  margin-top: 12px;
   padding-top: 10px;
   border-top: 1px solid var(--border);
   font-size: 14px;
@@ -2852,19 +2895,11 @@ summary:focus-visible {
 .sched-card .foot-facts .skips {
   color: var(--warn);
 }
-.sched-card .foot-facts .err {
-  color: var(--bad-ink);
-  overflow-wrap: anywhere;
-}
 .sched-card .foot-facts .idle {
   font-variant-numeric: tabular-nums;
 }
 .sched-card .foot-facts .idle.warn {
   color: var(--warn);
-}
-.sched-card .foot .sched-actions,
-.sched-card .foot .sched-edit {
-  margin-top: 0;
 }
 /* firing squares, shared by the cards and the legend */
 .sq {
@@ -3436,6 +3471,16 @@ details.desc ul {
   }
   .sched-card .last {
     flex-wrap: wrap;
+  }
+  /* DS-24 at 390: the actions wrap under the name, left-aligned */
+  .sched-card .sched-head {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+  .sched-card .sched-head .sched-actions,
+  .sched-card .sched-head .sched-edit {
+    flex: 0 1 auto;
+    max-width: 100%;
   }
 }
 

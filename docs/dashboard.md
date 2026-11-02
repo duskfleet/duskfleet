@@ -116,17 +116,22 @@ in the nav); the other pages are static.
 - **Schedules**: a status strip (kill switch, lease holder and when its lease expires, next
   firing, last 7 days fired / skipped busy), then the schedules grouped by project (the
   schedule's own, else its agent's; "no project" last), one card each, titled by its agent (a link to the agent's card on Agents,
-  which links its runs): cron (raw and in plain words), the schedule name, project, model, the
+  which links its runs), with the card's actions in its header: run now, pause / resume, edit the
+  cron and time zone, delete (inline confirmation); the changes go through the same validation as
+  `update_schedule`. Under the header, at most one message, never truncated: the auto-pause reason
+  (its last run linked) or a monthly budget pause in an amber strip; "paused · nothing fires until
+  Resume" (by hand, or by a budget whose tick another schedule of the scope tripped), or what the
+  gate said on its run of consecutive skips, as a plain line; the error of a failed fire in red,
+  also on a paused card with that plain pause line in front. Then
+  cron (raw and in plain words), the schedule name, project, model, the
   [gate](schedules.md#gates-skip-cheaply-when-there-is-no-work) and on-failure policy in force, the
   prompt, the last 10 firings as squares coloured by how the run they started **ended** (clean,
   needs review from the stored review reasons, failed, running, cancelled, skipped busy, skipped by
-  the gate, run gone), and a footer with the next tick (theoretical one for paused schedules), the
-  fired / skipped counters, the [idle cost](schedules.md#idle-cost) over 7 days (no-op runs out of
-  all runs and the dollars they cost, amber when at least half were no-ops), what the gate skipped
-  and cost, and the last error. A "next: resume" badge says the next fire will resume the last run
-  (`on_failure: resume_once`). Each card can be run now, paused / resumed, have its cron and time
-  zone edited, or be deleted (inline confirmation); the changes go through the same validation as
-  `update_schedule`. **Run now** does not start Claude from the dashboard: it marks the row and the
+  the gate, run gone), and a footer of stats only: the next tick (theoretical one for paused
+  schedules), the fired / skipped counters, the [idle cost](schedules.md#idle-cost) over 7 days
+  (no-op runs out of all runs and the dollars they cost, amber when at least half were no-ops) and
+  what the gate skipped and cost. A "next: resume" badge says the next fire will resume the last
+  run (`on_failure: resume_once`). **Run now** does not start Claude from the dashboard: it marks the row and the
   process that holds the scheduler lease fires it on its next tick (within `tick_seconds`, paused
   or not, busy = skip), so it waits while no process ticks. A callout warns when only an MCP host
   ticks, with the `install-service` command. Creating a schedule and changing its agent, project,
