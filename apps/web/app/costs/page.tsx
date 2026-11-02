@@ -68,7 +68,6 @@ export default async function CostsPage({ searchParams }: { searchParams: Promis
   // ---- KPIs ----
   const monthWords = costLabels(month.cost);
   const periodUsd = s.total + s.gateTotal;
-  const warnUsd = budget ? (budget.amountUsd * budget.warnPercent) / 100 : 0;
 
   // ---- spend per bucket ----
   const projectIds = new Map(projects.map((p) => [p.path.replace(/\/+$/, ""), p.id]));
@@ -210,23 +209,6 @@ export default async function CostsPage({ searchParams }: { searchParams: Promis
           <div className="label">Avg per run</div>
           <div className="value">{month.runs ? fmtCost(month.runsCostUsd / month.runs) : "–"}</div>
           <div className="sub">{fmtInt(month.runs)} runs this month</div>
-        </div>
-        <div className="stat">
-          <div className="label">Budget warning</div>
-          {budget ? (
-            <>
-              <div className="value warn">at {budget.warnPercent}%</div>
-              <div className="sub">
-                {fmtCost(warnUsd)} · {budget.hardStop ? "hard stop" : "warn only, no hard stop"} at{" "}
-                {fmtCost(budget.amountUsd)}
-              </div>
-            </>
-          ) : (
-            <>
-              <div className="value faint-value">none</div>
-              <div className="sub">set a budget to get a warning</div>
-            </>
-          )}
         </div>
       </section>
 
