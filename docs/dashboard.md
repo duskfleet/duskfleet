@@ -92,8 +92,8 @@ in the nav); the other pages are static.
   command and the exact command executed. Home paths print as `~/…`; Copy buttons give the
   full value.
 - **Agents**: four tiles (agents, running now, needs review, auto-paused), Project / Status
-  filters, a search on id and description and a sort (last run, id, runs, clean, cost), then one
-  table per project ("Any project" first), one row per agent: status (running with a pending or
+  filters, a search on id and description and a sort (id by default, last run, runs, clean, cost),
+  then one table per project ("Any project" first, then projects by id), one row per agent: status (running with a pending or
   running run, else "paused · auto" when a bound schedule was auto-paused, else needs review from
   the stored review reasons of its last run, else idle; the tiles and the Status filter count the
   same status), id and kind, a one-line description, model, runs over 7 days with a per-day
