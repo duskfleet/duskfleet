@@ -3,8 +3,8 @@ import path from "node:path";
 import { type EditableGlobalKey, type GlobalValue, readGlobalFile } from "@duskfleet/core";
 import { AppearanceSection, ConfigSection, DangerZone } from "@/components/Settings";
 import { TocSpy } from "@/components/TocSpy";
-import { config, services } from "@/lib/data";
-import { fmtTime } from "@/lib/format";
+import { config, homeDir, services } from "@/lib/data";
+import { fmtTime, tildePath } from "@/lib/format";
 import { SECTIONS, SETTINGS_MARKER } from "@/lib/settings";
 
 export const dynamic = "force-dynamic";
@@ -28,6 +28,8 @@ export default function SettingsPage() {
   for (const s of SECTIONS) for (const f of s.fields) values[f.key] = file.values[f.key] ?? f.default;
   const here = writtenHere(cfg.dataDir, file.modifiedAt);
   const agents = [...cfg.agents.keys()].sort();
+  // The file the loader actually read: config/ in a checkout, the user-level directory for an npm install.
+  const configPath = tildePath(file.path, homeDir());
 
   const active = services()
     .schedules.list()
@@ -47,7 +49,7 @@ export default function SettingsPage() {
 
       <div className="card settings-source">
         <span className="source-file">
-          <span className="source-label">Source</span> <code>config/duskfleet.yaml</code>
+          <span className="source-label">Source</span> <code title={file.path}>{configPath}</code>
         </span>
         <span className="source-meta">
           last changed <time dateTime={file.modifiedAt}>{fmtTime(file.modifiedAt)}</time>
@@ -79,6 +81,7 @@ export default function SettingsPage() {
               values={Object.fromEntries(s.fields.map((f) => [f.key, values[f.key]]))}
               agents={agents}
               schedulerEnabled={cfg.scheduler.enabled}
+              configPath={configPath}
             />
           ))}
           <DangerZone

@@ -24,6 +24,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
+import { desktopSnippet, mcpServerConfig } from "@duskfleet/core";
 import {
   applyDesktop,
   backupPath,
@@ -51,6 +52,49 @@ const entry = {
 function tempDir(prefix) {
   return realpathSync(mkdtempSync(path.join(tmpdir(), prefix)));
 }
+
+test("mcpServerConfig (shared with the dashboard's /mcp page) exports config and data only when needed", () => {
+  // An installed package (no checkout above the entry): the config is always exported.
+  const installed = mcpServerConfig({
+    nodeBin: "/opt/node/bin/node",
+    serverEntry: "/opt/lib/node_modules/duskfleet/dist/index.js",
+    claudeBin: "/opt/claude",
+    config: { configDir: "/home/me/.config/duskfleet", dataDir: "/data/df", dataSource: "env" },
+    version: "1.2.3",
+    platform: "linux",
+  });
+  assert.equal(installed.form, "path");
+  assert.deepEqual(installed.entry, {
+    command: "/opt/node/bin/node",
+    args: ["/opt/lib/node_modules/duskfleet/dist/index.js"],
+    env: { CLAUDE_BIN: "/opt/claude", DUSKFLEET_CONFIG: "/home/me/.config/duskfleet", DUSKFLEET_DATA: "/data/df" },
+  });
+  // The same entry the CLI builds by hand from serverEntry.
+  assert.deepEqual(
+    installed.entry,
+    serverEntry({
+      nodeBin: "/opt/node/bin/node",
+      serverEntry: "/opt/lib/node_modules/duskfleet/dist/index.js",
+      claudeBin: "/opt/claude",
+      configDir: "/home/me/.config/duskfleet",
+      dataDir: "/data/df",
+      version: "1.2.3",
+    }).entry,
+  );
+  // From npx's cache: the pinned npx form, same env.
+  const npx = mcpServerConfig({
+    nodeBin: "/opt/node/bin/node",
+    serverEntry: "/home/me/.npm/_npx/abc/node_modules/duskfleet/dist/index.js",
+    claudeBin: null,
+    config: { configDir: "/home/me/.config/duskfleet", dataDir: "/x", dataSource: "config" },
+    version: "1.2.3",
+    platform: "linux",
+  });
+  assert.equal(npx.form, "npx");
+  assert.deepEqual(npx.entry.args, ["-y", "-p", "duskfleet@1.2.3", "duskfleet-mcp"]);
+  assert.deepEqual(npx.entry.env, { DUSKFLEET_CONFIG: "/home/me/.config/duskfleet" });
+  assert.deepEqual(JSON.parse(desktopSnippet(npx.entry)), { mcpServers: { duskfleet: npx.entry } });
+});
 
 test("desktop config path per platform", () => {
   assert.equal(

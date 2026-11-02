@@ -19,15 +19,19 @@ import {
   type CostSeries,
   type CostSplit,
   type CostSplitBy,
+  claudeCodeAddArgs,
   costSeries,
   type DuskFleetConfig,
   describeCron,
+  desktopConfigPath,
+  desktopSnippet,
   findRepoRoot,
   type ListRunsFilter,
   listProjectAgents,
   loadAgents,
   loadConfig,
   MIXED_MODEL,
+  mcpServerConfig,
   NEEDS_REVIEW_SQL,
   nextFire,
   type OutcomeSeries,
@@ -46,10 +50,12 @@ import {
   ScheduleRepository,
   scheduleIdleStats,
   scheduleRunState,
+  shellLine,
   type TrendRange,
   utcDayStart,
   utcMonthStart,
 } from "@duskfleet/core";
+import { cliCommand, detectInstall, type Install } from "./cli";
 import { ACTIVE_SQL, ACTIVE_STATUSES } from "./running";
 import { listScoped, scopeList } from "./scope";
 import { mergeSeries } from "./trends";
@@ -1025,33 +1031,60 @@ export function toolCatalog(): ToolCatalog | null {
   }
 }
 
-/**
- * The MCP server entry: the checkout's packages/mcp/dist/index.js, else the `duskfleet`
- * package installed next to @duskfleet/web (same node_modules), else a placeholder.
- */
-function mcpEntry(): string {
-  // A directory holding config/duskfleet.yaml is a "root" for an installed package too,
-  // but has no packages/mcp/dist: only an entry that exists counts.
-  const root = findRepoRoot(process.cwd());
-  const webDir = process.env.DUSKFLEET_WEB_DIR;
-  const entry = [
-    root ? path.join(root, "packages", "mcp", "dist", "index.js") : null,
-    // <prefix>/node_modules/@duskfleet/web -> <prefix>/node_modules/duskfleet/dist/index.js
-    webDir ? path.resolve(webDir, "..", "..", "duskfleet", "dist", "index.js") : null,
-  ].find((f): f is string => !!f && existsSync(f));
-  return entry ?? "<path to the duskfleet package>/dist/index.js";
+/** The install the dashboard belongs to (checkout, global or npx): the form of every CLI command shown. */
+export function install(): Install {
+  return detectInstall({
+    mcpEntryEnv: process.env.DUSKFLEET_MCP_ENTRY,
+    webDir: process.env.DUSKFLEET_WEB_DIR,
+    cwd: process.cwd(),
+    findRepoRoot,
+    exists: existsSync,
+    readVersion: (file) => {
+      try {
+        const v = (JSON.parse(readFileSync(file, "utf8")) as { version?: unknown }).version;
+        return typeof v === "string" ? v : null;
+      } catch {
+        return null;
+      }
+    },
+  });
 }
 
-/** Where this server is registered, for the docs page. Absolute paths, as the hosts need them. */
-export function mcpRegistration() {
-  const entry = mcpEntry();
-  let claudeBin: string;
+/** A copy-paste CLI command for this install (`duskfleet ...`, `npx -y duskfleet@<v> ...` or `npm run cli -- ...`). */
+export function cli(args: string): string {
+  return cliCommand(install(), args);
+}
+
+/**
+ * The MCP host setup for the /mcp page, rendered by core's `mcpServerConfig`, the same renderer
+ * as `duskfleet mcp register` (same entry, env and Claude Desktop path for this OS). Null entry:
+ * this install's MCP server could not be found (dashboard started by hand, not by the CLI).
+ */
+export function mcpSetup() {
+  const inst = install();
+  const cfg = config();
+  let claudeBin: string | null;
   try {
-    claudeBin = resolveClaudeBinary(config().claude.binary); // absolute: GUI hosts start with a minimal PATH
+    claudeBin = resolveClaudeBinary(cfg.claude.binary); // absolute: GUI hosts start with a minimal PATH
   } catch {
-    claudeBin = "/absolute/path/to/claude";
+    claudeBin = null;
   }
-  return { entry, node: process.execPath, claudeBin };
+  const entry = inst.mcpEntry
+    ? mcpServerConfig({
+        nodeBin: process.execPath,
+        serverEntry: inst.mcpEntry,
+        claudeBin,
+        config: cfg,
+        version: inst.version,
+      }).entry
+    : null;
+  return {
+    install: inst,
+    entry,
+    desktopJson: entry ? desktopSnippet(entry) : null,
+    claudeCodeCmd: entry ? shellLine("claude", claudeCodeAddArgs(entry)) : null,
+    desktopConfigPath: desktopConfigPath(),
+  };
 }
 
 /** The Claude Code agents a registered project defines in its own .claude/agents/ (subagents and link targets). */
