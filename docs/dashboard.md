@@ -97,8 +97,8 @@ in the nav); the other pages are static.
   running run, else "paused · auto" when a bound schedule was auto-paused, else needs review from
   the stored review reasons of its last run, else idle; the tiles and the Status filter count the
   same status), id and kind, a one-line description, model, runs over 7 days with a per-day
-  sparkline, clean %, cost and last run, and links to its runs and schedule. Under about 720 px
-  the same row reflows into a four-line block, each number under its column label.
+  sparkline, clean %, cost and last run, and links to its runs and schedule. From tablet width
+  (1024 px) down the same row reflows into a four-line block, each number under its column label.
 - **Agent** (`/agents/<id>`): everything that configures one agent. Header with kind, builtin /
   override chip, status, project, model and file; 30-day tiles over UTC days (runs and cost with
   sparklines, clean %, needs review; gate runs left out of the counts, kept in the cost); the system prompt (own) or the link target with the project persona
