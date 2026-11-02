@@ -1912,11 +1912,18 @@ h2 .h2-id {
   width: 3px;
 }
 
-/* Agent/Row, narrow: the same cells as a 4-line block; the thead's labels move into the row */
 @media (max-width: 720px) {
   .agents-kpis {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
+  .ar-id {
+    max-width: 200px;
+  }
+}
+
+/* Agent/Row, tablet and narrow: the same cells as a 4-line block; the thead's labels move
+   into the row. From 1024 px down, so no squeezed table step between desktop and phone. */
+@media (max-width: 1024px) {
   .ms.sort-menu {
     display: none;
   }
@@ -1949,9 +1956,6 @@ h2 .h2-id {
     grid-column: 1 / 4;
     grid-row: 1;
     align-self: center;
-  }
-  .ar-id {
-    max-width: 200px;
   }
   .ar-status {
     grid-column: 4;
