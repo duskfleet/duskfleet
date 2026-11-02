@@ -5,7 +5,7 @@
 import assert from "node:assert/strict";
 import { spawn, spawnSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, readdirSync, realpathSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { hostname, tmpdir } from "node:os";
 import path from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
@@ -70,6 +70,44 @@ test("cli run --project accepts a registered id or a path; unknown ids, relative
     const both = cli(configDir, ["run", "--project", "demo", "--project-id", "demo", "--", "hello"]);
     assert.notEqual(both.status, 0);
     assert.match(both.stderr, /mutually exclusive/);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("doctor lists the stuck pending and running rows of a dead owner its startup sweep failed", () => {
+  const { root, configDir, project } = makeRoot();
+  try {
+    const first = cli(configDir, ["run", "--project", project, "--", "hello"]);
+    assert.equal(first.status, 0, first.stderr);
+    const second = cli(configDir, ["run", "--project", project, "--", "hello"]);
+    assert.equal(second.status, 0, second.stderr);
+    const pendingId = JSON.parse(first.stdout).id;
+    const runningId = JSON.parse(second.stdout).id;
+    const dead = spawnSync(process.execPath, ["-e", ""]).pid;
+    const owner = `mcp@${hostname()}:${dead}`;
+    const db = openDatabase(loadConfig(configDir).dataDir);
+    const stuck = db.prepare(
+      "UPDATE runs SET status = ?, started_at = NULL, ended_at = NULL, error = NULL, owner = ? WHERE id = ?",
+    );
+    stuck.run("pending", owner, pendingId);
+    stuck.run("running", owner, runningId);
+    db.close();
+
+    const doctor = cli(configDir, ["doctor"]);
+    assert.equal(doctor.status, 0, doctor.stderr);
+    const { orphans } = JSON.parse(doctor.stdout);
+    assert.deepEqual(
+      orphans.recovered.map((r) => [r.id, r.was, r.owner]).sort(),
+      [
+        [pendingId, "pending", owner],
+        [runningId, "running", owner],
+      ].sort(),
+    );
+    assert.match(orphans.advice, /marked 2 run\(s\) failed/);
+
+    const again = JSON.parse(cli(configDir, ["doctor"]).stdout);
+    assert.deepEqual(again.orphans, { recovered: [], advice: null }, "already failed by the first doctor");
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

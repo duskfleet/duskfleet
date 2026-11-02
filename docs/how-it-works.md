@@ -79,15 +79,17 @@ they arrive and keeps the raw stream in `data/logs/<run_id>.jsonl`:
   checkout never run.
 
 `RunManager` is the only writer of a run's status, and every change goes through a checked
-transition. Each run records its owner process; orphan recovery closes a `running` row as
-failed only when that owner is gone, so several Duskfleet processes can share the database
-safely.
+transition. Each run records its owner process; orphan recovery closes a `running` row, or a
+`pending` one whose process died between recording the run and spawning claude, as failed only
+when that owner is gone, so several Duskfleet processes can share the database safely.
 
 ## Run lifecycle
 
 ```mermaid
 stateDiagram-v2
-    [*] --> running : startRun (guards pass)
+    [*] --> pending : startRun (guards pass, row recorded)
+    pending --> running : claude spawned
+    pending --> failed : spawn error / orphaned
     running --> completed : result event
     running --> failed : error / non-zero exit / orphaned
     running --> cancelled : cancel_run

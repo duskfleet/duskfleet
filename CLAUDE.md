@@ -137,7 +137,7 @@ npm workspaces, one `config/` and one SQLite database shared by three deliverabl
   needs must be in its own `allowed_tools`; use `add_dirs` to reach other directories.
 - **Runs have an owner** (`runs.owner`, `role@host:pid` from `processIdentity`, migration 7):
   several Duskfleet processes share the DB, so `recoverOrphans` (startup and the lease holder's
-  once-a-minute sweep) fails a `running` row only when its owner is gone (dead pid on this host,
+  once-a-minute sweep) fails a `running` row, or a `pending` one never spawned, only when its owner is gone (dead pid on this host,
   NULL owner older than the longest timeout + 1 min, or this pid without the run in memory),
   never a live process's or another host's. A fresh NULL owner is a process on an old build
   (a `serve` not reinstalled after a build): it is live, not an orphan.

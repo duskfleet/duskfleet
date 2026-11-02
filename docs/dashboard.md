@@ -55,6 +55,11 @@ in the nav); the other pages are static.
   `?project=a&project=b&agent=x`: any of the projects AND any of the agents; a single `?agent=`
   still works; each select's × drops its filter), prompt search (`?q=`), `?schedule=` and
   `?limit=` (load older).
+  **Running now** counts the real runs not ended yet, `running` or `pending` (being spawned),
+  and the Running list above Recent shows the same rows. The Agents page uses the same
+  definition for its running state, so both pages agree (the Agents tile counts agents, an agent
+  with two live runs once). A `pending` row whose process died before the spawn is failed as
+  orphaned by the next sweep (see [troubleshooting](troubleshooting.md#runs)), not shown forever.
   The KPI cards filter the list by how runs ended, `?outcome=` (real runs only, gate runs left
   out, by the stored review verdict):
   - `needs_review`: every run with a review reason (click the **Needs review** card; it also shows
