@@ -2087,6 +2087,10 @@ h2 .h2-id {
   flex-wrap: wrap;
   font-size: 14px;
 }
+/* the outcome of a run-now request goes under the buttons, never beside them */
+.ad-run-now .ad-run-msg {
+  flex-basis: 100%;
+}
 .ad-btn {
   font: inherit;
   font-size: 14px;
