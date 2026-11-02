@@ -101,7 +101,14 @@ launchctl bootout gui/$(id -u)/com.example.claude-nightly      # remove it again
 
 A LaunchAgent runs as you, in your login session, so it sees the same Claude Code login as
 your terminal. Unlike cron, launchd runs a missed `StartCalendarInterval` job once when the
-Mac wakes up.
+Mac wakes up, with several missed intervals coalesced into one run (`man launchd.plist`,
+`StartCalendarInterval`).
+
+This example was run as written on macOS (November 2026, a scratch project, `--model haiku`):
+`plutil -lint` and `bash -n` pass, `bootstrap` then `kickstart` ran the job at once with exit
+code 0 and the log in `~/.local/state/claude-nightly/`, and `bootout` removed it. The
+`StandardOutPath` / `StandardErrorPath` files stay empty because the script writes everything
+to its own log. The wake-up behaviour above comes from the man page and was not tested.
 
 ### systemd user timer (Linux)
 
@@ -138,7 +145,10 @@ journalctl --user -u claude-nightly.service      # what it printed
 ```
 
 `Persistent=true` runs a missed tick once after boot. A `oneshot` service is never started twice
-at the same time by its timer.
+at the same time by its timer (`man systemd.timer`).
+
+These two units have not been run on a Linux machine yet, only read. If `systemctl` refuses one,
+`systemd-analyze --user verify ~/.config/systemd/user/claude-nightly.*` says why.
 
 ## What goes wrong unattended
 
@@ -189,8 +199,9 @@ Each failure mode below: what you see, why, and the fix in the plain setup.
   30 * * * * flock -n /tmp/claude-nightly.lock /home/you/bin/claude-nightly.sh
   ```
 
-  macOS has no `flock(1)` by default; a launchd job is not started again while it is still
-  running, and a systemd `oneshot` neither. Give every run a time limit too
+  macOS has no `flock(1)` by default; launchd keeps one process per job label, so a job still
+  running when its next interval comes is not started a second time, and a systemd `oneshot`
+  neither (from the man pages, not tested with a run that outlasts its interval). Give every run a time limit too
   (`timeout 30m claude -p ...` on Linux), so one stuck run does not hold the lock forever.
 
 ### Silent failures
