@@ -9,7 +9,7 @@ import { type ActionResult, requestScheduleRunAction } from "@/app/schedules/act
  * schedule's run now (stamps run_requested_at; the lease holder fires it on its next tick).
  * Without a bound schedule it renders nothing. Two steps, the second names the schedule.
  */
-export function AgentRunNow({ schedules }: { schedules: Array<{ id: string; name: string; requested: boolean }> }) {
+export function AgentRunNow({ schedules }: { schedules: RunNowSchedule[] }) {
   const router = useRouter();
   const [pending, start] = useTransition();
   const [open, setOpen] = useState(false);
@@ -25,6 +25,39 @@ export function AgentRunNow({ schedules }: { schedules: Array<{ id: string; name
     });
 
   return (
+    <AgentRunNowView
+      schedules={schedules}
+      open={open}
+      pending={pending}
+      result={result}
+      onOpen={() => setOpen(true)}
+      onCancel={() => setOpen(false)}
+      onFire={fire}
+    />
+  );
+}
+
+type RunNowSchedule = { id: string; name: string; requested: boolean };
+
+/** The markup of every state of AgentRunNow, which holds the state (rendered as is by the tests). */
+export function AgentRunNowView({
+  schedules,
+  open,
+  pending,
+  result,
+  onOpen,
+  onCancel,
+  onFire,
+}: {
+  schedules: RunNowSchedule[];
+  open: boolean;
+  pending: boolean;
+  result: ActionResult | null;
+  onOpen: () => void;
+  onCancel: () => void;
+  onFire: (id: string) => void;
+}) {
+  return (
     <span className="ad-run-now">
       {open ? (
         <>
@@ -36,12 +69,12 @@ export function AgentRunNow({ schedules }: { schedules: Array<{ id: string; name
               className="ad-btn primary"
               disabled={pending || s.requested}
               title={s.requested ? "Already requested: the ticking process starts it on its next tick" : undefined}
-              onClick={() => fire(s.id)}
+              onClick={() => onFire(s.id)}
             >
               {pending ? "…" : `“${s.name}”`}
             </button>
           ))}
-          <button type="button" className="ad-btn" disabled={pending} onClick={() => setOpen(false)}>
+          <button type="button" className="ad-btn" disabled={pending} onClick={onCancel}>
             Cancel
           </button>
         </>
@@ -49,7 +82,7 @@ export function AgentRunNow({ schedules }: { schedules: Array<{ id: string; name
         <button
           type="button"
           className="ad-btn primary"
-          onClick={() => setOpen(true)}
+          onClick={onOpen}
           title="Fire a bound schedule once now, outside its cron: same busy rules as a tick"
         >
           Run now…

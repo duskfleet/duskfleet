@@ -35,7 +35,7 @@ export function ScheduleActions({
 }) {
   const router = useRouter();
   const [pending, start] = useTransition();
-  const [mode, setMode] = useState<"idle" | "edit" | "confirm-delete">("idle");
+  const [mode, setMode] = useState<ScheduleActionsMode>("idle");
   const [draftCron, setDraftCron] = useState(cron);
   const [draftTz, setDraftTz] = useState(timeZone);
   const [result, setResult] = useState<ActionResult | null>(null);
@@ -50,13 +50,81 @@ export function ScheduleActions({
       }
     });
 
+  return (
+    <ScheduleActionsView
+      name={name}
+      enabled={enabled}
+      cron={cron}
+      timeZone={timeZone}
+      runRequested={runRequested}
+      mode={mode}
+      draftCron={draftCron}
+      draftTz={draftTz}
+      pending={pending}
+      result={result}
+      on={{
+        mode: setMode,
+        draftCron: setDraftCron,
+        draftTz: setDraftTz,
+        cancelEdit: () => {
+          setMode("idle");
+          setDraftCron(cron);
+          setDraftTz(timeZone);
+          setResult(null);
+        },
+        save: () => apply(() => updateScheduleWhenAction(id, draftCron, draftTz)),
+        runNow: () => apply(() => requestScheduleRunAction(id)),
+        toggleEnabled: () => apply(() => setScheduleEnabledAction(id, !enabled)),
+        remove: () => apply(() => deleteScheduleAction(id)),
+      }}
+    />
+  );
+}
+
+export type ScheduleActionsMode = "idle" | "edit" | "confirm-delete";
+
+/** The markup of every state of ScheduleActions, which holds the state (rendered as is by the tests). */
+export function ScheduleActionsView({
+  name,
+  enabled,
+  cron,
+  timeZone,
+  runRequested,
+  mode,
+  draftCron,
+  draftTz,
+  pending,
+  result,
+  on,
+}: {
+  name: string;
+  enabled: boolean;
+  cron: string;
+  timeZone: string;
+  runRequested: boolean;
+  mode: ScheduleActionsMode;
+  draftCron: string;
+  draftTz: string;
+  pending: boolean;
+  result: ActionResult | null;
+  on: {
+    mode: (m: ScheduleActionsMode) => void;
+    draftCron: (v: string) => void;
+    draftTz: (v: string) => void;
+    cancelEdit: () => void;
+    save: () => void;
+    runNow: () => void;
+    toggleEnabled: () => void;
+    remove: () => void;
+  };
+}) {
   if (mode === "edit") {
     return (
       <form
         className="sched-edit"
         onSubmit={(e) => {
           e.preventDefault();
-          apply(() => updateScheduleWhenAction(id, draftCron, draftTz));
+          on.save();
         }}
       >
         <label>
@@ -64,7 +132,7 @@ export function ScheduleActions({
           <input
             className="mono"
             value={draftCron}
-            onChange={(e) => setDraftCron(e.target.value)}
+            onChange={(e) => on.draftCron(e.target.value)}
             placeholder="0 8-20 * * 1-5"
             spellCheck={false}
             autoFocus
@@ -75,7 +143,7 @@ export function ScheduleActions({
           <input
             className="mono"
             value={draftTz}
-            onChange={(e) => setDraftTz(e.target.value)}
+            onChange={(e) => on.draftTz(e.target.value)}
             placeholder="Europe/London"
             spellCheck={false}
             list="duskfleet-timezones"
@@ -94,17 +162,7 @@ export function ScheduleActions({
           >
             {pending ? "…" : "Save"}
           </button>
-          <button
-            type="button"
-            className="copy-btn"
-            disabled={pending}
-            onClick={() => {
-              setMode("idle");
-              setDraftCron(cron);
-              setDraftTz(timeZone);
-              setResult(null);
-            }}
-          >
+          <button type="button" className="copy-btn" disabled={pending} onClick={on.cancelEdit}>
             Cancel
           </button>
         </span>
@@ -121,15 +179,10 @@ export function ScheduleActions({
       {mode === "confirm-delete" ? (
         <>
           <span className="muted">Delete &quot;{name}&quot;?</span>
-          <button
-            type="button"
-            className="copy-btn danger"
-            disabled={pending}
-            onClick={() => apply(() => deleteScheduleAction(id))}
-          >
+          <button type="button" className="copy-btn danger" disabled={pending} onClick={on.remove}>
             {pending ? "…" : "Yes, delete"}
           </button>
-          <button type="button" className="copy-btn" disabled={pending} onClick={() => setMode("idle")}>
+          <button type="button" className="copy-btn" disabled={pending} onClick={() => on.mode("idle")}>
             Cancel
           </button>
         </>
@@ -144,7 +197,7 @@ export function ScheduleActions({
                 ? "Already requested: the ticking process starts it on its next tick"
                 : "Fire once now, outside the cron and even when paused. Same busy rules as a tick; it starts on the next tick of the process that holds the lease."
             }
-            onClick={() => apply(() => requestScheduleRunAction(id))}
+            onClick={on.runNow}
           >
             {pending ? "…" : runRequested ? "Run requested" : "Run now"}
           </button>
@@ -153,7 +206,7 @@ export function ScheduleActions({
             className="copy-btn"
             disabled={pending}
             title={enabled ? "Pause: nothing fires until resumed" : "Resume: the next tick is computed from now"}
-            onClick={() => apply(() => setScheduleEnabledAction(id, !enabled))}
+            onClick={on.toggleEnabled}
           >
             {pending ? "…" : enabled ? "Pause" : "Resume"}
           </button>
@@ -162,7 +215,7 @@ export function ScheduleActions({
             className="copy-btn"
             disabled={pending}
             title="Change the cron expression or the time zone"
-            onClick={() => setMode("edit")}
+            onClick={() => on.mode("edit")}
           >
             Edit when
           </button>
@@ -171,7 +224,7 @@ export function ScheduleActions({
             className="copy-btn danger"
             disabled={pending}
             title="Remove the schedule; past runs are kept"
-            onClick={() => setMode("confirm-delete")}
+            onClick={() => on.mode("confirm-delete")}
           >
             Delete
           </button>
