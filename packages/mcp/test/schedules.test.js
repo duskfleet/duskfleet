@@ -1913,9 +1913,10 @@ test("defer_busy: a paused or auto-paused schedule never starts from a pending",
   let blockerRun = null;
   try {
     blockerRun = await occupyProject(t);
+    // One schedule per agent: three demo-bound agents, all deferred by the same busy project.
     const paused = t.scheduler.create({ name: "paused", agentId: "gatekeeper", prompt: "ok", cron: "0 3 * * *" });
-    const auto = t.scheduler.create({ name: "auto", agentId: "gatekeeper", prompt: "ok", cron: "0 4 * * *" });
-    const raced = t.scheduler.create({ name: "raced", agentId: "gatekeeper", prompt: "ok", cron: "0 5 * * *" });
+    const auto = t.scheduler.create({ name: "auto", agentId: "coder2", prompt: "ok", cron: "0 4 * * *" });
+    const raced = t.scheduler.create({ name: "raced", agentId: "coder3", prompt: "ok", cron: "0 5 * * *" });
     for (const s of [paused, auto, raced]) {
       t.due(s.id);
       await t.tickAll();
