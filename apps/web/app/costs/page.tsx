@@ -2,7 +2,7 @@ import { budgetLabel, COST_SPLITS, type CostSplitBy, costLabels, TREND_RANGES, t
 import Link from "next/link";
 import { type BarRule, ChartLegend, StackedBars } from "@/components/charts/StackedBars";
 import { budgetPerBucket, fmtUsdShort, moneyAxis, SPLIT_LABELS, SPLIT_PLURALS } from "@/lib/costs";
-import { costs, listAgents, listProjects, modelStats, monthSpend, scopeBudget } from "@/lib/data";
+import { cli, costs, listAgents, listProjects, modelStats, monthSpend, scopeBudget } from "@/lib/data";
 import { fmtCost, fmtDuration, fmtInt, fmtPct, fmtSplit, shortModel } from "@/lib/format";
 import {
   bucketLabel,
@@ -118,11 +118,13 @@ export default async function CostsPage({ searchParams }: { searchParams: Promis
     index: i,
     label: bucketLabel(s.starts[i] ?? "", s.bucket),
   }));
-  const budgetHint = agent
-    ? `npm run cli -- budgets set agent ${agent} --amount <usd>`
-    : project
-      ? `npm run cli -- budgets set project ${project.id} --amount <usd>`
-      : "npm run cli -- budgets set global --amount <usd>";
+  const budgetHint = cli(
+    agent
+      ? `budgets set agent ${agent} --amount <usd>`
+      : project
+        ? `budgets set project ${project.id} --amount <usd>`
+        : "budgets set global --amount <usd>",
+  );
 
   // ---- by model, same period and scope ----
   const models = modelStats({ ...scope, from: `${s.starts[0]}T00:00:00.000Z` });

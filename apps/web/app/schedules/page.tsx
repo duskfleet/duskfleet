@@ -9,7 +9,15 @@ import {
 import Link from "next/link";
 import { CopyButton } from "@/components/CopyButton";
 import { ScheduleActions } from "@/components/ScheduleActions";
-import { firingTotals, listSchedules, scheduleFiringsWithRuns, schedulerEnabled, schedulerLease } from "@/lib/data";
+import { cliCommand, installServiceCommand } from "@/lib/cli";
+import {
+  firingTotals,
+  install,
+  listSchedules,
+  scheduleFiringsWithRuns,
+  schedulerEnabled,
+  schedulerLease,
+} from "@/lib/data";
 import { fmtCost, fmtRelative, fmtTime, runTitle } from "@/lib/format";
 
 const HOLDER_LABEL: Record<string, string> = {
@@ -95,6 +103,8 @@ export default function SchedulesPage() {
   const enableExample = schedules[0]
     ? `update_schedule { "id": "${schedules[0].id}", "enabled": true }`
     : `update_schedule { "id": "<schedule id>", "enabled": true }`;
+  const inst = install();
+  const serviceCmd = installServiceCommand(inst);
   const createExample = `create_schedule { "name": "nightly review", "agent_id": "reviewer", "project_id": "<project id>", "cron": "0 7 * * 1-5", "prompt": "…" }`;
 
   return (
@@ -113,8 +123,8 @@ export default function SchedulesPage() {
           <span className="icon">!</span>
           <div>
             <strong>Ticking from an {holderLabel} only.</strong> Schedules stop firing when Claude Desktop / Claude Code
-            closes. To run them unattended install the service once: <code>npm run cli -- install-service</code>{" "}
-            (launchd, systemd --user or Task Scheduler).
+            closes. To run them unattended install the service once: <code>{serviceCmd}</code> (launchd, systemd --user
+            or Task Scheduler).
           </div>
         </div>
       )}
@@ -133,8 +143,8 @@ export default function SchedulesPage() {
           <div>
             <strong>No Duskfleet process is ticking.</strong> Schedules fire only while the MCP server (Claude Desktop /
             Claude Code) or
-            <code> duskfleet serve</code> is running. Install it as a service once with{" "}
-            <code>npm run cli -- install-service</code>. Missed ticks are not caught up.
+            <code> duskfleet serve</code> is running. Install it as a service once with <code>{serviceCmd}</code>.
+            Missed ticks are not caught up.
           </div>
         </div>
       )}
@@ -565,8 +575,8 @@ export default function SchedulesPage() {
           process ticks). A busy agent or project at tick time is a skip, never a queue, and missed ticks are not caught
           up. Creating a schedule and changing its agent, project, prompt, model, gate or on-failure policy go through
           an MCP client with <code>create_schedule</code> and <code>update_schedule</code>; from there{" "}
-          <code>run_schedule_now</code> fires immediately. On the command line, <code>npm run cli -- schedules</code>{" "}
-          lists them.
+          <code>run_schedule_now</code> fires immediately. On the command line,{" "}
+          <code>{cliCommand(inst, "schedules")}</code> lists them.
         </p>
         <div className="two-col">
           <div>

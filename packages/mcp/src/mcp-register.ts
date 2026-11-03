@@ -8,12 +8,8 @@
  *                   entry, a `.bak-<timestamp>` copy of the file, then the write. A file that is
  *                   not valid JSON is never overwritten.
  *
- * The command registered (a decision of issue #201, trade-offs in docs/mcp-server.md):
- * absolute `node` + absolute `dist/index.js` of this install, because a GUI host starts with a
- * minimal PATH and Claude Desktop does not expand `~`. Only when this CLI runs from npx's
- * temporary cache (which npm evicts) is the entry `npx -y -p duskfleet@<version> duskfleet-mcp`,
- * with npx's absolute path next to node: pinned, survives the eviction, needs the network on
- * the host's first start.
+ * The entry itself (node + dist/index.js, or the pinned npx form) is rendered by core's
+ * `config/mcp-entry.ts`, shared with the dashboard's /mcp page.
  */
 import { spawnSync } from "node:child_process";
 import {
@@ -30,76 +26,23 @@ import {
 } from "node:fs";
 import { homedir } from "node:os";
 import path from "node:path";
+import { claudeCodeAddArgs, desktopConfigPath, type McpServerEntry, SERVER_NAME, shellLine } from "@duskfleet/core";
+
+export {
+  claudeCodeAddArgs,
+  desktopConfigPath,
+  inNpxCache,
+  type McpServerEntry,
+  SERVER_NAME,
+  type ServerEntryInput,
+  serverEntry,
+  shellLine,
+} from "@duskfleet/core";
 
 export const MCP_TARGETS = ["claude-code", "claude-desktop"] as const;
 export type McpTarget = (typeof MCP_TARGETS)[number];
 
-/** The name the server is registered under, in both hosts. */
-export const SERVER_NAME = "duskfleet";
-
-export interface McpServerEntry {
-  command: string;
-  args: string[];
-  env: Record<string, string>;
-}
-
-export interface ServerEntryInput {
-  /** Absolute path of the node binary running this CLI. */
-  nodeBin: string;
-  /** Absolute path of dist/index.js, the MCP server entry next to this CLI. */
-  serverEntry: string;
-  /** Resolved claude binary, exported as CLAUDE_BIN (GUI hosts have a minimal PATH). */
-  claudeBin: string | null;
-  /** Config directory to export as DUSKFLEET_CONFIG; null when the server finds it by itself. */
-  configDir: string | null;
-  /** Data directory to export as DUSKFLEET_DATA (`exportedDataDir`); null or absent when the server resolves it itself. */
-  dataDir?: string | null;
-  /** Version of the installed package, pinned in the npx form. */
-  version: string;
-  platform?: NodeJS.Platform;
-}
-
-/** True when `file` lives in npx's temporary cache (`.../_npx/<hash>/...`). */
-export function inNpxCache(file: string): boolean {
-  return path.resolve(file).split(/[\\/]/).includes("_npx");
-}
-
-export function serverEntry(input: ServerEntryInput): { entry: McpServerEntry; form: "path" | "npx" } {
-  const env: Record<string, string> = {};
-  if (input.claudeBin) env["CLAUDE_BIN"] = input.claudeBin;
-  if (input.configDir) env["DUSKFLEET_CONFIG"] = input.configDir;
-  if (input.dataDir) env["DUSKFLEET_DATA"] = input.dataDir;
-  if (inNpxCache(input.serverEntry)) {
-    const npx = path.join(
-      path.dirname(input.nodeBin),
-      (input.platform ?? process.platform) === "win32" ? "npx.cmd" : "npx",
-    );
-    return {
-      form: "npx",
-      entry: { command: npx, args: ["-y", "-p", `duskfleet@${input.version}`, "duskfleet-mcp"], env },
-    };
-  }
-  return { form: "path", entry: { command: input.nodeBin, args: [input.serverEntry], env } };
-}
-
 // ---- Claude Desktop -------------------------------------------------------------
-
-/** Where Claude Desktop keeps its config, per platform. */
-export function desktopConfigPath(
-  platform: NodeJS.Platform = process.platform,
-  home = homedir(),
-  env: NodeJS.ProcessEnv = process.env,
-): string {
-  if (platform === "darwin") {
-    return path.join(home, "Library", "Application Support", "Claude", "claude_desktop_config.json");
-  }
-  if (platform === "win32") {
-    const appData = env["APPDATA"] || path.join(home, "AppData", "Roaming");
-    return path.win32.join(appData, "Claude", "claude_desktop_config.json");
-  }
-  const xdg = env["XDG_CONFIG_HOME"] || path.join(home, ".config");
-  return path.join(xdg, "Claude", "claude_desktop_config.json");
-}
 
 type JsonObject = Record<string, unknown>;
 
@@ -267,22 +210,6 @@ export function writeAtomically(file: string, content: string): void {
 /** Where Claude Code keeps user-scope MCP servers (`claude mcp add --scope user`). */
 export function claudeCodeConfigPath(home = homedir()): string {
   return path.join(home, ".claude.json");
-}
-
-/**
- * Arguments of `claude mcp add` for the entry (flags verified against `claude mcp add --help`,
- * see docs/development.md): user scope, stdio (the default transport), `-e KEY=value` per env.
- * The name comes right after `add`: `-e, --env <env...>` is variadic, so a name placed after it
- * would be read as one more env value. `--` then ends the options before the command.
- */
-export function claudeCodeAddArgs(entry: McpServerEntry): string[] {
-  const env = Object.entries(entry.env).flatMap(([k, v]) => ["-e", `${k}=${v}`]);
-  return ["mcp", "add", SERVER_NAME, "--scope", "user", ...env, "--", entry.command, ...entry.args];
-}
-
-/** Shell-readable rendering of a command, for the preview. */
-export function shellLine(cmd: string, args: string[]): string {
-  return [cmd, ...args].map((a) => (/^[\w@%+=:,./-]+$/.test(a) ? a : `'${a.replace(/'/g, `'\\''`)}'`)).join(" ");
 }
 
 export interface McpTargetStatus {

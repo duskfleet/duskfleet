@@ -1,7 +1,8 @@
 import Link from "next/link";
-import { CopyButton } from "@/components/CopyButton";
+import { ConnectClient } from "@/components/ConnectClient";
 import { TocSpy } from "@/components/TocSpy";
-import { type JsonSchema, mcpRegistration, type ToolCatalogEntry, toolCatalog } from "@/lib/data";
+import { cliCommand } from "@/lib/cli";
+import { type JsonSchema, mcpSetup, type ToolCatalogEntry, toolCatalog } from "@/lib/data";
 import { fmtRelative, fmtTime } from "@/lib/format";
 import { filterTools } from "@/lib/tools";
 
@@ -20,13 +21,16 @@ const GROUPS: Array<{ key: ToolCatalogEntry["group"]; title: string; blurb: stri
 export default async function McpPage({ searchParams }: { searchParams: Promise<{ q?: string }> }) {
   const q = (await searchParams).q?.trim() || undefined;
   const catalog = toolCatalog();
-  const reg = mcpRegistration();
-  const desktopJson = JSON.stringify(
-    { mcpServers: { duskfleet: { command: reg.node, args: [reg.entry], env: { CLAUDE_BIN: reg.claudeBin } } } },
-    null,
-    2,
+  const setup = mcpSetup();
+  const connect = (
+    <ConnectClient
+      desktopJson={setup.desktopJson}
+      claudeCodeCmd={setup.claudeCodeCmd}
+      desktopConfigPath={setup.desktopConfigPath}
+      checkout={setup.install.form === "checkout"}
+      registerCmd={cliCommand(setup.install, "mcp register --target claude-desktop")}
+    />
   );
-  const claudeCodeCmd = `claude mcp add --scope user duskfleet -e CLAUDE_BIN=${reg.claudeBin} -- ${reg.node} ${reg.entry}`;
   const tools = catalog ? filterTools(catalog.tools, q) : [];
   const groups = GROUPS.filter((g) => tools.some((t) => t.group === g.key));
 
@@ -142,78 +146,13 @@ export default async function McpPage({ searchParams }: { searchParams: Promise<
                 </section>
               ))}
 
-              <ConnectClient desktopJson={desktopJson} claudeCodeCmd={claudeCodeCmd} />
+              {connect}
             </div>
           </div>
         </>
       )}
-      {!catalog && <ConnectClient desktopJson={desktopJson} claudeCodeCmd={claudeCodeCmd} />}
+      {!catalog && connect}
     </>
-  );
-}
-
-function ConnectClient({ desktopJson, claudeCodeCmd }: { desktopJson: string; claudeCodeCmd: string }) {
-  // Shown verbatim, not tilde-shortened: Claude Desktop spawns the server without a shell and
-  // never expands "~", so a snippet read off the screen must already hold absolute paths.
-  return (
-    <section id="connect" className="docs-section connect">
-      <h2>Connect a client</h2>
-      <div className="connect-grid">
-        <div className="connect-box">
-          <h3>Claude Desktop / Cowork</h3>
-          <div className="cmd">
-            <WrappedCode text={desktopJson} />
-            <CopyButton text={desktopJson} />
-          </div>
-          <div className="side-note">
-            Add to <code>~/Library/Application Support/Claude/claude_desktop_config.json</code>, then restart the app.
-            Keep the paths absolute: the app does not expand <code>~</code>.
-          </div>
-        </div>
-        <div className="connect-box">
-          <h3>Claude Code</h3>
-          <div className="cmd">
-            <WrappedCode text={claudeCodeCmd} />
-            <CopyButton text={claudeCodeCmd} />
-          </div>
-          <div className="side-note">
-            Any project, one command. Hosts keep the server process alive and load it once: after{" "}
-            <code>npm run build</code>, restart the host. Config under <code>config/</code> needs no restart.
-          </div>
-        </div>
-      </div>
-    </section>
-  );
-}
-
-/**
- * A snippet that wraps with a hanging indent: one block per source line, its leading spaces moved
- * into --ind so continuation lines sit 2ch past the line's own indentation (text-indent only
- * acts on a block's first line). A <wbr> after each "/" lets long paths break at a segment.
- * Display only: the Copy button copies the original text.
- */
-function WrappedCode({ text }: { text: string }) {
-  return (
-    <pre className="block">
-      {text.split("\n").map((line, i) => {
-        const body = line.trimStart();
-        const parts = body.split("/");
-        return (
-          <span key={i} className="ln" style={{ "--ind": `${line.length - body.length}ch` } as React.CSSProperties}>
-            {parts.map((p, j) => (
-              <span key={j}>
-                {p}
-                {j < parts.length - 1 && (
-                  <>
-                    /<wbr />
-                  </>
-                )}
-              </span>
-            ))}
-          </span>
-        );
-      })}
-    </pre>
   );
 }
 
