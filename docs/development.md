@@ -259,6 +259,8 @@ Components never import a stub. To test a new component:
 
 This repository's issues and PRs are planned, implemented and reviewed by Duskfleet agents through `flow:` labels, with a PR gate and a project board mirror;
 roles, label state machine, schedules and example agent files: [How Duskfleet builds itself](self-hosting-development.md).
+Only Dependabot patch and minor bumps approved by the reviewer merge on their own (the PR gate approves them and turns on
+GitHub auto-merge); every other PR, majors included, waits for the owner's merge ([The PR gate](self-hosting-development.md#the-pr-gate)).
 
 ## Traffic snapshots
 

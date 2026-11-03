@@ -108,7 +108,7 @@ design: flow: design-ready ──(designer)──► flow: in-progress ──►
 The PR gate keeps the labels true to the merge state, with no agent involved. A PR labelled
 `flow: needs-review` or `flow: ready-to-merge` was fine when it got the label; once `main`
 moves it can conflict, and the ruleset on `main` requires an up-to-date branch with a green
-`checks` job. `node scripts/pr-gate.mjs [--dry-run] [--update-branch]` reads every open PR
+`checks` job. `node scripts/pr-gate.mjs [--dry-run] [--update-branch] [--auto-merge]` reads every open PR
 in those two states (drafts and Dependabot excluded) and, when it conflicts with its base or
 a required check (read from the rulesets on the base branch; a failed non-required job such
 as `sync` does not count) failed on its head, swaps the label to `flow: changes-requested`
@@ -128,6 +128,29 @@ label changes fire the project sync; with the default token it only relabels, si
 a label set by `GITHUB_TOKEN` starts no other workflow. The reviewer checks the same state
 before and after its passes (`gh pr view <n> --json mergeable,statusCheckRollup`): a
 conflicting or red PR gets `VERDICT: changes` without a review.
+
+Dependabot patch and minor bumps are the only PRs that merge without the owner; every other
+PR, an agent's or a contributor's, keeps the human merge. With `--auto-merge` (the workflow
+passes it only with `PR_GATE_TOKEN`) a PR qualifies when its author is Dependabot on a
+`dependabot/` branch of this repository (not a fork), it is labelled `flow: ready-to-merge`,
+the reviewer's newest comment for its current head (first line `Reviewed <sha>`, posted by the
+token's own account; the last `VERDICT:` line of that comment decides) approves, and every
+bump in the title and body is semver patch or minor (on `0.x` a minor counts as major; a
+grouped PR must list as many bumps as its title announces). The gate re-reads the head,
+approves that reviewed SHA as the token's user (the ruleset on `main` requires a code-owner
+review, so the token must be the code owner's), enables GitHub auto-merge bound to that SHA
+(squash, `--match-head-commit`; the repository deletes merged branches) and updates the branch
+when it is behind; the approval survives that merge commit because the ruleset does not dismiss
+stale reviews. GitHub merges once `checks` passes on the up-to-date head. One `[pr-gate]`
+comment per head says auto-merge is on. Because stale approvals survive any push, a PR already
+on auto-merge is re-verified on every run: it must still carry `flow: ready-to-merge`, its head
+must be a reviewer-approved SHA or an update-branch merge commit (second parent already on the
+base) on top of one, and its bumps must still be patch or minor. Otherwise (a Dependabot
+force-push to a new version, any other commit, the label removed) the gate disables
+auto-merge with one `[pr-gate]` comment per head, and the head needs a new review. A major or unparsable bump with the
+same label is never merged: it gets one `[pr-gate]` comment per head and waits for the owner.
+`--dry-run` lists the candidates and what a real run would do, after the same merge-state
+checks.
 
 The gate also expires stale locks. `flow: in-progress` and `flow: in-review` are swapped in
 first as a lock against a second run; a run that dies after that (timeout, killed child, an
