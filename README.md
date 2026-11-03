@@ -46,7 +46,8 @@ project on your disk and keeps a record of what happened.
 - **Every run recorded**: events, tool calls, permission denials, tokens and cost land in a
   local SQLite database, plus a JSONL log per run.
 - **Cron schedules and a dashboard**: schedules fire from a local process, and a dashboard on
-  localhost shows runs, schedules and agents.
+  localhost shows runs, schedules and agents. It never writes runs; it edits agent files,
+  schedules and the editable settings keys.
 
 <div align="center">
 

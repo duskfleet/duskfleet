@@ -43,14 +43,17 @@ starting anything and asks for another `--port`.
 A Next.js app that reads the database the MCP server writes (SQLite WAL mode). It can run
 while the MCP server is running or not; it only needs `config/` and `data/duskfleet.db`. It
 has no authentication and answers on localhost only (see [Remote access](#remote-access)).
+It never writes runs; it edits agent files, schedules and the editable settings keys (the
+list closes this page).
 It sends no telemetry: the `dev` and `build` scripts set `NEXT_TELEMETRY_DISABLED=1` (on
 Windows, an [experimental platform](../README.md#platform-support), set it in your shell first), and `start` / `duskfleet-web` (`bin/start.mjs`) default it
-to `1` on every platform.
+to `1` on every platform. `bin/start.mjs` also drops the `- Network:` line of Next's start banner:
+the server answers on `127.0.0.1` only, so that address is not reachable from the network.
 
 Five views, plus the [trend](#trends) of the runs. The runs list and a running run's detail auto-refresh every 3 seconds (pause button
 in the nav); the other pages are static.
 
-- **Runs**: KPI cards (clean runs, needs review, spend) computed on the current project / agent
+- **Runs** (the home page, `/`; `/runs` redirects there and keeps its query string): KPI cards (clean runs, needs review, spend) computed on the current project / agent
   filter; a Project and an Agent multi-select on the search line (repeated params,
   `?project=a&project=b&agent=x`: any of the projects AND any of the agents; a single `?agent=`
   still works; each select's × drops its filter), prompt search (`?q=`), `?schedule=` and
@@ -118,7 +121,7 @@ in the nav); the other pages are static.
   past 8 entries expands in place) and limits, including daily caps and the monthly budget; the
   bound schedules; and the needs-review reasons over 30 days, each bar opening Runs filtered by
   agent and reason. User agents can be deleted or unlinked here, with an inline confirmation;
-  builtins are read-only. **Run now…** appears only when a schedule runs the agent and uses that
+  builtins are never edited here. **Run now…** appears only when a schedule runs the agent and uses that
   schedule's run now (see Schedules below): the dashboard never starts a run itself.
 - **Schedules**: a status strip (kill switch, lease holder and when its lease expires, next
   firing, last 7 days fired / skipped busy), then the schedules grouped by project (the
@@ -306,5 +309,5 @@ had died out of budget, and nobody noticed for 11 hours.
 The dashboard never mutates runs or builtins: the Claude Code child processes belong to the
 MCP server process, so cancelling goes through `cancel_run` (Cowork) or the CLI. Its writes are
 the actions on user agent files (delete, unlink), on schedule rows (pause / resume, edit
-when, delete), all through the core API the MCP tools use, and the Settings page's edits of
+when, delete, run now), all through the core API the MCP tools use, and the Settings page's edits of
 `config/duskfleet.yaml` (core's `writeGlobalFile`).
