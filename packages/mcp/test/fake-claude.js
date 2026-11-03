@@ -16,6 +16,8 @@
  *                 line has a main-session-only `usage` and a two-model `modelUsage`
  *   "subagent-hang" -> same, but the process is killed before the hand-back
  *   "env"      -> like "ok", result text says whether CLAUDE_BIN reached the child
+ *   "env-secret" -> like "ok", result text says what DF_TEST_SECRET is in the child and
+ *                 whether PATH and HOME reached it (the environment allow-list)
  *   "gate-nowork" / "gate-work" / "gate-mention" -> like "ok"; a schedule gate agent's answer:
  *                 the marker alone on the last line (as **no_work**), work found, and the
  *                 marker only mentioned mid-sentence (must not skip)
@@ -43,6 +45,21 @@
  */
 import { spawn } from "node:child_process";
 import { appendFileSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import v8 from "node:v8";
+
+// SIGTERM (cancel, timeout, grace kill, MCP restart) without a handler can land while Node writes
+// its NODE_V8_COVERAGE file at exit and leave it empty, which fails the whole `test:coverage`
+// report ("coverage file is empty"). With a handler a SIGTERM during that write waits for it; one
+// that arrives earlier writes the coverage now, then dies of the signal as a real claude does
+// (exit code null, never a 143 that would read as nonzero_exit).
+process.on("SIGTERM", () => {
+  if (process.env.NODE_V8_COVERAGE) {
+    v8.takeCoverage();
+    v8.stopCoverage();
+  }
+  process.removeAllListeners("SIGTERM");
+  process.kill(process.pid, "SIGTERM");
+});
 
 const args = process.argv.slice(2);
 const sessionIdx = args.indexOf("--session-id");
@@ -64,6 +81,13 @@ if (args[0] === "--version") {
     process.exit(1);
   }
   process.stdout.write("9.9.9 (fake)\n");
+  process.exit(0);
+}
+
+// `claude auth status --json` (duskfleet init): always logged in. The logged-out case is a
+// separate tiny binary written by test/init.test.js (FAKE_CLAUDE_* does not reach this child).
+if (args[0] === "auth" && args[1] === "status") {
+  process.stdout.write(`${JSON.stringify({ loggedIn: true, authMethod: "claude.ai", apiProvider: "firstParty" })}\n`);
   process.exit(0);
 }
 
@@ -516,17 +540,19 @@ if (resumeIdx >= 0) {
       : "API Error: something went wrong"
     : prompt === "env"
       ? `CLAUDE_BIN ${process.env.CLAUDE_BIN === undefined ? "unset" : "set"}`
-      : prompt === "noop"
-        ? "Nothing to do: no tickets in Ready."
-        : prompt === "gate-nowork"
-          ? "Checked the board: nothing in Ready.\n\n**no_work**"
-          : prompt === "gate-work"
-            ? "Ready ticket found: SL-9."
-            : prompt === "gate-mention"
-              ? "Found SL-9 in Ready, so this is not NO_WORK"
-              : prompt === "prose-exit"
-                ? "The 503 retry test now passes; the not logged in banner is fixed."
-                : "Done: created hello.txt";
+      : prompt === "env-secret"
+        ? `DF_TEST_SECRET ${process.env.DF_TEST_SECRET ?? "unset"}; PATH ${process.env.PATH ? "set" : "unset"}; HOME ${process.env.HOME ? "set" : "unset"}`
+        : prompt === "noop"
+          ? "Nothing to do: no tickets in Ready."
+          : prompt === "gate-nowork"
+            ? "Checked the board: nothing in Ready.\n\n**no_work**"
+            : prompt === "gate-work"
+              ? "Ready ticket found: SL-9."
+              : prompt === "gate-mention"
+                ? "Found SL-9 in Ready, so this is not NO_WORK"
+                : prompt === "prose-exit"
+                  ? "The 503 retry test now passes; the not logged in banner is fixed."
+                  : "Done: created hello.txt";
   out({
     type: "result",
     subtype: isError ? "error_during_execution" : "success",

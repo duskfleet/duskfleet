@@ -14,10 +14,13 @@
  *   npm run start -w @duskfleet/web
  */
 import { spawn } from "node:child_process";
+import { once } from "node:events";
 import { existsSync } from "node:fs";
 import { createRequire } from "node:module";
 import path from "node:path";
+import { createInterface } from "node:readline";
 import { fileURLToPath } from "node:url";
+import { colourEnv, isDroppedLine } from "./next-output.mjs";
 
 const appDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 if (!existsSync(path.join(appDir, ".next", "BUILD_ID"))) {
@@ -27,9 +30,30 @@ if (!existsSync(path.join(appDir, ".next", "BUILD_ID"))) {
 
 const port = process.env.PORT || "4777";
 const nextBin = createRequire(import.meta.url).resolve("next/dist/bin/next");
+// stdout goes through isDroppedLine (Next's "Network:" line is wrong on a loopback-only server);
+// colourEnv keeps the banner coloured on a terminal now that Next writes to a pipe.
 const child = spawn(process.execPath, [nextBin, "start", appDir, "--hostname", "127.0.0.1", "--port", port], {
-  stdio: "inherit",
-  env: { NEXT_TELEMETRY_DISABLED: "1", ...process.env, DUSKFLEET_WEB_DIR: appDir },
+  stdio: ["inherit", "pipe", "inherit"],
+  env: {
+    NEXT_TELEMETRY_DISABLED: "1",
+    ...colourEnv(process.env, process.stdout.isTTY),
+    ...process.env,
+    DUSKFLEET_WEB_DIR: appDir,
+  },
+});
+// A closed reader (`duskfleet-web | head`) must not crash this wrapper and orphan next start:
+// stop forwarding and keep the server running.
+let stdoutOpen = true;
+process.stdout.on("error", () => {
+  stdoutOpen = false;
+});
+const lines = createInterface({ input: child.stdout, crlfDelay: Number.POSITIVE_INFINITY });
+lines.on("line", (line) => {
+  if (stdoutOpen && !isDroppedLine(line)) process.stdout.write(`${line}\n`);
 });
 for (const signal of ["SIGINT", "SIGTERM"]) process.on(signal, () => child.kill(signal));
-child.on("exit", (code, signal) => process.exit(code ?? (signal ? 1 : 0)));
+// Exit only once the child's stdio has ended ("close", not "exit") and every line was forwarded,
+// so the last lines (a startup failure, the output after SIGTERM) are not lost.
+Promise.all([once(lines, "close"), once(child, "close")]).then(([, [code, signal]]) =>
+  process.exit(code ?? (signal ? 1 : 0)),
+);

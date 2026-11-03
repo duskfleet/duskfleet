@@ -2,13 +2,20 @@
   "name": "@duskfleet/web",
   "version": "0.1.0",
   "type": "module",
-  "description": "Duskfleet dashboard: agents, running and past runs (read-only)",
+  "description": "Duskfleet dashboard: agents, running and past runs; it never writes runs, it edits agent files, schedules and the editable settings keys",
+  "homepage": "https://duskfleet.com",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/duskfleet/duskfleet.git",
+    "directory": "apps/web"
+  },
+  "bugs": "https://github.com/duskfleet/duskfleet/issues",
   "license": "MIT",
   "engines": {
     "node": ">=24"
   },
   "bin": {
-    "duskfleet-web": "./bin/start.mjs"
+    "duskfleet-web": "bin/start.mjs"
   },
   "files": [
     "bin/",
@@ -30,7 +37,8 @@
     "build": "NEXT_TELEMETRY_DISABLED=1 next build && node scripts/copy-tools.mjs",
     "start": "node bin/start.mjs",
     "typecheck": "tsc --noEmit",
-    "test": "node --test test/*.test.mjs"
+    "pretest": "node -e \"require('node:fs').rmSync('.test-build',{recursive:true,force:true})\" && tsc -p tsconfig.test.json",
+    "test": "node --import ./test/register.mjs --test test/*.test.mjs \".test-build/test/components/*.test.js\""
   },
   "dependencies": {
     "next": "^15.5.28",

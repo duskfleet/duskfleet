@@ -1,15 +1,23 @@
 {
   "name": "duskfleet",
   "version": "0.1.0",
-  "description": "A fleet of agents for your own machine.",
+  "description": "A fleet of agents for your own machine",
+  "keywords": ["claude-code", "claude", "agents", "scheduler", "cron", "mcp", "local-first", "cli"],
+  "homepage": "https://duskfleet.com",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/duskfleet/duskfleet.git",
+    "directory": "packages/duskfleet"
+  },
+  "bugs": "https://github.com/duskfleet/duskfleet/issues",
   "license": "MIT",
   "type": "module",
   "engines": {
     "node": ">=24"
   },
   "bin": {
-    "duskfleet": "./dist/cli.js",
-    "duskfleet-mcp": "./dist/index.js"
+    "duskfleet": "dist/cli.js",
+    "duskfleet-mcp": "dist/index.js"
   },
   "files": ["dist/", "README.md", "LICENSE"],
   "scripts": {
@@ -17,7 +25,7 @@
     "prepack": "node ../../scripts/assemble-package.mjs"
   },
   "dependencies": {
-    "@modelcontextprotocol/sdk": "^1.32.1",
+    "@modelcontextprotocol/sdk": "^1.32.2",
     "yaml": "^2.9.1",
     "zod": "^4.6.7"
   }

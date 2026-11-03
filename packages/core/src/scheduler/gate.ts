@@ -3,7 +3,7 @@
  * skips for (almost) nothing instead of paying a full agent session to say "nothing to do".
  *
  *  - command gate (opt-in, `scheduler.allow_command_gates`): `sh -c <command>` in the project
- *    directory with the scheduler's environment. Exit 0 = there is work, run.
+ *    directory with the runs' environment allow-list (child-env.ts). Exit 0 = there is work, run.
  *    Exit 1-125 = skip, its stdout (else stderr) is the reason. 126 / 127 (not executable,
  *    not found: a typo or a PATH without the tool), death by signal, timeout or spawn failure
  *    = error: a broken gate must not read as "idle".
@@ -15,7 +15,7 @@
  */
 import { spawn } from "node:child_process";
 import type { DuskFleetConfig } from "../config/types.js";
-import { withEffectivePath } from "../execution/search-path.js";
+import { childEnv, mergeEnvPassthrough } from "../execution/child-env.js";
 import { BudgetError } from "../orchestration/budget.js";
 import { BusyError } from "../orchestration/busy.js";
 import { DailyCapError } from "../orchestration/daily-cap.js";
@@ -115,6 +115,7 @@ export function runCommandGate(
   command: string,
   cwd: string,
   timeoutSeconds = DEFAULT_GATE_TIMEOUT_SECONDS,
+  envPassthrough: readonly string[] = [],
 ): Promise<GateVerdict> {
   return new Promise((resolve) => {
     let stdout = "";
@@ -133,8 +134,9 @@ export function runCommandGate(
       // sh, in its own process group so a timeout can kill everything it started.
       child = spawn("/bin/sh", ["-c", command], {
         cwd,
-        // A GUI host's minimal PATH would hide git, gh, jq... (see search-path.ts).
-        env: withEffectivePath(process.env),
+        // The runs' allow-list, not our whole environment (child-env.ts); with the effective PATH,
+        // since a GUI host's minimal one would hide git, gh, jq... (see search-path.ts).
+        env: childEnv(envPassthrough),
         stdio: ["ignore", "pipe", "pipe"],
         detached: process.platform !== "win32",
       });
@@ -262,7 +264,17 @@ export async function evaluateGate(runs: RunManager, s: Schedule): Promise<GateV
       if (refusal !== null) return { kind: "error", gateRunId: null, costUsd: 0, reason: refusal };
       // The directory the real run would use, resolved by RunManager exactly as startRun does.
       const cwd = runs.projectPathFor({ agentId: s.agentId, projectId: s.projectId });
-      return await runCommandGate(gate.command, cwd, gate.timeoutSeconds ?? DEFAULT_GATE_TIMEOUT_SECONDS);
+      // The variables the schedule's agent would get: the global passthrough plus its own.
+      const envPassthrough = mergeEnvPassthrough(
+        config.claude.envPassthrough,
+        config.agents.get(s.agentId)?.envPassthrough,
+      );
+      return await runCommandGate(
+        gate.command,
+        cwd,
+        gate.timeoutSeconds ?? DEFAULT_GATE_TIMEOUT_SECONDS,
+        envPassthrough,
+      );
     }
     if (!gate.agent)
       return { kind: "error", gateRunId: null, costUsd: 0, reason: "gate has neither command nor agent" };

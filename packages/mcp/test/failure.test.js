@@ -7,7 +7,14 @@ import { test } from "node:test";
 
 import "./helpers.js"; // before @duskfleet/core: drops an inherited CLAUDE_BIN
 
-import { classifyFailure, parseResetTime } from "@duskfleet/core";
+import {
+  CLAUDE_NOT_FOUND_FIX,
+  classifyFailure,
+  FAILURE_FIXES,
+  parseResetTime,
+  REVIEW_REASON_FIXES,
+  runFixHint,
+} from "@duskfleet/core";
 
 const endedAt = new Date("2026-10-21T10:00:00Z");
 const failed = (error, extra = {}) =>
@@ -137,4 +144,43 @@ test("parseResetTime: epoch, ISO, wall clock in a zone, next occurrence", () => 
   assert.equal(parseResetTime("resets 3 times a day", now), null);
   assert.equal(parseResetTime("resets 3pm (Not/AZone)", now), null);
   assert.equal(parseResetTime("limit reached", now), null);
+});
+
+test("runFixHint: one fix line from the hint table, code first, then a missing binary, then the review reason", () => {
+  const run = (extra) => ({
+    status: "failed",
+    errorCode: null,
+    errorDetail: null,
+    error: null,
+    reviewReasons: ["failed"],
+    deniedTools: [],
+    ...extra,
+  });
+  assert.equal(
+    runFixHint(run({ errorCode: "auth_required", errorDetail: { loginUrl: "https://claude.ai/login" } })),
+    `${FAILURE_FIXES.auth_required}, or open https://claude.ai/login`,
+  );
+  assert.equal(runFixHint(run({ error: "spawn /opt/bin/claude ENOENT" })), CLAUDE_NOT_FOUND_FIX);
+  assert.equal(runFixHint(run({ error: "spawn failed: Error: spawn claude ENOENT" })), CLAUDE_NOT_FOUND_FIX);
+  assert.equal(
+    runFixHint(run({ reviewReasons: ["nonzero_exit", "budget_exhausted"] })),
+    REVIEW_REASON_FIXES.budget_exhausted,
+    "the actionable reason wins over a bare non-zero exit",
+  );
+  assert.match(
+    runFixHint(
+      run({
+        status: "completed",
+        reviewReasons: ["permission_denied"],
+        deniedTools: [
+          { tool: "Bash", summary: "npm test" },
+          { tool: "Bash", summary: "npm run lint" },
+          { tool: "WebFetch", summary: null },
+        ],
+      }),
+    ),
+    /allowed_tools.*; denied: Bash, WebFetch$/,
+  );
+  assert.equal(runFixHint(run({ status: "completed", reviewReasons: [] })), null);
+  assert.equal(runFixHint(run({ status: "cancelled", reviewReasons: [] })), null);
 });

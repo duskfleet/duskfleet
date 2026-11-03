@@ -1,7 +1,8 @@
 # Quality gates for every pull request (docs/development.md "Quality gates"). Everything here runs without a Claude
 # login and without network beyond npm: the tests replay recorded stream-json through
 # packages/mcp/test/fake-claude.js, so a CI run never spawns Claude and never costs money.
-name: CI
+name: Checks (lint, build, test)
+run-name: "${{ github.event_name == 'pull_request' && format('Checks on PR #{0}: {1}', github.event.pull_request.number, github.event.pull_request.title) || format('Checks on push to {0}', github.ref_name) }}"
 
 on:
   pull_request:
@@ -39,6 +40,14 @@ jobs:
 
       - name: Build core + mcp
         run: npm run build
+
+      # After the build: the tool names come from packages/mcp/dist/tools.json, which the build writes.
+      - name: Docs sync (every MCP tool in docs/mcp-server.md, every docs page linked from README.md)
+        run: npm run check:docs
+
+      # After the build: replays the README Quick start through dist/cli.js against fake-claude.js.
+      - name: README Quick start (doctor, agents create, run, runs against the fake Claude)
+        run: npm run check:quickstart
 
       - name: Typecheck (core, mcp, web)
         run: |

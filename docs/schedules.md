@@ -15,6 +15,22 @@ to one) and model override.
 The cron parser is in-house (no dependency) and DST-safe: it re-derives local time per
 candidate minute, so a schedule at 08:00 fires at 08:00 on both sides of a clock change.
 
+## One schedule per agent
+
+An agent has one cadence. `create_schedule` refuses a schedule for an agent that already has
+one, and `update_schedule` refuses to move a schedule to such an agent:
+
+```
+agent "<id>" already has the schedule "<name>" (<schedule id>); one schedule per agent, edit it or delete it first
+```
+
+A second prompt for the same agent is a second agent (or a `run_agent` call), not a second
+schedule. The rule is checked on create and update, not by a database index, so a database
+from before it that already holds duplicates still opens and keeps firing them; editing or
+pausing one of them still works. `duskfleet doctor` lists them under
+`scheduler.duplicateSchedules` (agent, schedule ids and names) and the Schedules page shows a
+warning line on each of their cards; delete all but one.
+
 ## Who ticks
 
 Any Duskfleet process can: the MCP server that Claude Desktop or Claude Code keeps alive, or
@@ -49,7 +65,13 @@ npm run cli -- doctor                     # "scheduler.service" says whether it 
 |---|---|---|
 | macOS | launchd LaunchAgent (`RunAtLoad`, `KeepAlive`) | `~/Library/LaunchAgents/com.duskfleet.scheduler.plist` |
 | Linux | systemd user unit (`Restart=always`) | `~/.config/systemd/user/duskfleet.service` |
-| Windows | Task Scheduler logon task, no time limit, restart on failure | task "Duskfleet Scheduler", XML kept under `%LOCALAPPDATA%\Duskfleet` |
+| Windows (experimental) | Task Scheduler logon task, no time limit, restart on failure | task "Duskfleet Scheduler", XML kept under `%LOCALAPPDATA%\Duskfleet` |
+
+> [!NOTE]
+> Windows is **experimental** ([platform support](../README.md#platform-support)): the Task
+> Scheduler unit is implemented but has not been run by the maintainers. Output goes to
+> `data/logs/serve.log`, the task XML to `%LOCALAPPDATA%\Duskfleet`. To verify it on your machine,
+> follow the [Windows test plan](windows-test-plan.md).
 
 All three run as the logged-in user, so the service sees the same `claude` login as your
 terminal, start at login and restart the process if it dies. They append the process output to
@@ -68,8 +90,8 @@ Things to know:
   `npm run build`**, otherwise the service keeps running the old code (same as the MCP server).
 - While the machine sleeps nothing runs; missed ticks are not caught up (see Policies).
 - Linux: `loginctl enable-linger $USER` keeps the unit alive when you are logged out.
-- Windows support is implemented but has not been exercised by the maintainers: check
-  `data/logs/serve.log` if `doctor` reports the task running but nothing fires.
+- Windows (experimental, see the note above): check `data/logs/serve.log` if `doctor` reports
+  the task running but nothing fires, and report what you find as an issue.
 - The MCP server keeps ticking as a fallback: stop the service and it takes over after three
   ticks (90 s by default).
 - `serve` has priority: on its first tick it takes the lease from a live `mcp` / `cli` /
@@ -122,8 +144,9 @@ schedule, set with `gate` on `create_schedule` / `update_schedule` (`clear_gate:
 it). Two kinds:
 
 **Command gate** (off by default): a shell command run with `/bin/sh -c` in the project
-directory, with the full environment of the DuskFleet process that holds the lease, outside
-every Claude Code allow-list. Anything that can call `create_schedule` could otherwise make the
+directory, outside every Claude Code allow-list, with the environment a run of the schedule's
+agent would get (the default allow-list plus `claude.env_passthrough` and the agent's
+`env_passthrough`, see [configuration](configuration.md#what-reaches-a-run)). Anything that can call `create_schedule` could otherwise make the
 scheduler run arbitrary shell on every tick, so command gates are refused unless
 `config/duskfleet.yaml` sets:
 
@@ -239,6 +262,13 @@ dashboard): the reason is cleared, and only runs created after the pause count t
 next streak, so the schedule gets `auto_pause_after` fresh runs before it can be paused again.
 Run now still fires a paused schedule.
 
+`scheduler.auto_pause` (default `true`) is the on/off switch of the whole check, editable in
+`config/duskfleet.yaml` or as **Auto-pause** under Settings → Scheduler. `false` skips the check
+on every tick while keeping `auto_pause_after` for when it is turned back on (`auto_pause_after:
+0` still turns it off too). Both are re-read every tick, no restart. Turning the switch off never
+resumes anything: a schedule paused earlier stays paused, with its badge and reason, until you
+resume it.
+
 ## Busy ticks: one deferred fire
 
 Agents that share a checkout often find it busy at their tick: a development run outlasts the
@@ -288,6 +318,10 @@ on the row (`concurrencyPolicy`, `catchUpPolicy`, `triggerKind` in `list_schedul
 | `concurrency_policy` | `skip_if_active` (the only one) | `skip_if_active` |
 | `catch_up_policy` | `skip_missed`; `enqueue_missed_with_cap` is reserved and refused for now (planned: replay up to 3 missed ticks, never for sub-hourly schedules) | `skip_missed` |
 | `trigger_kind` | `cron` (the only one for now; the field leaves room for other triggers, such as an API call, and the tick only fires `cron` schedules) | `cron` |
+
+What to change when a schedule keeps skipping (`skipped_busy`, `skipped_daily_cap`,
+`skipped_budget`, `auto_paused`, or nothing recorded at all) is in
+[troubleshooting](troubleshooting.md#runs-skipped-by-gates).
 
 - A tick whose agent or project is still busy is never queued (checked before any
   [gate](#gates-skip-cheaply-when-there-is-no-work)): it becomes the schedule's one

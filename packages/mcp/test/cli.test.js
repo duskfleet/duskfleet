@@ -5,7 +5,7 @@
 import assert from "node:assert/strict";
 import { spawn, spawnSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, readdirSync, realpathSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { hostname, tmpdir } from "node:os";
 import path from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
@@ -25,7 +25,7 @@ function makeRoot() {
   // JSON strings are valid YAML: paths with quotes, `: `, `#` or backslashes stay intact.
   writeFileSync(
     path.join(configDir, "duskfleet.yaml"),
-    `data_dir: ../data\ndefault_agent: coder\nclaude:\n  binary: ${JSON.stringify(fakeBinary)}\n  default_timeout_minutes: 0.05\n`,
+    `data_dir: ../data\ndefault_agent: coder\nclaude:\n  binary: ${JSON.stringify(fakeBinary)}\n  default_timeout_minutes: 0.05\n  env_passthrough: ["FAKE_CLAUDE_*"]\n`,
   );
   writeFileSync(
     path.join(configDir, "projects.yaml"),
@@ -35,14 +35,15 @@ function makeRoot() {
   return { root, configDir, project: realpathSync(project) };
 }
 
-function cli(configDir, args, extraEnv = {}) {
+function cli(configDir, args, extraEnv = {}, cwd = undefined) {
   return spawnSync(process.execPath, [cliEntry, ...args], {
     env: testEnv({ DUSKFLEET_CONFIG: configDir, DUSKFLEET_LOG_LEVEL: "warn", ...extraEnv }),
     encoding: "utf8",
+    cwd,
   });
 }
 
-test("cli run --project accepts a registered id or a path; unknown ids, relative paths and both flags fail clearly", () => {
+test("cli run --project accepts a registered id or a path; unknown ids and both flags fail clearly", () => {
   const { root, configDir, project } = makeRoot();
   try {
     const byId = cli(configDir, ["run", "--project", "demo", "--", "hello"]);
@@ -63,13 +64,126 @@ test("cli run --project accepts a registered id or a path; unknown ids, relative
       "a value that is not path-like is an id",
     );
 
-    const relative = cli(configDir, ["run", "--project", "./project", "--", "hello"]);
-    assert.notEqual(relative.status, 0);
-    assert.match(relative.stderr, /project path must be absolute: \.\/project/);
-
     const both = cli(configDir, ["run", "--project", "demo", "--project-id", "demo", "--", "hello"]);
     assert.notEqual(both.status, 0);
     assert.match(both.stderr, /mutually exclusive/);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("cli run --project resolves a relative path from the shell directory and records the absolute path (#353)", () => {
+  const { root, configDir } = makeRoot();
+  try {
+    const scratch = path.join(root, "scratch");
+    mkdirSync(scratch);
+    const real = realpathSync(scratch);
+
+    const dot = cli(configDir, ["run", "--project", ".", "--", "hello"], {}, scratch);
+    assert.equal(dot.status, 0, dot.stderr);
+    const run = JSON.parse(dot.stdout);
+    assert.equal(run.projectPath, real, "`.` is the shell directory, stored absolute");
+    assert.equal(run.projectId, null);
+
+    const dotSlash = cli(configDir, ["run", "--project", "./scratch", "--", "hello"], {}, root);
+    assert.equal(dotSlash.status, 0, dotSlash.stderr);
+    assert.equal(JSON.parse(dotSlash.stdout).projectPath, real);
+
+    const bare = cli(configDir, ["run", "--project", "scratch", "--", "hello"], {}, root);
+    assert.equal(bare.status, 0, bare.stderr);
+    assert.equal(JSON.parse(bare.stdout).projectPath, real, "a bare name that is a directory here is a path");
+
+    const registered = cli(configDir, ["run", "--project", "../project", "--", "hello"], {}, scratch);
+    assert.equal(registered.status, 0, registered.stderr);
+    assert.equal(
+      JSON.parse(registered.stdout).projectId,
+      "demo",
+      "a relative path to a registered project gets its id",
+    );
+
+    const missing = cli(configDir, ["run", "--project", "./nowhere", "--", "hello"], {}, root);
+    assert.notEqual(missing.status, 0);
+    assert.match(missing.stderr, /not an existing directory: .*nowhere/);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("cli run: a failed run prints cause and fix first; stdout is trimmed unless --json", () => {
+  const { root, configDir, project } = makeRoot();
+  try {
+    // Logged out: fake-claude's "auth" prompt fails with "Invalid API key · Please run /login".
+    const auth = cli(configDir, ["run", "--project", project, "--", "auth"]);
+    assert.equal(auth.status, 1);
+    const lines = auth.stderr.split("\n");
+    const top = lines.slice(0, 5).join("\n");
+    assert.match(top, /^run \S+ failed/m, auth.stderr);
+    assert.match(top, /^cause: Claude is not logged in: .*Please run \/login/m);
+    assert.match(top, /^fix: Claude Code is not authenticated: run "claude" in a terminal and log in/m);
+    assert.match(auth.stderr, /^more: duskfleet run-info \S+/m);
+    const trimmed = JSON.parse(auth.stdout);
+    assert.equal(trimmed.errorCode, "auth_required", "scripts still get the record");
+    assert.equal(trimmed.status, "failed");
+    assert.equal("argv" in trimmed.command, false, "no spawned command line (system prompt) on stdout");
+    assert.equal("rawResultJson" in trimmed, false);
+    assert.equal(trimmed.command.cwd, project);
+
+    const full = JSON.parse(cli(configDir, ["run", "--project", project, "--json", "--", "auth"]).stdout);
+    assert.ok(Array.isArray(full.command.argv) && full.command.argv.includes("--append-system-prompt"));
+    assert.equal(typeof full.rawResultJson, "string", "--json prints the full record");
+
+    // A review reason without an error code gets the reason's fix.
+    const budget = cli(configDir, ["run", "--project", project, "--", "budget"]);
+    assert.equal(budget.status, 1);
+    assert.match(budget.stderr, /\(budget exhausted/);
+    assert.match(budget.stderr, /^fix: raise the agent's max_budget_usd/m);
+
+    // A clean run: no block, same trimmed shape.
+    const ok = cli(configDir, ["run", "--project", project, "--", "ok"]);
+    assert.equal(ok.status, 0, ok.stderr);
+    assert.doesNotMatch(ok.stderr, /^(cause|fix|more):/m);
+    const okRun = JSON.parse(ok.stdout);
+    assert.equal(okRun.status, "completed");
+    assert.equal("argv" in okRun.command, false);
+    assert.equal("rawResultJson" in okRun, false);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("doctor lists the stuck pending and running rows of a dead owner its startup sweep failed", () => {
+  const { root, configDir, project } = makeRoot();
+  try {
+    const first = cli(configDir, ["run", "--project", project, "--", "hello"]);
+    assert.equal(first.status, 0, first.stderr);
+    const second = cli(configDir, ["run", "--project", project, "--", "hello"]);
+    assert.equal(second.status, 0, second.stderr);
+    const pendingId = JSON.parse(first.stdout).id;
+    const runningId = JSON.parse(second.stdout).id;
+    const dead = spawnSync(process.execPath, ["-e", ""]).pid;
+    const owner = `mcp@${hostname()}:${dead}`;
+    const db = openDatabase(loadConfig(configDir).dataDir);
+    const stuck = db.prepare(
+      "UPDATE runs SET status = ?, started_at = NULL, ended_at = NULL, error = NULL, owner = ? WHERE id = ?",
+    );
+    stuck.run("pending", owner, pendingId);
+    stuck.run("running", owner, runningId);
+    db.close();
+
+    const doctor = cli(configDir, ["doctor"]);
+    assert.equal(doctor.status, 0, doctor.stderr);
+    const { orphans } = JSON.parse(doctor.stdout);
+    assert.deepEqual(
+      orphans.recovered.map((r) => [r.id, r.was, r.owner]).sort(),
+      [
+        [pendingId, "pending", owner],
+        [runningId, "running", owner],
+      ].sort(),
+    );
+    assert.match(orphans.advice, /marked 2 run\(s\) failed/);
+
+    const again = JSON.parse(cli(configDir, ["doctor"]).stdout);
+    assert.deepEqual(again.orphans, { recovered: [], advice: null }, "already failed by the first doctor");
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
@@ -227,6 +341,140 @@ test("cli schedules run-now stamps run_requested_at by id or name and spawns not
 
     const noTarget = cli(configDir, ["schedules", "run-now"]);
     assert.equal(noTarget.status, 2, "usage error");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+/** A fresh clone: no config/agents directory at all, default_agent null, claude found through CLAUDE_BIN. */
+function makeFreshRoot() {
+  const root = mkdtempSync(path.join(tmpdir(), "duskfleet-cli-fresh-"));
+  const configDir = path.join(root, "config");
+  mkdirSync(configDir);
+  const project = path.join(root, "project");
+  mkdirSync(project);
+  writeFileSync(
+    path.join(configDir, "duskfleet.yaml"),
+    "data_dir: ../data\ndefault_agent: null\nclaude:\n  default_timeout_minutes: 0.05\n",
+  );
+  writeFileSync(path.join(configDir, "projects.yaml"), "projects: {}\n");
+  return { root, configDir, project: realpathSync(project), agentsDir: path.join(root, "data", "agents") };
+}
+
+const QUICK_START_PROMPT =
+  "You fix the failing test in this project. Run the tests, read the failure, change the minimum code, run them again. No git, no installs.";
+
+test("README Quick start on a fresh clone: no agents, agents create fixer, then run --agent fixer completes", () => {
+  const { root, configDir, project, agentsDir } = makeFreshRoot();
+  const env = { CLAUDE_BIN: fakeBinary };
+  try {
+    const empty = cli(configDir, ["agents"], env);
+    assert.equal(empty.status, 0, empty.stderr);
+    assert.deepEqual(JSON.parse(empty.stdout), []);
+    assert.match(empty.stderr, /Duskfleet ships none.*\n.*agents create <id>/);
+
+    const doctor = cli(configDir, ["doctor"], env);
+    assert.deepEqual(JSON.parse(doctor.stdout).agents, []);
+
+    const noAgent = cli(configDir, ["run", "--project", project, "--", "Fix the failing test"], env);
+    assert.notEqual(noAgent.status, 0);
+    assert.match(
+      noAgent.stderr,
+      /Known agents: \(none: no agent file in .+ or .+; create one with "agents create <id>"\)/,
+    );
+
+    const created = cli(configDir, ["agents", "create", "fixer", "--model", "haiku", "--", QUICK_START_PROMPT], env);
+    assert.equal(created.status, 0, created.stderr);
+    const out = JSON.parse(created.stdout);
+    assert.equal(out.created, true);
+    assert.equal(out.agent.id, "fixer");
+    assert.equal(out.agent.source, "user");
+    assert.equal(out.agent.model, "haiku");
+    assert.equal(out.agent.maxBudgetUsd, 0.5);
+    assert.equal(out.agent.permissionMode, "dontAsk");
+    assert.equal(out.agent.timeoutMinutes, 10);
+    assert.ok(out.agent.allowedTools.includes("Bash(npm test:*)"));
+    assert.ok(out.agent.allowedTools.includes("Edit"));
+    assert.deepEqual(readdirSync(agentsDir), ["fixer.md"], "written to the user agents dir, never config/agents");
+    assert.deepEqual(readdirSync(configDir).sort(), ["duskfleet.yaml", "projects.yaml"]);
+
+    const listed = JSON.parse(cli(configDir, ["agents"], env).stdout);
+    assert.deepEqual(
+      listed.map((a) => a.id),
+      ["fixer"],
+    );
+
+    const run = cli(configDir, ["run", "--project", project, "--agent", "fixer", "--", "Fix the failing test"], env);
+    assert.equal(run.status, 0, run.stderr);
+    const r = JSON.parse(run.stdout);
+    assert.equal(r.status, "completed");
+    assert.equal(r.agentId, "fixer");
+    assert.equal(r.command.binary, fakeBinary);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("agents create refuses an existing id without --force, home paths, secrets and empty prompts, leaving no file", () => {
+  const { root, configDir, agentsDir } = makeFreshRoot();
+  const env = { CLAUDE_BIN: fakeBinary };
+  const files = () => {
+    try {
+      return readdirSync(agentsDir).sort();
+    } catch {
+      return [];
+    }
+  };
+  try {
+    const first = cli(configDir, ["agents", "create", "fixer", "--", "Be brief."], env);
+    assert.equal(first.status, 0, first.stderr);
+
+    const again = cli(configDir, ["agents", "create", "fixer", "--model", "sonnet", "--", "Be brief."], env);
+    assert.notEqual(again.status, 0);
+    assert.match(again.stderr, /agent "fixer" already exists \(.+fixer\.md\)\. Pass --force to replace it\./);
+
+    const forced = cli(
+      configDir,
+      ["agents", "create", "fixer", "--force", "--model", "sonnet", "--", "Be brief."],
+      env,
+    );
+    assert.equal(forced.status, 0, forced.stderr);
+    assert.equal(JSON.parse(forced.stdout).agent.model, "sonnet");
+    assert.equal(JSON.parse(forced.stdout).overrode, "user");
+
+    const home = ["", "Users", "alice"].join("/");
+    const homePath = cli(
+      configDir,
+      ["agents", "create", "leaky", "--description", `notes in ${home}/x`, "--", "Hi."],
+      env,
+    );
+    assert.notEqual(homePath.status, 0);
+    assert.match(homePath.stderr, /macOS home path/);
+
+    const secret = cli(configDir, ["agents", "create", "secret", "--", `Use sk-ant-${"a".repeat(20)} for calls.`], env);
+    assert.notEqual(secret.status, 0);
+    assert.match(secret.stderr, /Anthropic API key/);
+
+    const noPrompt = cli(configDir, ["agents", "create", "mute"], env);
+    assert.notEqual(noPrompt.status, 0);
+    assert.match(noPrompt.stderr, /needs a system prompt/);
+
+    const badBudget = cli(configDir, ["agents", "create", "cheap", "--budget", "lots", "--", "Hi."], env);
+    assert.notEqual(badBudget.status, 0);
+    assert.match(badBudget.stderr, /--budget must be a number/);
+
+    const bypass = cli(
+      configDir,
+      ["agents", "create", "wild", "--permission-mode", "bypassPermissions", "--", "Hi."],
+      env,
+    );
+    assert.notEqual(bypass.status, 0);
+    assert.match(bypass.stderr, /bypassPermissions cannot be set here/);
+
+    const badId = cli(configDir, ["agents", "create", "Bad Id", "--", "Hi."], env);
+    assert.notEqual(badId.status, 0);
+
+    assert.deepEqual(files(), ["fixer.md"], "no file left behind by a refused create");
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

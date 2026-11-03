@@ -4,7 +4,7 @@ import { getRun, runLogPath } from "@/lib/data";
 
 export const dynamic = "force-dynamic";
 
-/** The run's raw stream-json log, as plain text. Read-only: serves only a log under data/logs. */
+/** The run's raw stream-json log, as plain text. Writes nothing; serves only a log under data/logs. */
 export async function GET(_req: Request, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   const run = getRun(id)?.run;

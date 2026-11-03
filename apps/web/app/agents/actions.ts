@@ -3,9 +3,9 @@
 import path from "node:path";
 import { agentToSpec, deleteAgentFile, loadAgents, writeAgentFile } from "@duskfleet/core";
 /**
- * The only writes the dashboard performs: edits to *user* agent files
- * (data/agents). Builtins stay versioned and read-only here; runs are never
- * touched. Same rules as the MCP tools, re-implemented on the core API so the
+ * The dashboard's writes on agents: edits to *user* agent files (data/agents).
+ * Builtins stay versioned and are never edited here; runs are never touched
+ * (schedules and settings have their own actions). Same rules as the MCP tools, re-implemented on the core API so the
  * dashboard keeps depending on core only.
  */
 import { revalidatePath } from "next/cache";

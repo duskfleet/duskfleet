@@ -28,7 +28,8 @@
  *    `run_requested_at`; the lease holder fires it on its next tick, paused or not.
  *  - Auto-pause: before a scheduled (not manual) fire, a schedule whose last
  *    `scheduler.auto_pause_after` ended runs were all empty (0 tool calls) or needs review
- *    is paused instead, with the reason stored on the row (`auto_paused` firing).
+ *    is paused instead, with the reason stored on the row (`auto_paused` firing). Skipped
+ *    while `scheduler.auto_pause` is false (re-read every tick).
  *  - `pause` (MCP `pause_scheduler`): a pause of the whole scheduler until an instant, stored in
  *    the database and read every tick. The lease holder keeps ticking (lease, orphan sweep) but
  *    fires nothing; what came due meanwhile fires once when the pause ends (no catch-up).
@@ -157,6 +158,11 @@ export class Scheduler {
 
   list(): Schedule[] {
     return this.repo.list();
+  }
+
+  /** Agents with more than one schedule, left by databases from before the one-per-agent rule (doctor). */
+  duplicateAgents(): { agentId: string; schedules: Schedule[] }[] {
+    return this.repo.duplicateAgents();
   }
 
   /** Schedules with the state of the run each last started, what their next fire does (see scheduleRunState) and their 7-day idle cost. */
@@ -391,7 +397,7 @@ export class Scheduler {
       this.repo.recordFiring(s.id, "skipped_disabled", null, null, nextAt());
       return { outcome: "skipped_disabled", runId: null, error: null };
     }
-    if (!manual) {
+    if (!manual && this.runs.config.scheduler.autoPause) {
       const reason = autoPauseReason(this.repo, s, this.runs.config.scheduler.autoPauseAfter);
       if (reason && this.repo.autoPause(s.id, reason, this.now().toISOString())) {
         this.repo.recordFiring(s.id, "auto_paused", null, reason, null);

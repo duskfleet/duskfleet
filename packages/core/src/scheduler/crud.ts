@@ -37,7 +37,18 @@ export function nextRunAtFor(cron: string, timeZone: string, now: Date = new Dat
   return next ? next.toISOString() : null;
 }
 
-export function validateScheduleInput(config: DuskFleetConfig, input: ScheduleInput): void {
+/**
+ * Validate a schedule's fields. With `repo`, also the one-schedule-per-agent rule, checked last so
+ * every field error comes first: the agent must not have another schedule than `selfId` (the
+ * schedule being updated). A repo check, not a unique index: an index would refuse to open a
+ * database that already holds duplicates.
+ */
+export function validateScheduleInput(
+  config: DuskFleetConfig,
+  input: ScheduleInput,
+  repo?: Pick<ScheduleRepository, "findByAgent">,
+  selfId?: string,
+): void {
   if (!input.name?.trim()) throw new Error("name is required");
   if (!input.prompt?.trim()) throw new Error("prompt is required");
   try {
@@ -69,6 +80,21 @@ export function validateScheduleInput(config: DuskFleetConfig, input: ScheduleIn
   if (input.noopPattern != null) parseNoopPattern(input.noopPattern);
   if (input.gate != null) validateGate(config, input.gate, scheduleProjectId(input, agent));
   validatePolicies(input);
+  if (repo) assertOneSchedulePerAgent(repo, input.agentId, selfId);
+}
+
+/** Refuse a schedule for an agent that already has another one (`selfId`: the schedule being updated). */
+export function assertOneSchedulePerAgent(
+  repo: Pick<ScheduleRepository, "findByAgent">,
+  agentId: string,
+  selfId?: string,
+): void {
+  const other = repo.findByAgent(agentId).find((s) => s.id !== selfId);
+  if (other) {
+    throw new Error(
+      `agent "${agentId}" already has the schedule "${other.name}" (${other.id}); one schedule per agent, edit it or delete it first`,
+    );
+  }
 }
 
 /** trigger_kind, concurrency_policy and catch_up_policy: known values, and only the ones the scheduler implements. */
@@ -225,9 +251,9 @@ export function createSchedule(
   now: Date = new Date(),
   configReloadError: string | null = null,
 ): Schedule {
-  validateScheduleInput(config, input);
+  if (input.name && repo.findByName(input.name)) throw new Error(`a schedule named "${input.name}" already exists`);
+  validateScheduleInput(config, input, repo);
   assertCommandGateAllowed(config, input.gate, configReloadError);
-  if (repo.findByName(input.name)) throw new Error(`a schedule named "${input.name}" already exists`);
   const timeZone = input.timeZone ?? DEFAULT_TIME_ZONE;
   const nextRunAt = input.enabled === false ? null : nextRunAtFor(input.cron, timeZone, now);
   return repo.insert({ ...input, timeZone, nextRunAt });
@@ -264,7 +290,9 @@ export function updateSchedule(
     catchUpPolicy: patch.catchUpPolicy ?? existing.catchUpPolicy,
     triggerKind: patch.triggerKind ?? existing.triggerKind,
   };
-  validateScheduleInput(config, merged);
+  // One schedule per agent is checked only when the agent changes: pausing or editing one of the
+  // duplicates an older database already holds must keep working until the owner deletes one.
+  validateScheduleInput(config, merged, merged.agentId !== existing.agentId ? repo : undefined, id);
   assertCommandGateAllowed(config, patch.gate, configReloadError);
   if (merged.name !== existing.name && repo.findByName(merged.name))
     throw new Error(`a schedule named "${merged.name}" already exists`);

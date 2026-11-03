@@ -17,13 +17,15 @@ npm run check:pack   # npm pack --dry-run of duskfleet + @duskfleet/web: allow-l
 npm run typecheck    # core + mcp;  web: npm run typecheck -w @duskfleet/web
 npm test             # packages/core/test then packages/mcp/test, node --test, ~25 s, no network, no cost
 npm run cli -- doctor | agents | projects | run | runs | run-info | schedules
+npm run cli -- agents create <id> --model haiku -- "<system prompt>"   # own agent in data/agents, same path as create_agent
 npm run cli -- schedules run-now <id or name>   # stamps run_requested_at; the lease holder fires it next tick.
                      # The command for git hooks / scripts: `run --no-wait` leaves the run unread once the CLI exits
 npm run cli -- serve  # long-running scheduler process; the MCP server also ticks
 npm run cli -- install-service [--print] | uninstall-service   # register `serve` with launchd / systemd --user / Task Scheduler
 npm run cli -- run --project <project id or abs path> --agent <agent id> --model haiku -- "task"
 npm run web          # Next.js dashboard, http://localhost:4777
-npm run check        # what CI runs, same order: check:public, lint (biome ci), build, check:pack, typecheck, test
+npm run check        # what CI runs, same order: check:public, lint (biome ci), build, check:docs, check:quickstart, check:pack, typecheck, test
+npm run check:quickstart  # replays the README Quick start's `npm run cli --` lines against fake-claude.js (after build)
 npm run lint:fix     # Biome: format + safe fixes
 ```
 
@@ -54,14 +56,19 @@ npm workspaces, one `config/` and one SQLite database shared by three deliverabl
   files (`app/agents/actions.ts`: delete, unlink) and on schedule rows
   (`app/schedules/actions.ts`: pause/resume, cron + time zone, delete, run now, through core's
   `updateSchedule` / `requestRun`; run now only stamps `run_requested_at`, the lease holder
-  fires it on its next tick). No auth, localhost only.
-- `config/`: `duskfleet.yaml`, `agents/*.md` (builtin agents: YAML frontmatter + system
-  prompt body), `projects.yaml` (repo-relative examples only). Meant to be committed.
+  fires it on its next tick) and on the editable keys of `config/duskfleet.yaml`
+  (`app/settings/actions.ts`, through core's `writeGlobalFile`: comments kept, rolled back when
+  `loadConfig` refuses the result; `scheduler.enabled` only through its own action). No auth,
+  localhost only.
+- `config/`: `duskfleet.yaml`, `agents/*.md` (where a checkout may commit agents, "builtin":
+  YAML frontmatter + system prompt body; only specialised patterns here, never a starter or
+  default agent: owner decision 2026-10-26, a user's first agent comes from `agents create`),
+  `projects.yaml` (repo-relative examples only). Meant to be committed.
   **This repo is public: no usernames, home paths or machine-specific values in versioned
   files, docs or examples** (`npm run check:public` enforces it in CI; placeholders `<you>`, `me` are fine). Personal projects live in `data/projects.yaml`, personal agents
   in `data/agents/`, the MCP registration in `.mcp.json` (all git-ignored).
 - `data/`: `duskfleet.db`, `logs/<run_id>.jsonl` and `agents/*.md` (user agents written by
-  `create_agent`; same id as a builtin overrides it). Git-ignored runtime state. Code must
+  `create_agent` or the CLI's `agents create`; same id as a builtin overrides it). Git-ignored runtime state. Code must
   never write into `config/agents`; agent file I/O lives in `core/src/config/agent-files.ts`.
 - `playground/`: ignored scratch directory for a local run target when trying things out.
   Not part of the repo; register it in the private `data/projects.yaml` if needed.
@@ -82,11 +89,14 @@ npm workspaces, one `config/` and one SQLite database shared by three deliverabl
   `pause_scheduler` (one `scheduler_pause` row, migration 21) stops all firing until an instant,
   also read every tick (the holder keeps the lease and the sweep). `trigger_kind` is only `cron`.
   Create/update validation is `scheduler/crud.ts`, shared by MCP, CLI and dashboard.
-  Command gates (`sh -c`, full env) are opt-in: `scheduler.allow_command_gates` (default false)
+  One schedule per agent (owner decision 2026-11-01): `assertOneSchedulePerAgent` refuses a create
+  or an agent change, a repo query, never a unique index (older DBs hold duplicates; `doctor` lists them).
+  Command gates (`sh -c`, the runs' env allow-list) are opt-in: `scheduler.allow_command_gates` (default false)
   is checked on create/update (`assertCommandGateAllowed`) and again in `evaluateGate` per tick.
   Auto-pause (`autoPauseReason`, migration 16): before a scheduled fire, the last
   `scheduler.auto_pause_after` ended runs all empty (0 tool calls) or needs review = pause with
   `paused_reason`, outcome `auto_paused`; resume clears it, `auto_paused_at` bounds the next streak.
+  `scheduler.auto_pause: false` (read every tick) skips the check and keeps the threshold.
   `install-service` (`packages/mcp/src/service.ts`) renders a per-user unit (launchd,
   systemd --user, Task Scheduler XML) from machine paths: never version a unit, re-run it
   after every build (it restarts the service). Not the OS crontab.
@@ -105,8 +115,14 @@ npm workspaces, one `config/` and one SQLite database shared by three deliverabl
 - Real runs cost money. When one is needed to verify something, use `--model haiku`
   (cents) and say so. An agent without an explicit model uses the CLI default,
   which can be 100x more expensive.
+- Dashboard components are tested (owner rule 2026-11-02, harness in #344): every new or changed
+  component in `apps/web/components` ships with a render test in `apps/web/test` (`react-dom/server`,
+  one assertion per visible state, no snapshots; stateful logic lives in `apps/web/lib` and is
+  tested there). A component PR without its test is incomplete. Browser tests are #79, separate.
 - Dashboard: no component library, design tokens live in `apps/web/app/globals.css`
-  (dark only, brand palette: night ground, sunset accent; fonts via `next/font` in
+  (Dark and Light modes of the same tokens, each `light-dark(<light>, <dark>)`: Dark by default,
+  `prefers-color-scheme: light` or `data-theme` on `<html>` switch; brand palette: night ground,
+  sunset accent; fonts via `next/font` in
   `app/layout.tsx`). A completed run that hit a permission denial is "needs review"
   (amber), never plain green. One rule decides needs-review (`reviewReasons` in
   `core/src/observability/run.ts`: budget exhausted, timed out, orphaned, non-zero exit,
@@ -128,17 +144,22 @@ npm workspaces, one `config/` and one SQLite database shared by three deliverabl
   needs must be in its own `allowed_tools`; use `add_dirs` to reach other directories.
 - **Runs have an owner** (`runs.owner`, `role@host:pid` from `processIdentity`, migration 7):
   several Duskfleet processes share the DB, so `recoverOrphans` (startup and the lease holder's
-  once-a-minute sweep) fails a `running` row only when its owner is gone (dead pid on this host,
+  once-a-minute sweep) fails a `running` row, or a `pending` one never spawned, only when its owner is gone (dead pid on this host,
   NULL owner older than the longest timeout + 1 min, or this pid without the run in memory),
   never a live process's or another host's. A fresh NULL owner is a process on an old build
   (a `serve` not reinstalled after a build): it is live, not an orphan.
 - **`CLAUDE_BIN` beats `claude.binary`**, so an inherited one would make the tests launch the
   real claude instead of fake-claude.js. Test files import `test/helpers.js` (drops it) before
   `@duskfleet/core` and spawn processes with `testEnv()`; `childEnv()` never passes it to runs.
+- **Runs get an env allow-list, not our env** (`execution/child-env.ts`, `DEFAULT_ENV_ALLOW`):
+  the Claude child and command gates see only PATH, HOME, locale, `ANTHROPIC_*`, `CLAUDE_*`,
+  `NODE_*`, ... plus `claude.env_passthrough` and the agent's `env_passthrough` (merged). A test
+  knob read by fake-claude.js (`FAKE_CLAUDE_*`) only reaches it because the test config passes it.
 - **Agents can be bound to a project** (`project: <id>`): grouped, default target, refused
-  elsewhere. `create_agent`/`update_agent` validate the spec *before* writing, and roll the
-  file back if the config no longer loads: one bad agent file would otherwise break every
-  later config reload. They also refuse home paths and secret-looking values in any field
+  elsewhere. `create_agent`/`update_agent` and the CLI's `agents create` validate the spec
+  *before* writing, and roll the file back if the config no longer loads: one bad agent file
+  would otherwise break every later config reload. That path is one, in core
+  (`core/src/config/agent-create.ts`); never re-implement it in a caller. They also refuse home paths and secret-looking values in any field
   (`assertAgentSpecClean`, `core/src/config/agent-lint.ts`); `add_dirs` under home become `~/...`.
 - **Two agent kinds, always explicit**: `own` (persona written here, body = system prompt,
   no `claude_agent`) or `link` (`claude_agent` + a project folder given as `project_path` or a
@@ -187,7 +208,8 @@ npm workspaces, one `config/` and one SQLite database shared by three deliverabl
   `~/.claude/settings.json`. Keep it unless the hook is removed.
 - Children run with `--strict-mcp-config`: they never see the caller's MCP servers,
   so Duskfleet cannot recurse into itself.
-- Project paths must be absolute (`~` is expanded). Prefer `project_id` from
+- Project paths must be absolute (`~` is expanded); only the CLI's `run --project` resolves a
+  relative one, from its cwd (`resolveCliProject`), before core sees it. Prefer `project_id` from
   `config/projects.yaml` in prompts and docs.
 - Scripts that import `@modelcontextprotocol/sdk` must live under `packages/mcp/` to
   resolve the module.
@@ -198,7 +220,7 @@ npm workspaces, one `config/` and one SQLite database shared by three deliverabl
 
 ## Roadmap
 
-Next: scheduler (`packages/core/src/scheduler/types.ts` is the contract, no implementation),
-then deterministic evals (`tests_passed`, `build_passed`, `files_exist`) as post-run hooks,
+Shipped: the scheduler (cron, gates, daily caps, monthly budgets, auto-pause, `serve` /
+`install-service`). Next: deterministic evals (`tests_passed`, `build_passed`, `files_exist`) as post-run hooks,
 then LLM evals as a second read-only run, then metrics tools and Git integration. A Codex CLI
 executor as a second runtime is assessed in the design notes (after evals).

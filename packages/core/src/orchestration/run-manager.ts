@@ -9,6 +9,7 @@ import path from "node:path";
 import { agentDefinitionHash, listProjectAgents, projectAgentDefinitionHash } from "../config/agent-files.js";
 import { loadConfig } from "../config/loader.js";
 import type { AgentDefinition, DuskFleetConfig, ProjectDefinition } from "../config/types.js";
+import { mergeEnvPassthrough } from "../execution/child-env.js";
 import { mergeSubagent, needsRepair, sameSubagent, subagentsFromLog } from "../execution/log-replay.js";
 import { allowListedMcpPrefixes, mcpToolPrefix } from "../execution/mcp.js";
 import { mergeUsageByModel } from "../execution/stream-json.js";
@@ -231,14 +232,23 @@ export class RunManager {
   }
 
   /**
-   * Mark `running` runs whose owning process is gone as failed. Called at startup and
-   * by the scheduler lease holder. Several Duskfleet processes share the database
-   * (serve, one MCP server per host session, CLI), so a run owned by a live process,
-   * or by another host, is left alone.
+   * Mark `running` and `pending` runs whose owning process is gone as failed. Called at
+   * startup and by the scheduler lease holder. Several Duskfleet processes share the
+   * database (serve, one MCP server per host session, CLI), so a run owned by a live
+   * process, or by another host, is left alone. A `pending` row of a dead owner is a run
+   * whose process died between the insert and the spawn: it never started, nothing else
+   * would ever end it.
    */
   recoverOrphans(): number {
-    const orphans = this.runs.listByStatus("running").filter((run) => this.ownerIsGone(run));
-    let recovered = 0;
+    return this.recoverOrphanRuns().length;
+  }
+
+  /** `recoverOrphans`, returning the rows it failed as they were before (status `running` or `pending`). */
+  recoverOrphanRuns(): Run[] {
+    const orphans = [...this.runs.listByStatus("running"), ...this.runs.listByStatus("pending")].filter((run) =>
+      this.ownerIsGone(run),
+    );
+    const recovered: Run[] = [];
     for (const run of orphans) {
       assertTransition(run.status, "failed");
       // Compare-and-set: a starting process and the lease holder may sweep the same row.
@@ -248,15 +258,20 @@ export class RunManager {
         error: orphanedError(run.owner),
       };
       // Not through transition(): the write must stay a compare-and-set, so the reasons are computed here.
-      const won = this.runs.updateIfStatus(run.id, "running", {
+      const won = this.runs.updateIfStatus(run.id, run.status, {
         ...patch,
         reviewReasons: reviewReasons({ ...run, ...patch }),
       });
       if (!won) continue;
       this.runs.addEvent(run.id, "status_change", { from: run.status, to: "failed" });
-      recovered++;
+      recovered.push(run);
     }
-    if (recovered) log.warn(`marked ${recovered} orphaned run(s) as failed`);
+    if (recovered.length) {
+      const pending = recovered.filter((run) => run.status === "pending").length;
+      log.warn(
+        `marked ${recovered.length} orphaned run(s) as failed${pending ? ` (${pending} still pending: never started)` : ""}`,
+      );
+    }
     return recovered;
   }
 
@@ -444,6 +459,8 @@ export class RunManager {
     }
     const addDirs = [...new Set([...(project?.addDirs ?? []), ...(agent.addDirs ?? [])])];
     if (addDirs.length) request.addDirs = addDirs;
+    const envPassthrough = mergeEnvPassthrough(this.config.claude.envPassthrough, agent.envPassthrough);
+    if (envPassthrough.length) request.envPassthrough = envPassthrough;
 
     // Record the run (with the exact command) *before* launching it.
     const run: Run = {
@@ -1056,14 +1073,16 @@ export class RunManager {
 
   private resolveAgent(agentId: string | undefined): AgentDefinition {
     const id = agentId ?? this.config.defaultAgent;
+    const known =
+      this.config.agents.size > 0
+        ? [...this.config.agents.keys()].join(", ")
+        : `(none: no agent file in ${path.join(this.config.configDir, "agents")} or ${this.config.userAgentsDir}; create one with "agents create <id>")`;
     if (!id) {
-      throw new Error(
-        `no agent given and no default_agent in duskfleet.yaml. Known agents: ${[...this.config.agents.keys()].join(", ")}`,
-      );
+      throw new Error(`no agent given and no default_agent in duskfleet.yaml. Known agents: ${known}`);
     }
     const agent = this.config.agents.get(id);
     if (!agent) {
-      throw new Error(`unknown agent "${id}". Known agents: ${[...this.config.agents.keys()].join(", ")}`);
+      throw new Error(`unknown agent "${id}". Known agents: ${known}`);
     }
     return agent;
   }

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { runTitle, shortModel, shortPath, tildePath, tildeText } from "../lib/format.ts";
+import { fmtSplit, runTitle, shortModel, shortPath, tildePath, tildeText } from "../lib/format.ts";
 import { badgeVerdict } from "../lib/status.ts";
 
 test("runTitle takes the first non-empty line and strips markdown markers", () => {
@@ -97,4 +97,11 @@ test("shortModel turns full model ids into family and version", () => {
   assert.equal(shortModel(null), "default");
   assert.equal(shortModel(undefined), "default");
   assert.equal(shortModel(""), "default");
+});
+
+test("fmtSplit shows the side the basis names, and both apart when mixed", () => {
+  const split = { apiUsd: 1.5, subscriptionUsd: 12 };
+  assert.equal(fmtSplit(split, "api"), "$1.50");
+  assert.equal(fmtSplit(split, "subscription"), "$12.00");
+  assert.equal(fmtSplit(split, "mixed"), "$1.50 billed · $12.00 API value");
 });

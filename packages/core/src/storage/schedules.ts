@@ -157,6 +157,23 @@ export class ScheduleRepository {
     return row ? rowToSchedule(row) : null;
   }
 
+  /** The schedules of one agent, oldest first (one per agent is the rule; older databases may hold more). */
+  findByAgent(agentId: string): Schedule[] {
+    return (
+      this.db
+        .prepare("SELECT * FROM schedules WHERE agent_id = ? ORDER BY created_at, name")
+        .all(agentId) as unknown as ScheduleRow[]
+    ).map(rowToSchedule);
+  }
+
+  /** Agents with more than one schedule (databases from before the one-per-agent rule), sorted by agent id. */
+  duplicateAgents(): { agentId: string; schedules: Schedule[] }[] {
+    const ids = this.db
+      .prepare("SELECT agent_id FROM schedules GROUP BY agent_id HAVING COUNT(*) > 1 ORDER BY agent_id")
+      .all() as unknown as { agent_id: string }[];
+    return ids.map((r) => ({ agentId: r.agent_id, schedules: this.findByAgent(r.agent_id) }));
+  }
+
   /** Enabled cron schedules (trigger_kind 'cron') whose next_run_at is at or before `now`. */
   due(nowIso: string): Schedule[] {
     return (

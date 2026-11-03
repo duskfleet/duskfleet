@@ -72,6 +72,18 @@ async function runningRow(app, owner) {
   return started.id;
 }
 
+/** A finished run turned back into a `pending` row (never started) with the given owner. */
+async function pendingRow(app, owner) {
+  const started = await app.a.startRun({ prompt: "ok", projectPath: app.project });
+  await app.a.waitForRun(started.id, 10_000);
+  app.db
+    .prepare(
+      "UPDATE runs SET status = 'pending', started_at = NULL, ended_at = NULL, error = NULL, owner = ? WHERE id = ?",
+    )
+    .run(owner, started.id);
+  return started.id;
+}
+
 /** Move a run's start `ms` into the past. */
 function backdate(app, id, ms) {
   const at = new Date(Date.now() - ms).toISOString();
@@ -150,6 +162,56 @@ test("an owner without a usable pid (0 or empty) is gone; a row is failed only o
       const changes = b.events(id).filter((e) => e.type === "status_change" && e.payload.to === "failed");
       assert.equal(changes.length, 1);
     }
+  } finally {
+    await app.cleanup();
+  }
+});
+
+test("a pending row of a dead owner (died before the spawn) is failed as orphaned; a live owner's is left alone", async () => {
+  const app = makeApp();
+  try {
+    const dead = formatHolder("mcp", hostname(), deadPid());
+    const stuck = await pendingRow(app, dead);
+    const live = await pendingRow(app, formatHolder("serve", hostname(), process.ppid));
+    const remote = await pendingRow(app, formatHolder("serve", "some-other-host", 1));
+
+    const b = app.manager(formatHolder("cli", hostname(), deadPid()));
+    const recovered = b.recoverOrphanRuns();
+    assert.deepEqual(
+      recovered.map((r) => [r.id, r.status]),
+      [[stuck, "pending"]],
+    );
+    const failed = b.getRun(stuck);
+    assert.equal(failed.status, "failed");
+    assert.equal(failed.error, `orphaned: owning process ${dead} is gone`);
+    assert.ok(failed.endedAt);
+    assert.equal(failed.startedAt, null, "it never started");
+    assert.ok(failed.reviewReasons.includes("orphaned"));
+    const changes = b.events(stuck).filter((e) => e.type === "status_change" && e.payload.to === "failed");
+    assert.deepEqual(
+      changes.map((e) => e.payload.from),
+      ["pending"],
+    );
+    assert.equal(b.getRun(live).status, "pending", "a live owner may be spawning it right now");
+    assert.equal(b.getRun(remote).status, "pending", "another host's pids cannot be checked from here");
+    assert.equal(b.recoverOrphans(), 0, "already failed: no second transition");
+  } finally {
+    await app.cleanup();
+  }
+});
+
+test("the lease holder's sweep fails a stuck pending row too", async () => {
+  const app = makeApp();
+  try {
+    const scheduler = new Scheduler(new ScheduleRepository(app.db), app.a, {
+      tickMs: 1000,
+      holder: app.a.owner,
+      now: () => new Date("2026-10-16T10:00:00Z"),
+    });
+    const stuck = await pendingRow(app, formatHolder("mcp", hostname(), deadPid()));
+    await scheduler.tick();
+    assert.equal(app.a.getRun(stuck).status, "failed");
+    scheduler.stop();
   } finally {
     await app.cleanup();
   }

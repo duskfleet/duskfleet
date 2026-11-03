@@ -97,6 +97,24 @@ export function budgetStatuses(
   return source.list().map((b) => budgetStatusOf(source, config, b, now));
 }
 
+/**
+ * The budget that applies to a view of the spend: the global one when the view is unfiltered,
+ * the agent's (else the project's) when it is filtered. A filtered view never falls back to the
+ * global budget: drawn against one agent's spend it would read as that agent's limit. Null when
+ * the scope in view has no budget.
+ */
+export function budgetForScope<T extends Pick<Budget, "scope" | "scopeId">>(
+  budgets: readonly T[],
+  view: { agentId?: string; projectId?: string },
+): T | null {
+  const find = (scope: BudgetScope, id: string | null) =>
+    budgets.find((b) => b.scope === scope && (b.scopeId ?? null) === id) ?? null;
+  if (!view.agentId && !view.projectId) return find("global", null);
+  return (
+    (view.agentId ? find("agent", view.agentId) : null) ?? (view.projectId ? find("project", view.projectId) : null)
+  );
+}
+
 /** "global", "agent foo", "project bar": how messages name a budget. */
 export function budgetLabel(b: Pick<Budget, "scope" | "scopeId">): string {
   return b.scope === "global" ? "global" : `${b.scope} ${b.scopeId}`;

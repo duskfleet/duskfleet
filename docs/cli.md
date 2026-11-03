@@ -1,37 +1,202 @@
 # CLI
 
 The CLI uses the same orchestration code as the MCP server and is the quickest way to test.
-`npm run cli --` is shorthand for `node packages/mcp/dist/cli.js`.
+The commands below are written for the npm package: `npx duskfleet <command>`, or
+`duskfleet <command>` after a global install (`npm i -g duskfleet`). In a clone of this
+repository (after `npm run build`) the same command is `npm run cli -- <command>`, shorthand for
+`node packages/mcp/dist/cli.js <command>`.
 
 ```bash
-npm run cli -- doctor                                     # Claude binary, version, config and data paths
-npm run cli -- doctor --probe                             # plus one real hello run on haiku (costs cents)
-npm run cli -- run --project ~/Documents/Projects/my-app -- "Add a README section describing the build"
-npm run cli -- run --project my-app --agent my-reviewer --model sonnet -- "Review src/ for obvious bugs"   # registered id or path (--project-id is the explicit form)
-npm run cli -- run --no-wait --project /path -- "..."     # return immediately (see the note below)
-npm run cli -- runs --status completed --limit 10
-npm run cli -- run-info <run_id> --events   # includes subagents; --events adds the timeline
-npm run cli -- repair-subagents             # backfill subagent rows of finished runs from their logs
-npm run cli -- agents
-npm run cli -- projects
-npm run cli -- schedules
-npm run cli -- schedules run-now "pr review"              # schedule id or name; the lease holder fires it on its next tick
-npm run cli -- budgets                                    # monthly budgets with this month's spend and state
-npm run cli -- budgets set project my-app --amount 50 [--warn 80] [--no-hard-stop]   # or: global | agent <id>
-npm run cli -- budgets delete <budget id>
-npm run cli -- serve                                      # long-running scheduler process
-npm run cli -- install-service [--print]                  # register `serve` with launchd / systemd --user / Task Scheduler
-npm run cli -- uninstall-service
-npm run cli -- tools                                      # the MCP tool catalogue
+npx duskfleet init                                       # guided setup; see "init" below
+npx duskfleet init --yes [--mcp claude-code|claude-desktop]   # the same without prompts (scripts, CI)
+npx duskfleet doctor                                     # Claude binary, version, config and data paths
+npx duskfleet doctor --probe                             # plus one real hello run on haiku (costs cents)
+npx duskfleet run --project ~/Documents/Projects/my-app -- "Add a README section describing the build"
+npx duskfleet run --project my-app --agent my-reviewer --model sonnet -- "Review src/ for obvious bugs"   # registered id or path (--project-id is the explicit form)
+npx duskfleet run --no-wait --project /path -- "..."     # return immediately (see the note below)
+npx duskfleet run --project . --agent fixer -- "..."     # relative path: resolved from the shell's directory
+npx duskfleet runs --status completed --limit 10
+npx duskfleet run-info <run_id> --events   # includes subagents; --events adds the timeline
+npx duskfleet repair-subagents             # backfill subagent rows of finished runs from their logs
+npx duskfleet agents                                     # empty list + a hint to agents create on a fresh install
+npx duskfleet agents create fixer --model haiku -- "You fix the failing test in this project. ..."   # see below
+npx duskfleet projects
+npx duskfleet schedules
+npx duskfleet schedules run-now "pr review"              # schedule id or name; the lease holder fires it on its next tick
+npx duskfleet budgets                                    # monthly budgets with this month's spend and state
+npx duskfleet budgets set project my-app --amount 50 [--warn 80] [--no-hard-stop]   # or: global | agent <id>
+npx duskfleet budgets delete <budget id>
+npx duskfleet dashboard [--port 4777] [--no-open] [--no-install]   # install @duskfleet/web on demand, start it (see dashboard.md)
+npx duskfleet serve                                      # long-running scheduler process
+duskfleet install-service [--print]                      # global install only: register `serve` with launchd / systemd --user / Task Scheduler
+duskfleet uninstall-service
+npx duskfleet mcp register --target claude-desktop --dry-run   # or claude-code; preview, then --yes to apply (see mcp-server.md)
+npx duskfleet mcp status                                 # which Claude hosts have a duskfleet entry; no config needed
+npx duskfleet tools                                      # the MCP tool catalogue
+npx duskfleet --help                                     # the usage (also -h); no config needed
+npx duskfleet run --help                                 # one command's usage, options, example and doc link (any command)
+npx duskfleet --version                                  # the package version (also -v); duskfleet-mcp --version too
 ```
 
-`doctor` prints the effective `path` used to find `claude` and passed to runs; `pathDefaulted`
+`run --project` takes a registered project id or a path. A relative path (`.`, `../app`,
+`./scratch`, or a bare name that is a directory where you are and not a registered id) is resolved
+from the shell's directory, and the run records the absolute path; `~` is expanded. Only the CLI
+does this: the MCP tools (`run_agent`'s `project_path`) and schedules have no meaningful working
+directory and keep requiring an absolute path or a registered id.
+
+`install-service` refuses to run from npx's temporary cache (npm can evict it, and the service
+would point at a file that is gone): install the package globally first, `npm i -g duskfleet`,
+then `duskfleet install-service`. In a clone, `npm run cli -- install-service` registers the
+clone's build ([Schedules](schedules.md#who-ticks)).
+
+`duskfleet` with no arguments prints the usage on stderr and exits 2; `--help` prints it on
+stdout and exits 0. Both end with `First time here? Run: npx duskfleet init`.
+
+Every command answers `--help` (or `-h`) with its own usage: one block with the options, an
+example and the link to its doc page, on stdout with exit 0, with or without a config
+(`duskfleet run --help`, `duskfleet agents create --help`). A `--help` after `--` is part of the
+prompt, not a flag. A wrong invocation is named before any config is loaded, on stderr with exit 2:
+an unknown command prints `unknown command: <name>` and the list of commands; a missing argument
+prints what is missing (`error: run needs a prompt after --: ...`, `error: run-info needs a run id`)
+followed by that command's usage.
+
+Only commands that need the config report a missing one (`init`, `tools`, `mcp status`,
+`uninstall-service` and every `--help` work without). That error ends with the same init hint
+(no config means no `duskfleet.yaml` in the directory the lookup picked:
+`DUSKFLEET_CONFIG`, a `config/` above the CLI, else the user-level directory; see
+[where config and data live](configuration.md#where-config-and-data-live)). `--version` prints the version of the installed
+`duskfleet` package and needs neither a config nor Node 24.
+
+Logs go to stderr, so stdout stays the command's JSON. A one-shot command logs warnings and
+errors only; `--verbose`, anywhere before a `--`, brings the info lines back (config loaded,
+executor ready, `storage: applied N migrations (M → N)` after an upgrade). `serve` and the MCP
+server keep info: their log is the record. `DUSKFLEET_LOG_LEVEL=debug|info|warn|error` overrides
+both defaults and `--verbose`
+([environment variables](configuration.md#environment-variables)).
+
+## init
+
+`init` prepares a first configuration. Each step prints its result; a config that cannot be
+written or loaded stops with the fix and exit 1:
+
+1. **Node**: the version (Node 24+ is checked before any command runs).
+2. **Claude Code**: the binary (same lookup as runs: `CLAUDE_BIN`, `claude.binary`, `PATH`,
+   `~/.local/bin/claude`), its version, and the login from `claude auth status --json`. Not
+   installed, not starting or not logged in does **not** stop `init`: the problem is printed
+   here, the config is written anyway, the fix is repeated after the summary (`Claude Code is not
+   logged in: run claude auth login, then check it with: duskfleet doctor --probe`) and the exit
+   code is 0. Before the login, `doctor`, `agents`, `projects`, `runs`, `schedules`, `budgets`,
+   `agents create` and the dashboard work; `run`, `serve` and scheduled runs fail with
+   `auth_required` and the same fix (`errorCode`, [what a run records](#what-a-run-records)).
+3. **Config and data**: creates the user-level config directory with a starter `duskfleet.yaml`
+   and the data directory ([where config and data live](configuration.md#where-config-and-data-live)).
+   A config that already exists (user-level, a checkout's `config/`, or `DUSKFLEET_CONFIG`) is
+   reported and left untouched, so running `init` twice is safe. `DUSKFLEET_CONFIG` pointing at
+   a directory without `duskfleet.yaml` is an error: `init` writes only the user-level directory.
+4. **MCP registration** (optional): on a terminal it asks `Register the MCP server in Claude Code
+   / Claude Desktop / skip?` and then does what `mcp register --target ... --yes` does (preview,
+   backup of an existing file, write; see [MCP server](mcp-server.md)).
+5. What was created, where, and the next commands: `doctor`, `agents create`, `run`. No agent is
+   created: Duskfleet ships none.
+
+`init --yes` asks nothing: steps 1-3 and the summary, step 4 only with `--mcp claude-code` or
+`--mcp claude-desktop`; without `--mcp` it never writes a Claude config file. It too succeeds
+without a Claude login, so a script can prepare a machine before anyone logs in; a config that
+cannot be written or loaded, or a failed `--mcp` registration, exits non-zero. On something that is not a terminal (a script) without `--yes`, step 4 is
+skipped.
+
+## First run
+
+Duskfleet ships no starter agent and `default_agent` is `null`, so a run needs `--agent`. The
+README Quick start creates one, then runs it:
+
+```bash
+npx duskfleet init
+npx duskfleet doctor
+npx duskfleet agents create fixer --model haiku -- "You fix the failing test in this project. Run the tests, read the failure, change the minimum code, run them again. No git, no installs."
+npx duskfleet run --project /abs/path/to/scratch-project --agent fixer -- "Fix the failing test"
+```
+
+A run with no agent, when none exists, fails with
+`Known agents: (none: no agent file in <config>/agents or <user agents dir>; create one with "agents create <id>")`.
+
+## What run prints
+
+On stderr, the run id and its log as it starts. When the run did not end clean (failed, timed
+out, cancelled, or completed but [needs review](dashboard.md#needs-review)), a short block follows before
+anything else: the status with its review reasons, the cause in one line, the fix when there is
+one, and where to look next. A run against a Claude that is not logged in:
+
+```text
+run 7f3c9a2e-... started (session 0b1d...)
+log: <data>/logs/7f3c9a2e-....jsonl
+run 7f3c9a2e-... failed (non-zero exit code)
+cause: Claude is not logged in: Not logged in · Please run /login
+fix: Claude Code is not authenticated: run "claude" in a terminal and log in (or check ANTHROPIC_API_KEY)
+more: duskfleet run-info 7f3c9a2e-..., or the run's page in the dashboard; full record: run --json
+```
+
+The fix lines come from one table in core (`FAILURE_FIXES` per error code, `REVIEW_REASON_FIXES`
+per review reason, plus a `claude` binary that was not found), the same one `doctor --probe`
+uses for its advice. A permission denial names the denied tools.
+
+On stdout, the run record as JSON for scripts (exit 0 for `completed` or, with `--no-wait`,
+`running`; 1 otherwise). It leaves out `command.argv` (the full spawned command line, system
+prompt included) and `rawResultJson`; `run --json` prints the full record, the same as
+`run-info <run_id>`.
+
+## agents create
+
+`agents create <id> [flags] -- "<system prompt>"` writes an **own** agent (the prompt is its
+persona) to `user_agents_dir` (`agents/<id>.md` in the data directory; `data/agents/<id>.md` in a
+clone), the same file and the same checks as the
+MCP tool `create_agent`: the spec is validated before anything is written, home directory paths
+and secret-looking values are refused in every field, and the file is removed again if the
+config no longer loads. An existing id is refused unless `--force` is given. For a **link**
+agent use `create_agent` over MCP ([Agents](agents.md)).
+
+| Flag | Frontmatter field | Default when omitted |
+|---|---|---|
+| `--model <m>` | `model` | none: the Claude Code default, which can be the most expensive model |
+| `--budget <usd>` | `max_budget_usd` | `0.5` |
+| `--permission-mode <mode>` | `permission_mode` | `dontAsk` (`bypassPermissions` is refused, as in `create_agent`) |
+| `--allowed-tools <a,b>` | `allowed_tools` | `Read`, `Grep`, `Glob`, `Edit`, `Write` and `Bash(...)` for `npm test`, `npm run test`, `npx vitest`, `npx jest`, `pytest`, `python -m pytest`, `cargo test`, `go test`, `make test` |
+| `--disallowed-tools <a,b>` | `disallowed_tools` | none |
+| `--timeout <minutes>` | `timeout_minutes` | `10` |
+| `--description <text>` | `description` | empty |
+| `--prompt-file <file>` | body (system prompt) | instead of the text after `--` |
+| `--force` | | overwrite an agent with the same id (a builtin id becomes a user override) |
+
+It prints `{ created, overrode, agent }` as JSON and the next command on stderr.
+
+## doctor, logs and diffs
+
+`doctor` prints where the config and data come from: `configDir` with `configSource` (`env` for
+`DUSKFLEET_CONFIG`, `repo` for a `config/` found walking up from the CLI, `user` for the
+user-level directory), `configLookup` (every candidate in precedence order, `null` when it does
+not apply), and `dataDir` with `dataSource` (`env` for `DUSKFLEET_DATA`, `config` for `data_dir`
+or the `../data` next to a repo config, `user` for the user-level data directory). The rules are
+in [Configuration](configuration.md#where-config-and-data-live).
+
+`doctor` also prints the effective `path` used to find `claude` and passed to runs; `pathDefaulted`
 is true on macOS when the inherited `PATH` was missing or minimal (a GUI-launched host) and the usual
 install directories were put in front ([Troubleshooting](troubleshooting.md)).
 
 `doctor` also reports the scheduler: whether something is ticking, which kind of process holds
 the lease (`serve`, `mcp`, `cli`) and whether the service is installed and running. See
 [Schedules](schedules.md#who-ticks) for the service.
+
+Like every CLI command, `doctor` starts with the orphan sweep: `running` rows, and `pending`
+rows never spawned, whose owning process on this host is gone are marked failed as orphaned.
+`orphans.recovered` lists the rows this sweep failed (`id`, `agentId`, `was`: `running` or
+`pending`, `owner`, `createdAt`), so rows a previous build left stuck show up once; an empty list
+means nothing was stuck ([Troubleshooting](troubleshooting.md#runs)).
+
+> [!NOTE]
+> On Windows the CLI and `install-service` (Task Scheduler) are **experimental**: implemented,
+> not run by the maintainers ([platform support](../README.md#platform-support)). The service
+> logs to `data/logs/serve.log` and keeps its task XML under `%LOCALAPPDATA%\Duskfleet`; the
+> [Windows test plan](windows-test-plan.md) lists what to check.
 
 `doctor --probe` adds a live check that `claude --version` cannot do: one minimal real run
 (`--model haiku`, a few cents at most, capped by `--max-budget-usd 0.05`; the command says so on
@@ -124,6 +289,16 @@ The dashboard's per-model breakdown counts a `mixed` run under the model it requ
 `ANTHROPIC_API_KEY` (Claude Code bills that key per token), `subscription` otherwise (`costUsd`
 is then what Claude Code reports, not what you are billed). It is null for runs recorded before it
 existed. The dashboard marks subscription costs "reported, not billed".
+
+A cost is named after what it is, never after a setting. `runs`, `run-info`, `list_runs` and
+`get_run` add `costLabel` to each run: `Cost` when it is billed (`billingType: api`), `API value`
+otherwise (a subscription run, or one recorded before `billingType` existed). `list_runs` also
+returns `cost`, the listed runs summed by billing type (`apiUsd` billed, `subscriptionUsd` the API
+value of subscription usage) with the wording to show: `heading` is `Spent` when every run is
+billed, `Usage (API value)` when none is (`note`: included in your Claude subscription), `Spent and
+usage` when both kinds are listed. `runs` prints the same total as one line on stderr (stdout stays
+the JSON array), for example `Usage (API value): $3.2 over 20 runs, included in your Claude
+subscription`.
 
 `contextExhausted` comes only from structured signals (termination reason, result subtype,
 stop reason, or the error text of a failed run), never from scanning the result's prose.

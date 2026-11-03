@@ -10,6 +10,8 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
+import { ConfigNotFoundError, loadConfig, resolveConfigDir } from "@duskfleet/core";
+import { COMMAND_HELP } from "../dist/cli-help.js";
 import { testEnv } from "./helpers.js";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -49,6 +51,120 @@ test("--help prints the usage on stdout with exit 0 and loads no config; no comm
   const none = run(workspaceCli, [], { DUSKFLEET_CONFIG: missing });
   assert.equal(none.status, 2);
   assert.match(none.stderr, /Usage:/);
+  assert.match(none.stderr, /First time here\? Run: npx duskfleet init\n$/);
+  assert.match(run(workspaceCli, ["--help"]).stdout, /First time here\? Run: npx duskfleet init\n$/);
+});
+
+test("every command answers --help / -h with its own usage and exit 0, without a config", () => {
+  const missing = path.join(tmpdir(), "duskfleet-no-such-config");
+  for (const command of Object.keys(COMMAND_HELP)) {
+    for (const flag of ["--help", "-h"]) {
+      const r = run(workspaceCli, [command, flag], { DUSKFLEET_CONFIG: missing });
+      assert.equal(r.status, 0, `${command} ${flag}: ${r.stderr}`);
+      assert.equal(r.stderr, "", `${command} ${flag}`);
+      assert.match(r.stdout, new RegExp(`^Usage:\\n  duskfleet ${command}`), `${command} ${flag}`);
+      assert.match(r.stdout, /\nExample:\n {2}duskfleet /);
+      assert.match(r.stdout, /\nDocs: https:\/\/github\.com\/duskfleet\/duskfleet\/blob\/main\/docs\/.+\.md/);
+    }
+  }
+  // A subcommand's --help is its command's; --help after -- is part of a prompt, not a flag.
+  const sub = run(workspaceCli, ["agents", "create", "--help"], { DUSKFLEET_CONFIG: missing });
+  assert.equal(sub.status, 0, sub.stderr);
+  assert.match(sub.stdout, /duskfleet agents create <id>/);
+  const prompt = run(workspaceCli, ["run", "--", "--help"], { DUSKFLEET_CONFIG: missing });
+  assert.equal(prompt.status, 2);
+  assert.match(prompt.stderr, /^error: run needs a project: --project <id or path>\n/);
+  // tools --help is the usage, not the JSON catalogue.
+  assert.doesNotMatch(run(workspaceCli, ["tools", "--help"]).stdout, /^[[{]/);
+});
+
+test("an unknown command is named with the command list, exit 2, before any config load", () => {
+  for (const env of [{ DUSKFLEET_CONFIG: path.join(tmpdir(), "duskfleet-no-such-config") }, {}]) {
+    const r = run(workspaceCli, ["bogus"], env);
+    assert.equal(r.status, 2, r.stderr);
+    assert.equal(r.stdout, "");
+    assert.match(r.stderr, /^unknown command: bogus\ncommands: init, agents, .*doctor\n/);
+    assert.doesNotMatch(r.stderr, /Config file not found/);
+  }
+});
+
+test("a missing required argument is named with that command's usage, exit 2, before any config load", () => {
+  const env = { DUSKFLEET_CONFIG: path.join(tmpdir(), "duskfleet-no-such-config") };
+  const cases = [
+    [["run", "--project", "demo"], /^error: run needs a prompt after --: /, "run"],
+    [["run", "--project", "demo", "--"], /^error: run needs a prompt after --: /, "run"],
+    [["run", "--", "hello"], /^error: run needs a project: /, "run"],
+    [["run-info"], /^error: run-info needs a run id\n/, "run-info"],
+    [["schedules", "run-now"], /^error: schedules run-now needs a schedule id or name\n/, "schedules"],
+    [["agents", "create"], /^error: agents create needs an agent id: /, "agents"],
+    [["agents", "nope"], /^error: unknown agents subcommand: nope\n/, "agents"],
+    [["budgets", "set", "global"], /^error: budgets set needs --amount <usd>\n/, "budgets"],
+    [["runs", "--status", "done"], /^error: unknown status "done": one of /, "runs"],
+    [["mcp", "nope"], /^error: unknown mcp subcommand: nope\n/, "mcp"],
+  ];
+  for (const [args, first, command] of cases) {
+    const r = run(workspaceCli, args, env);
+    assert.equal(r.status, 2, `${args.join(" ")}: ${r.stderr}`);
+    assert.match(r.stderr, first, args.join(" "));
+    assert.match(r.stderr, new RegExp(`\\n\\nUsage:\\n  duskfleet ${command}`), args.join(" "));
+    assert.doesNotMatch(r.stderr, /Config file not found/, args.join(" "));
+  }
+});
+
+test("a command that finds no config ends with the init hint; other errors do not", () => {
+  const missing = run(workspaceCli, ["doctor"], { DUSKFLEET_CONFIG: path.join(tmpdir(), "duskfleet-no-such-config") });
+  assert.equal(missing.status, 1);
+  assert.match(missing.stderr, /error: Config file not found: .*\nFirst time here\? Run: npx duskfleet init\n$/);
+
+  // The other no-config case (no DUSKFLEET_CONFIG, nothing found walking up, no user-level
+  // duskfleet.yaml yet) throws the same class; the bins live inside this repository, so check the
+  // lookup in process from a temp dir.
+  const saved = { config: process.env["DUSKFLEET_CONFIG"], xdg: process.env["XDG_CONFIG_HOME"] };
+  delete process.env["DUSKFLEET_CONFIG"];
+  const outside = mkdtempSync(path.join(tmpdir(), "duskfleet-no-repo-"));
+  process.env["XDG_CONFIG_HOME"] = path.join(outside, "xdg-config");
+  try {
+    const configDir = resolveConfigDir(outside);
+    assert.equal(configDir, path.join(outside, "xdg-config", "duskfleet"));
+    assert.throws(
+      () => loadConfig(configDir),
+      (err) => err instanceof ConfigNotFoundError && /Config file not found/.test(err.message),
+    );
+  } finally {
+    if (saved.config !== undefined) process.env["DUSKFLEET_CONFIG"] = saved.config;
+    if (saved.xdg !== undefined) process.env["XDG_CONFIG_HOME"] = saved.xdg;
+    else delete process.env["XDG_CONFIG_HOME"];
+    rmSync(outside, { recursive: true, force: true });
+  }
+
+  // Not every error is a missing config: an invalid one gets no hint.
+  const root = mkdtempSync(path.join(tmpdir(), "duskfleet-bad-config-"));
+  try {
+    writeFileSync(path.join(root, "duskfleet.yaml"), "max_concurrent_runs: -1\n");
+    const bad = run(workspaceCli, ["doctor"], { DUSKFLEET_CONFIG: root });
+    assert.equal(bad.status, 1);
+    assert.doesNotMatch(bad.stderr, /duskfleet init/);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("--version and -v print the package's own version, need no config, exit 0 (both bins)", () => {
+  const ownVersion = (dir) => JSON.parse(readFileSync(path.join(dir, "..", "package.json"), "utf8")).version;
+  const published = JSON.parse(readFileSync(path.join(bundleDir, "..", "package.json"), "utf8")).version;
+  const workspaceDist = path.dirname(workspaceCli);
+  assert.equal(ownVersion(workspaceDist), published, "@duskfleet/mcp and duskfleet carry the same version");
+  for (const dir of [workspaceDist, bundleDir]) {
+    for (const bin of ["cli.js", "index.js"]) {
+      for (const flag of ["--version", "-v"]) {
+        const r = run(path.join(dir, bin), [flag], {
+          DUSKFLEET_CONFIG: path.join(tmpdir(), "duskfleet-no-such-config"),
+        });
+        assert.equal(r.status, 0, r.stderr);
+        assert.equal(r.stdout, `${published}\n`, `${dir}/${bin} ${flag}`);
+      }
+    }
+  }
 });
 
 test("the duskfleet bundle carries core, imports no @duskfleet/core and ships no maps or declarations", () => {
@@ -96,16 +212,26 @@ test("the bundled CLI runs: --help without config, doctor on a config with the f
 });
 
 /** A minimal two-package workspace with a copy of scripts/check-pack.mjs, so the check runs on it. */
-function packWorkspace(cliVersion, webVersion) {
+function packWorkspace(cliVersion, webVersion, cliBin = "dist/cli.js") {
   const root = mkdtempSync(path.join(tmpdir(), "duskfleet-pack-"));
   const write = (rel, content) => {
     mkdirSync(path.dirname(path.join(root, rel)), { recursive: true });
     writeFileSync(path.join(root, rel), content);
   };
   write("package.json", JSON.stringify({ name: "ws", private: true, workspaces: ["packages/duskfleet", "apps/web"] }));
-  write("packages/duskfleet/package.json", JSON.stringify({ name: "duskfleet", version: cliVersion }));
+  write(
+    "packages/duskfleet/package.json",
+    JSON.stringify({
+      name: "duskfleet",
+      version: cliVersion,
+      bin: { duskfleet: cliBin, "duskfleet-mcp": "dist/index.js" },
+    }),
+  );
   for (const f of ["dist/cli.js", "dist/index.js", "dist/core/index.js"]) write(`packages/duskfleet/${f}`, "");
-  write("apps/web/package.json", JSON.stringify({ name: "@duskfleet/web", version: webVersion }));
+  write(
+    "apps/web/package.json",
+    JSON.stringify({ name: "@duskfleet/web", version: webVersion, bin: { "duskfleet-web": "bin/start.mjs" } }),
+  );
   for (const f of ["bin/start.mjs", "next.config.mjs"]) write(`apps/web/${f}`, "");
   write("scripts/check-pack.mjs", readFileSync(path.join(here, "..", "..", "..", "scripts", "check-pack.mjs")));
   return root;
@@ -134,5 +260,24 @@ test("check-pack fails when the two packages carry different versions, passes wh
     } finally {
       rmSync(root, { recursive: true, force: true });
     }
+  }
+});
+
+// npm 11 drops a bin whose path starts with "./" while publishing (seen in the release run of
+// 2026-10-28, "bin[duskfleet] script name dist/cli.js was invalid and removed"), so the gate
+// refuses it before any tag is cut.
+test("check-pack refuses a bin path npm would drop at publish time", () => {
+  const root = packWorkspace("0.1.0", "0.1.0", "./dist/cli.js");
+  try {
+    const r = spawnSync(process.execPath, [path.join(root, "scripts", "check-pack.mjs")], {
+      cwd: root,
+      env: testEnv(),
+      encoding: "utf8",
+    });
+    assert.equal(r.status, 1, r.stdout);
+    assert.match(r.stderr, /1 problem\(s\)/);
+    assert.match(r.stderr, /bin duskfleet -> \.\/dist\/cli\.js: npm drops this entry at publish/);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
   }
 });

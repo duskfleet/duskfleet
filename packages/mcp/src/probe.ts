@@ -12,7 +12,7 @@ import { randomUUID } from "node:crypto";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import type { ClaudeConfig, Executor } from "@duskfleet/core";
+import { type ClaudeConfig, type Executor, FAILURE_FIXES } from "@duskfleet/core";
 
 export const PROBE_MODEL = "haiku";
 export const PROBE_PROMPT = "Reply with the single word: pong";
@@ -41,7 +41,7 @@ const AUTH_PATTERN =
 
 export async function runProbe(
   executor: Executor,
-  claude: Pick<ClaudeConfig, "defaultTimeoutMinutes">,
+  claude: Pick<ClaudeConfig, "defaultTimeoutMinutes"> & Partial<Pick<ClaudeConfig, "envPassthrough">>,
 ): Promise<ProbeReport> {
   const cwd = mkdtempSync(path.join(tmpdir(), "duskfleet-probe-"));
   const timeoutMs = Math.min(PROBE_MAX_TIMEOUT_MS, claude.defaultTimeoutMinutes * 60 * 1000);
@@ -60,6 +60,8 @@ export async function runProbe(
         model: PROBE_MODEL,
         maxBudgetUsd: PROBE_MAX_BUDGET_USD,
         timeoutMs,
+        // The same environment as every run: the global passthrough (no agent here).
+        ...(claude.envPassthrough?.length ? { envPassthrough: claude.envPassthrough } : {}),
       },
       (event) => {
         if (event.type === "grace_kill") lingered = true;
@@ -143,7 +145,7 @@ export function probeAdvice(
   }
   if (outcome === "failed") {
     if (error && AUTH_PATTERN.test(error)) {
-      return 'Claude Code is not authenticated: run "claude" interactively and log in (or check ANTHROPIC_API_KEY), then probe again';
+      return `${FAILURE_FIXES.auth_required}, then probe again`;
     }
     return "the probe run failed (see probe.error); scheduled runs would likely fail the same way";
   }

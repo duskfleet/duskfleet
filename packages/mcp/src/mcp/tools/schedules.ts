@@ -162,7 +162,9 @@ export function registerScheduleTools(server: McpServer, ctx: ToolContext): void
       title: "Create schedule",
       description:
         "Create a cron schedule that runs an agent unattended. Stored in the Duskfleet database and picked up on the next tick " +
-        "(≤ tick_seconds). Fails on an unknown agent/project, an invalid cron or time zone, or a duplicate name.",
+        "(≤ tick_seconds). One schedule per agent: fails when the agent already has a schedule (edit that one with update_schedule, " +
+        "or delete it first; a second prompt for the same agent is a second agent or a run_agent call). " +
+        "Also fails on an unknown agent/project, an invalid cron or time zone, or a duplicate name.",
       inputSchema: {
         name: z.string().min(1).describe("Unique, human name, e.g. 'app main hourly'"),
         ...scheduleFields,
@@ -200,7 +202,8 @@ export function registerScheduleTools(server: McpServer, ctx: ToolContext): void
     {
       title: "Update schedule",
       description:
-        "Change fields of a schedule; omitted fields keep their value. enabled: false pauses it (next_run_at cleared), true resumes from now.",
+        "Change fields of a schedule; omitted fields keep their value. enabled: false pauses it (next_run_at cleared), true resumes from now. " +
+        "One schedule per agent: changing agent_id to an agent that already has a schedule fails.",
       inputSchema: {
         id: z.string().min(1).describe("Schedule id from list_schedules"),
         name: z.string().min(1).optional().describe("New human name"),

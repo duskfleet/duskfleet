@@ -4,9 +4,9 @@
 # Where runtime data lives (SQLite database and per-run logs). Git-ignored.
 data_dir: ../data
 
-# Where agents created at runtime (create_agent over MCP, or by hand) are stored.
-# Agents in config/agents are the versioned builtins; a user agent with the same id
-# overrides the builtin. Default: <data_dir>/agents (git-ignored).
+# Where agents created at runtime (`agents create` on the CLI, create_agent over MCP,
+# or by hand) are stored. Agent files a checkout commits go in config/agents (builtins);
+# a user agent with the same id overrides the builtin. Default: <data_dir>/agents (git-ignored).
 user_agents_dir: null
 
 # Private project registry, merged over config/projects.yaml (same id = private wins).
@@ -20,8 +20,9 @@ user_projects_file: null
 allowed_project_roots: []
 #  - ~/Documents/Projects
 
-# Agent used by run_agent when no agent_id is supplied. Leave unset (null) to make
-# agent_id mandatory: every agent here is bound to a project, so there is no sensible default.
+# Agent used by run_agent (and `run` without --agent) when none is supplied. null makes
+# the agent mandatory: Duskfleet ships no starter agent, so there is no sensible default.
+# Create your first one with `npm run cli -- agents create <id> --model haiku -- "<prompt>"`.
 default_agent: null
 
 # Maximum number of Claude Code processes running at the same time.
@@ -44,6 +45,7 @@ scheduler:
   # Anchored at the start: a run that did work and mentions "nothing to do" later is not idle.
   # An invalid pattern is ignored with a warning (the default applies).
   noop_pattern: '/^\s*(nothing to do|no .* in ready)/i'
+  auto_pause: true         # on/off switch of auto-pause; off keeps auto_pause_after, resumes nothing
   # Pause a schedule after this many consecutive runs that completed with 0 tool calls or
   # ended needs review; the reason shows on /schedules until it is resumed. 0 = never.
   auto_pause_after: 5
@@ -52,7 +54,7 @@ scheduler:
   # cron occurrence, and dropped on pause. Never a queue. false = the tick is just skipped_busy.
   defer_busy: true
   # Command gates (gate.command on a schedule) run `/bin/sh -c <command>` in the project
-  # directory with the full environment of the DuskFleet process, outside every Claude Code
+  # directory with the runs' environment (claude.env_passthrough below), outside every Claude Code
   # allow-list, on every tick. Off by default: create/update refuse them (MCP, CLI, dashboard)
   # and a stored one makes its tick record `error` instead of running. Agent gates are not affected.
   allow_command_gates: false
@@ -82,3 +84,10 @@ claude:
   # Default per-run limits, overridable per agent.
   default_timeout_minutes: 30
   default_max_budget_usd: 5
+  # Runs and command gates get an allow-list of this process's environment, not all of it:
+  # PATH, HOME, USER, LOGNAME, SHELL, LANG, LC_*, TMPDIR, TERM, TZ, ANTHROPIC_*, CLAUDE_*,
+  # NODE_*, npm_config_*, XDG_* (plus the Windows basics). Anything else, such as GITHUB_TOKEN
+  # or AWS_*, is dropped unless named here (every run) or in an agent's env_passthrough
+  # (that agent's runs); the lists are merged. Exact names or PREFIX_*.
+  env_passthrough: []
+  #  - GH_TOKEN               # agents that use `gh`

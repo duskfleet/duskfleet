@@ -88,6 +88,11 @@ export interface AgentDefinition {
    * stopped; its own max_budget_usd bounds the overshoot. Unset = no cap.
    */
   maxDailyCostUsd?: number;
+  /**
+   * Environment variables (exact names or `PREFIX_*`) this agent's runs get on top of the default
+   * allow-list and `claude.env_passthrough` (e.g. `GH_TOKEN` for an agent that uses `gh`).
+   */
+  envPassthrough?: string[];
   /** Markdown body of the agent file. Sent via --append-system-prompt when non-empty. */
   systemPrompt: string;
   /** Absolute path of the file this agent was loaded from. */
@@ -113,6 +118,11 @@ export interface ClaudeConfig {
   allowBypassPermissions: boolean;
   defaultTimeoutMinutes: number;
   defaultMaxBudgetUsd: number;
+  /**
+   * Environment variables (exact names or `PREFIX_*`) passed to every run and command gate on top
+   * of the default allow-list (`DEFAULT_ENV_ALLOW`). Everything else is dropped. Default none.
+   */
+  envPassthrough: string[];
 }
 
 export interface SchedulerConfig {
@@ -124,8 +134,13 @@ export interface SchedulerConfig {
   /** Default no-op marker for idle-cost stats: `/regex/flags` or a plain case-insensitive regex. */
   noopPattern: string;
   /**
+   * On/off switch of auto-pause (re-read every tick). Off skips the check and keeps
+   * `autoPauseAfter`; it never resumes a schedule paused earlier. Default true.
+   */
+  autoPause: boolean;
+  /**
    * Pause a schedule after this many consecutive runs that completed with 0 tool calls or
-   * ended needs review (checked before each scheduled fire). 0 = never.
+   * ended needs review (checked before each scheduled fire, when `autoPause` is on). 0 = never.
    */
   autoPauseAfter: number;
   /**
@@ -142,10 +157,14 @@ export interface SchedulerConfig {
   deferBusy: boolean;
 }
 
+/** Where the data directory came from: DUSKFLEET_DATA, duskfleet.yaml (data_dir or ../data), or the user-level default. */
+export type DataSource = "env" | "config" | "user";
+
 export interface DuskFleetConfig {
   /** Directory containing duskfleet.yaml. */
   configDir: string;
   dataDir: string;
+  dataSource: DataSource;
   /** Writable directory for agents created at runtime. Defaults to <dataDir>/agents. */
   userAgentsDir: string;
   /** Private project registry merged over config/projects.yaml. Defaults to <dataDir>/projects.yaml. */

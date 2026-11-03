@@ -1,0 +1,14 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Documentation
+    url: https://github.com/duskfleet/duskfleet#documentation
+    about: How Duskfleet works, configuration, agents, schedules, CLI and MCP tools.
+  - name: Troubleshooting
+    url: https://github.com/duskfleet/duskfleet/blob/main/docs/troubleshooting.md
+    about: Stuck runs, permission denials, orphaned runs and doctor failures.
+  - name: Contributing
+    url: https://github.com/duskfleet/duskfleet/blob/main/CONTRIBUTING.md
+    about: Set up, rules for pull requests, and good first issues to start with.
+  - name: Security vulnerability
+    url: https://github.com/duskfleet/duskfleet/blob/main/SECURITY.md
+    about: Report security problems privately, never in a public issue.

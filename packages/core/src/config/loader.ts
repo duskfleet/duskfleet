@@ -6,10 +6,18 @@ import { parse as parseYaml } from "yaml";
 import { z } from "zod";
 import { DEFAULT_NOOP_PATTERN, parseNoopPattern } from "../scheduler/idle.js";
 import { logger } from "../util/log.js";
-import { AGENT_ID_PATTERN, maxConcurrentSchema, maxDailyCostUsdSchema, maxDailyRunsSchema } from "./agent-files.js";
+import {
+  AGENT_ID_PATTERN,
+  envPassthroughSchema,
+  maxConcurrentSchema,
+  maxDailyCostUsdSchema,
+  maxDailyRunsSchema,
+} from "./agent-files.js";
+import { dataDirFromEnv, type LocationContext, userConfigDir, userDataDir } from "./locations.js";
 import {
   type AgentDefinition,
   type AgentSource,
+  type DataSource,
   type DuskFleetConfig,
   EFFORT_LEVELS,
   ON_FAILURE_POLICIES,
@@ -20,21 +28,46 @@ import {
 const log = logger("config");
 
 /**
- * Locates the config directory.
+ * No config to load: no config/duskfleet.yaml above the entry point, or none in the directory
+ * DUSKFLEET_CONFIG names. Callers tell it apart with `instanceof` (the CLI points at `init`).
+ */
+export class ConfigNotFoundError extends Error {
+  override name = "ConfigNotFoundError";
+}
+
+/** Where the config directory came from: DUSKFLEET_CONFIG, a repo-local config/, or the user-level one. */
+export type ConfigSource = "env" | "repo" | "user";
+
+export interface ConfigLocation {
+  configDir: string;
+  source: ConfigSource;
+  /** Every candidate in precedence order, null when it does not apply (what `doctor` prints). */
+  lookup: { env: string | null; repo: string | null; user: string };
+}
+
+/**
+ * Locates the config directory, first match wins:
  *   1. DUSKFLEET_CONFIG env var (path to a directory containing duskfleet.yaml)
  *   2. <repo root>/config, where the repo root is the closest ancestor of
  *      `startFrom` (a file URL or a path) that contains config/duskfleet.yaml
+ *   3. the user-level config directory (`userConfigDir`), whether or not it exists yet:
+ *      `loadConfig` then throws ConfigNotFoundError until `initUserConfig` has written it.
  */
-export function resolveConfigDir(startFrom: string = process.cwd()): string {
-  const fromEnv = process.env["DUSKFLEET_CONFIG"];
-  if (fromEnv) return expandHome(fromEnv);
+export function locateConfig(startFrom: string = process.cwd(), ctx: LocationContext = {}): ConfigLocation {
+  const env = ctx.env ?? process.env;
+  const fromEnv = env["DUSKFLEET_CONFIG"] ? expandHome(env["DUSKFLEET_CONFIG"]) : null;
   const root = findRepoRoot(startFrom);
-  if (!root) {
-    throw new Error(
-      `Could not find config/duskfleet.yaml walking up from ${startFrom}. Set DUSKFLEET_CONFIG to the config directory.`,
-    );
-  }
-  return path.join(root, "config");
+  const repo = root ? path.join(root, "config") : null;
+  const user = userConfigDir(ctx);
+  const lookup = { env: fromEnv, repo, user };
+  if (fromEnv) return { configDir: fromEnv, source: "env", lookup };
+  if (repo) return { configDir: repo, source: "repo", lookup };
+  return { configDir: user, source: "user", lookup };
+}
+
+/** `locateConfig(...).configDir`. */
+export function resolveConfigDir(startFrom: string = process.cwd()): string {
+  return locateConfig(startFrom).configDir;
 }
 
 /** Walks up from a path or file URL until a directory containing config/duskfleet.yaml is found. */
@@ -56,7 +89,9 @@ export function expandHome(p: string): string {
 }
 
 const globalSchema = z.object({
-  data_dir: z.string().default("../data"),
+  // null = the default: ../data next to a repo-local or DUSKFLEET_CONFIG config, the user-level
+  // data directory next to the user-level config (see dataDirFor).
+  data_dir: z.string().nullable().default(null),
   user_agents_dir: z.string().nullable().default(null),
   user_projects_file: z.string().nullable().default(null),
   allowed_project_roots: z.array(z.string()).default([]),
@@ -75,6 +110,7 @@ const globalSchema = z.object({
       allow_bypass_permissions: z.boolean().default(false),
       default_timeout_minutes: z.number().positive().default(30),
       default_max_budget_usd: z.number().positive().default(5),
+      env_passthrough: envPassthroughSchema.default([]),
     })
     .prefault({}),
   scheduler: z
@@ -99,6 +135,7 @@ const globalSchema = z.object({
             return DEFAULT_NOOP_PATTERN;
           }
         }),
+      auto_pause: z.boolean().default(true),
       auto_pause_after: z.number().int().min(0).default(5),
       allow_command_gates: z.boolean().default(false),
       defer_busy: z.boolean().default(true),
@@ -128,6 +165,7 @@ const agentFrontmatterSchema = z.object({
   isolated: z.boolean().optional(),
   max_daily_runs: maxDailyRunsSchema.optional(),
   max_daily_cost_usd: maxDailyCostUsdSchema.optional(),
+  env_passthrough: envPassthroughSchema.optional(),
 });
 
 const projectsSchema = z.object({
@@ -147,12 +185,12 @@ const projectsSchema = z.object({
 export function loadConfig(configDir: string): DuskFleetConfig {
   const globalPath = path.join(configDir, "duskfleet.yaml");
   if (!existsSync(globalPath)) {
-    throw new Error(`Config file not found: ${globalPath}`);
+    throw new ConfigNotFoundError(`Config file not found: ${globalPath}`);
   }
   const raw = parseYaml(readFileSync(globalPath, "utf8")) ?? {};
   const g = globalSchema.parse(raw);
 
-  const dataDir = path.resolve(configDir, expandHome(g.data_dir));
+  const { dataDir, dataSource } = dataDirFor(configDir, g.data_dir);
   const allowedProjectRoots = g.allowed_project_roots.map((r) => path.resolve(configDir, expandHome(r)));
 
   const userAgentsDir = g.user_agents_dir
@@ -187,6 +225,7 @@ export function loadConfig(configDir: string): DuskFleetConfig {
   return {
     configDir,
     dataDir,
+    dataSource,
     userAgentsDir,
     userProjectsFile,
     allowedProjectRoots,
@@ -201,12 +240,14 @@ export function loadConfig(configDir: string): DuskFleetConfig {
       allowBypassPermissions: g.claude.allow_bypass_permissions,
       defaultTimeoutMinutes: g.claude.default_timeout_minutes,
       defaultMaxBudgetUsd: g.claude.default_max_budget_usd,
+      envPassthrough: g.claude.env_passthrough,
     },
     scheduler: {
       enabled: g.scheduler.enabled,
       tickSeconds: g.scheduler.tick_seconds,
       defaultTimeZone: g.scheduler.default_time_zone,
       noopPattern: g.scheduler.noop_pattern,
+      autoPause: g.scheduler.auto_pause,
       autoPauseAfter: g.scheduler.auto_pause_after,
       allowCommandGates: g.scheduler.allow_command_gates,
       deferBusy: g.scheduler.defer_busy,
@@ -214,6 +255,27 @@ export function loadConfig(configDir: string): DuskFleetConfig {
     agents,
     projects,
   };
+}
+
+/**
+ * The data directory, first match wins: DUSKFLEET_DATA, `data_dir` in duskfleet.yaml (relative to
+ * the config directory), then the default: the user-level data directory when `configDir` is the
+ * user-level config directory, else ../data next to it (a clone's data/).
+ */
+export function dataDirFor(
+  configDir: string,
+  dataDirSetting: string | null,
+  ctx: LocationContext = {},
+): { dataDir: string; dataSource: DataSource } {
+  const fromEnv = dataDirFromEnv(ctx.env);
+  if (fromEnv) return { dataDir: fromEnv, dataSource: "env" };
+  if (dataDirSetting !== null) {
+    return { dataDir: path.resolve(configDir, expandHome(dataDirSetting)), dataSource: "config" };
+  }
+  if (path.resolve(configDir) === path.resolve(userConfigDir(ctx))) {
+    return { dataDir: userDataDir(ctx), dataSource: "user" };
+  }
+  return { dataDir: path.resolve(configDir, "../data"), dataSource: "config" };
 }
 
 /**
@@ -269,6 +331,7 @@ export function loadAgents(agentsDir: string, source: AgentSource = "builtin"): 
     if (fm.isolated !== undefined) agent.isolated = fm.isolated;
     if (fm.max_daily_runs !== undefined) agent.maxDailyRuns = fm.max_daily_runs;
     if (fm.max_daily_cost_usd !== undefined) agent.maxDailyCostUsd = fm.max_daily_cost_usd;
+    if (fm.env_passthrough !== undefined) agent.envPassthrough = fm.env_passthrough;
     agents.set(id, agent);
   }
   return agents;

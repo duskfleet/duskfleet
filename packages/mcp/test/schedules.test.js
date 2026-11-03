@@ -4,6 +4,7 @@
  * processes cannot both hold the lease.
  */
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -33,6 +34,7 @@ import { testEnv } from "./helpers.js"; // drops an inherited CLAUDE_BIN before 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const fakeBinary = path.join(here, "fake-claude.js");
 const serverEntry = path.join(here, "..", "dist", "index.js");
+const cliEntry = path.join(here, "..", "dist", "cli.js");
 
 /**
  * The test config; command gates are on unless `allowCommandGates` is false (then the key is absent: the default).
@@ -41,7 +43,7 @@ const serverEntry = path.join(here, "..", "dist", "index.js");
  */
 function globalYaml({ allowCommandGates = true, deferBusy = false } = {}) {
   const gates = allowCommandGates ? "  allow_command_gates: true\n" : "";
-  return `data_dir: ../data\ndefault_agent: coder\nscheduler:\n  enabled: true\n  tick_seconds: 5\n${gates}  defer_busy: ${deferBusy}\nclaude:\n  binary: "${fakeBinary}"\n  default_timeout_minutes: 0.05\n`;
+  return `data_dir: ../data\ndefault_agent: coder\nscheduler:\n  enabled: true\n  tick_seconds: 5\n${gates}  defer_busy: ${deferBusy}\nclaude:\n  binary: "${fakeBinary}"\n  default_timeout_minutes: 0.05\n  env_passthrough: ["FAKE_CLAUDE_*"]\n`;
 }
 
 function makeRoot(options = {}) {
@@ -53,6 +55,9 @@ function makeRoot(options = {}) {
   writeFileSync(path.join(configDir, "duskfleet.yaml"), globalYaml(options));
   writeFileSync(path.join(configDir, "projects.yaml"), `projects:\n  demo:\n    path: ${project}\n`);
   writeFileSync(path.join(configDir, "agents", "coder.md"), `---\nproject: demo\n---\nBe brief.\n`);
+  // One schedule per agent: tests that need several schedules on demo use these too.
+  for (const id of ["coder2", "coder3"])
+    writeFileSync(path.join(configDir, "agents", `${id}.md`), `---\nproject: demo\n---\nBe brief.\n`);
   writeFileSync(path.join(configDir, "agents", "free.md"), `---\n---\nUnbound.\n`);
   writeFileSync(
     path.join(configDir, "agents", "resumer.md"),
@@ -171,6 +176,28 @@ test("schedules over MCP: create, list, update, run now, delete; validation erro
       }),
       /already exists/,
     );
+    // One schedule per agent: a second one for coder is refused, whatever its name.
+    fails(
+      await client.callTool({
+        name: "create_schedule",
+        arguments: { name: "coder nightly", agent_id: "coder", prompt: "other", cron: "0 2 * * *" },
+      }),
+      new RegExp(
+        `agent "coder" already has the schedule "coder hourly" \\(${created.schedule.id}\\); one schedule per agent, edit it or delete it first`,
+      ),
+    );
+    // Moving another agent's schedule onto coder is refused too.
+    const second = ok(
+      await client.callTool({
+        name: "create_schedule",
+        arguments: { name: "coder2 hourly", agent_id: "coder2", prompt: "ok", cron: "0 * * * *" },
+      }),
+    );
+    fails(
+      await client.callTool({ name: "update_schedule", arguments: { id: second.schedule.id, agent_id: "coder" } }),
+      /agent "coder" already has the schedule "coder hourly".*one schedule per agent/,
+    );
+    ok(await client.callTool({ name: "delete_schedule", arguments: { id: second.schedule.id } }));
     fails(
       await client.callTool({
         name: "create_schedule",
@@ -330,6 +357,67 @@ test("scheduleProjectId: the schedule's project, else its agent's, else null", (
   assert.equal(scheduleProjectId({ projectId: "demo" }, undefined), "demo", "deleted agent, schedule project");
 });
 
+test("one schedule per agent: create and agent changes refused; older duplicates still open, edit, and doctor lists them", async () => {
+  const { root, configDir } = makeRoot();
+  const t = makeScheduler(configDir);
+  try {
+    const first = t.scheduler.create({ name: "coder hourly", agentId: "coder", prompt: "ok", cron: "0 * * * *" });
+    assert.throws(
+      () => t.scheduler.create({ name: "coder nightly", agentId: "coder", prompt: "x", cron: "0 2 * * *" }),
+      new RegExp(
+        `^Error: agent "coder" already has the schedule "coder hourly" \\(${first.id}\\); one schedule per agent, edit it or delete it first$`,
+      ),
+    );
+    assert.equal(t.scheduler.update(first.id, { cron: "30 * * * *", prompt: "again" }).cron, "30 * * * *");
+    const other = t.scheduler.create({ name: "coder2 hourly", agentId: "coder2", prompt: "ok", cron: "0 * * * *" });
+    assert.throws(() => t.scheduler.update(other.id, { agentId: "coder" }), /agent "coder" already has the schedule/);
+    assert.equal(t.scheduler.update(other.id, { agentId: "coder3" }).agentId, "coder3", "a free agent is fine");
+    assert.deepEqual(t.scheduler.duplicateAgents(), []);
+
+    // A database from before the rule: the repository writes a duplicate directly.
+    const dup = t.repo.insert({
+      name: "coder manual",
+      agentId: "coder",
+      prompt: "old",
+      cron: "0 3 1 1 *",
+      timeZone: "Europe/London",
+      nextRunAt: null,
+    });
+    assert.equal(t.scheduler.update(dup.id, { enabled: false }).enabled, false, "a duplicate can still be paused");
+    assert.equal(t.scheduler.update(dup.id, { prompt: "older" }).prompt, "older", "and edited");
+    const dups = t.scheduler.duplicateAgents();
+    assert.equal(dups.length, 1);
+    assert.equal(dups[0].agentId, "coder");
+    assert.deepEqual(
+      dups[0].schedules.map((s) => s.id),
+      [first.id, dup.id],
+    );
+  } finally {
+    t.scheduler.stop();
+    t.runs.shutdown();
+    t.db.close();
+  }
+  try {
+    // The database still opens, and doctor reports the duplicate as a warning.
+    const doctor = spawnSync(process.execPath, [cliEntry, "doctor"], {
+      env: testEnv({ DUSKFLEET_CONFIG: configDir, DUSKFLEET_LOG_LEVEL: "warn" }),
+      encoding: "utf8",
+    });
+    assert.equal(doctor.status, 0, doctor.stderr);
+    const report = JSON.parse(doctor.stdout);
+    const [entry, ...more] = report.scheduler.duplicateSchedules;
+    assert.equal(more.length, 0);
+    assert.equal(entry.agentId, "coder");
+    assert.deepEqual(
+      entry.schedules.map((s) => s.name),
+      ["coder hourly", "coder manual"],
+    );
+    assert.match(entry.warning, /agent "coder" has 2 schedules; one schedule per agent, delete all but one/);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("tick fires due schedules, honours the kill switch, and only the lease holder fires", async () => {
   const { root, configDir, project } = makeRoot();
   const config = loadConfig(configDir);
@@ -347,12 +435,15 @@ test("tick fires due schedules, honours the kill switch, and only the lease hold
     // make it due now
     repo.update(s.id, { nextRunAt: new Date(Date.now() - 1000).toISOString() });
 
+    // compare with the clock before the tick: next is derived from the tick's own now, and a
+    // Date.now() read after it can already be past that minute boundary (flaked on CI)
+    const beforeTick = Date.now();
     await a.tick();
     assert.equal(a.status().leaseHeldByThisProcess, true);
     let after = repo.get(s.id);
     assert.equal(after.lastOutcome, "started");
     assert.ok(after.lastRunId);
-    assert.ok(new Date(after.nextRunAt).getTime() > Date.now(), "advanced to the next minute");
+    assert.ok(new Date(after.nextRunAt).getTime() > beforeTick, "advanced to the next minute");
     assert.equal(runs.getRun(after.lastRunId).projectPath, project);
 
     // B cannot take the lease while A holds it
@@ -724,12 +815,22 @@ test("`duskfleet serve` stays alive past its first tick and holds the lease unti
   let exited = null;
   child.on("exit", (code) => (exited = code));
   try {
-    // long enough for bootstrap + the first tick to finish (it used to exit with 0 right after it)
-    await new Promise((r) => setTimeout(r, 2500));
+    // Wait for the start line instead of a fixed sleep: under a loaded suite the bootstrap alone
+    // can take longer than 2.5 s. Then give the first tick time to finish (serve used to exit
+    // with 0 right after it).
+    const deadline = Date.now() + 20_000;
+    while (exited === null && !/scheduler ticking every/.test(stderr) && Date.now() < deadline) {
+      await new Promise((r) => setTimeout(r, 100));
+    }
+    await new Promise((r) => setTimeout(r, 1500));
     assert.equal(exited, null, `serve exited early with ${exited}: ${stderr}`);
     assert.match(stderr, /scheduler ticking every/);
     const db = openDatabase(loadConfig(configDir).dataDir);
-    const lease = new ScheduleRepository(db).leaseInfo();
+    let lease = new ScheduleRepository(db).leaseInfo();
+    while (!lease && Date.now() < deadline) {
+      await new Promise((r) => setTimeout(r, 100));
+      lease = new ScheduleRepository(db).leaseInfo();
+    }
     db.close();
     assert.ok(lease && /^serve@/.test(lease.holder), `lease held by serve, got ${JSON.stringify(lease)}`);
     assert.ok(new Date(lease.expiresAt).getTime() > Date.now(), "lease is live");
@@ -992,6 +1093,37 @@ test("auto-pause: three real empty runs (empty_run) pause as 'completed with 0 t
   }
 });
 
+test("auto-pause switch: scheduler.auto_pause false fires a streak of needs-review runs; true (re-read next tick) pauses it", async () => {
+  const { root, configDir } = makeRoot();
+  const yaml = (on) =>
+    `data_dir: ../data\ndefault_agent: coder\nscheduler:\n  auto_pause: ${on}\n  auto_pause_after: 3\nclaude:\n  binary: "${fakeBinary}"\n  default_timeout_minutes: 0.05\n`;
+  writeFileSync(path.join(configDir, "duskfleet.yaml"), yaml(false));
+  const t = makeScheduler(configDir);
+  try {
+    assert.equal(t.config.scheduler.autoPause, false);
+    assert.equal(t.config.scheduler.autoPauseAfter, 3, "the threshold is kept while off");
+    const s = t.scheduler.create({ name: "denied", agentId: "coder", prompt: "denied", cron: "* * * * *" });
+    for (let i = 0; i < 5; i++) {
+      const run = await t.fireAndWait(s.id);
+      assert.deepEqual(run.reviewReasons, ["permission_denied"]);
+      assert.equal(t.repo.get(s.id).lastOutcome, "started");
+    }
+    assert.equal(t.repo.get(s.id).enabled, true);
+    assert.equal(t.runs.listRuns({}).length, 5);
+
+    // Switched on in the file: the next tick reads it and pauses as before.
+    writeFileSync(path.join(configDir, "duskfleet.yaml"), yaml(true));
+    t.due(s.id);
+    await t.tickAll();
+    const paused = t.repo.get(s.id);
+    assert.equal(paused.enabled, false);
+    assert.equal(paused.lastOutcome, "auto_paused");
+    assert.equal(t.runs.listRuns({}).length, 5, "no sixth run");
+  } finally {
+    await t.close(root);
+  }
+});
+
 test("idle cost: 7-day ticks, fires, no-op runs by marker and what they cost, per schedule", async () => {
   const { root, configDir } = makeRoot();
   const t = makeScheduler(configDir);
@@ -1126,7 +1258,12 @@ test("command gates are opt-in: refused over MCP under the default config, accep
     ok(
       await client.callTool({
         name: "create_schedule",
-        arguments: { ...base, name: "agent gated", gate: { agent: { agent_id: "gatekeeper", prompt: "x" } } },
+        arguments: {
+          ...base,
+          agent_id: "coder2",
+          name: "agent gated",
+          gate: { agent: { agent_id: "gatekeeper", prompt: "x" } },
+        },
       }),
     );
     fails(
@@ -1143,7 +1280,7 @@ test("command gates are opt-in: refused over MCP under the default config, accep
     const created = ok(
       await client.callTool({
         name: "create_schedule",
-        arguments: { ...base, name: "cmd", gate: { command: "true" } },
+        arguments: { ...base, agent_id: "coder3", name: "cmd", gate: { command: "true" } },
       }),
     );
     assert.equal(created.schedule.gate.command, "true");
@@ -1208,7 +1345,7 @@ test("command gates fail closed: switched off while config/ fails to load, the s
       cron: "* * * * *",
       gate: { command: `touch "${marker}"; exit 1` },
     });
-    const plain = t.scheduler.create({ name: "plain", agentId: "coder", prompt: "ok", cron: "0 * * * *" });
+    const plain = t.scheduler.create({ name: "plain", agentId: "coder2", prompt: "ok", cron: "0 * * * *" });
     // The switch goes off, but a broken agent file makes every reload fail: the config in memory
     // still says allow_command_gates: true.
     writeFileSync(path.join(configDir, "duskfleet.yaml"), globalYaml({ allowCommandGates: false }));
@@ -1225,7 +1362,7 @@ test("command gates fail closed: switched off while config/ fails to load, the s
       () =>
         t.scheduler.create({
           name: "new",
-          agentId: "coder",
+          agentId: "coder3",
           prompt: "ok",
           cron: "0 * * * *",
           gate: { command: "true" },

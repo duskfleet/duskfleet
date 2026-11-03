@@ -20,8 +20,20 @@ entry that does the job, link it; write a persona only when nothing exists.
 
 | Where | Who writes it | Purpose |
 |---|---|---|
-| `config/agents/<id>.md` | you, in Git | **builtin** agents committed with the repo |
-| `data/agents/<id>.md` (`user_agents_dir`) | `create_agent` over MCP, or by hand | **user** agents, git-ignored. Same id as a builtin = override |
+| `config/agents/<id>.md` | you, in Git | **builtin** agents: where a checkout *may* keep agents it commits |
+| `data/agents/<id>.md` (`user_agents_dir`) | `agents create` on the CLI, `create_agent` over MCP, or by hand | **user** agents, git-ignored. Same id as a builtin = override |
+
+Duskfleet ships no starter or default agent (`default_agent: null`): your first agent is one you
+create. From the CLI, `agents create` writes an own agent with safe defaults (a $0.50 budget,
+`dontAsk`, file tools plus the common test commands, 10 minutes):
+
+```bash
+npm run cli -- agents create fixer --model haiku -- "You fix the failing test in this project. Run the tests, read the failure, change the minimum code, run them again. No git, no installs."
+```
+
+It goes through the same validate, write, reload and roll-back path as `create_agent` and refuses
+an existing id unless `--force` ([CLI](cli.md#agents-create) lists the flags). Use `create_agent`
+over MCP for a link agent.
 
 Both are re-read on every run and every `list_agents` call, so edits apply without restarting
 anything. Code never writes into `config/agents`. Because a user agent may later be committed,
@@ -31,7 +43,8 @@ field, and store `add_dirs` inside your home directory as `~/...`
 
 ## Builtin agents
 
-General-purpose patterns shipped in `config/agents/`, not bound to any project. Point them at a
+Two specialised patterns sit in this repository's `config/agents/`, not bound to any project.
+They are not a starter agent and no run uses them unless you name them. Point them at a
 project with `run_agent` or a schedule; to change their envelope (model, allow-list, budget),
 copy the file into `data/agents/` with the same id and edit the copy.
 
@@ -59,6 +72,7 @@ permission_mode: acceptEdits      # acceptEdits | dontAsk | auto | manual  (plan
 # isolated: true                  # never edits the project checkout: ignores max_concurrent_per_project
 # max_daily_runs: 24              # runs of this agent per UTC day (whole number >= 1); default no cap
 # max_daily_cost_usd: 10          # spend of this agent per UTC day; default no cap
+# env_passthrough: ["GH_TOKEN"]   # variables its runs get beyond the default allow-list (see "Environment of a run")
 timeout_minutes: 30
 max_budget_usd: 5
 # wrap_up_reserve_usd: 0.5     # part of max_budget_usd kept for the wrap-up pass; default 10%, min $0.50, 0 = off
@@ -222,6 +236,27 @@ Verified against Claude Code 2.1.295 on 2026-10-08 with real runs:
 `permission_mode: acceptEdits` does not allow Bash: an agent that must run tests needs an
 `allowed_tools` entry such as `Bash(npm test:*)`.
 
+## Environment of a run
+
+A run does not inherit the whole environment of the process running Duskfleet: only an
+allow-list reaches it (`PATH`, `HOME`, `USER`, `LOGNAME`, `SHELL`, `LANG`, `LC_*`, `TMPDIR`,
+`TERM`, `TZ`, `ANTHROPIC_*`, `CLAUDE_*`, `NODE_*`, `npm_config_*`, `XDG_*`, plus the Windows
+basics; the full list is in [configuration](configuration.md#what-reaches-a-run)). A token such
+as `GITHUB_TOKEN` or `NPM_TOKEN` in the shell that started the server is invisible to the agent
+unless it is passed on by name:
+
+```markdown
+---
+id: pr-fixer
+allowed_tools: ["Bash(gh pr:*)"]
+env_passthrough: ["GH_TOKEN"]     # exact names or PREFIX_*
+---
+```
+
+`claude.env_passthrough` in `config/duskfleet.yaml` does the same for every agent; the two lists
+are merged. `GH_TOKEN` is the one most agents need (for `gh`). Anything passed is readable by the
+agent, so list only what it may use.
+
 ## Grouping agents by project
 
 `project: <id>` on an agent binds it to an entry of `projects.yaml`. Bound agents are grouped
@@ -268,6 +303,9 @@ Two things to get right with a link:
   names interactive sessions show. The list is an allow-list: with the wrong prefix the
   agent is denied the tools that exist. Listing both prefixes keeps the file usable from
   both.
+
+A worked example of links and own agents together: [How Duskfleet builds itself](self-hosting-development.md)
+describes the agents that develop this repository, with sanitised copies of their files.
 
 ## MCP servers inside runs
 
