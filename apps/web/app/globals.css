@@ -4740,13 +4740,6 @@ details.desc ul {
 .reason-rows .reason-go {
   color: var(--text);
 }
-/* /costs: split switch on the right of the toolbar, legend beside the panel title */
-.trend-toolbar .split {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  margin-left: auto;
-}
 /* three tiles: three equal columns, then the two-column step of every .stats grid
    with the odd last tile spanning the row, so no cell is left empty */
 .cost-kpis {
@@ -4761,58 +4754,232 @@ details.desc ul {
     grid-column: 1 / -1;
   }
 }
-.cost-panel .panel-head {
-  display: flex;
-  justify-content: space-between;
-  align-items: baseline;
-  flex-wrap: wrap;
-  gap: 4px 20px;
-}
-.cost-panel .panel-head .chart-legend {
-  margin: 0;
-}
 .cost-panel .panel-foot {
   margin: 12px 0 0;
   color: var(--muted);
   font-size: 14px;
   line-height: 21px;
 }
-.cost-models {
-  max-width: none;
-  margin-top: 20px;
-}
-.cost-models .table tfoot td {
+.cost-panel .panel-foot code {
+  font-family: var(--font-mono);
   color: var(--text);
 }
-.cost-models .share {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-}
-.cost-models .share-bar {
-  flex: 1;
-  min-width: 80px;
-  max-width: 300px;
-  height: 8px;
-  border-radius: 4px;
-  background: var(--border);
-  overflow: hidden;
-}
-.cost-models .share-bar span {
+/* the insight line links to the top spender's runs */
+.cost-panel a.trend-callout {
   display: block;
-  height: 100%;
+  width: fit-content;
+}
+.cost-panel a.trend-callout:hover {
+  text-decoration: underline;
+  text-decoration-color: var(--border-strong);
+}
+/* DS-27: chart beside the ranked table, the table a little wider than /trends' */
+.cost-body {
+  grid-template-columns: minmax(0, 1fr) 420px;
+}
+.cost-chart {
+  min-width: 0;
+}
+.bar-chart .chart-ends.bar-ends {
+  min-width: 150px;
+}
+.chart-ends .end-name {
+  position: static;
+  transform: none;
+}
+/* "others": the unticked rows folded into one outlined segment */
+.chart-bar.tone-others {
+  fill: var(--panel-2);
+  stroke: var(--border-strong);
+}
+/* hover or focus on a row (or a segment): its segments turn primary, the rest dim */
+.cost-panel.has-hl .chart-bar {
+  opacity: 0.35;
+}
+.cost-panel.has-hl .chart-bar.is-hl {
+  opacity: 1;
+  fill: var(--text);
+}
+.cost-panel.has-hl .chart-ends span.is-hl {
+  font-weight: 600;
+}
+.cost-table {
+  background: var(--panel-2);
+  border-radius: 8px;
+  padding: 6px 8px 4px;
+  font-size: 14px;
+  line-height: 21px;
+  min-width: 0;
+}
+.ct-tools {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+.ct-tools .at-find {
+  flex: 1;
+  min-width: 0;
+}
+.ct-split {
+  display: inline-flex;
+  padding: 2px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--panel);
+  font-size: 13px;
+  line-height: 20px;
+}
+.ct-split a {
+  color: var(--muted);
+  padding: 0 8px;
+  border: 1px solid transparent;
   border-radius: 4px;
+  text-align: center;
+}
+.ct-split a:hover {
+  color: var(--text);
+  text-decoration: none;
+}
+.ct-split a.on {
+  color: var(--text);
+  background: var(--warn-tint);
+  border-color: var(--warn-border);
+}
+.ct-head,
+.ct-rows li,
+.ct-total {
+  display: grid;
+  grid-template-columns: 13px 10px minmax(0, 1fr) 54px 42px 36px 52px;
+  align-items: center;
+  column-gap: 6px;
+  padding: 0 2px;
+}
+.ct-head {
+  margin-top: 6px;
+  padding-bottom: 2px;
+  border-bottom: 1px solid var(--border);
+  color: var(--muted);
+  font-size: 12px;
+}
+.ct-rows {
+  list-style: none;
+  margin: 0;
+  padding: 2px 0;
+  max-height: 210px;
+  overflow-y: auto;
+}
+.ct-rows li {
+  color: var(--muted);
+  border-radius: 4px;
+}
+.ct-rows li:hover,
+.ct-rows li:focus-within {
+  background: var(--panel);
+}
+.ct-rows .at-box:focus-visible {
+  outline: 1.5px solid var(--text);
+  outline-offset: 1px;
+}
+.ct-swatch {
+  width: 10px;
+  height: 10px;
+  border-radius: 2px;
+}
+.ct-swatch.tone-accent {
   background: var(--accent);
 }
-.cost-models .share-pct {
+.ct-swatch.tone-faint {
+  background: var(--faint);
+}
+.ct-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ct-rows .ct-name {
+  color: var(--text);
+}
+.ct-num {
   font-family: var(--font-mono);
   letter-spacing: 0;
-  color: var(--muted);
-  min-width: 3em;
+  text-align: right;
+  white-space: nowrap;
+}
+.ct-head .ct-num {
+  font-family: inherit;
+}
+.ct-rows a.ct-runs {
+  color: var(--text);
+  text-decoration: underline;
+  text-decoration-color: var(--border-strong);
+  text-underline-offset: 2px;
+}
+.ct-more {
+  color: var(--faint);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 20px;
+  padding: 0 2px;
+}
+/* the total stays under the scrolling rows */
+.ct-total {
+  position: sticky;
+  bottom: 0;
+  border-top: 1px solid var(--border);
+  background: var(--panel-2);
+  color: var(--text);
+  font-weight: 600;
+  padding-top: 2px;
+  padding-bottom: 2px;
+}
+.cost-table .at-all {
+  margin: 2px 2px 4px;
+}
+@media (max-width: 1000px) {
+  .cost-body {
+    grid-template-columns: minmax(0, 1fr);
+  }
 }
 @media (max-width: 600px) {
-  .trend-toolbar .kept,
-  .trend-toolbar .split {
+  /* 390: the find field on its own row, the split at full width, avg/run dropped */
+  .ct-tools {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .ct-split {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+  }
+  .ct-head,
+  .ct-rows li,
+  .ct-total {
+    grid-template-columns: 13px 10px minmax(0, 1fr) 54px 42px 36px;
+  }
+  .ct-avg {
+    display: none;
+  }
+  .cost-table:not(.expanded) .ct-rows .extra {
+    display: none;
+  }
+  .cost-table .ct-rows {
+    max-height: none;
+  }
+  .cost-table .ct-more {
+    display: none;
+  }
+  .cost-table .at-all {
+    display: inline-block;
+  }
+  /* the table names the rows: end labels keep the amount only */
+  .bar-chart .chart-ends.bar-ends {
+    min-width: 3em;
+  }
+  .bar-chart .chart-ends .end-name {
+    display: none;
+  }
+}
+@media (max-width: 600px) {
+  .trend-toolbar .kept {
     margin-left: 0;
   }
   /* the table names the lines: end labels keep the rate only */

@@ -4,13 +4,27 @@
  * from the tones in globals.css (.chart-*), never from here.
  */
 
-export type BarTone = "ok" | "warn" | "muted" | "accent" | "faint";
+import { spreadLabels } from "@/lib/trends";
+
+/** "others": the unticked rows of /costs folded into one outlined segment. */
+export type BarTone = "ok" | "warn" | "muted" | "accent" | "faint" | "others";
 
 export interface BarStack {
   key: string;
   label: string;
   tone: BarTone;
   values: ReadonlyArray<number>;
+  /** Table row it draws (`data-row`), for the hover highlight of /costs. */
+  row?: string | null;
+}
+
+/** A label at the right of the plot, beside its stack's segment of the last bar. */
+export interface BarEnd {
+  /** The stack it names (same key). */
+  key: string;
+  name: string;
+  value: string;
+  strong?: boolean;
 }
 
 /** A horizontal reference across the plot: the budget (dashed) or its warning threshold (dotted). */
@@ -34,10 +48,14 @@ export interface StackedBarsProps {
   /** A label above each bar (null = none), e.g. its total. */
   topLabels?: ReadonlyArray<string | null>;
   rules?: ReadonlyArray<BarRule>;
+  /** Labels at the right of the plot (none: no end column). */
+  ends?: ReadonlyArray<BarEnd>;
 }
 
 /** Share of a bar slot left empty between two bars. */
 const SLOT_GAP = 0.2;
+/** Minimum distance between two end labels, px (one line of text). */
+const END_GAP = 18;
 
 export function StackedBars({
   ariaLabel,
@@ -49,11 +67,28 @@ export function StackedBars({
   format = String,
   topLabels,
   rules = [],
+  ends,
 }: StackedBarsProps) {
   const n = names.length;
   const yPct = (v: number) => (1 - v / y.max) * 100;
   const center = (i: number) => ((i + 0.5) / n) * 100;
   const total = (i: number) => stacks.reduce((sum, s) => sum + (s.values[i] ?? 0), 0);
+  // End labels sit beside their segment of the last bar that has one (the current bucket may be empty).
+  let lastBar = n - 1;
+  while (lastBar > 0 && total(lastBar) <= 0) lastBar--;
+  const mids = new Map<string, number>();
+  let acc = 0;
+  for (const s of stacks) {
+    const v = s.values[lastBar] ?? 0;
+    mids.set(s.key, acc + v / 2);
+    acc += v;
+  }
+  const placed = spreadLabels(
+    (ends ?? []).map((e) => ({ ...e, top: (yPct(mids.get(e.key) ?? 0) / 100) * height })),
+    END_GAP,
+    height,
+  );
+  const rowOf = new Map(stacks.map((s) => [s.key, s.row ?? null]));
   return (
     <div className="chart bar-chart" role="img" aria-label={ariaLabel}>
       <div className="chart-y" style={{ height }} aria-hidden="true">
@@ -79,6 +114,7 @@ export function StackedBars({
                 <rect
                   key={`${s.key}-${name}`}
                   className={`chart-bar tone-${s.tone}`}
+                  data-row={s.row ?? undefined}
                   x={i + SLOT_GAP / 2}
                   width={1 - SLOT_GAP}
                   y={yPct(base)}
@@ -119,7 +155,22 @@ export function StackedBars({
           </span>
         ))}
       </div>
-      <div className="chart-ends" aria-hidden="true" />
+      <div className={`chart-ends${ends?.length ? " bar-ends" : ""}`} style={{ height }} aria-hidden="true">
+        {placed.map((e) => {
+          const row = rowOf.get(e.key);
+          return (
+            <span
+              key={e.key}
+              className={e.strong ? "tone-primary" : undefined}
+              data-row={row ?? undefined}
+              style={{ top: e.top }}
+            >
+              <span className="end-name">{e.name} </span>
+              {e.value}
+            </span>
+          );
+        })}
+      </div>
       <div className="chart-x" aria-hidden="true">
         {xTicks.map((t) => (
           <span key={t.index} style={{ left: `${center(t.index)}%` }}>

@@ -1,9 +1,22 @@
 import { budgetLabel, COST_SPLITS, type CostSplitBy, costLabels, TREND_RANGES, type TrendRange } from "@duskfleet/core";
 import Link from "next/link";
-import { type BarRule, ChartLegend, StackedBars } from "@/components/charts/StackedBars";
-import { budgetPerBucket, fmtUsdShort, moneyAxis, SPLIT_LABELS, SPLIT_PLURALS } from "@/lib/costs";
-import { cli, costs, listAgents, listProjects, modelStats, monthSpend, scopeBudget } from "@/lib/data";
-import { fmtCost, fmtDuration, fmtInt, fmtPct, fmtSplit, shortModel } from "@/lib/format";
+import { type CostSplitOption, CostTable, type CostTableRow } from "@/components/charts/CostTable";
+import { type BarEnd, type BarRule, StackedBars } from "@/components/charts/StackedBars";
+import {
+  budgetPerBucket,
+  costRows,
+  costStacks,
+  fmtUsd2,
+  fmtUsdShort,
+  moneyAxis,
+  resolveTicks,
+  SPLIT_NOUNS,
+  SPLIT_PLURALS,
+  timesText,
+  toggleTick,
+} from "@/lib/costs";
+import { cli, costs, finishedRunsBy, listProjects, monthSpend, scopeBudget } from "@/lib/data";
+import { fmtCost, fmtInt, shortModel } from "@/lib/format";
 import {
   bucketLabel,
   granularityText,
@@ -16,84 +29,110 @@ import {
 
 export const dynamic = "force-dynamic";
 
-type Search = { agent?: string; project?: string; range?: string; by?: string };
+type Param = string | string[] | undefined;
+type Search = { agent?: Param; project?: Param; model?: Param; range?: Param; by?: Param; q?: Param; all?: Param };
 
 const isRange = (v: string | undefined): v is TrendRange => (TREND_RANGES as readonly string[]).includes(v ?? "");
 const isSplit = (v: string | undefined): v is CostSplitBy => (COST_SPLITS as readonly string[]).includes(v ?? "");
+const one = (v: Param): string | undefined => (Array.isArray(v) ? v[0] : v);
+/** A split's ticks as the URL holds them: null when absent (the default ticks), [] when explicitly empty. */
+const tickParam = (v: Param): string[] | null =>
+  v === undefined ? null : [...new Set((Array.isArray(v) ? v : [v]).filter(Boolean))];
 
-export async function generateMetadata({ searchParams }: { searchParams: Promise<Search> }) {
-  const { agent, project } = await searchParams;
-  const parts = ["Costs", project, agent].filter(Boolean);
-  return { title: `${parts.join(" · ")} · Duskfleet` };
+export async function generateMetadata() {
+  return { title: "Costs · Duskfleet" };
 }
 
-const BAR_HEIGHT = 260;
-/** Up to this many bars every total is printed above its bar; past it only the current one. */
-const MAX_TOP_LABELS = 13;
+const BAR_HEIGHT = 232;
 
 export default async function CostsPage({ searchParams }: { searchParams: Promise<Search> }) {
   const sp = await searchParams;
-  const range: TrendRange = isRange(sp.range) ? sp.range : "1m";
-  const by: CostSplitBy = isSplit(sp.by) ? sp.by : "agent";
-  const agents = listAgents();
+  const rangeParam = one(sp.range);
+  const range: TrendRange = isRange(rangeParam) ? rangeParam : "1m";
+  const byParam = one(sp.by);
+  const by: CostSplitBy = isSplit(byParam) ? byParam : "agent";
+  const q = one(sp.q)?.trim() ?? "";
   const projects = listProjects();
-  // Unknown ids are dropped, as on the Runs page, rather than showing an empty chart.
-  const agent = sp.agent && agents.some((a) => a.id === sp.agent) ? sp.agent : undefined;
-  const project = sp.project ? projects.find((p) => p.id === sp.project) : undefined;
-  const scope = { agentId: agent, projectPath: project?.path };
   const now = new Date();
-  const s = costs(range, by, scope);
-  const month = monthSpend(scope);
-  const budget = scopeBudget({ agentId: agent, projectId: project?.id });
+  const s = costs(range, by);
+  const month = monthSpend();
+  // Ticks never filter the page: the totals, the KPIs and the budget stay the global ones.
+  const budget = scopeBudget({});
   const unit = unitName(s.bucket);
+  const period = unitCount(s.starts.length, s.bucket);
 
-  const qs = (base: string, next: Partial<Search>) => {
-    const p = new URLSearchParams();
-    const merged: Search = { agent, project: project?.id, ...next };
-    for (const k of ["agent", "project", "range", "by"] as const) {
-      const v = merged[k];
-      if (v) p.set(k, v);
-    }
-    const q = p.toString();
-    return q ? `${base}?${q}` : base;
+  // ---- rows: one per agent, project path or model of the period ----
+  const runCounts = finishedRunsBy(by, s.starts[0] ?? now.toISOString().slice(0, 10));
+  const rows = costRows(s.series, runCounts);
+  const projectIds = new Map(projects.map((p) => [p.path.replace(/\/+$/, ""), p.id]));
+  const projectId = (path: string) => projectIds.get(path.replace(/\/+$/, ""));
+  const label = (key: string) =>
+    by === "model"
+      ? shortModel(key)
+      : by === "project"
+        ? (projectId(key) ?? key.split("/").filter(Boolean).pop() ?? key)
+        : key;
+  // In the URL a project is its registry id when it has one, as on the Runs page.
+  const urlKey = (key: string) => (by === "project" ? (projectId(key) ?? key) : key);
+  const fromUrl = new Map(rows.map((r) => [urlKey(r.key), r.key]));
+
+  // Each split keeps its own ticks in its own param; the others ride along untouched.
+  const raw: Record<CostSplitBy, string[] | null> = {
+    agent: tickParam(sp.agent),
+    project: tickParam(sp.project),
+    model: tickParam(sp.model),
   };
-  const costsHref = (next: Partial<Search>) =>
-    qs("/costs", { range: range === "1m" ? undefined : range, by: by === "agent" ? undefined : by, ...next });
+  const asked = raw[by];
+  const ticked = resolveTicks(asked === null ? null : asked.map((k) => fromUrl.get(k) ?? k), rows);
+  const tickedSet = new Set(ticked);
 
-  const kept = [
-    agent ? { key: "agent", label: `agent: ${agent}`, href: costsHref({ agent: undefined }) } : null,
-    project ? { key: "project", label: `project: ${project.id}`, href: costsHref({ project: undefined }) } : null,
-  ].filter((k): k is { key: string; label: string; href: string } => k !== null);
+  type Next = Partial<Record<CostSplitBy, string[] | null>> & { range?: TrendRange; by?: CostSplitBy; q?: string };
+  const costsHref = (next: Next) => {
+    const p = new URLSearchParams();
+    const r = next.range ?? range;
+    const b = next.by ?? by;
+    if (r !== "1m") p.set("range", r);
+    if (b !== "agent") p.set("by", b);
+    for (const split of COST_SPLITS) {
+      const values = split in next ? next[split] : raw[split];
+      for (const v of values ?? []) p.append(split, v);
+      if (values && values.length === 0) p.append(split, "");
+    }
+    if (next.q) p.set("q", next.q);
+    const query = p.toString();
+    return query ? `/costs?${query}` : "/costs";
+  };
+  const runsHref = (key: string): string | null => {
+    if (by === "agent") return `/?agent=${encodeURIComponent(key)}`;
+    const id = by === "project" ? projectId(key) : undefined;
+    return id ? `/?project=${encodeURIComponent(id)}` : null;
+  };
+  const nameHref = (key: string): string | null =>
+    by === "agent" ? `/agents/${encodeURIComponent(key)}` : runsHref(key);
 
   // ---- KPIs ----
   const monthWords = costLabels(month.cost);
   const periodUsd = s.total + s.gateTotal;
+  const finished = rows.reduce((n, r) => n + r.runs, 0);
+  const avgRun = finished ? s.total / finished : null;
 
-  // ---- spend per bucket ----
-  const projectIds = new Map(projects.map((p) => [p.path.replace(/\/+$/, ""), p.id]));
-  const keyLabel = (key: string) =>
-    by === "model"
-      ? shortModel(key)
-      : by === "project"
-        ? (projectIds.get(key.replace(/\/+$/, "")) ?? key.split("/").filter(Boolean).pop() ?? key)
-        : key;
-  const top = s.series[0];
-  const stacks = s.series.map((x, i) => ({
+  // ---- chart ----
+  const stacks = costStacks(s.series, s.totals, ticked).map((x) => ({
     key: x.key,
-    label: keyLabel(x.key),
-    tone: i === 0 ? ("accent" as const) : ("faint" as const),
+    label: x.row ? label(x.row) : x.tone === "others" ? "others" : "all",
+    tone: x.tone,
     values: x.values,
+    row: x.row,
   }));
-  const legend = [
-    ...(top ? [{ key: "top", label: `${keyLabel(top.key)} (top spender)`, tone: "accent" as const }] : []),
-    ...(s.series.length > 1
-      ? [{ key: "others", label: `other ${SPLIT_PLURALS[by]} (one segment each)`, tone: "faint" as const }]
-      : []),
-  ];
-  const last = s.starts.length - 1;
-  const topLabels = s.totals.map((t, i) => {
-    if (i === last) return `${fmtUsdShort(t)} so far`;
-    return t > 0 && s.starts.length <= MAX_TOP_LABELS ? fmtUsdShort(t) : null;
+  const othersCount = rows.filter((r) => r.spent > 0 && !tickedSet.has(r.key)).length;
+  const othersUsd = rows.filter((r) => !tickedSet.has(r.key)).reduce((n, r) => n + r.spent, 0);
+  const ends: BarEnd[] = stacks.map((x, i) => {
+    if (x.row) {
+      const r = rows.find((row) => row.key === x.row);
+      return { key: x.key, name: label(x.row), value: fmtUsd2(r?.spent ?? 0), strong: i === 0 };
+    }
+    if (x.tone === "others") return { key: x.key, name: `${othersCount} others`, value: fmtUsd2(othersUsd) };
+    return { key: x.key, name: `all ${SPLIT_PLURALS[by]}`, value: fmtUsd2(s.total) };
   });
   const perBucket = budget ? budgetPerBucket(budget.amountUsd, s.bucket) : 0;
   const rules: BarRule[] = budget
@@ -103,43 +142,82 @@ export default async function CostsPage({ searchParams }: { searchParams: Promis
           tone: "budget",
           label:
             s.bucket === "month"
-              ? `budget ${fmtUsdShort(budget.amountUsd)}`
-              : `budget ${fmtUsdShort(budget.amountUsd)} a month · ${fmtUsdShort(perBucket)} a ${unit}`,
+              ? `budget ${fmtUsdShort(budget.amountUsd)} a month`
+              : `budget ${fmtUsdShort(budget.amountUsd)} a month · ${fmtCost(perBucket)} a ${unit}`,
         },
         {
           value: (perBucket * budget.warnPercent) / 100,
           tone: "warn",
-          label: `warn ${budget.warnPercent}% · ${fmtUsdShort((perBucket * budget.warnPercent) / 100)}`,
+          label: `warn ${budget.warnPercent}% · ${fmtCost((perBucket * budget.warnPercent) / 100)}`,
         },
       ]
     : [];
   const axis = moneyAxis(Math.max(...s.totals, perBucket));
-  const ticks = xTickIndexes(s.starts.length, s.starts.length <= MAX_TOP_LABELS ? MAX_TOP_LABELS : 7).map((i) => ({
+  const ticks = xTickIndexes(s.starts.length).map((i) => ({
     index: i,
     label: bucketLabel(s.starts[i] ?? "", s.bucket),
   }));
-  const budgetHint = cli(
-    agent
-      ? `budgets set agent ${agent} --amount <usd>`
-      : project
-        ? `budgets set project ${project.id} --amount <usd>`
-        : "budgets set global --amount <usd>",
-  );
+  const budgetHint = cli("budgets set global --amount <usd>");
 
-  // ---- by model, same period and scope ----
-  const models = modelStats({ ...scope, from: `${s.starts[0]}T00:00:00.000Z` });
-  const modelCost = {
-    apiUsd: models.reduce((n, m) => n + m.cost.apiUsd, 0),
-    subscriptionUsd: models.reduce((n, m) => n + m.cost.subscriptionUsd, 0),
-  };
-  const modelWords = costLabels(modelCost);
-  const modelTotal = models.reduce((n, m) => n + m.costUsd, 0);
+  // ---- insight: the top spender ----
+  const top = rows[0];
+  const topRuns = top ? runsHref(top.key) : null;
+  let insight: string | null = null;
+  if (top && top.spent > 0) {
+    insight = `${label(top.key)} spent ${fmtUsd2(top.spent)} in ${period}, ${Math.round(top.share * 100)}% of the total`;
+    if (top.runs > 0 && top.avg !== null) {
+      insight += `: ${fmtInt(top.runs)} runs at ${fmtUsd2(top.avg)} each`;
+      const times = rows.length > 1 && avgRun ? timesText(top.avg, avgRun) : null;
+      if (times) insight += `, ${times} the average run`;
+    }
+  }
+
+  // ---- table ----
+  const tableRows: CostTableRow[] = rows.map((r) => {
+    const rank = ticked.indexOf(r.key);
+    return {
+      key: r.key,
+      label: label(r.key),
+      title: by === "agent" ? undefined : r.key,
+      spent: fmtUsd2(r.spent),
+      share: `${Math.round(r.share * 100)}%`,
+      runs: fmtInt(r.runs),
+      avg: r.avg === null ? "–" : fmtUsd2(r.avg),
+      tone: rank === 0 ? "accent" : rank > 0 ? "faint" : null,
+      checked: rank >= 0,
+      tickHref: costsHref({ [by]: toggleTick(ticked, r.key, rows).map((k) => (k ? urlKey(k) : k)) } as Next),
+      nameHref: nameHref(r.key),
+      runsHref: runsHref(r.key),
+    };
+  });
+  const splits: CostSplitOption[] = COST_SPLITS.map((b) => ({
+    key: b,
+    label: SPLIT_NOUNS[b],
+    href: costsHref({ by: b }),
+    on: b === by,
+  }));
+  const hiddenParams: Array<[string, string]> = [
+    ...(range === "1m" ? [] : [["range", range] as [string, string]]),
+    ...(by === "agent" ? [] : [["by", by] as [string, string]]),
+    ...COST_SPLITS.flatMap((split) =>
+      raw[split] === null
+        ? []
+        : (raw[split] as string[]).length
+          ? (raw[split] as string[]).map((v) => [split, v] as [string, string])
+          : [[split, ""] as [string, string]],
+    ),
+  ];
+  const showAllParams = new URLSearchParams([...hiddenParams, ...(q ? [["q", q]] : []), ["all", "1"]]);
+
+  const subtitle = `USD, stacked · tick rows in the table to draw them (kept in the URL); default: the top ${
+    rows.filter((r) => r.spent > 0).length < 5 ? "spenders" : "5 spenders"
+  } · the rest fold into one outlined "others" segment`;
 
   return (
     <>
       <div className="page-head">
         <h1>Costs</h1>
-        <Link href={qs("/", {})} className="back-link">
+        <Link href="/" className="back-link">
           ← back to Runs
         </Link>
       </div>
@@ -148,7 +226,7 @@ export default async function CostsPage({ searchParams }: { searchParams: Promis
           {TREND_RANGES.map((r) => (
             <Link
               key={r}
-              href={costsHref({ range: r === "1m" ? undefined : r })}
+              href={costsHref({ range: r })}
               className={r === range ? "on" : ""}
               aria-current={r === range ? "true" : undefined}
             >
@@ -157,37 +235,6 @@ export default async function CostsPage({ searchParams }: { searchParams: Promis
           ))}
         </nav>
         <span className="granularity">{granularityText(s.bucket, s.starts.length, now)}</span>
-        {kept.length > 0 && (
-          <span className="kept">
-            opened with
-            {kept.map((k) => (
-              <Link
-                key={k.key}
-                href={k.href}
-                className="kept-chip"
-                title="Remove this filter"
-                aria-label={`${k.label}, remove this filter`}
-              >
-                {k.label} <span aria-hidden="true">✕</span>
-              </Link>
-            ))}
-          </span>
-        )}
-        <span className="split">
-          split
-          <nav className="period" aria-label="Split">
-            {COST_SPLITS.map((b) => (
-              <Link
-                key={b}
-                href={costsHref({ by: b === "agent" ? undefined : b })}
-                className={b === by ? "on" : ""}
-                aria-current={b === by ? "true" : undefined}
-              >
-                {SPLIT_LABELS[b]}
-              </Link>
-            ))}
-          </nav>
-        </span>
       </div>
 
       <section className="stats cost-kpis" aria-label="Spend">
@@ -196,32 +243,31 @@ export default async function CostsPage({ searchParams }: { searchParams: Promis
           <div className="value">{fmtCost(month.costUsd)}</div>
           <div className="sub">
             {budget
-              ? `of ${fmtCost(budget.amountUsd)} ${budgetLabel(budget)} budget · ${Math.round(budget.percent)}%`
+              ? `of ${fmtUsd2(budget.amountUsd)} ${budgetLabel(budget)} budget · ${Math.round(budget.percent)}%`
               : "no monthly budget for this scope"}
           </div>
         </div>
         <div className="stat">
-          <div className="label">Last {unitCount(s.starts.length, s.bucket)}</div>
+          <div className="label">Last {period}</div>
           <div className="value">{fmtCost(periodUsd)}</div>
           <div className="sub">
-            avg {fmtCost(periodUsd / s.starts.length)} a {unit}
+            avg {fmtCost(periodUsd / s.starts.length)} a {unit} · {fmtInt(finished)} runs
           </div>
         </div>
         <div className="stat">
           <div className="label">Avg per run</div>
-          <div className="value">{month.runs ? fmtCost(month.runsCostUsd / month.runs) : "–"}</div>
-          <div className="sub">{fmtInt(month.runs)} runs this month</div>
+          <div className="value">{avgRun === null ? "–" : fmtCost(avgRun)}</div>
+          <div className="sub">
+            {fmtInt(finished)} finished runs in {period}
+          </div>
         </div>
       </section>
 
       <section className="card trend-panel cost-panel" aria-labelledby="cost-spend">
-        <div className="panel-head">
-          <h2 className="panel-title" id="cost-spend">
-            Spend per {unit}, {SPLIT_LABELS[by].toLowerCase()}
-          </h2>
-          {periodUsd > 0 && <ChartLegend items={legend} />}
-        </div>
-        {periodUsd === 0 ? (
+        <h2 className="panel-title" id="cost-spend">
+          Spend per {unit}, by {SPLIT_NOUNS[by]}
+        </h2>
+        {rows.length === 0 ? (
           <div className="trend-empty">
             <strong>No spend in {RANGE_PHRASES[range]}</strong>
             <span>Costs appear here once runs report them.{range !== "1y" && " Try a longer period."}</span>
@@ -233,94 +279,67 @@ export default async function CostsPage({ searchParams }: { searchParams: Promis
           </div>
         ) : (
           <>
-            <p className="panel-sub">
-              USD, stacked · the top spender is highlighted, hover a segment for its {SPLIT_PLURALS[by].slice(0, -1)}{" "}
-              and amount ·{" "}
-              {budget
-                ? s.bucket === "month"
-                  ? "dashed: monthly budget, dotted: warning"
-                  : `dashed: monthly budget pro rata per ${unit}, dotted: warning`
-                : "no budget for this scope, so no budget line"}
-            </p>
-            <StackedBars
-              ariaLabel={`Spend per ${unit} ${SPLIT_LABELS[by].toLowerCase()}: ${fmtCost(s.total)} over ${RANGE_PHRASES[range]}${budget ? `, monthly budget ${fmtCost(budget.amountUsd)}` : ""}`}
-              names={s.starts.map((d) => bucketLabel(d, s.bucket))}
-              xTicks={ticks}
-              stacks={stacks}
-              y={axis}
-              height={BAR_HEIGHT}
-              format={fmtUsdShort}
-              topLabels={topLabels}
-              rules={rules}
-            />
-            {!budget && (
-              <p className="panel-foot">
-                Set a budget to see it here: <code>{budgetHint}</code> (or set_budget over MCP).
-              </p>
-            )}
-            {s.gateTotal > 0 && (
-              <p className="panel-foot" title="Schedule gate agents decide whether a tick has work">
-                {fmtCost(s.total)} on runs · {fmtCost(s.gateTotal)} on gates, not in the bars
-              </p>
-            )}
+            <p className="panel-sub">{subtitle}</p>
+            {insight &&
+              (topRuns ? (
+                <Link href={topRuns} className="trend-callout">
+                  {insight}
+                </Link>
+              ) : (
+                <p className="trend-callout">{insight}</p>
+              ))}
+            <div className="rate-body cost-body">
+              <div className="cost-chart">
+                <StackedBars
+                  ariaLabel={`Spend per ${unit} by ${SPLIT_NOUNS[by]}: ${fmtCost(s.total)} over ${RANGE_PHRASES[range]}${
+                    ends.length ? `, ${ends.map((e) => `${e.name} ${e.value}`).join(", ")}` : ""
+                  }${budget ? `, monthly budget ${fmtCost(budget.amountUsd)}` : ""}`}
+                  names={s.starts.map((d) => bucketLabel(d, s.bucket))}
+                  xTicks={ticks}
+                  stacks={stacks}
+                  y={axis}
+                  height={BAR_HEIGHT}
+                  format={fmtUsdShort}
+                  rules={rules}
+                  ends={ends}
+                />
+                {!budget && (
+                  <p className="panel-foot">
+                    No budget for this scope, so no budget line. Set one: <code>{budgetHint}</code> (or set_budget over
+                    MCP)
+                  </p>
+                )}
+                {s.gateTotal > 0 && (
+                  <p className="panel-foot" title="Schedule gate agents decide whether a tick has work">
+                    {fmtCost(s.total)} on runs · {fmtCost(s.gateTotal)} on gates, not in the bars
+                  </p>
+                )}
+              </div>
+              <CostTable
+                rows={tableRows}
+                noun={SPLIT_NOUNS[by]}
+                plural={SPLIT_PLURALS[by]}
+                splits={splits}
+                total={{
+                  spent: fmtUsd2(s.total),
+                  share: s.total > 0 ? "100%" : "–",
+                  runs: fmtInt(finished),
+                  avg: avgRun === null ? "–" : fmtUsd2(avgRun),
+                }}
+                param={by}
+                q={q}
+                hidden={hiddenParams}
+                expanded={one(sp.all) === "1"}
+                showAllHref={`/costs?${showAllParams}`}
+              />
+            </div>
           </>
         )}
       </section>
-
-      {models.length > 0 && (
-        <section className="card model-card cost-models" aria-label="Spend by model">
-          <table className="table">
-            <thead>
-              <tr>
-                <th>Model</th>
-                <th className="num">Runs</th>
-                <th className="num">Avg duration</th>
-                <th className="num">Avg {modelWords.column === "Cost" ? "cost" : modelWords.column}</th>
-                <th className="num">Total</th>
-                <th>Share of spend</th>
-              </tr>
-            </thead>
-            <tbody>
-              {models.map((m) => (
-                <tr key={m.model}>
-                  <td>
-                    <span className="pill model" title={m.model}>
-                      {shortModel(m.model)}
-                    </span>
-                  </td>
-                  <td className="num">{fmtInt(m.runs)}</td>
-                  <td className="num">{fmtDuration(m.avgDurationMs)}</td>
-                  <td className="num">{fmtCost(m.avgCostUsd)}</td>
-                  <td className="num">{fmtSplit(m.cost, modelWords.basis)}</td>
-                  <td>
-                    <span className="share">
-                      <span className="share-bar" aria-hidden="true">
-                        <span style={{ width: `${modelTotal ? (m.costUsd / modelTotal) * 100 : 0}%` }} />
-                      </span>
-                      <span className="share-pct">{fmtPct(m.costUsd, modelTotal)}</span>
-                    </span>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-            <tfoot>
-              <tr>
-                <td>All models</td>
-                <td className="num">{fmtInt(models.reduce((n, m) => n + m.runs, 0))}</td>
-                <td className="num"></td>
-                <td className="num"></td>
-                <td className="num">{fmtSplit(modelCost, modelWords.basis)}</td>
-                <td></td>
-              </tr>
-            </tfoot>
-          </table>
-        </section>
-      )}
       <p className="trend-note">
-        Split switch re-stacks the same bars by agent, project or model. With an agent or project filter, the overlay is
-        that scope&apos;s budget when one exists; a filtered view never borrows the global one. The By model table
-        counts finished runs of the period{modelWords.basis === "subscription" ? `, ${modelWords.note}` : ""}. Buckets
-        and budget months are UTC.
+        The split sets what the table ranks (agent, project or model); ticked rows are drawn, the rest fold into
+        &quot;others&quot;. Runs count finished runs of the period; the budget overlay is the global one, ticks never
+        filter it. {monthWords.basis === "subscription" ? `${monthWords.note} ` : ""}UTC buckets.
       </p>
     </>
   );
