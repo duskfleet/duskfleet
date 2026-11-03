@@ -11,11 +11,14 @@
  * gets noticed. The run goes against a temporary scratch project with one failing test, with
  * DUSKFLEET_CONFIG on a temporary copy of config/ (data_dir ../data lands in the temp dir too).
  *
+ * `init` is replayed twice: once more against a logged-out claude, where it must still exit 0
+ * and print the login hint (#349).
+ *
  * Asserts: every replayed command exits 0, `doctor` / `agents create` / `run` / `runs` are all
  * there, `run` records a completed run and `runs` lists it.
  */
 import { spawnSync } from "node:child_process";
-import { cpSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, cpSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -118,6 +121,24 @@ function makeScratch(base) {
   return realpathSync(project);
 }
 
+/** A claude that is installed but logged out: `auth status --json` says so and exits 1. */
+function loggedOutClaude(base) {
+  const file = path.join(base, "claude-logged-out.cjs");
+  writeFileSync(
+    file,
+    [
+      "#!/usr/bin/env node",
+      "const a = process.argv.slice(2);",
+      'if (a[0] === "--version") { process.stdout.write("9.9.9 (fake)\\n"); process.exit(0); }',
+      'if (a[0] === "auth" && a[1] === "status") { process.stdout.write(JSON.stringify({ loggedIn: false }) + "\\n"); process.exit(1); }',
+      "process.exit(3);",
+      "",
+    ].join("\n"),
+  );
+  chmodSync(file, 0o755);
+  return file;
+}
+
 function main() {
   const lines = quickstartLines(readFileSync(path.join(root, "README.md"), "utf8"));
   const base = realpathSync(mkdtempSync(path.join(tmpdir(), "duskfleet-quickstart-")));
@@ -160,6 +181,21 @@ function main() {
         fail(`step exited ${result.status}: ${line}\n${result.stderr.trim()}\n${result.stdout.trim()}`);
       }
       seen.add(command);
+
+      if (command === "init") {
+        // #349: init must also succeed before the Claude login (scripts prepare a machine first).
+        const before = spawnSync(process.execPath, [cliEntry, ...args], {
+          cwd: root,
+          env: { ...env, CLAUDE_BIN: loggedOutClaude(base) },
+          encoding: "utf8",
+          timeout: 60_000,
+        });
+        if (before.status !== 0 || !/not logged in/.test(before.stdout)) {
+          fail(
+            `step exited ${before.status} or gave no login hint with Claude Code logged out: ${line}\n${before.stderr.trim()}\n${before.stdout.trim()}`,
+          );
+        }
+      }
 
       if (command === "run") {
         const run = JSON.parse(result.stdout);
