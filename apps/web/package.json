@@ -37,7 +37,8 @@
     "build": "NEXT_TELEMETRY_DISABLED=1 next build && node scripts/copy-tools.mjs",
     "start": "node bin/start.mjs",
     "typecheck": "tsc --noEmit",
-    "test": "node --test test/*.test.mjs"
+    "pretest": "node -e \"require('node:fs').rmSync('.test-build',{recursive:true,force:true})\" && tsc -p tsconfig.test.json",
+    "test": "node --import ./test/register.mjs --test test/*.test.mjs \".test-build/test/components/*.test.js\""
   },
   "dependencies": {
     "next": "^15.5.28",

@@ -9,7 +9,7 @@ import { fileURLToPath } from "node:url";
  *   duskfleet agents
  *   duskfleet agents create <id> [--model <m>] [--budget <usd>] [...] [--force] -- "<system prompt>"
  *   duskfleet projects
- *   duskfleet run --project <id or path> [--agent <id>] [--model <m>] [--no-wait] -- "<prompt>"
+ *   duskfleet run --project <id or path> [--agent <id>] [--model <m>] [--no-wait] [--json] -- "<prompt>"
  *   duskfleet runs [--status <s>] [--limit <n>]
  *   duskfleet run-info <run_id> [--events]
  *   duskfleet repair-subagents # backfill subagent rows of finished runs from their logs
@@ -38,6 +38,7 @@ import {
   type DataSource,
   effectivePath,
   findRepoRoot,
+  type LogLevel,
   loadConfig,
   parseHolder,
   pathDefaulted,
@@ -45,6 +46,7 @@ import {
   type RunStatus,
   resolveConfigDir,
   runCostLabel,
+  setDefaultLogLevel,
   subagentView,
   summarizeRun,
 } from "@duskfleet/core";
@@ -64,6 +66,7 @@ import {
   serverEntry,
 } from "./mcp-register.js";
 import { PROBE_COST_NOTE, type ProbeReport, probeNotRun, runProbe } from "./probe.js";
+import { runReportLines, trimmedRun } from "./run-report.js";
 import {
   exportedDataDir,
   installService,
@@ -96,7 +99,7 @@ function usage(asked = false): never {
       "                          [--allowed-tools <a,b>] [--disallowed-tools <a,b>] [--timeout <minutes>]",
       '                          [--description <text>] [--force] (-- "<system prompt>" | --prompt-file <file>)',
       "  duskfleet projects",
-      '  duskfleet run --project <id or path> [--agent <id>] [--model <m>] [--no-wait] -- "<prompt>"',
+      '  duskfleet run --project <id or path> [--agent <id>] [--model <m>] [--no-wait] [--json] -- "<prompt>"',
       "  duskfleet runs [--status <status>] [--limit <n>]",
       "  duskfleet run-info <run_id> [--events]",
       "  duskfleet repair-subagents",
@@ -115,6 +118,9 @@ function usage(asked = false): never {
       "  duskfleet doctor [--probe]",
       "  duskfleet --help",
       "  duskfleet --version",
+      "",
+      "Any command takes --verbose: info logs on stderr (default: warnings and errors only,",
+      "except serve). DUSKFLEET_LOG_LEVEL=debug|info|warn|error overrides both.",
       "",
       INIT_HINT,
       "",
@@ -323,8 +329,31 @@ async function mcpRegister(
   return 0;
 }
 
+/**
+ * The arguments without `--verbose`, and whether it was there. Taken out wherever it stands
+ * before a `--` (after it, everything is the prompt), so every command accepts it.
+ */
+function takeVerbose(args: string[]): { args: string[]; verbose: boolean } {
+  const end = args.indexOf("--");
+  const head = end === -1 ? args : args.slice(0, end);
+  const tail = end === -1 ? [] : args.slice(end);
+  const kept = head.filter((a) => a !== "--verbose");
+  return { args: [...kept, ...tail], verbose: kept.length !== head.length };
+}
+
+/**
+ * Log level of a CLI invocation when DUSKFLEET_LOG_LEVEL is not set (the variable always wins):
+ * `serve` keeps `info`, its log is the record; a one-shot command shows warnings and errors only,
+ * `--verbose` brings `info` back.
+ */
+function cliLogLevel(command: string | undefined, verbose: boolean): LogLevel {
+  return command === "serve" || verbose ? "info" : "warn";
+}
+
 async function main(): Promise<void> {
-  const [command, ...rest] = process.argv.slice(2);
+  const { args, verbose } = takeVerbose(process.argv.slice(2));
+  const [command, ...rest] = args;
+  setDefaultLogLevel(cliLogLevel(command, verbose));
   if (!command) usage();
   // Before bootstrap: help must work without a config (a fresh `npx duskfleet --help`).
   if (command === "--help" || command === "-h" || command === "help") usage(true);
@@ -594,6 +623,7 @@ async function main(): Promise<void> {
           agent: { type: "string", short: "a" },
           model: { type: "string", short: "m" },
           "no-wait": { type: "boolean", default: false },
+          json: { type: "boolean", default: false },
         },
       });
       const prompt = positionals.join(" ").trim();
@@ -615,7 +645,10 @@ async function main(): Promise<void> {
       if (!values["no-wait"]) {
         run = await app.runs.waitForRun(run.id, 24 * 60 * 60 * 1000);
       }
-      print(run);
+      // A run that did not end clean: cause and fix first, on stderr, before the record.
+      const report = runReportLines(run);
+      if (report) process.stderr.write(`${report.join("\n")}\n`);
+      print(values.json ? run : trimmedRun(run));
       return done(run.status === "completed" || run.status === "running" ? 0 : 1);
     }
     case "runs": {

@@ -60,15 +60,27 @@ Only commands that need the config report a missing one (`init`, `tools`, `mcp s
 [where config and data live](configuration.md#where-config-and-data-live)). `--version` prints the version of the installed
 `duskfleet` package and needs neither a config nor Node 24.
 
+Logs go to stderr, so stdout stays the command's JSON. A one-shot command logs warnings and
+errors only; `--verbose`, anywhere before a `--`, brings the info lines back (config loaded,
+executor ready, `storage: applied N migrations (M → N)` after an upgrade). `serve` and the MCP
+server keep info: their log is the record. `DUSKFLEET_LOG_LEVEL=debug|info|warn|error` overrides
+both defaults and `--verbose`
+([environment variables](configuration.md#environment-variables)).
+
 ## init
 
-`init` prepares a first configuration. Each step prints its result; the first failure stops
-with the fix and exit 1:
+`init` prepares a first configuration. Each step prints its result; a config that cannot be
+written or loaded stops with the fix and exit 1:
 
 1. **Node**: the version (Node 24+ is checked before any command runs).
 2. **Claude Code**: the binary (same lookup as runs: `CLAUDE_BIN`, `claude.binary`, `PATH`,
    `~/.local/bin/claude`), its version, and the login from `claude auth status --json`. Not
-   logged in: it prints `claude auth login` and stops.
+   installed, not starting or not logged in does **not** stop `init`: the problem is printed
+   here, the config is written anyway, the fix is repeated after the summary (`Claude Code is not
+   logged in: run claude auth login, then check it with: duskfleet doctor --probe`) and the exit
+   code is 0. Before the login, `doctor`, `agents`, `projects`, `runs`, `schedules`, `budgets`,
+   `agents create` and the dashboard work; `run`, `serve` and scheduled runs fail with
+   `auth_required` and the same fix (`errorCode`, [what a run records](#what-a-run-records)).
 3. **Config and data**: creates the user-level config directory with a starter `duskfleet.yaml`
    and the data directory ([where config and data live](configuration.md#where-config-and-data-live)).
    A config that already exists (user-level, a checkout's `config/`, or `DUSKFLEET_CONFIG`) is
@@ -81,8 +93,9 @@ with the fix and exit 1:
    created: Duskfleet ships none.
 
 `init --yes` asks nothing: steps 1-3 and the summary, step 4 only with `--mcp claude-code` or
-`--mcp claude-desktop`; without `--mcp` it never writes a Claude config file. Any failed check
-exits non-zero. On something that is not a terminal (a script) without `--yes`, step 4 is
+`--mcp claude-desktop`; without `--mcp` it never writes a Claude config file. It too succeeds
+without a Claude login, so a script can prepare a machine before anyone logs in; a config that
+cannot be written or loaded, or a failed `--mcp` registration, exits non-zero. On something that is not a terminal (a script) without `--yes`, step 4 is
 skipped.
 
 ## First run
@@ -99,6 +112,31 @@ npx duskfleet run --project /abs/path/to/scratch-project --agent fixer -- "Fix t
 
 A run with no agent, when none exists, fails with
 `Known agents: (none: no agent file in <config>/agents or <user agents dir>; create one with "agents create <id>")`.
+
+## What run prints
+
+On stderr, the run id and its log as it starts. When the run did not end clean (failed, timed
+out, cancelled, or completed but [needs review](dashboard.md#needs-review)), a short block follows before
+anything else: the status with its review reasons, the cause in one line, the fix when there is
+one, and where to look next. A run against a Claude that is not logged in:
+
+```text
+run 7f3c9a2e-... started (session 0b1d...)
+log: <data>/logs/7f3c9a2e-....jsonl
+run 7f3c9a2e-... failed (non-zero exit code)
+cause: Claude is not logged in: Not logged in · Please run /login
+fix: Claude Code is not authenticated: run "claude" in a terminal and log in (or check ANTHROPIC_API_KEY)
+more: duskfleet run-info 7f3c9a2e-..., or the run's page in the dashboard; full record: run --json
+```
+
+The fix lines come from one table in core (`FAILURE_FIXES` per error code, `REVIEW_REASON_FIXES`
+per review reason, plus a `claude` binary that was not found), the same one `doctor --probe`
+uses for its advice. A permission denial names the denied tools.
+
+On stdout, the run record as JSON for scripts (exit 0 for `completed` or, with `--no-wait`,
+`running`; 1 otherwise). It leaves out `command.argv` (the full spawned command line, system
+prompt included) and `rawResultJson`; `run --json` prints the full record, the same as
+`run-info <run_id>`.
 
 ## agents create
 

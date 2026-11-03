@@ -56,6 +56,8 @@ Requirements: a supported platform (below), Node.js **24+** (built-in `node:sqli
 addons; `.nvmrc` pins it, and an older Node gets `Duskfleet needs Node 24 or newer; you have
 vX.Y.Z`), and [Claude Code](https://docs.anthropic.com/en/docs/claude-code) installed and
 **logged in** for the user that runs Duskfleet (Duskfleet does not manage authentication).
+Only runs need the login: before it, `init`, `doctor`, `agents create`, the other read-only
+commands and the dashboard already work, and `init` ends with the command to log in.
 
 ### Platform support
 

@@ -24,8 +24,16 @@ after `npm i -g duskfleet`); in a clone of this repository the same command is
   Windows (experimental, [platform support](../README.md#platform-support)) the `PATH` is used
   as it is, even a minimal one. Such hosts also do not expand `~` in
   `claude_desktop_config.json` ("No executable file at ~/..."): use absolute paths.
+- **`init` says Claude Code is not logged in (or not installed)**: the config is written anyway
+  and `init` exits 0. `doctor`, the read-only commands, `agents create` and the dashboard work
+  now; runs fail with `auth_required` until you run `claude auth login` (as the user that runs
+  Duskfleet), then `npx duskfleet doctor --probe` to check.
 - **Is `claude` logged in, will a hook block scheduled runs?** `npx duskfleet doctor --probe`
   makes one real hello run on haiku (cents) and says which of the two it hit
+  ([CLI](cli.md)).
+- **A command says nothing about what it loaded**: one-shot commands log warnings and errors
+  only. Add `--verbose` (or set `DUSKFLEET_LOG_LEVEL=info`, `debug` for more) to see which
+  config and data directory it used, the executor and the migrations it applied, on stderr
   ([CLI](cli.md)).
 - **New code is not picked up**: the MCP host keeps the server process alive. After
   `npm run build`, restart Claude Desktop or the Claude Code session. Config changes need no restart.

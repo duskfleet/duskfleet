@@ -11,13 +11,12 @@ import { type ActionResult, requestScheduleRunAction } from "@/app/schedules/act
  * schedule already requested is said so in words, not offered again; opening the second step
  * clears the message of the previous request.
  */
-export function AgentRunNow({ schedules }: { schedules: Array<{ id: string; name: string; requested: boolean }> }) {
+export function AgentRunNow({ schedules }: { schedules: RunNowSchedule[] }) {
   const router = useRouter();
   const [pending, start] = useTransition();
   const [open, setOpen] = useState(false);
   const [result, setResult] = useState<ActionResult | null>(null);
   if (schedules.length === 0) return null;
-  const allRequested = schedules.every((s) => s.requested);
 
   const fire = (id: string) =>
     start(async () => {
@@ -27,6 +26,43 @@ export function AgentRunNow({ schedules }: { schedules: Array<{ id: string; name
       if (r.ok) router.refresh();
     });
 
+  return (
+    <AgentRunNowView
+      schedules={schedules}
+      open={open}
+      pending={pending}
+      result={result}
+      onOpen={() => {
+        setResult(null);
+        setOpen(true);
+      }}
+      onCancel={() => setOpen(false)}
+      onFire={fire}
+    />
+  );
+}
+
+type RunNowSchedule = { id: string; name: string; requested: boolean };
+
+/** The markup of every state of AgentRunNow, which holds the state (rendered as is by the tests). */
+export function AgentRunNowView({
+  schedules,
+  open,
+  pending,
+  result,
+  onOpen,
+  onCancel,
+  onFire,
+}: {
+  schedules: RunNowSchedule[];
+  open: boolean;
+  pending: boolean;
+  result: ActionResult | null;
+  onOpen: () => void;
+  onCancel: () => void;
+  onFire: (id: string) => void;
+}) {
+  const allRequested = schedules.every((s) => s.requested);
   return (
     <span className="ad-run-now">
       {open ? (
@@ -38,12 +74,18 @@ export function AgentRunNow({ schedules }: { schedules: Array<{ id: string; name
                 “{s.name}” already requested, it starts on the next tick
               </span>
             ) : (
-              <button key={s.id} type="button" className="ad-btn primary" disabled={pending} onClick={() => fire(s.id)}>
+              <button
+                key={s.id}
+                type="button"
+                className="ad-btn primary"
+                disabled={pending}
+                onClick={() => onFire(s.id)}
+              >
                 {pending ? "…" : `“${s.name}”`}
               </button>
             ),
           )}
-          <button type="button" className="ad-btn" disabled={pending} onClick={() => setOpen(false)}>
+          <button type="button" className="ad-btn" disabled={pending} onClick={onCancel}>
             Cancel
           </button>
         </>
@@ -52,10 +94,7 @@ export function AgentRunNow({ schedules }: { schedules: Array<{ id: string; name
           type="button"
           className="ad-btn primary"
           disabled={allRequested}
-          onClick={() => {
-            setResult(null);
-            setOpen(true);
-          }}
+          onClick={onOpen}
           title={
             allRequested
               ? "Already requested: the ticking process starts it on its next tick"
