@@ -2,7 +2,7 @@
   "name": "@duskfleet/web",
   "version": "0.1.0",
   "type": "module",
-  "description": "Duskfleet dashboard: agents, running and past runs (read-only)",
+  "description": "Duskfleet dashboard: agents, running and past runs; it never writes runs, it edits agent files, schedules and the editable settings keys",
   "homepage": "https://duskfleet.com",
   "repository": {
     "type": "git",

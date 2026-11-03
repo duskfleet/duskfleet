@@ -17,7 +17,9 @@ import { spawn } from "node:child_process";
 import { existsSync } from "node:fs";
 import { createRequire } from "node:module";
 import path from "node:path";
+import { createInterface } from "node:readline";
 import { fileURLToPath } from "node:url";
+import { isDroppedLine } from "./next-output.mjs";
 
 const appDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 if (!existsSync(path.join(appDir, ".next", "BUILD_ID"))) {
@@ -27,9 +29,15 @@ if (!existsSync(path.join(appDir, ".next", "BUILD_ID"))) {
 
 const port = process.env.PORT || "4777";
 const nextBin = createRequire(import.meta.url).resolve("next/dist/bin/next");
+// stdout goes through isDroppedLine (Next's "Network:" line is wrong on a loopback-only server);
+// FORCE_COLOR keeps the banner coloured on a terminal now that Next writes to a pipe.
+const colour = process.stdout.isTTY && process.env.FORCE_COLOR === undefined ? { FORCE_COLOR: "1" } : {};
 const child = spawn(process.execPath, [nextBin, "start", appDir, "--hostname", "127.0.0.1", "--port", port], {
-  stdio: "inherit",
-  env: { NEXT_TELEMETRY_DISABLED: "1", ...process.env, DUSKFLEET_WEB_DIR: appDir },
+  stdio: ["inherit", "pipe", "inherit"],
+  env: { NEXT_TELEMETRY_DISABLED: "1", ...colour, ...process.env, DUSKFLEET_WEB_DIR: appDir },
+});
+createInterface({ input: child.stdout, crlfDelay: Number.POSITIVE_INFINITY }).on("line", (line) => {
+  if (!isDroppedLine(line)) process.stdout.write(`${line}\n`);
 });
 for (const signal of ["SIGINT", "SIGTERM"]) process.on(signal, () => child.kill(signal));
 child.on("exit", (code, signal) => process.exit(code ?? (signal ? 1 : 0)));

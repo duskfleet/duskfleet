@@ -29,7 +29,8 @@ flowchart TB
     parser -- status, tools, subagents,<br/>tokens, cost --> db[(SQLite<br/>runs, run_agents, schedules)]
     parser --> logs["data/logs/&lt;run_id&gt;.jsonl"]
 
-    db -- "read-only (WAL)" --> web[Dashboard]
+    db -- "reads runs (WAL)" --> web[Dashboard]
+    web -- "edits schedules" --> db
 ```
 
 ## From request to child process
