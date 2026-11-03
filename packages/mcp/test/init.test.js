@@ -64,6 +64,7 @@ test("init --yes from an empty directory: starter config, exit 0, doctor works, 
     assert.match(init.stdout, /\[3\/5\] Config: created .*duskfleet\.yaml/);
     assert.match(init.stdout, /\[4\/5\] MCP registration: skipped/);
     assert.match(init.stdout, /duskfleet agents create/);
+    assert.doesNotMatch(init.stdout + init.stderr, /first run/i, "init --yes never reaches the guided first run");
     assert.ok(existsSync(s.yaml));
 
     const doctor = s.cli("doctor");
