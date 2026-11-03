@@ -92,13 +92,20 @@ in the nav); the other pages are static.
   (`on_failure: resume_once`; the list shows "resumes ↗" / "retried ↗" flags),
   final message (long results collapse), a callout when a budget exhaustion was followed by a
   wrap-up pass (what the main pass spent, what the wrap-up cost and whether it recorded where
-  it stopped; the wrap-up's own tool calls sit between `wrap-up started` / `wrap-up ended`
-  rows of the timeline), a **Changes** section when the project is a git checkout (files the
+  it stopped, plus how the reserve is sized: 10 % of the budget, at least $0.50, never more than
+  half, the same line as the title of the agent page's "wrap-up" limit; the wrap-up's own tool
+  calls sit between `wrap-up started` / `wrap-up ended` rows of the timeline), a **Changes** section when the project is a git checkout (files the
   run changed with lines added / deleted, the base commit, a link to the patch at
   `/runs/<id>/diff`), event timeline with legend and grouped repeats,
   previous / next run of the same agent, a "run again" CLI command, the `claude --resume`
   command and the exact command executed. Home paths print as `~/…`; Copy buttons give the
-  full value.
+  full value. Every CLI command the dashboard shows (run again, `budgets set` on Costs,
+  `install-service` and `schedules` on Schedules) is written for the install it runs from:
+  `duskfleet <command>` for a global install, `npx -y duskfleet@<version> <command>` when
+  `duskfleet dashboard` ran through npx (`install-service` then installs the package globally
+  first, since npx refuses it), `npm run cli -- <command>` only in the repo checkout. The
+  dashboard knows which from `DUSKFLEET_MCP_ENTRY`, the MCP server path `duskfleet dashboard`
+  passes it, else from a checkout above its working directory (`npm run web`).
 - **Agents**: four tiles (agents, running now, needs review, auto-paused), Project / Status
   filters, a search on id and description and a sort (id by default, last run, runs, clean, cost),
   then one table per project ("Any project" first, then projects by id), one row per agent: status (running with a pending or
@@ -163,16 +170,20 @@ in the nav); the other pages are static.
 - **MCP**: the tool catalogue (`packages/mcp/dist/tools.json`, generated at build time from the
   real server; the published `@duskfleet/web` ships a copy as `tools.json`) with a sticky index
   and a filter by tool or parameter name (`/mcp?q=agent`), plus the registration snippets for
-  Claude Desktop and Claude Code with your absolute paths (outside a checkout, the `duskfleet`
-  package installed next to `@duskfleet/web`).
+  Claude Desktop and Claude Code: the same entry `duskfleet mcp register --dry-run` prints (one
+  renderer in core), with your absolute paths, the npx form when the install runs from npx's
+  cache, and the Claude Desktop config path of your OS. When the dashboard cannot find its
+  install's MCP server (started by hand, not by `duskfleet dashboard`), it shows the
+  `mcp register` command instead of a snippet.
 - **Settings** (the gear at the right end of the nav): the theme (Dark / Light / Device, the
   same choice as the footer switch, kept in this browser) and the runtime keys of
-  `config/duskfleet.yaml`: concurrency limits, `scheduler.tick_seconds`, the `auto_pause` switch
+  `duskfleet.yaml` (the header names the file the loader read: `config/` in a checkout,
+  the user-level config directory for an npm install, or `DUSKFLEET_CONFIG`): concurrency limits, `scheduler.tick_seconds`, the `auto_pause` switch
   and `auto_pause_after` (dimmed, value kept, "ignored while auto-pause is off" while the switch is off),
   the Claude defaults (timeout, budget, `strict_mcp_config`, `setting_sources`, `binary`),
   `allowed_project_roots` and `default_agent`. Each section has its own Save, which lists the
   changes old → new in a confirmation first; a value the loader would refuse shows inline and
-  blocks only its section. The save writes `config/duskfleet.yaml` itself, keeping its comments,
+  blocks only its section. The save writes that file itself, keeping its comments,
   and is checked by loading the config: a refused change restores the file. Every process
   re-reads the file on its next run or tick, except `claude.binary` and
   `claude.setting_sources`, marked "Restart MCP host". The scheduler kill switch

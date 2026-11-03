@@ -40,6 +40,7 @@ import {
   findRepoRoot,
   type LogLevel,
   loadConfig,
+  mcpServerConfig,
   parseHolder,
   pathDefaulted,
   RUN_STATUSES,
@@ -63,7 +64,6 @@ import {
   planClaudeCode,
   planDesktop,
   runClaudeCodeAdd,
-  serverEntry,
 } from "./mcp-register.js";
 import { PROBE_COST_NOTE, type ProbeReport, probeNotRun, runProbe } from "./probe.js";
 import { runReportLines, trimmedRun } from "./run-report.js";
@@ -293,16 +293,12 @@ async function mcpRegister(
   dryRun: boolean,
   yes: boolean,
 ): Promise<number> {
-  // dist/index.js sits next to this module; the config is exported only when the server would
-  // not find it by walking up from there (same rule as the service unit).
-  const entryFile = path.join(path.dirname(fileURLToPath(import.meta.url)), "index.js");
-  const { entry, form } = serverEntry({
+  // dist/index.js sits next to this module. Same renderer as the dashboard's /mcp page.
+  const { entry, form } = mcpServerConfig({
     nodeBin: process.execPath,
-    serverEntry: entryFile,
+    serverEntry: path.join(path.dirname(fileURLToPath(import.meta.url)), "index.js"),
     claudeBin: app.executor.binary,
-    configDir: serviceDirs(findRepoRoot(entryFile), app.config.configDir).configDir,
-    // A GUI host does not see this shell's DUSKFLEET_DATA / XDG_* variables either.
-    dataDir: exportedDataDir(app.config.dataDir, app.config.dataSource, app.config.configDir),
+    config: app.config,
     version: packageVersion(),
   });
   const out = (s: string) => process.stdout.write(`${s}\n`);
@@ -412,7 +408,12 @@ async function main(): Promise<void> {
     const entry = values["no-install"]
       ? findWeb(config.dataDir, version)
       : ensureWeb(config.dataDir, version, log).entry;
-    process.exit(await startDashboard({ entry, port, configDir: config.configDir, open: !values["no-open"], log }));
+    // The MCP server next to this CLI: the dashboard's /mcp page shows the entry for it, and its
+    // copy-paste commands use the form of this install (`duskfleet`, npx or the checkout's npm run cli).
+    const mcpEntry = path.join(path.dirname(fileURLToPath(import.meta.url)), "index.js");
+    process.exit(
+      await startDashboard({ entry, port, configDir: config.configDir, mcpEntry, open: !values["no-open"], log }),
+    );
   }
   // Before bootstrap: init is what writes the config bootstrap needs.
   if (command === "init") {

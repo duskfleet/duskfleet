@@ -18,6 +18,8 @@ const STUBS = {
   "next/navigation": "test/stubs/next-navigation.js",
   // A "use server" module: it reads the database through lib/data.
   "@/app/schedules/actions": "test/stubs/schedule-actions.js",
+  // A "use server" module: it writes duskfleet.yaml through core.
+  "@/app/settings/actions": "test/stubs/settings-actions.js",
 };
 
 /** `./RunRow` -> `./RunRow.js`, `./lib` -> `./lib/index.js`, as a bundler would. */
