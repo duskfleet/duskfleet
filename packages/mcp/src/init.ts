@@ -1,9 +1,11 @@
 /**
- * `duskfleet init`: the guided first setup. Each step prints its result and the first failure
- * stops with the fix (exit 1):
+ * `duskfleet init`: the guided first setup. Each step prints its result; a config that cannot be
+ * written or loaded stops with the fix (exit 1):
  *
  *   1. Node: the version (the >= 24 check already ran in cli.ts, before this code loaded).
  *   2. Claude Code: binary (the executor's lookup), version, login (`claude auth status --json`).
+ *      Not blocking (#349): without Claude Code or its login init goes on, repeats the fix after
+ *      the summary and exits 0.
  *   3. Config and data: the user-level directories with the starter duskfleet.yaml
  *      (`initUserConfig`); an existing config is reported and left untouched.
  *   4. MCP registration, optional: asked on a terminal; under --yes only with --mcp <target>.
@@ -114,12 +116,52 @@ async function askMcpTarget(): Promise<McpTarget | null> {
   }
 }
 
+/**
+ * Step 2: binary, version, login. Prints the result (stdout when logged in, stderr otherwise) and
+ * returns null when runs can start, else the fix to repeat after the summary.
+ */
+async function checkClaude(location: ConfigLocation): Promise<string | null> {
+  const settings = existingClaudeSettings(location);
+  const env = childEnv(settings.passthrough);
+  const then = "then check it with: duskfleet doctor --probe";
+  let binary: string;
+  try {
+    binary = resolveClaudeBinary(settings.binary);
+  } catch (err) {
+    fail(`[2/5] Claude Code: not found\n${err instanceof Error ? err.message : String(err)}`);
+    return `Claude Code is not installed: install it (https://docs.claude.com/en/docs/claude-code), log in (claude auth login), ${then}`;
+  }
+  let version: string;
+  try {
+    version = await claudeVersion(binary, env);
+  } catch (err) {
+    fail(`[2/5] Claude Code: ${binary} --version failed: ${err instanceof Error ? err.message : String(err)}`);
+    return `Claude Code does not start: reinstall it or point CLAUDE_BIN at a working binary, ${then}`;
+  }
+  let login: LoginStatus;
+  try {
+    login = await readLoginStatus(binary, env);
+  } catch (err) {
+    fail(`[2/5] Claude Code ${version}: ${err instanceof Error ? err.message : String(err)}`);
+    return `The Claude Code login could not be read: update Claude Code (claude update), ${then}`;
+  }
+  if (!login.loggedIn) {
+    fail(`[2/5] Claude Code ${version} (${binary}): not logged in`);
+    return `Claude Code is not logged in: run claude auth login, ${then}`;
+  }
+  out(`[2/5] Claude Code ${version} (${binary}): logged in${login.method ? ` (${login.method})` : ""}`);
+  return null;
+}
+
 /** The guided first run spends money: offered on a terminal only, never under --yes. */
 export function offersFirstRun(yes: boolean, isTTY: boolean): boolean {
   return !yes && isTTY;
 }
 
-/** Runs the setup; returns the exit code (0, or 1 at the first failed step). */
+/**
+ * Runs the setup; returns the exit code (0, or 1 when the config cannot be written or loaded).
+ * A missing or logged-out Claude Code is not a failure: the hint is printed and the exit is 0.
+ */
 export async function runInit(options: InitOptions): Promise<number> {
   if (options.mcp && !MCP_TARGETS.includes(options.mcp)) {
     fail(`--mcp must be ${MCP_TARGETS.join(" or ")}`);
@@ -131,39 +173,10 @@ export async function runInit(options: InitOptions): Promise<number> {
   // 1. Node
   out(`[1/5] Node ${process.version}: ok`);
 
-  // 2. Claude Code: same lookup and environment allow-list as the executor.
-  const settings = existingClaudeSettings(location);
-  const env = childEnv(settings.passthrough);
-  let binary: string;
-  try {
-    binary = resolveClaudeBinary(settings.binary);
-  } catch (err) {
-    fail(`[2/5] Claude Code: not found\n${err instanceof Error ? err.message : String(err)}`);
-    fail("Install Claude Code (https://docs.claude.com/en/docs/claude-code), then run init again.");
-    return 1;
-  }
-  let version: string;
-  try {
-    version = await claudeVersion(binary, env);
-  } catch (err) {
-    fail(`[2/5] Claude Code: ${binary} --version failed: ${err instanceof Error ? err.message : String(err)}`);
-    fail("Reinstall Claude Code or point CLAUDE_BIN at a working binary, then run init again.");
-    return 1;
-  }
-  let login: LoginStatus;
-  try {
-    login = await readLoginStatus(binary, env);
-  } catch (err) {
-    fail(`[2/5] Claude Code ${version}: ${err instanceof Error ? err.message : String(err)}`);
-    fail("Update Claude Code (claude update), then run init again.");
-    return 1;
-  }
-  if (!login.loggedIn) {
-    fail(`[2/5] Claude Code ${version} (${binary}): not logged in`);
-    fail("Log in, then run init again:\n  claude auth login");
-    return 1;
-  }
-  out(`[2/5] Claude Code ${version} (${binary}): logged in${login.method ? ` (${login.method})` : ""}`);
+  // 2. Claude Code: same lookup and environment allow-list as the executor. Not blocking (owner
+  // decision 2026-11-02, #349): the config, the read-only commands and the dashboard need no
+  // login, only runs do. A problem here is printed now and repeated after the summary.
+  const claudeFix = await checkClaude(location);
 
   // 3. Config and data
   const yamlPath = path.join(location.configDir, "duskfleet.yaml");
@@ -207,7 +220,10 @@ export async function runInit(options: InitOptions): Promise<number> {
 
   // Guided first run (optional, interactive only): asks first, says what it costs. A refused
   // path or a failed run is reported by the step itself and does not undo the setup above.
-  if (offersFirstRun(options.yes, process.stdin.isTTY === true)) {
+  // Not offered when step 2 found no usable Claude Code: the run would only fail (#349).
+  if (offersFirstRun(options.yes, process.stdin.isTTY === true) && claudeFix) {
+    out("Guided first run: skipped until Claude Code is logged in (then: duskfleet run --first)");
+  } else if (offersFirstRun(options.yes, process.stdin.isTTY === true)) {
     try {
       await options.firstRun();
     } catch (err) {
@@ -223,8 +239,14 @@ export async function runInit(options: InitOptions): Promise<number> {
       "Next:",
       "  duskfleet doctor",
       '  duskfleet agents create fixer --model haiku -- "You fix failing tests. Run the tests, fix the code, run them again."',
-      '  duskfleet run --project <absolute path> --agent fixer -- "Make the tests pass"',
+      '  duskfleet run --project <path> --agent fixer -- "Make the tests pass"',
     ].join("\n"),
   );
+  if (claudeFix) {
+    // stdout like the summary, so a reader of `init` output alone sees why `run` will fail.
+    out(
+      `\n${claudeFix}\nUntil then the config, the read-only commands, agents create and the dashboard work; run, serve and schedules need the login.`,
+    );
+  }
   return 0;
 }

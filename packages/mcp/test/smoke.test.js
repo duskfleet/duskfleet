@@ -540,7 +540,11 @@ test("project validation rejects paths outside allowed roots", async () => {
       () => app.runs.startRun({ prompt: "ok", projectPath: tmpdir() }),
       /outside allowed_project_roots/,
     );
-    await assert.rejects(() => app.runs.startRun({ prompt: "ok", projectPath: "relative/path" }), /must be absolute/);
+    await assert.rejects(
+      () => app.runs.startRun({ prompt: "ok", projectPath: "relative/path" }),
+      // Core (MCP, scheduler) has no shell directory: the error says where an absolute path comes from.
+      /must be absolute: relative\/path \(only the CLI resolves a relative path.*pwd.*registered project id\)/,
+    );
     await assert.rejects(() => app.runs.startRun({ prompt: "ok" }), /project_path or project_id/);
   } finally {
     await app.cleanup();

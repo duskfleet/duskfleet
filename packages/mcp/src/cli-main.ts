@@ -1,4 +1,4 @@
-import { readFileSync } from "node:fs";
+import { readFileSync, statSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 /**
@@ -9,7 +9,7 @@ import { fileURLToPath } from "node:url";
  *   duskfleet agents
  *   duskfleet agents create <id> [--model <m>] [--budget <usd>] [...] [--force] -- "<system prompt>"
  *   duskfleet projects
- *   duskfleet run --project <id or path> [--agent <id>] [--model <m>] [--no-wait] -- "<prompt>"
+ *   duskfleet run --project <id or path> [--agent <id>] [--model <m>] [--no-wait] [--json] -- "<prompt>"
  *   duskfleet run --first [--project <absolute path>]   # the guided first run of init (first-run.ts)
  *   duskfleet runs [--status <s>] [--limit <n>]
  *   duskfleet run-info <run_id> [--events]
@@ -39,17 +39,21 @@ import {
   type DataSource,
   effectivePath,
   findRepoRoot,
+  type LogLevel,
   loadConfig,
+  mcpServerConfig,
   parseHolder,
   pathDefaulted,
   RUN_STATUSES,
   type RunStatus,
   resolveConfigDir,
   runCostLabel,
+  setDefaultLogLevel,
   subagentView,
   summarizeRun,
 } from "@duskfleet/core";
 import { bootstrap } from "./bootstrap.js";
+import { commandHelp, isCommand, unknownCommandText, wantsHelp } from "./cli-help.js";
 import { assertPortFree, ensureWeb, findWeb, parsePort, startDashboard } from "./dashboard.js";
 import { runFirstRun, stdinPrompter } from "./first-run.js";
 import { runInit } from "./init.js";
@@ -62,9 +66,9 @@ import {
   planClaudeCode,
   planDesktop,
   runClaudeCodeAdd,
-  serverEntry,
 } from "./mcp-register.js";
 import { PROBE_COST_NOTE, type ProbeReport, probeNotRun, runProbe } from "./probe.js";
+import { runReportLines, trimmedRun } from "./run-report.js";
 import {
   exportedDataDir,
   installService,
@@ -97,7 +101,7 @@ function usage(asked = false): never {
       "                          [--allowed-tools <a,b>] [--disallowed-tools <a,b>] [--timeout <minutes>]",
       '                          [--description <text>] [--force] (-- "<system prompt>" | --prompt-file <file>)',
       "  duskfleet projects",
-      '  duskfleet run --project <id or path> [--agent <id>] [--model <m>] [--no-wait] -- "<prompt>"',
+      '  duskfleet run --project <id or path> [--agent <id>] [--model <m>] [--no-wait] [--json] -- "<prompt>"',
       "  duskfleet run --first [--project <absolute path>]",
       "  duskfleet runs [--status <status>] [--limit <n>]",
       "  duskfleet run-info <run_id> [--events]",
@@ -118,11 +122,20 @@ function usage(asked = false): never {
       "  duskfleet --help",
       "  duskfleet --version",
       "",
+      "Any command takes --verbose: info logs on stderr (default: warnings and errors only,",
+      "except serve). DUSKFLEET_LOG_LEVEL=debug|info|warn|error overrides both.",
+      "",
       INIT_HINT,
       "",
     ].join("\n"),
   );
   process.exit(asked ? 0 : 2);
+}
+
+/** A wrong invocation of one command: what is wrong, then that command's usage, on stderr with exit 2. */
+function commandUsage(command: string, problem: string): never {
+  process.stderr.write(`error: ${problem}\n\n${commandHelp(command)}`);
+  process.exit(2);
 }
 
 /**
@@ -182,7 +195,7 @@ function parseAgentCreate(args: string[]): { id: string; fields: Record<string, 
     },
   });
   const [id, ...words] = positionals;
-  if (!id) usage();
+  if (!id) commandUsage("agents", 'agents create needs an agent id: agents create <id> -- "<system prompt>"');
   // Same rule as create_agent: bypassPermissions stays a hand-edited, config-gated choice.
   if (values["permission-mode"] === "bypassPermissions") {
     throw new Error("--permission-mode bypassPermissions cannot be set here; edit the agent file by hand");
@@ -211,6 +224,25 @@ function parseAgentCreate(args: string[]): { id: string; fields: Record<string, 
   if (values.model) fields["model"] = values.model;
   if (values["disallowed-tools"] !== undefined) fields["disallowed_tools"] = csv(values["disallowed-tools"]);
   return { id, fields, force: values.force };
+}
+
+/**
+ * `run --project`: a registered id stays an id, an absolute or `~` path is passed as is, and a
+ * relative path (`.`, `..`, anything with a separator, or a bare name that is a directory here) is
+ * resolved from the shell's directory. Only the CLI does this: the MCP server's and the scheduler's
+ * cwd mean nothing to the caller, so core keeps requiring absolute paths there.
+ */
+function resolveCliProject(raw: string, registered: (id: string) => boolean, cwd = process.cwd()): string {
+  const value = raw.trim(); // as core does: " /abs/proj" is still absolute, not relative to cwd
+  if (registered(value) || value.startsWith("~") || path.isAbsolute(value)) return value;
+  const candidate = path.resolve(cwd, value);
+  const relativePath = value === "." || value === ".." || /[\\/]/.test(value) || /^[A-Za-z]:/.test(value);
+  if (relativePath) return candidate;
+  try {
+    return statSync(candidate).isDirectory() ? candidate : value;
+  } catch {
+    return value; // not a directory here: core reads it as a project id ("unknown project ...")
+  }
 }
 
 /** What the service runs: this node, this dist/cli.js, this repo (or config), the resolved claude binary. */
@@ -264,16 +296,12 @@ async function mcpRegister(
   dryRun: boolean,
   yes: boolean,
 ): Promise<number> {
-  // dist/index.js sits next to this module; the config is exported only when the server would
-  // not find it by walking up from there (same rule as the service unit).
-  const entryFile = path.join(path.dirname(fileURLToPath(import.meta.url)), "index.js");
-  const { entry, form } = serverEntry({
+  // dist/index.js sits next to this module. Same renderer as the dashboard's /mcp page.
+  const { entry, form } = mcpServerConfig({
     nodeBin: process.execPath,
-    serverEntry: entryFile,
+    serverEntry: path.join(path.dirname(fileURLToPath(import.meta.url)), "index.js"),
     claudeBin: app.executor.binary,
-    configDir: serviceDirs(findRepoRoot(entryFile), app.config.configDir).configDir,
-    // A GUI host does not see this shell's DUSKFLEET_DATA / XDG_* variables either.
-    dataDir: exportedDataDir(app.config.dataDir, app.config.dataSource, app.config.configDir),
+    config: app.config,
     version: packageVersion(),
   });
   const out = (s: string) => process.stdout.write(`${s}\n`);
@@ -319,11 +347,43 @@ async function mcpRegister(
   return 0;
 }
 
+/**
+ * The arguments without `--verbose`, and whether it was there. Taken out wherever it stands
+ * before a `--` (after it, everything is the prompt), so every command accepts it.
+ */
+function takeVerbose(args: string[]): { args: string[]; verbose: boolean } {
+  const end = args.indexOf("--");
+  const head = end === -1 ? args : args.slice(0, end);
+  const tail = end === -1 ? [] : args.slice(end);
+  const kept = head.filter((a) => a !== "--verbose");
+  return { args: [...kept, ...tail], verbose: kept.length !== head.length };
+}
+
+/**
+ * Log level of a CLI invocation when DUSKFLEET_LOG_LEVEL is not set (the variable always wins):
+ * `serve` keeps `info`, its log is the record; a one-shot command shows warnings and errors only,
+ * `--verbose` brings `info` back.
+ */
+function cliLogLevel(command: string | undefined, verbose: boolean): LogLevel {
+  return command === "serve" || verbose ? "info" : "warn";
+}
+
 async function main(): Promise<void> {
-  const [command, ...rest] = process.argv.slice(2);
+  const { args, verbose } = takeVerbose(process.argv.slice(2));
+  const [command, ...rest] = args;
+  setDefaultLogLevel(cliLogLevel(command, verbose));
   if (!command) usage();
   // Before bootstrap: help must work without a config (a fresh `npx duskfleet --help`).
   if (command === "--help" || command === "-h" || command === "help") usage(true);
+  if (!isCommand(command)) {
+    process.stderr.write(unknownCommandText(command));
+    process.exit(2);
+  }
+  // Also before any config load: `<command> --help` prints that command's usage.
+  if (wantsHelp(rest)) {
+    process.stdout.write(commandHelp(command));
+    process.exit(0);
+  }
   if (command === "tools") {
     print(await buildToolCatalog());
     return;
@@ -351,7 +411,12 @@ async function main(): Promise<void> {
     const entry = values["no-install"]
       ? findWeb(config.dataDir, version)
       : ensureWeb(config.dataDir, version, log).entry;
-    process.exit(await startDashboard({ entry, port, configDir: config.configDir, open: !values["no-open"], log }));
+    // The MCP server next to this CLI: the dashboard's /mcp page shows the entry for it, and its
+    // copy-paste commands use the form of this install (`duskfleet`, npx or the checkout's npm run cli).
+    const mcpEntry = path.join(path.dirname(fileURLToPath(import.meta.url)), "index.js");
+    process.exit(
+      await startDashboard({ entry, port, configDir: config.configDir, mcpEntry, open: !values["no-open"], log }),
+    );
   }
   // Before bootstrap: init is what writes the config bootstrap needs.
   if (command === "init") {
@@ -386,15 +451,22 @@ async function main(): Promise<void> {
     process.exit(code);
   }
 
-  const app = await bootstrap(import.meta.url, { role: command === "serve" ? "serve" : "cli" });
+  // Each command opens the config and database once its arguments are checked, so a wrong
+  // invocation is named (exit 2) before any config load, with or without a config.
+  let opened: Awaited<ReturnType<typeof bootstrap>> | null = null;
+  const open = async () => {
+    opened ??= await bootstrap(import.meta.url, { role: command === "serve" ? "serve" : "cli" });
+    return opened;
+  };
   const done = (code = 0) => {
-    app.close();
+    opened?.close();
     process.exit(code);
   };
 
   switch (command) {
     case "install-service": {
       const { values } = parseArgs({ args: rest, options: { print: { type: "boolean", default: false } } });
+      const app = await open();
       const target = serviceTarget(
         app.executor.binary,
         app.config.dataDir,
@@ -423,13 +495,16 @@ async function main(): Promise<void> {
       return done(status.running === false ? 1 : 0);
     }
     case "uninstall-service": {
+      // Needs no config: removing the unit works after the config is gone.
       const r = uninstallService(process.platform);
       print({ uninstalled: true, ...r });
       return done();
     }
     case "mcp": {
       const [sub, ...args] = rest;
-      if (sub !== "register") usage();
+      if (sub !== "register") {
+        commandUsage("mcp", sub ? `unknown mcp subcommand: ${sub}` : "mcp needs a subcommand: register or status");
+      }
       const { values } = parseArgs({
         args,
         options: {
@@ -442,23 +517,26 @@ async function main(): Promise<void> {
       if (!target || !MCP_TARGETS.includes(target)) {
         throw new Error(`mcp register needs --target ${MCP_TARGETS.join(" or ")}`);
       }
+      const app = await open();
       return done(await mcpRegister(app, target, values["dry-run"], values.yes));
     }
     case "agents": {
       const [sub, ...args] = rest;
       if (sub === "create") {
         const { id, fields, force } = parseAgentCreate(args);
+        const app = await open();
         const config = app.config;
         const existing = assertAgentIdFree(config, id, force, "--force", null);
         const agent = createAgentFromFields("own", fields, config, () => app.runs.reloadConfig());
         const { systemPrompt: _p, ...shown } = agent;
         process.stderr.write(
-          `agent "${id}" written to ${agent.sourcePath}\nnext: duskfleet run --project <id or absolute path> --agent ${id} -- "<task>"\n`,
+          `agent "${id}" written to ${agent.sourcePath}\nnext: duskfleet run --project <id or path> --agent ${id} -- "<task>"\n`,
         );
         print({ created: true, overrode: existing?.source ?? null, agent: shown });
         return done();
       }
-      if (sub) usage();
+      if (sub) commandUsage("agents", `unknown agents subcommand: ${sub}`);
+      const app = await open();
       const agents = [...app.config.agents.values()].map(({ systemPrompt: _p, ...a }) => a);
       if (agents.length === 0) {
         process.stderr.write(
@@ -469,6 +547,7 @@ async function main(): Promise<void> {
       return done();
     }
     case "projects": {
+      const app = await open();
       print({ allowedProjectRoots: app.config.allowedProjectRoots, projects: [...app.config.projects.values()] });
       return done();
     }
@@ -477,6 +556,7 @@ async function main(): Promise<void> {
         args: rest,
         options: { probe: { type: "boolean", default: false } },
       });
+      const app = await open();
       let version: string | null = null;
       let error: string | null = null;
       try {
@@ -548,6 +628,20 @@ async function main(): Promise<void> {
         dataSource: app.config.dataSource,
         agents: [...app.config.agents.keys()],
         scheduler,
+        // Rows whose owning process was gone, failed by this process's startup sweep: `running`
+        // ones (orphans) and `pending` ones (the process died between the insert and the spawn).
+        orphans: {
+          recovered: app.recoveredAtStartup.map((run) => ({
+            id: run.id,
+            agentId: run.agentId,
+            was: run.status,
+            owner: run.owner,
+            createdAt: run.createdAt,
+          })),
+          advice: app.recoveredAtStartup.length
+            ? `marked ${app.recoveredAtStartup.length} run(s) failed with the orphaned error: their owning process is gone`
+            : null,
+        },
         ...(doctorFlags.probe ? { probe } : {}),
       });
       return done(error || (probe && !probe.ok) ? 1 : 0);
@@ -562,6 +656,7 @@ async function main(): Promise<void> {
           agent: { type: "string", short: "a" },
           model: { type: "string", short: "m" },
           "no-wait": { type: "boolean", default: false },
+          json: { type: "boolean", default: false },
           first: { type: "boolean", default: false },
         },
       });
@@ -570,6 +665,7 @@ async function main(): Promise<void> {
         if (positionals.length || values.agent || values.model || values["project-id"] || values["no-wait"]) {
           throw new Error("run --first takes only --project <absolute path>; agent, model and prompt are fixed");
         }
+        const app = await open();
         const prompter = stdinPrompter();
         try {
           return done(await runFirstRun(app, { askToStart: false, projectPath: values.project }, prompter));
@@ -578,11 +674,16 @@ async function main(): Promise<void> {
         }
       }
       const prompt = positionals.join(" ").trim();
-      if (!prompt || (!values.project && !values["project-id"])) usage();
+      if (!prompt) commandUsage("run", 'run needs a prompt after --: run --project <id or path> -- "<prompt>"');
+      if (!values.project && !values["project-id"]) {
+        commandUsage("run", "run needs a project: --project <id or path>");
+      }
 
+      const app = await open();
       const input: Parameters<typeof app.runs.startRun>[0] = { prompt };
-      // --project takes a registered id or an absolute path (core decides which); --project-id is the explicit form.
-      if (values.project) input.projectPath = values.project;
+      // --project takes a registered id or a path, relative ones resolved from the shell directory
+      // (core decides id vs path); --project-id is the explicit form.
+      if (values.project) input.projectPath = resolveCliProject(values.project, (id) => app.config.projects.has(id));
       if (values["project-id"]) input.projectId = values["project-id"];
       if (values.agent) input.agentId = values.agent;
       if (values.model) input.model = values.model;
@@ -592,7 +693,10 @@ async function main(): Promise<void> {
       if (!values["no-wait"]) {
         run = await app.runs.waitForRun(run.id, 24 * 60 * 60 * 1000);
       }
-      print(run);
+      // A run that did not end clean: cause and fix first, on stderr, before the record.
+      const report = runReportLines(run);
+      if (report) process.stderr.write(`${report.join("\n")}\n`);
+      print(values.json ? run : trimmedRun(run));
       return done(run.status === "completed" || run.status === "running" ? 0 : 1);
     }
     case "runs": {
@@ -600,11 +704,12 @@ async function main(): Promise<void> {
         args: rest,
         options: { status: { type: "string" }, limit: { type: "string" }, agent: { type: "string" } },
       });
-      const filter: Parameters<typeof app.runs.listRuns>[0] = {};
-      if (values.status) {
-        if (!(RUN_STATUSES as readonly string[]).includes(values.status)) usage();
-        filter.status = values.status as RunStatus;
+      if (values.status && !(RUN_STATUSES as readonly string[]).includes(values.status)) {
+        commandUsage("runs", `unknown status "${values.status}": one of ${RUN_STATUSES.join(", ")}`);
       }
+      const app = await open();
+      const filter: Parameters<typeof app.runs.listRuns>[0] = {};
+      if (values.status) filter.status = values.status as RunStatus;
       if (values.limit) filter.limit = Number(values.limit);
       if (values.agent) filter.agentId = values.agent;
       const runs = app.runs.listRuns(filter);
@@ -616,7 +721,8 @@ async function main(): Promise<void> {
     case "schedules": {
       const [sub, target] = rest;
       if (sub === "run-now") {
-        if (!target) usage();
+        if (!target) commandUsage("schedules", "schedules run-now needs a schedule id or name");
+        const app = await open();
         // Only stamps run_requested_at: the lease holder (normally the service) fires the
         // schedule on its next tick. Nothing is spawned here, so this is the command to call
         // from a git hook or any script that must return at once (`run --no-wait` would exit
@@ -636,7 +742,8 @@ async function main(): Promise<void> {
         print(schedule);
         return done();
       }
-      if (sub) usage();
+      if (sub) commandUsage("schedules", `unknown schedules subcommand: ${sub}`);
+      const app = await open();
       print({ scheduler: app.scheduler.status(), schedules: app.scheduler.listWithLastRun() });
       return done();
     }
@@ -653,7 +760,9 @@ async function main(): Promise<void> {
           },
         });
         const [scope, scopeId] = positionals;
-        if (!scope || !values.amount) usage();
+        if (!scope) commandUsage("budgets", "budgets set needs a scope: global, agent <id> or project <id>");
+        if (!values.amount) commandUsage("budgets", "budgets set needs --amount <usd>");
+        const app = await open();
         const input: BudgetInput = { scope: scope as BudgetInput["scope"], amountUsd: Number(values.amount) };
         if (scopeId) input.scopeId = scopeId;
         if (values.warn) input.warnPercent = Number(values.warn);
@@ -662,7 +771,8 @@ async function main(): Promise<void> {
         return done();
       }
       if (sub === "delete") {
-        if (!args[0]) usage();
+        if (!args[0]) commandUsage("budgets", "budgets delete needs a budget id");
+        const app = await open();
         if (!app.runs.deleteBudget(args[0])) {
           process.stderr.write(`budget not found: ${args[0]}\n`);
           return done(1);
@@ -670,13 +780,15 @@ async function main(): Promise<void> {
         print({ deleted: true });
         return done();
       }
-      if (sub) usage();
+      if (sub) commandUsage("budgets", `unknown budgets subcommand: ${sub}`);
+      const app = await open();
       print(app.runs.budgetStatuses());
       return done();
     }
     case "serve": {
       // Keeps the scheduler ticking without any MCP host. Safe next to the MCP server:
       // only the lease holder fires. Stop with SIGINT/SIGTERM.
+      const app = await open();
       app.scheduler.start();
       process.stderr.write(
         `duskfleet serve: scheduler ticking every ${app.config.scheduler.tickSeconds}s (holder ${app.scheduler.status().holder}); Ctrl-C to stop\n`,
@@ -704,7 +816,8 @@ async function main(): Promise<void> {
         options: { events: { type: "boolean", default: false } },
       });
       const id = positionals[0];
-      if (!id) usage();
+      if (!id) commandUsage("run-info", "run-info needs a run id");
+      const app = await open();
       const run = app.runs.getRun(id);
       if (!run) {
         process.stderr.write(`run not found: ${id}\n`);
@@ -722,6 +835,7 @@ async function main(): Promise<void> {
     }
     case "repair-subagents": {
       // One-shot backfill of subagent rows recorded by an older parser, from each finished run's log.
+      const app = await open();
       print(await app.runs.repairSubagents());
       return done();
     }

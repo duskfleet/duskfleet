@@ -146,6 +146,13 @@ label event, so the clock restarts and a run still at work is never interrupted.
 their side of it: swap the label first, push or post before the timeout, never end a run with
 work "still running in the background".
 
+Last, the gate clears finished work: every issue or PR closed (or merged) in the last 30 days
+loses all its `flow:` labels, since `Closes #n` closes the issue but leaves its
+`flow: in-progress` lock on the board; `area:` and `priority:` labels stay, open items are not
+touched, no comment is posted, and `--dry-run` lists what it would remove. `--repo <owner/name>`
+(or `GH_REPO`) runs the same script against another repository, such as a site repo with its
+own copy of the workflow.
+
 ## Schedules and limits
 
 One cron schedule per agent ([`docs/examples/schedules.yaml`](examples/schedules.yaml)),
@@ -209,8 +216,10 @@ once instead of on the next hourly run; it needs the same secret there.
 
 - **No coordinator.** Each agent reads the labels when its schedule fires; nothing hands work
   over directly. A hand-off waits for the next tick of the receiving agent (up to 30 minutes).
-- **Busy means skip.** A tick whose agent is still running is recorded as `skipped_busy` and
-  lost, never queued. A long developer run simply delays the next unit of work.
+- **Busy means wait once, never queue.** A tick whose agent is still running becomes the
+  schedule's one deferred fire (`deferred`), retried every tick until it starts or the next
+  occurrence comes (`skipped_busy` then, or with `scheduler.defer_busy: false`). A long developer
+  run simply delays the next unit of work.
 - **Locks are labels.** Two runs could race between a label query and the label swap; the
   schedules are staggered and `max_concurrent_per_agent: 1` keeps one run per agent, and the
   PR gate expires the locks a dead run leaves behind.

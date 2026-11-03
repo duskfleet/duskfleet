@@ -19,15 +19,19 @@ import {
   type CostSeries,
   type CostSplit,
   type CostSplitBy,
+  claudeCodeAddArgs,
   costSeries,
   type DuskFleetConfig,
   describeCron,
+  desktopConfigPath,
+  desktopSnippet,
   findRepoRoot,
   type ListRunsFilter,
   listProjectAgents,
   loadAgents,
   loadConfig,
   MIXED_MODEL,
+  mcpServerConfig,
   NEEDS_REVIEW_SQL,
   nextFire,
   type OutcomeSeries,
@@ -46,10 +50,13 @@ import {
   ScheduleRepository,
   scheduleIdleStats,
   scheduleRunState,
+  shellLine,
   type TrendRange,
   utcDayStart,
   utcMonthStart,
 } from "@duskfleet/core";
+import { cliCommand, detectInstall, type Install, usableMcpEntry } from "./cli";
+import { ACTIVE_SQL, ACTIVE_STATUSES } from "./running";
 import { listScoped, scopeList } from "./scope";
 import { mergeSeries } from "./trends";
 
@@ -283,8 +290,13 @@ export function listRuns(filter: RunsFilter = {}): RunWithProject[] {
 /** How a run ended, as the agent page's Recent runs Status filter partitions them (stored review verdict). */
 export type RunBucket = "running" | "review" | "clean" | "cancelled";
 
-/** A run not ended yet: the Running bucket here and the agent's running state (agentStats). */
-const ACTIVE_SQL = "status IN ('running','pending')";
+/** The runs not ended yet (`running` and `pending`, see lib/running.ts), newest first: the Runs page's Running list. */
+export function activeRuns(filter: Omit<RunsFilter, "status"> = {}): RunWithProject[] {
+  const limit = filter.limit ?? 50;
+  return ACTIVE_STATUSES.flatMap((status) => listRuns({ ...filter, status, limit }))
+    .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
+    .slice(0, limit);
+}
 const BUCKET_SQL: Record<RunBucket, string> = {
   running: `(${ACTIVE_SQL})`,
   review: `(NOT ${ACTIVE_SQL} AND ${NEEDS_REVIEW_SQL})`,
@@ -773,7 +785,7 @@ export function overview(
       // budget_exhausted or with a denial must not raise the failed / needs-review KPIs. Its
       // cost is part of the spend, shown apart (cost_gates).
       `SELECT COALESCE(SUM(kind = 'run'), 0)                                     AS total,
-              SUM(kind = 'run' AND status = 'running')                            AS running,
+              SUM(kind = 'run' AND ${ACTIVE_SQL})                                 AS running,
               SUM(kind = 'run' AND status IN ('completed','failed','timed_out','cancelled')) AS finished,
               SUM(kind = 'run' AND status = 'completed')                          AS completed,
               SUM(kind = 'run' AND status = 'completed' AND NOT ${NEEDS_REVIEW_SQL}) AS clean,
@@ -1019,33 +1031,62 @@ export function toolCatalog(): ToolCatalog | null {
   }
 }
 
-/**
- * The MCP server entry: the checkout's packages/mcp/dist/index.js, else the `duskfleet`
- * package installed next to @duskfleet/web (same node_modules), else a placeholder.
- */
-function mcpEntry(): string {
-  // A directory holding config/duskfleet.yaml is a "root" for an installed package too,
-  // but has no packages/mcp/dist: only an entry that exists counts.
-  const root = findRepoRoot(process.cwd());
-  const webDir = process.env.DUSKFLEET_WEB_DIR;
-  const entry = [
-    root ? path.join(root, "packages", "mcp", "dist", "index.js") : null,
-    // <prefix>/node_modules/@duskfleet/web -> <prefix>/node_modules/duskfleet/dist/index.js
-    webDir ? path.resolve(webDir, "..", "..", "duskfleet", "dist", "index.js") : null,
-  ].find((f): f is string => !!f && existsSync(f));
-  return entry ?? "<path to the duskfleet package>/dist/index.js";
+/** The install the dashboard belongs to (checkout, global or npx): the form of every CLI command shown. */
+export function install(): Install {
+  return detectInstall({
+    mcpEntryEnv: process.env.DUSKFLEET_MCP_ENTRY,
+    webDir: process.env.DUSKFLEET_WEB_DIR,
+    cwd: process.cwd(),
+    findRepoRoot,
+    exists: existsSync,
+    readVersion: (file) => {
+      try {
+        const v = (JSON.parse(readFileSync(file, "utf8")) as { version?: unknown }).version;
+        return typeof v === "string" ? v : null;
+      } catch {
+        return null;
+      }
+    },
+  });
 }
 
-/** Where this server is registered, for the docs page. Absolute paths, as the hosts need them. */
-export function mcpRegistration() {
-  const entry = mcpEntry();
-  let claudeBin: string;
+/** A copy-paste CLI command for this install (`duskfleet ...`, `npx -y duskfleet@<v> ...` or `npm run cli -- ...`). */
+export function cli(args: string): string {
+  return cliCommand(install(), args);
+}
+
+/**
+ * The MCP host setup for the /mcp page, rendered by core's `mcpServerConfig`, the same renderer
+ * as `duskfleet mcp register` (same entry, env and Claude Desktop path for this OS). Null entry:
+ * this install's MCP server could not be found (dashboard started by hand, not by the CLI).
+ */
+export function mcpSetup() {
+  const inst = install();
+  const cfg = config();
+  let claudeBin: string | null;
   try {
-    claudeBin = resolveClaudeBinary(config().claude.binary); // absolute: GUI hosts start with a minimal PATH
+    claudeBin = resolveClaudeBinary(cfg.claude.binary); // absolute: GUI hosts start with a minimal PATH
   } catch {
-    claudeBin = "/absolute/path/to/claude";
+    claudeBin = null;
   }
-  return { entry, node: process.execPath, claudeBin };
+  const serverEntry = usableMcpEntry(inst);
+  const entry = serverEntry
+    ? mcpServerConfig({
+        nodeBin: process.execPath,
+        serverEntry,
+        claudeBin,
+        config: cfg,
+        // Pinned only in the npx form, where usableMcpEntry guarantees a version.
+        version: inst.version ?? "",
+      }).entry
+    : null;
+  return {
+    install: inst,
+    entry,
+    desktopJson: entry ? desktopSnippet(entry) : null,
+    claudeCodeCmd: entry ? shellLine("claude", claudeCodeAddArgs(entry)) : null,
+    desktopConfigPath: desktopConfigPath(),
+  };
 }
 
 /** The Claude Code agents a registered project defines in its own .claude/agents/ (subagents and link targets). */

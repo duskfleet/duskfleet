@@ -42,8 +42,17 @@
 // each with a `[pr-gate]` comment naming the lock and its age. A new pickup is a new label
 // event, so the clock restarts: a run that is still working is never interrupted.
 //
-//   node scripts/pr-gate.mjs [--dry-run] [--update-branch] [--stale-hours <n>]
+// Last, it clears the flow off finished work: a merged PR closes its issue through
+// `Closes #n`, but nothing took the lock label off, so closed issues kept `flow: in-progress`
+// on the board and in every label search. Every issue or PR closed (or merged) in the last
+// CLEANUP_DAYS days loses all its `flow:` labels; `area:`, `priority:` and the rest stay, open
+// items are never touched, and no comment is posted (--dry-run only lists them).
+//
+//   node scripts/pr-gate.mjs [--dry-run] [--update-branch] [--stale-hours <n>] [--repo <owner/name>]
+//
+// --repo (or GH_REPO) points every gh call at another repository, e.g. duskfleet/duskfleet-website.
 import { execFileSync } from "node:child_process";
+import { pathToFileURL } from "node:url";
 
 const GATED_LABELS = ["flow: needs-review", "flow: ready-to-merge"];
 const HANDOFF_LABEL = "flow: changes-requested";
@@ -57,6 +66,21 @@ const ISSUE_LOCKS = { "flow: in-progress": "flow: ready" };
 const VERDICT_LABELS = { approve: "flow: ready-to-merge", changes: "flow: changes-requested" };
 // Every keyword GitHub links a PR to an issue with (same as scripts/issue-plan.mjs).
 const CLOSES = /\b(?:close[sd]?|fix(?:es|ed)?|resolve[sd]?)[ \t:]+((?:#\d+[ \t,;]*(?:and[ \t]+)?)+)/gi;
+const FLOW_PREFIX = "flow: ";
+// How far back the cleanup looks: older closed items were cleared by hand on 2026-11-02.
+const CLEANUP_DAYS = 30;
+
+// The `flow:` labels a closed issue or closed/merged PR (a REST issues item: `state`,
+// `closed_at`, `labels`) must lose, or [] for an open item, one closed more than `days` ago,
+// or one without flow labels. Pure: no gh call, so it is tested without network.
+export function closedFlowLabels(item, { now, days = CLEANUP_DAYS }) {
+  if (item.state !== "closed") return [];
+  const closedAt = Date.parse(item.closed_at ?? "");
+  if (!Number.isFinite(closedAt) || now - closedAt > days * 86_400_000) return [];
+  return (item.labels ?? [])
+    .map((label) => (typeof label === "string" ? label : label?.name))
+    .filter((name) => typeof name === "string" && name.startsWith(FLOW_PREFIX));
+}
 
 const args = process.argv.slice(2);
 const dryRun = args.includes("--dry-run");
@@ -67,27 +91,21 @@ if (!Number.isFinite(staleHours) || staleHours <= 0) {
   console.error(`--stale-hours needs a positive number of hours, got ${JSON.stringify(staleHoursArg)}`);
   process.exit(2);
 }
+const repo = args.includes("--repo") ? args[args.indexOf("--repo") + 1] : undefined;
+if (args.includes("--repo") && !/^[\w.-]+\/[\w.-]+$/.test(repo ?? "")) {
+  console.error(`--repo needs <owner>/<name>, got ${JSON.stringify(repo)}`);
+  process.exit(2);
+}
 const now = Date.now();
 
 function gh(ghArgs, { input } = {}) {
-  return execFileSync("gh", ghArgs, { encoding: "utf8", input, maxBuffer: 64 * 1024 * 1024 });
+  // GH_REPO also fills the {owner}/{repo} placeholders of `gh api`.
+  const env = repo ? { ...process.env, GH_REPO: repo } : process.env;
+  return execFileSync("gh", ghArgs, { encoding: "utf8", input, env, maxBuffer: 64 * 1024 * 1024 });
 }
 function sleep(ms) {
   Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
 }
-
-const prs = JSON.parse(
-  gh([
-    "pr",
-    "list",
-    "--state",
-    "open",
-    "--limit",
-    "200",
-    "--json",
-    "number,isDraft,author,labels,baseRefName,headRefName,headRefOid,mergeable,mergeStateStatus,statusCheckRollup,body,isCrossRepository",
-  ]),
-);
 
 // The label that hands a PR back for rework: the developer's, or the contributor's for a fork.
 function handoffLabel(pr, label = HANDOFF_LABEL) {
@@ -324,67 +342,127 @@ function gate(pr) {
   return "handed";
 }
 
-// One failing PR (an update-branch 422 after the PR turned conflicting, a 5xx) must not skip
-// the others: log it, go on, and exit non-zero at the end.
-const summary = {
-  handed: 0,
-  updated: 0,
-  clean: 0,
-  locked: 0,
-  expired: 0,
-  waiting: 0,
-  revived: 0,
-  skipped: 0,
-  failed: 0,
-};
-for (const pr of prs) {
-  try {
-    summary[gate(pr)]++;
-  } catch (error) {
-    console.error(`PR #${pr.number}: failed: ${(error.stderr || error.message).toString().trim()}`);
-    summary.failed++;
+// A closed issue or a closed/merged PR loses its `flow:` labels. A label already gone (a
+// DELETE answering 404, a human or a parallel run was faster) counts as removed. Returns the
+// summary bucket.
+function clearClosedFlow(item) {
+  const labels = closedFlowLabels(item, { now });
+  if (labels.length === 0) return null;
+  const kind = item.pull_request ? "PR" : "issue";
+  console.log(`${kind} #${item.number} (closed): removing ${labels.join(", ")}`);
+  if (dryRun) return "cleared";
+  for (const label of labels) {
+    try {
+      gh(["api", "-X", "DELETE", `repos/{owner}/{repo}/issues/${item.number}/labels/${encodeURIComponent(label)}`]);
+    } catch (error) {
+      if (!/HTTP 404|Label does not exist/.test(String(error.stderr ?? error.message))) throw error;
+    }
   }
+  return "cleared";
 }
 
-// Issues the open PRs close (body keywords or an issue/<n>- branch, as in issue-plan.mjs).
-const closedBy = new Set();
-for (const pr of prs) {
-  for (const match of (pr.body ?? "").matchAll(CLOSES)) {
-    for (const ref of match[1].matchAll(/#(\d+)/g)) closedBy.add(Number(ref[1]));
-  }
-  const branchIssue = /^issue\/(\d+)-/.exec(pr.headRefName);
-  if (branchIssue) closedBy.add(Number(branchIssue[1]));
-}
-let issues = [];
-try {
-  issues = JSON.parse(
+function main() {
+  const prs = JSON.parse(
     gh([
-      "issue",
+      "pr",
       "list",
       "--state",
       "open",
-      "--label",
-      "flow: in-progress",
       "--limit",
       "200",
       "--json",
-      "number,labels",
+      "number,isDraft,author,labels,baseRefName,headRefName,headRefOid,mergeable,mergeStateStatus,statusCheckRollup,body,isCrossRepository",
     ]),
   );
-} catch (error) {
-  console.error(`issues: failed: ${(error.stderr || error.message).toString().trim()}`);
-  summary.failed++;
-}
-for (const issue of issues) {
+
+  // One failing PR (an update-branch 422 after the PR turned conflicting, a 5xx) must not skip
+  // the others: log it, go on, and exit non-zero at the end.
+  const summary = {
+    handed: 0,
+    updated: 0,
+    clean: 0,
+    locked: 0,
+    expired: 0,
+    waiting: 0,
+    revived: 0,
+    cleared: 0,
+    skipped: 0,
+    failed: 0,
+  };
+  for (const pr of prs) {
+    try {
+      summary[gate(pr)]++;
+    } catch (error) {
+      console.error(`PR #${pr.number}: failed: ${(error.stderr || error.message).toString().trim()}`);
+      summary.failed++;
+    }
+  }
+
+  // Issues the open PRs close (body keywords or an issue/<n>- branch, as in issue-plan.mjs).
+  const closedBy = new Set();
+  for (const pr of prs) {
+    for (const match of (pr.body ?? "").matchAll(CLOSES)) {
+      for (const ref of match[1].matchAll(/#(\d+)/g)) closedBy.add(Number(ref[1]));
+    }
+    const branchIssue = /^issue\/(\d+)-/.exec(pr.headRefName);
+    if (branchIssue) closedBy.add(Number(branchIssue[1]));
+  }
+  let issues = [];
   try {
-    summary[expireIssueLock(issue, closedBy)]++;
+    issues = JSON.parse(
+      gh([
+        "issue",
+        "list",
+        "--state",
+        "open",
+        "--label",
+        "flow: in-progress",
+        "--limit",
+        "200",
+        "--json",
+        "number,labels",
+      ]),
+    );
   } catch (error) {
-    console.error(`issue #${issue.number}: failed: ${(error.stderr || error.message).toString().trim()}`);
+    console.error(`issues: failed: ${(error.stderr || error.message).toString().trim()}`);
     summary.failed++;
   }
+  for (const issue of issues) {
+    try {
+      summary[expireIssueLock(issue, closedBy)]++;
+    } catch (error) {
+      console.error(`issue #${issue.number}: failed: ${(error.stderr || error.message).toString().trim()}`);
+      summary.failed++;
+    }
+  }
+
+  // Closed issues and closed/merged PRs (the REST issues list holds both). `since` filters on
+  // the last update, never earlier than the close, so it only narrows the page count;
+  // closedFlowLabels checks the close date itself.
+  let closed = [];
+  try {
+    const since = new Date(now - CLEANUP_DAYS * 86_400_000).toISOString();
+    closed = JSON.parse(
+      gh(["api", "--paginate", `repos/{owner}/{repo}/issues?state=closed&per_page=100&since=${since}`]),
+    );
+  } catch (error) {
+    console.error(`closed items: failed: ${(error.stderr || error.message).toString().trim()}`);
+    summary.failed++;
+  }
+  for (const item of closed) {
+    try {
+      if (clearClosedFlow(item)) summary.cleared++;
+    } catch (error) {
+      console.error(`#${item.number}: failed: ${(error.stderr || error.message).toString().trim()}`);
+      summary.failed++;
+    }
+  }
+
+  console.log(
+    `pr-gate${dryRun ? " (dry run)" : ""}: ${summary.handed} handed back, ${summary.updated} updated, ${summary.clean} clean, ${summary.locked} locked and alive, ${summary.expired} stale locks expired, ${summary.waiting} waiting for a contributor, ${summary.revived} back for review, ${summary.cleared} closed items cleared of flow labels, ${summary.skipped} not gated, ${summary.failed} failed`,
+  );
+  if (summary.failed > 0) process.exitCode = 1;
 }
 
-console.log(
-  `pr-gate${dryRun ? " (dry run)" : ""}: ${summary.handed} handed back, ${summary.updated} updated, ${summary.clean} clean, ${summary.locked} locked and alive, ${summary.expired} stale locks expired, ${summary.waiting} waiting for a contributor, ${summary.revived} back for review, ${summary.skipped} not gated, ${summary.failed} failed`,
-);
-if (summary.failed > 0) process.exitCode = 1;
+// Run only as a script: the tests import closedFlowLabels without touching gh.
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) main();

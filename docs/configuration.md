@@ -80,6 +80,7 @@ scheduler:
   noop_pattern: '/^\s*(nothing to do|no .* in ready)/i'   # final message of a run that found no work (idle-cost stats)
   auto_pause: true              # on/off switch of auto-pause; false keeps auto_pause_after and resumes nothing
   auto_pause_after: 5           # pause a schedule after this many empty / needs-review runs in a row; 0 = never
+  defer_busy: true              # a busy scheduled tick waits as one pending fire until the next cron occurrence; false = skipped_busy
   allow_command_gates: false    # schedule command gates (`sh -c`, outside Claude Code's allow-lists) are refused unless true
 ```
 
@@ -136,7 +137,7 @@ for it). `max_concurrent_runs` always stays the hard cap. See
 |---|---|
 | `DUSKFLEET_CONFIG` | Directory containing `duskfleet.yaml` (default: the closest ancestor `config/` of the running package / cwd) |
 | `CLAUDE_BIN` | Path to the Claude Code binary (overrides `claude.binary`). Read by Duskfleet only: it is not passed on to agent runs. |
-| `DUSKFLEET_LOG_LEVEL` | `debug` \| `info` \| `warn` \| `error` |
+| `DUSKFLEET_LOG_LEVEL` | `debug` \| `info` \| `warn` \| `error`, on stderr. Default: `warn` for one-shot CLI commands (`--verbose` = `info`), `info` for `serve` and the MCP server. When set, it wins over both. |
 
 ### What reaches a run
 

@@ -118,29 +118,57 @@ test("init --yes never writes a Claude config file unless --mcp is given", () =>
   }
 });
 
-test("init with Claude Code logged out stops at step 2 with the login hint, exit 1, nothing written", () => {
+test("init with Claude Code logged out (#349): config written, login hint, exit 0; read-only commands work, run is auth_required", () => {
   const s = sandbox();
   try {
-    // `claude auth status --json` of a logged-out user: loggedIn false, exit 1.
+    // A logged-out claude: `auth status --json` says loggedIn false and exits 1; a run gets the
+    // logged-out result of fake-claude.js (FAKE_CLAUDE_MODE=auth, set here, past the env allow-list).
     const loggedOut = path.join(s.root, "claude-logged-out.js");
     writeFileSync(
       loggedOut,
       [
         "#!/usr/bin/env node",
+        'const { spawnSync } = require("node:child_process");',
         "const a = process.argv.slice(2);",
         'if (a[0] === "--version") { process.stdout.write("9.9.9 (fake)\\n"); process.exit(0); }',
         'if (a[0] === "auth" && a[1] === "status") { process.stdout.write(JSON.stringify({ loggedIn: false }) + "\\n"); process.exit(1); }',
-        "process.exit(3);",
+        `const r = spawnSync(process.execPath, [${JSON.stringify(fakeBinary)}, ...a], { stdio: "inherit", env: { ...process.env, FAKE_CLAUDE_MODE: "auth" } });`,
+        "process.exit(r.status ?? 1);",
         "",
       ].join("\n"),
     );
     chmodSync(loggedOut, 0o755);
     s.env.CLAUDE_BIN = loggedOut;
-    const init = s.cli("init", "--yes");
-    assert.equal(init.status, 1);
-    assert.match(init.stderr, /\[2\/5\] Claude Code 9\.9\.9 \(fake\).*not logged in/);
-    assert.match(init.stderr, /claude auth login/);
-    assert.equal(existsSync(s.yaml), false, "init stopped before writing the config");
+
+    for (const args of [["init", "--yes"], ["init"]]) {
+      const init = s.cli(...args);
+      assert.equal(init.status, 0, `${args.join(" ")}: ${init.stderr}`);
+      assert.match(init.stderr, /\[2\/5\] Claude Code 9\.9\.9 \(fake\).*not logged in/);
+      assert.match(init.stdout, /\[3\/5\] Config: (created|.*already exists)/);
+      assert.match(
+        init.stdout,
+        /Claude Code is not logged in: run claude auth login, then check it with: duskfleet doctor --probe/,
+      );
+      assert.ok(existsSync(s.yaml), "the config is written without a login");
+    }
+
+    const doctor = s.cli("doctor");
+    assert.equal(doctor.status, 0, doctor.stderr);
+    assert.equal(JSON.parse(doctor.stdout).configSource, "user");
+    for (const args of [["agents"], ["projects"], ["runs"], ["schedules"]]) {
+      const r = s.cli(...args);
+      assert.equal(r.status, 0, `${args.join(" ")}: ${r.stderr}`);
+    }
+    const create = s.cli("agents", "create", "fixer", "--model", "haiku", "--", "You fix failing tests.");
+    assert.equal(create.status, 0, create.stderr);
+
+    const project = path.join(s.root, "project");
+    mkdirSync(project);
+    const run = s.cli("run", "--project", project, "--agent", "fixer", "--", "Make the tests pass");
+    assert.equal(run.status, 1, run.stderr);
+    const recorded = JSON.parse(run.stdout);
+    assert.equal(recorded.status, "failed");
+    assert.equal(recorded.errorCode, "auth_required");
   } finally {
     rmSync(s.root, { recursive: true, force: true });
   }

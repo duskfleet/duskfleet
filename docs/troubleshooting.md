@@ -4,12 +4,19 @@ Sections: [Install and doctor](#install-and-doctor) · [Runs](#runs) ·
 [Unattended runs](#unattended-runs) · [Scheduler and service](#scheduler-and-service) ·
 [Dashboard](#dashboard).
 
+Commands are written for the npm package (`npx duskfleet <command>`, or `duskfleet <command>`
+after `npm i -g duskfleet`); in a clone of this repository the same command is
+`npm run cli -- <command>`.
+
+For `claude -p` scheduled by hand (cron, launchd, systemd) rather than through Duskfleet, see
+the guide [Run Claude Code on a schedule on your own machine](guides/run-claude-code-on-a-schedule.md).
+
 ## Install and doctor
 
 - **`Duskfleet needs Node 24 or newer; you have vX.Y.Z`** (exit code 1, from the CLI and the MCP
   server alike): Duskfleet uses the built-in `node:sqlite`, so it refuses older runtimes before
   loading anything. Switch to Node 24 (`nvm use` reads `.nvmrc`; `fnm` and others read
-  `.node-version`) and run `npm run build` again. An MCP host started with an absolute `node`
+  `.node-version`; in a clone run `npm run build` again). An MCP host started with an absolute `node`
   path keeps using that binary: point it at a Node 24 one.
 - **`doctor` cannot find `claude`**: set `claude.binary` in `duskfleet.yaml` or `CLAUDE_BIN`.
   On macOS, GUI-launched hosts (Claude Desktop, launchd) start with a minimal `PATH` (only
@@ -20,8 +27,16 @@ Sections: [Install and doctor](#install-and-doctor) · [Runs](#runs) ·
   Windows (experimental, [platform support](../README.md#platform-support)) the `PATH` is used
   as it is, even a minimal one. Such hosts also do not expand `~` in
   `claude_desktop_config.json` ("No executable file at ~/..."): use absolute paths.
-- **Is `claude` logged in, will a hook block scheduled runs?** `npm run cli -- doctor --probe`
+- **`init` says Claude Code is not logged in (or not installed)**: the config is written anyway
+  and `init` exits 0. `doctor`, the read-only commands, `agents create` and the dashboard work
+  now; runs fail with `auth_required` until you run `claude auth login` (as the user that runs
+  Duskfleet), then `npx duskfleet doctor --probe` to check.
+- **Is `claude` logged in, will a hook block scheduled runs?** `npx duskfleet doctor --probe`
   makes one real hello run on haiku (cents) and says which of the two it hit
+  ([CLI](cli.md)).
+- **A command says nothing about what it loaded**: one-shot commands log warnings and errors
+  only. Add `--verbose` (or set `DUSKFLEET_LOG_LEVEL=info`, `debug` for more) to see which
+  config and data directory it used, the executor and the migrations it applied, on stderr
   ([CLI](cli.md)).
 - **New code is not picked up**: the MCP host keeps the server process alive. After
   `npm run build`, restart Claude Desktop or the Claude Code session. Config changes need no restart.
@@ -46,6 +61,10 @@ Sections: [Install and doctor](#install-and-doctor) · [Runs](#runs) ·
   run was started by a build without run ownership; such a row is failed only once it is older
   than the longest configured timeout plus a minute, since it may come from a process still on
   that build (a `serve` not restarted after `npm run build`: re-run `install-service`).
+  A run failed that way with no start time was left `pending`: its process died after
+  recording it and before spawning claude (the host restarted, a crash). Such a row used to
+  show as running on the dashboard forever; it is swept like a `running` one now. `doctor`
+  lists the rows its own startup sweep failed (`orphans.recovered`, with the status each `was`).
 - **A run stays `running` although nothing is running**: recovery only fails a run when its
   owner (`role@host:pid`) is provably gone. Two cases it cannot see: the owner's pid was
   reused by an unrelated live process, or the machine's hostname changed since the run
@@ -72,7 +91,7 @@ the scheduler records on a firing ([schedules](schedules.md#policies)).
 - **Symptom**: the run is `completed` but **needs review** (amber), reason `permission_denied`.
   The task is often half-done: the agent worked around the refused call or stopped there.
 - **Where to see it**: the run detail page (the "Needs review" callout and the denied calls,
-  each with its command or file); `npm run cli -- run-info <run_id>` and `get_run`
+  each with its command or file); `npx duskfleet run-info <run_id>` and `get_run`
   (`deniedTools`, `permissionDenials`, `reviewReasons`); `list_runs` / `duskfleet runs`
   (`needsReview`, `reviewReasons`).
 - **Causes and fixes** (fix the agent's `allowed_tools`, not the prompt; see
@@ -175,7 +194,8 @@ outcome is recorded on the firing: `lastOutcome` / `lastError` in `list_schedule
   (which restarts the service) fixes it; on a service older than that, kill the stale
   `index.js` processes or restart the hosts that spawned them.
 - **Schedules stop when Claude Desktop closes**: only the MCP server was ticking. Install the
-  service once with `npm run cli -- install-service`; `doctor` reports `scheduler.service`.
+  service once: `npm i -g duskfleet`, then `duskfleet install-service` (it refuses npx's
+  temporary cache; in a clone, `npm run cli -- install-service`); `doctor` reports `scheduler.service`.
   If the service is running but nothing fires, read `data/logs/serve.log` (the service writes
   there, not to the terminal); a `claude` not found there means the unit's PATH / `CLAUDE_BIN`
   are stale, re-run `install-service`.

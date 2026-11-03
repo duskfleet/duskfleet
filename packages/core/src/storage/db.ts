@@ -313,6 +313,17 @@ const MIGRATIONS: ReadonlyArray<{ version: number; sql: string; backfill?: (db: 
       );
     `,
   },
+  {
+    // Deferred busy fire (scheduler.defer_busy): a scheduled fire refused by a concurrency guard
+    // stays pending, one per schedule, retried every tick until it starts or deferred_until (the
+    // next cron occurrence) passes; deferred_reason is the busy message of the original tick.
+    // Apart from run_requested_at, which is a manual "run now" and fires even when paused.
+    version: 22,
+    sql: `
+      ALTER TABLE schedules ADD COLUMN deferred_until TEXT;
+      ALTER TABLE schedules ADD COLUMN deferred_reason TEXT;
+    `,
+  },
 ];
 
 /**
@@ -371,6 +382,11 @@ function backfillReviewReasons(db: DatabaseSync): void {
   if (n) log.info(`review reasons computed for ${n} finished run(s)`);
 }
 
+/** "applied 21 migrations (0 → 21)": the schema versions before and after the batch. */
+function migrationsLine(count: number, from: number, to: number): string {
+  return `applied ${count} migration${count === 1 ? "" : "s"} (${from} → ${to})`;
+}
+
 export function openDatabase(dataDir: string): DatabaseSync {
   mkdirSync(dataDir, { recursive: true });
   const file = path.join(dataDir, "duskfleet.db");
@@ -383,22 +399,31 @@ export function openDatabase(dataDir: string): DatabaseSync {
   const applied = new Set(
     (db.prepare("SELECT version FROM schema_migrations").all() as Array<{ version: number }>).map((r) => r.version),
   );
-  for (const m of MIGRATIONS) {
-    if (applied.has(m.version)) continue;
-    db.exec("BEGIN");
-    try {
-      db.exec(m.sql);
-      m.backfill?.(db);
-      db.prepare("INSERT INTO schema_migrations (version, applied_at) VALUES (?, ?)").run(
-        m.version,
-        new Date().toISOString(),
-      );
-      db.exec("COMMIT");
-      log.info(`applied migration ${m.version}`);
-    } catch (err) {
-      db.exec("ROLLBACK");
-      throw err;
+  // One line for the whole batch (a fresh install applies them all), logged even when a later one fails.
+  const from = Math.max(0, ...applied);
+  let count = 0;
+  let to = from;
+  try {
+    for (const m of MIGRATIONS) {
+      if (applied.has(m.version)) continue;
+      db.exec("BEGIN");
+      try {
+        db.exec(m.sql);
+        m.backfill?.(db);
+        db.prepare("INSERT INTO schema_migrations (version, applied_at) VALUES (?, ?)").run(
+          m.version,
+          new Date().toISOString(),
+        );
+        db.exec("COMMIT");
+      } catch (err) {
+        db.exec("ROLLBACK");
+        throw err;
+      }
+      count++;
+      to = m.version;
     }
+  } finally {
+    if (count) log.info(migrationsLine(count, from, to));
   }
   log.debug(`database open`, { file });
   return db;

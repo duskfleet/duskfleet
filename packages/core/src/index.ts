@@ -63,6 +63,21 @@ export {
   userDataDir,
 } from "./config/locations.js";
 export {
+  claudeCodeAddArgs,
+  desktopConfigPath,
+  desktopSnippet,
+  exportedDataDir,
+  inNpxCache,
+  type McpServerConfigInput,
+  type McpServerEntry,
+  mcpServerConfig,
+  SERVER_NAME,
+  type ServerEntryInput,
+  serverEntry,
+  serviceDirs,
+  shellLine,
+} from "./config/mcp-entry.js";
+export {
   PROJECT_ID_PATTERN,
   projectIdFromPath,
   readUserProjects,
@@ -234,4 +249,4 @@ export {
   trendBuckets,
 } from "./storage/trends.js";
 
-export { type LogLevel, logger } from "./util/log.js";
+export { type LogLevel, logger, parseLogLevel, setDefaultLogLevel } from "./util/log.js";

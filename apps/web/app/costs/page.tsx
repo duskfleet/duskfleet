@@ -2,7 +2,7 @@ import { budgetLabel, COST_SPLITS, type CostSplitBy, costLabels, TREND_RANGES, t
 import Link from "next/link";
 import { type BarRule, ChartLegend, StackedBars } from "@/components/charts/StackedBars";
 import { budgetPerBucket, fmtUsdShort, moneyAxis, SPLIT_LABELS, SPLIT_PLURALS } from "@/lib/costs";
-import { costs, listAgents, listProjects, modelStats, monthSpend, scopeBudget } from "@/lib/data";
+import { cli, costs, listAgents, listProjects, modelStats, monthSpend, scopeBudget } from "@/lib/data";
 import { fmtCost, fmtDuration, fmtInt, fmtPct, fmtSplit, shortModel } from "@/lib/format";
 import {
   bucketLabel,
@@ -68,7 +68,6 @@ export default async function CostsPage({ searchParams }: { searchParams: Promis
   // ---- KPIs ----
   const monthWords = costLabels(month.cost);
   const periodUsd = s.total + s.gateTotal;
-  const warnUsd = budget ? (budget.amountUsd * budget.warnPercent) / 100 : 0;
 
   // ---- spend per bucket ----
   const projectIds = new Map(projects.map((p) => [p.path.replace(/\/+$/, ""), p.id]));
@@ -119,11 +118,13 @@ export default async function CostsPage({ searchParams }: { searchParams: Promis
     index: i,
     label: bucketLabel(s.starts[i] ?? "", s.bucket),
   }));
-  const budgetHint = agent
-    ? `npm run cli -- budgets set agent ${agent} --amount <usd>`
-    : project
-      ? `npm run cli -- budgets set project ${project.id} --amount <usd>`
-      : "npm run cli -- budgets set global --amount <usd>";
+  const budgetHint = cli(
+    agent
+      ? `budgets set agent ${agent} --amount <usd>`
+      : project
+        ? `budgets set project ${project.id} --amount <usd>`
+        : "budgets set global --amount <usd>",
+  );
 
   // ---- by model, same period and scope ----
   const models = modelStats({ ...scope, from: `${s.starts[0]}T00:00:00.000Z` });
@@ -210,23 +211,6 @@ export default async function CostsPage({ searchParams }: { searchParams: Promis
           <div className="label">Avg per run</div>
           <div className="value">{month.runs ? fmtCost(month.runsCostUsd / month.runs) : "–"}</div>
           <div className="sub">{fmtInt(month.runs)} runs this month</div>
-        </div>
-        <div className="stat">
-          <div className="label">Budget warning</div>
-          {budget ? (
-            <>
-              <div className="value warn">at {budget.warnPercent}%</div>
-              <div className="sub">
-                {fmtCost(warnUsd)} · {budget.hardStop ? "hard stop" : "warn only, no hard stop"} at{" "}
-                {fmtCost(budget.amountUsd)}
-              </div>
-            </>
-          ) : (
-            <>
-              <div className="value faint-value">none</div>
-              <div className="sub">set a budget to get a warning</div>
-            </>
-          )}
         </div>
       </section>
 

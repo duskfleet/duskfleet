@@ -366,11 +366,14 @@ export function ConfigSection({
   values,
   agents,
   schedulerEnabled,
+  configPath,
 }: {
   id: string;
   values: Values;
   agents: string[];
   schedulerEnabled: boolean;
+  /** The duskfleet.yaml the loader uses, as shown (home-shortened). */
+  configPath: string;
 }) {
   const def = SECTIONS.find((s) => s.id === id)!;
   const router = useRouter();
@@ -548,7 +551,7 @@ export function ConfigSection({
           {restartKeys.length > 0
             ? `${restartKeys.join(" and ")} ${restartKeys.length === 1 ? "applies" : "apply"} once the MCP host restarts; the rest on the next run.`
             : "Applies on the next run. Runs already going keep their settings."}{" "}
-          Written to <code>config/duskfleet.yaml</code>.
+          Written to <code>{configPath}</code>.
         </p>
         {error && <p className="bad-text">{error}</p>}
         <div className="dialog-actions">

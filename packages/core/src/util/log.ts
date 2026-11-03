@@ -8,8 +8,23 @@ export type LogLevel = "debug" | "info" | "warn" | "error";
 
 const LEVELS: Record<LogLevel, number> = { debug: 10, info: 20, warn: 30, error: 40 };
 
-const configured = (process.env["DUSKFLEET_LOG_LEVEL"] as LogLevel | undefined) ?? "info";
-const threshold = LEVELS[configured] ?? LEVELS.info;
+/** DUSKFLEET_LOG_LEVEL when it names a level; it always wins over the entry point's default. */
+const fromEnv = parseLogLevel(process.env["DUSKFLEET_LOG_LEVEL"]);
+let threshold = LEVELS[fromEnv ?? "info"];
+
+/** A level name, or null for anything else (unset, empty, a typo). */
+export function parseLogLevel(value: string | undefined): LogLevel | null {
+  return value !== undefined && Object.hasOwn(LEVELS, value) ? (value as LogLevel) : null;
+}
+
+/**
+ * The level used when DUSKFLEET_LOG_LEVEL is not set. `info` unless an entry point says
+ * otherwise: the one-shot CLI commands pick `warn` (`--verbose` brings `info` back), `serve` and
+ * the MCP server keep `info`, their log is the record.
+ */
+export function setDefaultLogLevel(level: LogLevel): void {
+  if (fromEnv === null) threshold = LEVELS[level];
+}
 
 function write(level: LogLevel, scope: string, message: string, extra?: unknown): void {
   if (LEVELS[level] < threshold) return;

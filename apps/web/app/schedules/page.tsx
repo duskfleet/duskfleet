@@ -9,7 +9,15 @@ import {
 import Link from "next/link";
 import { CopyButton } from "@/components/CopyButton";
 import { ScheduleActions } from "@/components/ScheduleActions";
-import { firingTotals, listSchedules, scheduleFiringsWithRuns, schedulerEnabled, schedulerLease } from "@/lib/data";
+import { cliCommand, installServiceCommand } from "@/lib/cli";
+import {
+  firingTotals,
+  install,
+  listSchedules,
+  scheduleFiringsWithRuns,
+  schedulerEnabled,
+  schedulerLease,
+} from "@/lib/data";
 import { fmtCost, fmtRelative, fmtTime, runTitle } from "@/lib/format";
 
 const HOLDER_LABEL: Record<string, string> = {
@@ -32,6 +40,7 @@ type Verdict =
   | "failed"
   | "cancelled"
   | "running"
+  | "deferred"
   | "busy"
   | "capped"
   | "budget"
@@ -46,6 +55,7 @@ const VERDICT_LABEL: Record<Verdict, string> = {
   failed: "failed",
   cancelled: "cancelled",
   running: "running",
+  deferred: "deferred, busy",
   busy: "skipped busy",
   capped: "skipped, daily cap",
   budget: "skipped, monthly budget spent",
@@ -57,6 +67,7 @@ const VERDICT_LABEL: Record<Verdict, string> = {
 
 /** The run's stored review reasons decide amber, as everywhere else (RunManager wrote them when it ended). */
 function verdictOf(outcome: ScheduleOutcome, run: RunSummary | null): Verdict {
+  if (outcome === "deferred") return "deferred";
   if (outcome === "skipped_busy") return "busy";
   if (outcome === "skipped_daily_cap") return "capped";
   if (outcome === "skipped_budget") return "budget";
@@ -95,6 +106,8 @@ export default function SchedulesPage() {
   const enableExample = schedules[0]
     ? `update_schedule { "id": "${schedules[0].id}", "enabled": true }`
     : `update_schedule { "id": "<schedule id>", "enabled": true }`;
+  const inst = install();
+  const serviceCmd = installServiceCommand(inst);
   const createExample = `create_schedule { "name": "nightly review", "agent_id": "reviewer", "project_id": "<project id>", "cron": "0 7 * * 1-5", "prompt": "…" }`;
 
   return (
@@ -113,8 +126,8 @@ export default function SchedulesPage() {
           <span className="icon">!</span>
           <div>
             <strong>Ticking from an {holderLabel} only.</strong> Schedules stop firing when Claude Desktop / Claude Code
-            closes. To run them unattended install the service once: <code>npm run cli -- install-service</code>{" "}
-            (launchd, systemd --user or Task Scheduler).
+            closes. To run them unattended install the service once: <code>{serviceCmd}</code> (launchd, systemd --user
+            or Task Scheduler).
           </div>
         </div>
       )}
@@ -133,8 +146,8 @@ export default function SchedulesPage() {
           <div>
             <strong>No Duskfleet process is ticking.</strong> Schedules fire only while the MCP server (Claude Desktop /
             Claude Code) or
-            <code> duskfleet serve</code> is running. Install it as a service once with{" "}
-            <code>npm run cli -- install-service</code>. Missed ticks are not caught up.
+            <code> duskfleet serve</code> is running. Install it as a service once with <code>{serviceCmd}</code>.
+            Missed ticks are not caught up.
           </div>
         </div>
       )}
@@ -244,9 +257,10 @@ export default function SchedulesPage() {
                   const empty = FIRINGS_SHOWN - strip.length;
                   const idle = s.idle7d;
                   const idleWarn = idle.noopRuns > 0 && idle.noopRuns * 2 >= idle.runs;
+                  const message = cardMessage(s, firings);
                   return (
                     <article key={s.id} id={s.id} className={`sched-card${s.enabled ? "" : " paused"}`}>
-                      <div className="main">
+                      <div className="sched-head">
                         <div className="title-row">
                           <h3>
                             <Link href={`/agents#${encodeURIComponent(s.agentId)}`} title={`Agent ${s.agentId}`}>
@@ -279,6 +293,14 @@ export default function SchedulesPage() {
                               run requested
                             </span>
                           )}
+                          {s.deferredUntil && (
+                            <span
+                              className="badge pending"
+                              title={`A busy tick is pending (${s.deferredReason ?? "busy"}). Retried every tick until it starts; dropped as skipped busy at ${fmtTime(s.deferredUntil)} (next cron occurrence) or on pause (scheduler.defer_busy).`}
+                            >
+                              deferred
+                            </span>
+                          )}
                           {s.willResumeRunId && (
                             <Link
                               href={`/runs/${s.willResumeRunId}`}
@@ -289,6 +311,28 @@ export default function SchedulesPage() {
                             </Link>
                           )}
                         </div>
+                        <ScheduleActions
+                          id={s.id}
+                          name={s.name}
+                          enabled={s.enabled}
+                          cron={s.cron}
+                          timeZone={s.timeZone}
+                          runRequested={s.runRequestedAt !== null}
+                        />
+                      </div>
+
+                      {message && (
+                        <p className={`sched-msg ${message.tone}`}>
+                          {message.text}
+                          {message.runId && (
+                            <Link href={`/runs/${message.runId}`} title={`Run ${message.runId}`}>
+                              {message.runId}
+                            </Link>
+                          )}
+                        </p>
+                      )}
+
+                      <div className="main">
                         <div className="meta">
                           <span className="cron-chip" title={`cron "${s.cron}" evaluated in ${s.timeZone}`}>
                             {s.cron}
@@ -407,8 +451,8 @@ export default function SchedulesPage() {
                             ) : (
                               "never fired"
                             )}
-                            {!s.enabled && s.pausedReason && s.autoPausedAt ? (
-                              <span title={`${s.pausedReason} · ${fmtTime(s.autoPausedAt)}`}>
+                            {!s.enabled && s.pausedReason && s.autoPausedAt && (
+                              <span title={fmtTime(s.autoPausedAt)}>
                                 {" "}
                                 · auto-paused{" "}
                                 {new Date(s.autoPausedAt).toLocaleDateString(undefined, {
@@ -416,19 +460,6 @@ export default function SchedulesPage() {
                                   month: "short",
                                 })}
                               </span>
-                            ) : (
-                              !s.enabled && (
-                                <span
-                                  title={`${fmtTime(s.updatedAt)}. Firings, run now and edits also update this time, so it is not the pause date.`}
-                                >
-                                  {" "}
-                                  · paused, last changed{" "}
-                                  {new Date(s.updatedAt).toLocaleDateString(undefined, {
-                                    day: "numeric",
-                                    month: "short",
-                                  })}
-                                </span>
-                              )
                             )}
                           </span>
                           <Link href={`/?schedule=${encodeURIComponent(s.id)}`} title="Runs started by this schedule">
@@ -491,23 +522,7 @@ export default function SchedulesPage() {
                               </span>
                             </>
                           )}
-                          {s.lastError && (
-                            <>
-                              <span className="sep">·</span>
-                              <span className="err" title={s.lastError}>
-                                {s.lastError.slice(0, 90)}
-                              </span>
-                            </>
-                          )}
                         </span>
-                        <ScheduleActions
-                          id={s.id}
-                          name={s.name}
-                          enabled={s.enabled}
-                          cron={s.cron}
-                          timeZone={s.timeZone}
-                          runRequested={s.runRequestedAt !== null}
-                        />
                       </div>
                     </article>
                   );
@@ -532,6 +547,10 @@ export default function SchedulesPage() {
             <span>
               <span className="sq running" />
               running
+            </span>
+            <span>
+              <span className="sq deferred" />
+              deferred, busy
             </span>
             <span>
               <span className="sq busy" />
@@ -571,8 +590,8 @@ export default function SchedulesPage() {
           process ticks). A busy agent or project at tick time is a skip, never a queue, and missed ticks are not caught
           up. Creating a schedule and changing its agent, project, prompt, model, gate or on-failure policy go through
           an MCP client with <code>create_schedule</code> and <code>update_schedule</code>; from there{" "}
-          <code>run_schedule_now</code> fires immediately. On the command line, <code>npm run cli -- schedules</code>{" "}
-          lists them.
+          <code>run_schedule_now</code> fires immediately. On the command line,{" "}
+          <code>{cliCommand(inst, "schedules")}</code> lists them.
         </p>
         <div className="two-col">
           <div>
@@ -616,6 +635,50 @@ function groupByProject(schedules: ScheduleRow[]): ProjectGroup[] {
   return [...byProject.entries()]
     .sort(([a], [b]) => (a === null ? 1 : b === null ? -1 : a.localeCompare(b)))
     .map(([projectId, rows]) => ({ projectId, schedules: rows, paused: rows.filter((s) => !s.enabled).length }));
+}
+
+interface CardMessage {
+  /** warn = strip (auto-pause, budget pause); muted = plain line (paused with no stored cause, gate skips); bad = a real fire error. */
+  tone: "warn" | "muted" | "bad";
+  text: string;
+  /** Run linked at the end of the text (the last run of an auto-pause streak). */
+  runId?: string;
+}
+
+/**
+ * The card's one message, under the header (DS-24). The auto-pause reason is written by core's
+ * `autoPauseReason` and always ends with "last run <id>": the id is split off that stable suffix
+ * rather than stored a second time. A budget pause stores no reason; its skip is the last firing.
+ */
+function cardMessage(
+  s: ScheduleRow,
+  firings: Array<{ outcome: ScheduleOutcome; error: string | null }>,
+): CardMessage | null {
+  const last = firings[0];
+  if (!s.enabled) {
+    if (s.pausedReason) {
+      const m = /^(.*\blast run )(\S+)$/s.exec(s.pausedReason);
+      return m ? { tone: "warn", text: m[1]!, runId: m[2]! } : { tone: "warn", text: s.pausedReason };
+    }
+    if (last?.outcome === "skipped_budget") {
+      return { tone: "warn", text: `paused by the monthly budget${last.error ? `: ${last.error}` : ""}` };
+    }
+    // No stored cause: a pause by hand, or a monthly budget pause of a schedule whose own tick did
+    // not trip it (core pauses the whole scope, with a skipped_budget firing only on the one that did).
+    if (s.lastOutcome === "error" && s.lastError) {
+      return { tone: "bad", text: `paused · nothing fires until Resume · last fire failed: ${s.lastError}` };
+    }
+    return { tone: "muted", text: "paused · nothing fires until Resume" };
+  }
+  if (s.lastOutcome === "error" && s.lastError) return { tone: "bad", text: s.lastError };
+  if (last?.outcome === "skipped_gate") {
+    let n = 0;
+    while (n < firings.length && firings[n]!.outcome === "skipped_gate") n++;
+    const count = n === FIRINGS_SHOWN ? `${n}+` : String(n);
+    const ticks = n === 1 ? "the last tick" : `the last ${count} ticks`;
+    return { tone: "muted", text: `gate skipped ${ticks}${last.error ? `: ${last.error}` : ""}` };
+  }
+  return null;
 }
 
 /** "project · name" where a schedule is named outside its project group (the status strip). */

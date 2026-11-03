@@ -81,8 +81,11 @@ npm workspaces, one `config/` and one SQLite database shared by three deliverabl
 - Scheduler (`packages/core/src/scheduler/`): schedules are DB rows (migration 4), cron is the
   in-house 5-field parser in `cron.ts` (no dependency; DST-safe by re-deriving local time per
   candidate minute). Only the SQLite lease holder ticks; the holder is `<role>@host:pid`
-  (`serve` / `mcp` / `cli`, `parseHolder`). Busy = `skipped_busy`, never a queue;
-  no catch-up of missed ticks; `scheduler.enabled` is the kill switch read every tick, and
+  (`serve` / `mcp` / `cli`, `parseHolder`). Busy is never a queue: one deferred fire per
+  schedule (`scheduler.defer_busy`, migration 22, `deferred_until` = next cron occurrence),
+  retried every tick, a busy retry writes no row, expiry = `skipped_busy`, pause drops it;
+  manual fires, caps, budgets and gates are never deferred (docs/schedules.md); no catch-up of
+  missed ticks; `scheduler.enabled` is the kill switch read every tick, and
   `pause_scheduler` (one `scheduler_pause` row, migration 21) stops all firing until an instant,
   also read every tick (the holder keeps the lease and the sweep). `trigger_kind` is only `cron`.
   Create/update validation is `scheduler/crud.ts`, shared by MCP, CLI and dashboard.
@@ -112,6 +115,10 @@ npm workspaces, one `config/` and one SQLite database shared by three deliverabl
 - Real runs cost money. When one is needed to verify something, use `--model haiku`
   (cents) and say so. An agent without an explicit model uses the CLI default,
   which can be 100x more expensive.
+- Dashboard components are tested (owner rule 2026-11-02, harness in #344): every new or changed
+  component in `apps/web/components` ships with a render test in `apps/web/test` (`react-dom/server`,
+  one assertion per visible state, no snapshots; stateful logic lives in `apps/web/lib` and is
+  tested there). A component PR without its test is incomplete. Browser tests are #79, separate.
 - Dashboard: no component library, design tokens live in `apps/web/app/globals.css`
   (Dark and Light modes of the same tokens, each `light-dark(<light>, <dark>)`: Dark by default,
   `prefers-color-scheme: light` or `data-theme` on `<html>` switch; brand palette: night ground,
@@ -137,7 +144,7 @@ npm workspaces, one `config/` and one SQLite database shared by three deliverabl
   needs must be in its own `allowed_tools`; use `add_dirs` to reach other directories.
 - **Runs have an owner** (`runs.owner`, `role@host:pid` from `processIdentity`, migration 7):
   several Duskfleet processes share the DB, so `recoverOrphans` (startup and the lease holder's
-  once-a-minute sweep) fails a `running` row only when its owner is gone (dead pid on this host,
+  once-a-minute sweep) fails a `running` row, or a `pending` one never spawned, only when its owner is gone (dead pid on this host,
   NULL owner older than the longest timeout + 1 min, or this pid without the run in memory),
   never a live process's or another host's. A fresh NULL owner is a process on an old build
   (a `serve` not reinstalled after a build): it is live, not an orphan.
@@ -170,7 +177,7 @@ npm workspaces, one `config/` and one SQLite database shared by three deliverabl
   never to edit the checkout, not checked) skips the project guard; `max_concurrent_runs`
   stays the hard cap. Refuse, never queue: the guards throw `BusyError` (`orchestration/busy.ts`,
   message still says "agent busy" / "project busy" for humans) and the scheduler records
-  `skipped_busy` on `instanceof BusyError`, never by matching text; busy means "skip this tick".
+  `deferred` / `skipped_busy` on `instanceof BusyError`, never by matching text.
   Daily caps (`max_daily_runs`, `max_daily_cost_usd`, UTC day, counted from `runs`) are checked
   there too but throw `DailyCapError` (`orchestration/daily-cap.ts`, not a BusyError): `skipped_daily_cap`.
   Monthly budgets (`budgets` table, migration 18; scope global / agent / project, UTC month) come
@@ -201,7 +208,8 @@ npm workspaces, one `config/` and one SQLite database shared by three deliverabl
   `~/.claude/settings.json`. Keep it unless the hook is removed.
 - Children run with `--strict-mcp-config`: they never see the caller's MCP servers,
   so Duskfleet cannot recurse into itself.
-- Project paths must be absolute (`~` is expanded). Prefer `project_id` from
+- Project paths must be absolute (`~` is expanded); only the CLI's `run --project` resolves a
+  relative one, from its cwd (`resolveCliProject`), before core sees it. Prefer `project_id` from
   `config/projects.yaml` in prompts and docs.
 - Scripts that import `@modelcontextprotocol/sdk` must live under `packages/mcp/` to
   resolve the module.

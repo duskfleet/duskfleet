@@ -14,7 +14,7 @@ import { CopyButton } from "@/components/CopyButton";
 import { Expandable } from "@/components/Expandable";
 import { Prose } from "@/components/Prose";
 import { StatusBadge } from "@/components/StatusBadge";
-import { adjacentRuns, agentSummary, getRun, homeDir, projectLabel } from "@/lib/data";
+import { adjacentRuns, agentSummary, cli, getRun, homeDir, projectLabel } from "@/lib/data";
 import {
   billingNote,
   elapsedSince,
@@ -29,6 +29,7 @@ import {
   shortModel,
   tildePath,
   tildeText,
+  WRAP_UP_RESERVE_RULE,
 } from "@/lib/format";
 
 export const dynamic = "force-dynamic";
@@ -75,7 +76,7 @@ export default async function RunPage({
   const t0 = new Date(run.startedAt ?? run.createdAt).getTime();
   const fullCommand = `${run.command.binary} ${run.command.argv.map((a) => shellQuote(a, 160)).join(" ")}`;
   const again = [
-    "npm run cli -- run",
+    cli("run"),
     `--project ${shellQuote(run.projectPath)}`,
     `--agent ${run.agentId}`,
     run.modelRequested ? `--model ${run.modelRequested}` : null,
@@ -353,7 +354,8 @@ export default async function RunPage({
                 Budget exhausted
                 {mainPhase ? ` after ${fmtCost(mainPhase.costUsd)} of ${fmtCost(mainPhase.budgetUsd)}` : ""}.
               </strong>{" "}
-              A wrap-up pass resumed the session with the {fmtCost(wrapUp.budgetUsd)} reserve and{" "}
+              A wrap-up pass resumed the session with the{" "}
+              <span title={WRAP_UP_RESERVE_RULE}>{fmtCost(wrapUp.budgetUsd)} reserve</span> and{" "}
               {wrapUp.outcome === "completed"
                 ? "recorded where it stopped"
                 : `ended ${wrapUp.outcome.replace("_", " ")}${wrapUp.terminationReason ? ` (${wrapUp.terminationReason})` : ""}`}
@@ -362,6 +364,7 @@ export default async function RunPage({
               {wrapUp.outcome === "completed"
                 ? " Its final message is the result below; the task itself was not finished."
                 : " The task was not finished and nothing may have been recorded: check the result and the place the agent reports to."}
+              <div className="muted">{WRAP_UP_RESERVE_RULE}.</div>
             </div>
           </div>
         )}
@@ -410,7 +413,7 @@ export default async function RunPage({
               <CopyButton text={again} />
             </div>
             <div className="side-note">
-              Same agent, project and prompt from a terminal in the repo. Or ask <code>run_agent</code> over MCP.
+              Same agent, project and prompt from a terminal. Or ask <code>run_agent</code> over MCP.
               {!run.modelRequested && " No model was pinned: the agent's or the CLI default applies."}
             </div>
           </div>

@@ -21,7 +21,7 @@ import {
   type RunBucket,
   scopeBudget,
 } from "@/lib/data";
-import { fmtClock, fmtCost, fmtInt, fmtPct, fmtTime, shortModel, tildePath } from "@/lib/format";
+import { fmtClock, fmtCost, fmtInt, fmtPct, fmtTime, shortModel, tildePath, WRAP_UP_RESERVE_RULE } from "@/lib/format";
 
 export const dynamic = "force-dynamic";
 
@@ -388,7 +388,9 @@ export default async function AgentPage({ params, searchParams }: Params) {
               </div>
               <div>
                 <dt>wrap-up</dt>
-                <dd>{a.wrapUpReserveUsd > 0 ? `${fmtCost(a.wrapUpReserveUsd)} kept back` : "off"}</dd>
+                <dd title={WRAP_UP_RESERVE_RULE}>
+                  {a.wrapUpReserveUsd > 0 ? `${fmtCost(a.wrapUpReserveUsd)} kept back` : "off"}
+                </dd>
               </div>
               <div>
                 <dt>timeout</dt>

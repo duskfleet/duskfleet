@@ -43,18 +43,26 @@ starting anything and asks for another `--port`.
 A Next.js app that reads the database the MCP server writes (SQLite WAL mode). It can run
 while the MCP server is running or not; it only needs `config/` and `data/duskfleet.db`. It
 has no authentication and answers on localhost only (see [Remote access](#remote-access)).
+It never writes runs; it edits agent files, schedules and the editable settings keys (the
+list closes this page).
 It sends no telemetry: the `dev` and `build` scripts set `NEXT_TELEMETRY_DISABLED=1` (on
 Windows, an [experimental platform](../README.md#platform-support), set it in your shell first), and `start` / `duskfleet-web` (`bin/start.mjs`) default it
-to `1` on every platform.
+to `1` on every platform. `bin/start.mjs` also drops the `- Network:` line of Next's start banner:
+the server answers on `127.0.0.1` only, so that address is not reachable from the network.
 
 Five views, plus the [trend](#trends) of the runs. The runs list and a running run's detail auto-refresh every 3 seconds (pause button
 in the nav); the other pages are static.
 
-- **Runs**: KPI cards (clean runs, needs review, spend) computed on the current project / agent
+- **Runs** (the home page, `/`; `/runs` redirects there and keeps its query string): KPI cards (clean runs, needs review, spend) computed on the current project / agent
   filter; a Project and an Agent multi-select on the search line (repeated params,
   `?project=a&project=b&agent=x`: any of the projects AND any of the agents; a single `?agent=`
   still works; each select's × drops its filter), prompt search (`?q=`), `?schedule=` and
   `?limit=` (load older).
+  **Running now** counts the real runs not ended yet, `running` or `pending` (being spawned),
+  and the Running list above Recent shows the same rows. The Agents page uses the same
+  definition for its running state, so both pages agree (the Agents tile counts agents, an agent
+  with two live runs once). A `pending` row whose process died before the spawn is failed as
+  orphaned by the next sweep (see [troubleshooting](troubleshooting.md#runs)), not shown forever.
   The KPI cards filter the list by how runs ended, `?outcome=` (real runs only, gate runs left
   out, by the stored review verdict):
   - `needs_review`: every run with a review reason (click the **Needs review** card; it also shows
@@ -84,21 +92,28 @@ in the nav); the other pages are static.
   (`on_failure: resume_once`; the list shows "resumes ↗" / "retried ↗" flags),
   final message (long results collapse), a callout when a budget exhaustion was followed by a
   wrap-up pass (what the main pass spent, what the wrap-up cost and whether it recorded where
-  it stopped; the wrap-up's own tool calls sit between `wrap-up started` / `wrap-up ended`
-  rows of the timeline), a **Changes** section when the project is a git checkout (files the
+  it stopped, plus how the reserve is sized: 10 % of the budget, at least $0.50, never more than
+  half, the same line as the title of the agent page's "wrap-up" limit; the wrap-up's own tool
+  calls sit between `wrap-up started` / `wrap-up ended` rows of the timeline), a **Changes** section when the project is a git checkout (files the
   run changed with lines added / deleted, the base commit, a link to the patch at
   `/runs/<id>/diff`), event timeline with legend and grouped repeats,
   previous / next run of the same agent, a "run again" CLI command, the `claude --resume`
   command and the exact command executed. Home paths print as `~/…`; Copy buttons give the
-  full value.
+  full value. Every CLI command the dashboard shows (run again, `budgets set` on Costs,
+  `install-service` and `schedules` on Schedules) is written for the install it runs from:
+  `duskfleet <command>` for a global install, `npx -y duskfleet@<version> <command>` when
+  `duskfleet dashboard` ran through npx (`install-service` then installs the package globally
+  first, since npx refuses it), `npm run cli -- <command>` only in the repo checkout. The
+  dashboard knows which from `DUSKFLEET_MCP_ENTRY`, the MCP server path `duskfleet dashboard`
+  passes it, else from a checkout above its working directory (`npm run web`).
 - **Agents**: four tiles (agents, running now, needs review, auto-paused), Project / Status
-  filters, a search on id and description and a sort (last run, id, runs, clean, cost), then one
-  table per project ("Any project" first), one row per agent: status (running with a pending or
+  filters, a search on id and description and a sort (id by default, last run, runs, clean, cost),
+  then one table per project ("Any project" first, then projects by id), one row per agent: status (running with a pending or
   running run, else "paused · auto" when a bound schedule was auto-paused, else needs review from
   the stored review reasons of its last run, else idle; the tiles and the Status filter count the
   same status), id and kind, a one-line description, model, runs over 7 days with a per-day
-  sparkline, clean %, cost and last run, and links to its runs and schedule. Under about 720 px
-  the same row reflows into a four-line block, each number under its column label.
+  sparkline, clean %, cost and last run, and links to its runs and schedule. From tablet width
+  (1024 px) down the same row reflows into a four-line block, each number under its column label.
 - **Agent** (`/agents/<id>`): everything that configures one agent. Header with kind, builtin /
   override chip, status, project, model and file; 30-day tiles over UTC days (runs and cost with
   sparklines, clean %, needs review; gate runs left out of the counts, kept in the cost); the system prompt (own) or the link target with the project persona
@@ -106,22 +121,29 @@ in the nav); the other pages are static.
   past 8 entries expands in place) and limits, including daily caps and the monthly budget; the
   bound schedules; and the needs-review reasons over 30 days, each bar opening Runs filtered by
   agent and reason. User agents can be deleted or unlinked here, with an inline confirmation;
-  builtins are read-only. **Run now…** appears only when a schedule runs the agent and uses that
+  builtins are never edited here. **Run now…** appears only when a schedule runs the agent and uses that
   schedule's run now (see Schedules below): the dashboard never starts a run itself.
 - **Schedules**: a status strip (kill switch, lease holder and when its lease expires, next
   firing, last 7 days fired / skipped busy), then the schedules grouped by project (the
   schedule's own, else its agent's; "no project" last), one card each, titled by its agent (a link to the agent's card on Agents,
-  which links its runs): cron (raw and in plain words), the schedule name, project, model, the
+  which links its runs), with the card's actions in its header: run now, pause / resume, edit the
+  cron and time zone, delete (inline confirmation); the changes go through the same validation as
+  `update_schedule`. Under the header, at most one message, never truncated: the auto-pause reason
+  (its last run linked) or a monthly budget pause in an amber strip; "paused · nothing fires until
+  Resume" (by hand, or by a budget whose tick another schedule of the scope tripped), or what the
+  gate said on its run of consecutive skips, as a plain line; the error of a failed fire in red,
+  also on a paused card with that plain pause line in front. Then
+  cron (raw and in plain words), the schedule name, project, model, the
   [gate](schedules.md#gates-skip-cheaply-when-there-is-no-work) and on-failure policy in force, the
   prompt, the last 10 firings as squares coloured by how the run they started **ended** (clean,
-  needs review from the stored review reasons, failed, running, cancelled, skipped busy, skipped by
-  the gate, run gone), and a footer with the next tick (theoretical one for paused schedules), the
-  fired / skipped counters, the [idle cost](schedules.md#idle-cost) over 7 days (no-op runs out of
-  all runs and the dollars they cost, amber when at least half were no-ops), what the gate skipped
-  and cost, and the last error. A "next: resume" badge says the next fire will resume the last run
-  (`on_failure: resume_once`). Each card can be run now, paused / resumed, have its cron and time
-  zone edited, or be deleted (inline confirmation); the changes go through the same validation as
-  `update_schedule`. **Run now** does not start Claude from the dashboard: it marks the row and the
+  needs review from the stored review reasons, failed, running, cancelled, deferred (busy, waiting
+  as the schedule's one pending fire: hollow square with the accent border, and a **deferred**
+  badge on the row while it waits), skipped busy, skipped by
+  the gate, run gone), and a footer of stats only: the next tick (theoretical one for paused
+  schedules), the fired / skipped counters, the [idle cost](schedules.md#idle-cost) over 7 days
+  (no-op runs out of all runs and the dollars they cost, amber when at least half were no-ops) and
+  what the gate skipped and cost. A "next: resume" badge says the next fire will resume the last
+  run (`on_failure: resume_once`). **Run now** does not start Claude from the dashboard: it marks the row and the
   process that holds the scheduler lease fires it on its next tick (within `tick_seconds`, paused
   or not, busy = skip), so it waits while no process ticks. A callout warns when only an MCP host
   ticks, with the `install-service` command. Creating a schedule and changing its agent, project,
@@ -150,16 +172,20 @@ in the nav); the other pages are static.
 - **MCP**: the tool catalogue (`packages/mcp/dist/tools.json`, generated at build time from the
   real server; the published `@duskfleet/web` ships a copy as `tools.json`) with a sticky index
   and a filter by tool or parameter name (`/mcp?q=agent`), plus the registration snippets for
-  Claude Desktop and Claude Code with your absolute paths (outside a checkout, the `duskfleet`
-  package installed next to `@duskfleet/web`).
+  Claude Desktop and Claude Code: the same entry `duskfleet mcp register --dry-run` prints (one
+  renderer in core), with your absolute paths, the npx form when the install runs from npx's
+  cache, and the Claude Desktop config path of your OS. When the dashboard cannot find its
+  install's MCP server (started by hand, not by `duskfleet dashboard`), it shows the
+  `mcp register` command instead of a snippet.
 - **Settings** (the gear at the right end of the nav): the theme (Dark / Light / Device, the
   same choice as the footer switch, kept in this browser) and the runtime keys of
-  `config/duskfleet.yaml`: concurrency limits, `scheduler.tick_seconds`, the `auto_pause` switch
+  `duskfleet.yaml` (the header names the file the loader read: `config/` in a checkout,
+  the user-level config directory for an npm install, or `DUSKFLEET_CONFIG`): concurrency limits, `scheduler.tick_seconds`, the `auto_pause` switch
   and `auto_pause_after` (dimmed, value kept, "ignored while auto-pause is off" while the switch is off),
   the Claude defaults (timeout, budget, `strict_mcp_config`, `setting_sources`, `binary`),
   `allowed_project_roots` and `default_agent`. Each section has its own Save, which lists the
   changes old → new in a confirmation first; a value the loader would refuse shows inline and
-  blocks only its section. The save writes `config/duskfleet.yaml` itself, keeping its comments,
+  blocks only its section. The save writes that file itself, keeping its comments,
   and is checked by loading the config: a refused change restores the file. Every process
   re-reads the file on its next run or tick, except `claude.binary` and
   `claude.setting_sources`, marked "Restart MCP host". The scheduler kill switch
@@ -210,14 +236,13 @@ With no finished run in the period, the page offers the 1-year view instead.
 
 ## Costs
 
-`/costs` (the **Spent** card of the Runs page, or the "Spend by model moved to Costs" line under
-the run list) shows where the money goes over time, on the agent / project filter the page was
+`/costs` (the **Spent** card of the Runs page) shows where the money goes over time, on the agent / project filter the page was
 opened with. `?range=` is the same period selector as `/trends`, same UTC buckets; `?by=agent`
 (default), `project` or `model` picks the split. Runs count by their start time, as budgets do.
 
 - **KPIs**: spend this UTC month (gates included) against the budget of the scope in view; the
   spend of the whole period with its average per bucket; the average cost of a real run this
-  month; the budget's warning threshold and whether it hard-stops.
+  month.
 - **Spend per day / week / month**: stacked bars of the real runs' `cost_usd`, one segment per
   agent, project or model. The top spender of the period is in the accent colour, every other
   segment in the faint one (hover a segment for its name and amount). Totals sit above the bars
@@ -286,5 +311,5 @@ had died out of budget, and nobody noticed for 11 hours.
 The dashboard never mutates runs or builtins: the Claude Code child processes belong to the
 MCP server process, so cancelling goes through `cancel_run` (Cowork) or the CLI. Its writes are
 the actions on user agent files (delete, unlink), on schedule rows (pause / resume, edit
-when, delete), all through the core API the MCP tools use, and the Settings page's edits of
+when, delete, run now), all through the core API the MCP tools use, and the Settings page's edits of
 `config/duskfleet.yaml` (core's `writeGlobalFile`).
