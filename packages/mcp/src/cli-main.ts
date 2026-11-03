@@ -38,6 +38,7 @@ import {
   type DataSource,
   effectivePath,
   findRepoRoot,
+  type LogLevel,
   loadConfig,
   parseHolder,
   pathDefaulted,
@@ -45,6 +46,7 @@ import {
   type RunStatus,
   resolveConfigDir,
   runCostLabel,
+  setDefaultLogLevel,
   subagentView,
   summarizeRun,
 } from "@duskfleet/core";
@@ -116,6 +118,9 @@ function usage(asked = false): never {
       "  duskfleet doctor [--probe]",
       "  duskfleet --help",
       "  duskfleet --version",
+      "",
+      "Any command takes --verbose: info logs on stderr (default: warnings and errors only,",
+      "except serve). DUSKFLEET_LOG_LEVEL=debug|info|warn|error overrides both.",
       "",
       INIT_HINT,
       "",
@@ -324,8 +329,31 @@ async function mcpRegister(
   return 0;
 }
 
+/**
+ * The arguments without `--verbose`, and whether it was there. Taken out wherever it stands
+ * before a `--` (after it, everything is the prompt), so every command accepts it.
+ */
+function takeVerbose(args: string[]): { args: string[]; verbose: boolean } {
+  const end = args.indexOf("--");
+  const head = end === -1 ? args : args.slice(0, end);
+  const tail = end === -1 ? [] : args.slice(end);
+  const kept = head.filter((a) => a !== "--verbose");
+  return { args: [...kept, ...tail], verbose: kept.length !== head.length };
+}
+
+/**
+ * Log level of a CLI invocation when DUSKFLEET_LOG_LEVEL is not set (the variable always wins):
+ * `serve` keeps `info`, its log is the record; a one-shot command shows warnings and errors only,
+ * `--verbose` brings `info` back.
+ */
+function cliLogLevel(command: string | undefined, verbose: boolean): LogLevel {
+  return command === "serve" || verbose ? "info" : "warn";
+}
+
 async function main(): Promise<void> {
-  const [command, ...rest] = process.argv.slice(2);
+  const { args, verbose } = takeVerbose(process.argv.slice(2));
+  const [command, ...rest] = args;
+  setDefaultLogLevel(cliLogLevel(command, verbose));
   if (!command) usage();
   // Before bootstrap: help must work without a config (a fresh `npx duskfleet --help`).
   if (command === "--help" || command === "-h" || command === "help") usage(true);

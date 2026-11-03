@@ -31,6 +31,10 @@ after `npm i -g duskfleet`); in a clone of this repository the same command is
 - **Is `claude` logged in, will a hook block scheduled runs?** `npx duskfleet doctor --probe`
   makes one real hello run on haiku (cents) and says which of the two it hit
   ([CLI](cli.md)).
+- **A command says nothing about what it loaded**: one-shot commands log warnings and errors
+  only. Add `--verbose` (or set `DUSKFLEET_LOG_LEVEL=info`, `debug` for more) to see which
+  config and data directory it used, the executor and the migrations it applied, on stderr
+  ([CLI](cli.md)).
 - **New code is not picked up**: the MCP host keeps the server process alive. After
   `npm run build`, restart Claude Desktop or the Claude Code session. Config changes need no restart.
 - **`npm install` fails on root-owned files in `~/.npm`**: use `npm install --cache "$TMPDIR/npm-cache"`.

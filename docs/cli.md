@@ -60,6 +60,13 @@ Only commands that need the config report a missing one (`init`, `tools`, `mcp s
 [where config and data live](configuration.md#where-config-and-data-live)). `--version` prints the version of the installed
 `duskfleet` package and needs neither a config nor Node 24.
 
+Logs go to stderr, so stdout stays the command's JSON. A one-shot command logs warnings and
+errors only; `--verbose`, anywhere before a `--`, brings the info lines back (config loaded,
+executor ready, `storage: applied N migrations (M → N)` after an upgrade). `serve` and the MCP
+server keep info: their log is the record. `DUSKFLEET_LOG_LEVEL=debug|info|warn|error` overrides
+both defaults and `--verbose`
+([environment variables](configuration.md#environment-variables)).
+
 ## init
 
 `init` prepares a first configuration. Each step prints its result; a config that cannot be
