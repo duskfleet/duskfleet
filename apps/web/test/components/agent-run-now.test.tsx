@@ -53,29 +53,27 @@ test("AgentRunNow: open, one button per bound schedule named in quotes, then Can
   assert.doesNotMatch(html, /title=/);
 });
 
-test("AgentRunNow: open with one schedule already requested, that one is disabled and says why", () => {
+test("AgentRunNow: open with one schedule already requested, that one is said in words, not offered", () => {
   const html = view({ open: true, schedules: [{ ...nightly, requested: true }, hourly] });
   assert.deepEqual(buttons(html), [
-    ["“nightly”", true],
     ["“hourly”", false],
     ["Cancel", false],
   ]);
-  assert.match(html, /disabled="" title="Already requested: the ticking process starts it on its next tick">“nightly”/);
+  assert.match(html, /<span class="muted">“nightly” already requested, it starts on the next tick<\/span>/);
 });
 
-test("AgentRunNow: open with every schedule requested, only Cancel stays enabled", () => {
-  const html = view({
-    open: true,
-    schedules: [
-      { ...nightly, requested: true },
-      { ...hourly, requested: true },
-    ],
-  });
-  assert.deepEqual(buttons(html), [
-    ["“nightly”", true],
-    ["“hourly”", true],
-    ["Cancel", false],
-  ]);
+test("AgentRunNow: closed with every schedule requested, a disabled Run requested button that says why", () => {
+  const all = [
+    { ...nightly, requested: true },
+    { ...hourly, requested: true },
+  ];
+  const html = view({ schedules: all });
+  assert.equal(
+    html,
+    '<span class="ad-run-now"><button type="button" class="ad-btn primary" disabled="" ' +
+      'title="Already requested: the ticking process starts it on its next tick">Run requested</button></span>',
+  );
+  assert.equal(renderToStaticMarkup(<AgentRunNow schedules={all} />), html);
 });
 
 test("AgentRunNow: while the request is pending every button is disabled and shows …", () => {
@@ -88,7 +86,7 @@ test("AgentRunNow: while the request is pending every button is disabled and sho
 
 test("AgentRunNow: the result in place, muted when it worked, bad-text when it did not", () => {
   const ok = view({ result: { ok: true, message: "Run requested for nightly" } });
-  assert.match(ok, /Run now…<\/button><span class="muted">Run requested for nightly<\/span><\/span>$/);
+  assert.match(ok, /Run now…<\/button><span class="ad-run-msg muted">Run requested for nightly<\/span><\/span>$/);
   const err = view({ result: { ok: false, message: "schedule not found" } });
-  assert.match(err, /Run now…<\/button><span class="bad-text">schedule not found<\/span><\/span>$/);
+  assert.match(err, /Run now…<\/button><span class="ad-run-msg bad-text">schedule not found<\/span><\/span>$/);
 });

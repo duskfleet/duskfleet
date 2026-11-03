@@ -81,9 +81,11 @@ test("RunTable: no runs, the empty text alone", () => {
 });
 
 test("RunTable: live columns, Elapsed and Started (relative)", () => {
-  const html = renderToStaticMarkup(<RunTable runs={[run()]} emptyText="" />);
+  // Minutes, not hours: "n h ago" turns into "yesterday …" just after midnight.
+  const started = new Date(Date.now() - 10 * 60_000).toISOString();
+  const html = renderToStaticMarkup(<RunTable runs={[run({ startedAt: started })]} emptyText="" />);
   assert.deepEqual(headers(html), ["Status", "Run", "Model", "Elapsed", "Turns", "API value", "Started"]);
-  assert.match(html, /<td class="when col-started" title="[^"]+">1 h ago<\/td>/);
+  assert.match(html, /<td class="when col-started" title="[^"]+">10 min ago<\/td>/);
 });
 
 test("RunTable: ended columns, Duration and Ended (wall clock)", () => {
