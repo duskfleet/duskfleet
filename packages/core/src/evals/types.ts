@@ -1,6 +1,10 @@
 /**
- * Evaluation foundations. Nothing in the MVP produces evals yet; the types and
- * table exist so that evaluators can be added without touching the Run model.
+ * Evaluation foundations. Nothing produces evals yet; the types, the score schema
+ * (`score.ts`) and the table exist so that evaluators can be added without touching the Run model.
+ *
+ * Isolation: evaluators write only to `evals`, through `EvalRepository`, never to `runs` (a run's
+ * status and review reasons belong to `RunManager`). An LLM evaluator is a second, read-only
+ * Claude Code run with its own `maxBudgetUsd`, never the evaluated run's budget.
  *
  * Planned:
  *  - deterministic evaluators (tests_passed, build_passed, files_exist, ...)
@@ -10,6 +14,7 @@
 
 import { randomUUID } from "node:crypto";
 import type { DatabaseSync } from "node:sqlite";
+import { type EvalDetails, scoreEval } from "./score.js";
 
 export type EvalKind = "deterministic" | "llm";
 export type EvalStatus = "pass" | "fail" | "error" | "skipped";
@@ -20,23 +25,47 @@ export interface EvalResult {
   name: string;
   kind: EvalKind;
   status: EvalStatus;
+  /** In [0, 1]; null when a hard check failed, or for `error` / `skipped`. */
   score: number | null;
-  details: unknown;
+  /** `EvalDetails` for pass / fail, `{ message }` for error / skipped. */
+  details: EvalDetails | { message: string } | null;
   createdAt: string;
 }
 
-/** Contract every future evaluator implements. */
-export interface Evaluator {
+/** What an evaluator returns: scored details, or why it could not score. */
+export type EvalOutcome = { details: EvalDetails } | { status: "error" | "skipped"; message: string };
+
+interface EvaluatorBase {
   name: string;
-  kind: EvalKind;
-  evaluate(runId: string): Promise<Omit<EvalResult, "id" | "runId" | "name" | "kind" | "createdAt">>;
+  evaluate(runId: string): Promise<EvalOutcome>;
 }
+
+export interface DeterministicEvaluator extends EvaluatorBase {
+  kind: "deterministic";
+}
+
+export interface LlmEvaluator extends EvaluatorBase {
+  kind: "llm";
+  /** Budget of the eval run itself (`--max-budget-usd`), separate from the evaluated run's. */
+  maxBudgetUsd: number;
+}
+
+/** Contract every future evaluator implements. */
+export type Evaluator = DeterministicEvaluator | LlmEvaluator;
 
 export class EvalRepository {
   constructor(private readonly db: DatabaseSync) {}
 
-  record(input: Omit<EvalResult, "id" | "createdAt">): EvalResult {
-    const result: EvalResult = { ...input, id: randomUUID(), createdAt: new Date().toISOString() };
+  /** The only write path of evals. Scored details go through `scoreEval` (throws on a bad shape). */
+  record(runId: string, name: string, kind: EvalKind, outcome: EvalOutcome): EvalResult {
+    const base = { id: randomUUID(), runId, name, kind, createdAt: new Date().toISOString() };
+    let result: EvalResult;
+    if ("details" in outcome) {
+      const { status, score } = scoreEval(outcome.details);
+      result = { ...base, status, score, details: outcome.details };
+    } else {
+      result = { ...base, status: outcome.status, score: null, details: { message: outcome.message } };
+    }
     this.db
       .prepare(
         "INSERT INTO evals (id, run_id, name, kind, status, score, details, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
@@ -48,7 +77,7 @@ export class EvalRepository {
         result.kind,
         result.status,
         result.score,
-        result.details === undefined ? null : JSON.stringify(result.details),
+        result.details === null ? null : JSON.stringify(result.details),
         result.createdAt,
       );
     return result;
@@ -76,4 +105,23 @@ export class EvalRepository {
       createdAt: r.created_at,
     }));
   }
+}
+
+/**
+ * Runs one evaluator against a run and records the outcome. An LLM evaluator without a positive
+ * `maxBudgetUsd` is refused before it runs; an evaluator that throws, or returns details that do
+ * not match the schema, is recorded as `error`. Nothing here touches `runs`.
+ */
+export async function runEvaluator(repo: EvalRepository, evaluator: Evaluator, runId: string): Promise<EvalResult> {
+  if (evaluator.kind === "llm" && !(Number.isFinite(evaluator.maxBudgetUsd) && evaluator.maxBudgetUsd > 0)) {
+    throw new Error(`LLM evaluator "${evaluator.name}" needs its own maxBudgetUsd > 0`);
+  }
+  let outcome: EvalOutcome;
+  try {
+    outcome = await evaluator.evaluate(runId);
+    if ("details" in outcome) scoreEval(outcome.details);
+  } catch (err) {
+    outcome = { status: "error", message: err instanceof Error ? err.message : String(err) };
+  }
+  return repo.record(runId, evaluator.name, evaluator.kind, outcome);
 }
