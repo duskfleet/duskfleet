@@ -115,10 +115,10 @@ export class BudgetRepository {
     ).map((r) => ({ id: r.id, name: r.name, agentId: r.agent_id, projectId: r.project_id }));
   }
 
-  /** Pause these schedules (enabled = 0, next_run_at cleared, as update_schedule enabled: false does). */
+  /** Pause these schedules (enabled = 0, next_run_at and a pending deferred fire cleared, as update_schedule enabled: false does). */
   pauseSchedules(ids: string[]): void {
     const stmt = this.db.prepare(
-      "UPDATE schedules SET enabled = 0, next_run_at = NULL, updated_at = ? WHERE id = ? AND enabled = 1",
+      "UPDATE schedules SET enabled = 0, next_run_at = NULL, deferred_until = NULL, deferred_reason = NULL, updated_at = ? WHERE id = ? AND enabled = 1",
     );
     const now = new Date().toISOString();
     for (const id of ids) stmt.run(now, id);

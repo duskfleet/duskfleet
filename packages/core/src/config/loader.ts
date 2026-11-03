@@ -138,6 +138,7 @@ const globalSchema = z.object({
       auto_pause: z.boolean().default(true),
       auto_pause_after: z.number().int().min(0).default(5),
       allow_command_gates: z.boolean().default(false),
+      defer_busy: z.boolean().default(true),
     })
     .prefault({}),
 });
@@ -249,6 +250,7 @@ export function loadConfig(configDir: string): DuskFleetConfig {
       autoPause: g.scheduler.auto_pause,
       autoPauseAfter: g.scheduler.auto_pause_after,
       allowCommandGates: g.scheduler.allow_command_gates,
+      deferBusy: g.scheduler.defer_busy,
     },
     agents,
     projects,
