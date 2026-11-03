@@ -2,7 +2,8 @@
  * Scheduling model. A Schedule says "run this agent with this prompt on this
  * cron, in this time zone". The Scheduler (scheduler.ts) fires due schedules
  * through RunManager, which keeps the WIP guards: a tick whose agent or project
- * is still busy is recorded as `skipped_busy`, never queued.
+ * is still busy is `deferred` (one pending fire per schedule, until the next cron
+ * occurrence; `scheduler.defer_busy`) or `skipped_busy`, never queued.
  */
 
 import type { OnFailurePolicy } from "../config/types.js";
@@ -15,10 +16,15 @@ import type { OnFailurePolicy } from "../config/types.js";
  * the schedules of that scope were paused.
  * `auto_paused` = its last `scheduler.auto_pause_after` runs were all empty or needs review: the
  *   scheduler paused it instead of firing; the reason is kept as the firing's error text.
+ * `deferred` = a scheduled tick found the agent or project busy and `scheduler.defer_busy` is on:
+ *   the fire stays pending (one per schedule) and is retried every tick until it starts (a later
+ *   `started` / `resumed` row) or the next cron occurrence comes (then a `skipped_busy` row).
+ *   Counts as neither a fire nor a skip: the row that settles it does.
  */
 export type ScheduleOutcome =
   | "started"
   | "resumed"
+  | "deferred"
   | "skipped_busy"
   | "skipped_daily_cap"
   | "skipped_budget"
@@ -57,7 +63,8 @@ export interface ScheduleGate {
 
 /**
  * What a tick does when the schedule's agent or project is still busy. `skip_if_active` (the
- * only value for now) records `skipped_busy`; a busy tick is never queued.
+ * only value for now) never queues: the tick is `deferred` (at most one pending fire, until the
+ * next cron occurrence) when `scheduler.defer_busy` is on, else `skipped_busy`.
  */
 export const CONCURRENCY_POLICIES = ["skip_if_active"] as const;
 export type ConcurrencyPolicy = (typeof CONCURRENCY_POLICIES)[number];
@@ -166,6 +173,14 @@ export interface Schedule {
    * towards the next streak, so a resumed schedule gets `auto_pause_after` fresh runs.
    */
   autoPausedAt: string | null;
+  /**
+   * Pending deferred fire (`deferred` outcome): retried every tick until it starts; dropped and
+   * recorded `skipped_busy` once this instant (the next cron occurrence after the busy tick)
+   * passes, dropped silently when the schedule is paused. null = nothing pending.
+   */
+  deferredUntil: string | null;
+  /** The busy message of the tick that was deferred; null when nothing is pending. */
+  deferredReason: string | null;
 }
 
 export interface ScheduleInput {

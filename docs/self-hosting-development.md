@@ -234,8 +234,10 @@ once instead of on the next hourly run; it needs the same secret there.
 
 - **No coordinator.** Each agent reads the labels when its schedule fires; nothing hands work
   over directly. A hand-off waits for the next tick of the receiving agent (up to 30 minutes).
-- **Busy means skip.** A tick whose agent is still running is recorded as `skipped_busy` and
-  lost, never queued. A long developer run simply delays the next unit of work.
+- **Busy means wait once, never queue.** A tick whose agent is still running becomes the
+  schedule's one deferred fire (`deferred`), retried every tick until it starts or the next
+  occurrence comes (`skipped_busy` then, or with `scheduler.defer_busy: false`). A long developer
+  run simply delays the next unit of work.
 - **Locks are labels.** Two runs could race between a label query and the label swap; the
   schedules are staggered and `max_concurrent_per_agent: 1` keeps one run per agent, and the
   PR gate expires the locks a dead run leaves behind.
