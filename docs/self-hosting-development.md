@@ -88,7 +88,9 @@ design: flow: design-ready ──(designer)──► flow: in-progress ──►
   `VERDICT: approve` or `VERDICT: changes`. The verdict's label (`flow: ready-to-merge` or
   `flow: changes-requested`; `flow: contributor-changes` when the PR comes from a fork) is the
   hand-off. Read-only agent; after three `VERDICT: changes`
-  rounds it parks the PR with `flow: needs-human`. The built-in `code-review` skill is not
+  rounds it parks the PR with `flow: needs-human`. A comment starting with `[owner]` (the
+  owner's decision, written in chat) resets that count, so a human can put a parked PR back
+  into review with three fresh rounds. The built-in `code-review` skill is not
   used unattended: its fork gathers context with commands no allow-list can permit
   (`git diff @{upstream}...HEAD`, `;` chains), so it was denied in most runs.
 - Dependabot PRs take a short path instead of the two passes: all checks green, only manifests,
