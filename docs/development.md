@@ -19,7 +19,7 @@ duskfleet/
 │   ├── mcp/             @duskfleet/mcp  — MCP server (stdio) + CLI + tests
 │   └── duskfleet/       duskfleet       — the published npm package: mcp + core bundled (no source)
 └── apps/
-    └── web/             @duskfleet/web  — Next.js dashboard (read-only), published too
+    └── web/             @duskfleet/web  — Next.js dashboard (never writes runs), published too
 ```
 
 A local `playground/` directory is ignored by version control: put a throwaway project there
@@ -58,8 +58,9 @@ apps/web/lib/data.ts             server-only read access to config + SQLite
 ```bash
 npm run build          # core + mcp (tsc). The CLI, the MCP server and the dashboard import from dist/
 npm run typecheck      # core + mcp; dashboard: npm run typecheck -w @duskfleet/web
-npm test               # packages/core/test, then packages/mcp/test; node --test, ~25 s, no network, no cost
+npm test               # packages/core/test, packages/mcp/test, then apps/web/test; node --test, ~25 s, no network, no cost
 npm test -w @duskfleet/core   # core unit tests alone, under a second
+npm test -w @duskfleet/web    # dashboard helpers and component render tests (after npm run build), a few seconds
 npm run check          # everything CI runs, in the same order (hygiene, lint, build, pack, typecheck, tests)
 ```
 
@@ -214,14 +215,21 @@ login and spends nothing: the tests use the fake binary. In order:
 | Public-repo hygiene | `npm run check:public` | A versioned file contains a home path, the committing machine's user or host name, or the index holds a symlink. Placeholders `<you>`, `you`, `me` are fine. |
 | Lint + format | `npm run lint` (`biome ci .`; `npm run lint:fix` repairs) | A Biome lint error or an unformatted file. Warnings (`noNonNullAssertion`, `noExplicitAny`, …) do not block. In `packages/core` an import of the MCP SDK, React or Next.js is an error. |
 | Build | `npm run build` | `tsc` errors in core or mcp |
-| Docs sync | `npm run check:docs` (after the build: it reads `packages/mcp/dist/tools.json`) | An MCP tool the server registers has no row in `docs/mcp-server.md`, a `ScheduleOutcome` value is not listed there, a `docs/*.md` page is not linked from `README.md`, or the README's tool count is stale. |
-| README Quick start | `npm run check:quickstart` (after the build: `scripts/check-quickstart.mjs` drives `packages/mcp/dist/cli.js`) | A `npm run cli -- ...` line of the README Quick start exits non-zero when replayed against `fake-claude.js` (temporary copy of `config/`, scratch project with a failing test), `run` does not record a completed run, `runs` does not list it, a `doctor` / `agents create` / `run` / `runs` step is gone, or a new line is neither replayed nor on the script's skip list. |
+| Docs sync | `npm run check:docs` (after the build: it reads `packages/mcp/dist/tools.json`) | An MCP tool the server registers has no row in `docs/mcp-server.md`, a `ScheduleOutcome` value is not listed there, a `docs/*.md` page is not linked from `README.md`, or the README's tool count or its "MCP tools" badge is stale. |
+| README Quick start | `npm run check:quickstart` (after the build: `scripts/check-quickstart.mjs` drives `packages/mcp/dist/cli.js`) | A `npx duskfleet ...` (or `npm run cli -- ...`) line of the README Quick start exits non-zero when replayed as `node packages/mcp/dist/cli.js ...` against `fake-claude.js` (temporary copy of `config/`, scratch project with a failing test), `run` does not record a completed run, `runs` does not list it, an `init` / `doctor` / `agents create` / `run` / `runs` step is gone, or a new line is neither replayed nor on the script's skip list. |
 | Typecheck | `npm run typecheck`, `npm run typecheck -w @duskfleet/web` | Type errors anywhere |
-| Tests + coverage | `npm run test:coverage` | A failing test, or line coverage of the in-process code under 80 % |
+| Tests + coverage | `npm run test:coverage` (core and mcp with coverage, then `npm test -w @duskfleet/web`) | A failing test, or line coverage of the in-process code of core and mcp under 80 % |
 | Dashboard build | `npm run build:web` | `next build` errors (Server Component rules `tsc` does not see) |
 | Pack check | `npm run check:pack -- --require-web-build` | A published tarball holds a file outside its allow-list (tests, maps, `data/`, `.env*`), lists `@duskfleet/core` as a dependency, misses the dashboard build, or the two versions differ. `npm run check` runs it without the flag: an unbuilt dashboard is only a warning there. |
 | Packed CLI smoke | `npm pack -w duskfleet`, then `npx ./duskfleet-*.tgz --help` outside the repository | The tarball does not install or its CLI does not start. |
 | Audit | `npm audit --audit-level=high` | Report-only until the Next 16 upgrade clears the `postcss` advisory Next 15 pins; then blocking on high / critical. |
+
+Dashboard components have render tests (rule since 2026-11-02, harness and first tests in #344):
+every new or changed component in `apps/web/components` ships with a test in `apps/web/test` that
+renders it with `react-dom/server` and asserts the markup of each visible state (text, token-driving
+classes, disabled controls, `title` / `aria-*`); no snapshot files. State transitions are tested
+through the pure helpers in `apps/web/lib` the component calls. Layout and interaction in a real
+browser are not covered here (#79). The reviewer treats a component PR without its test as incomplete.
 
 Two tests are gates in themselves: `test/migrations.test.js` pins the SHA-256 of every shipped
 migration (edit one and it fails; add one and it tells you the digest to append), and the layering of
@@ -229,6 +237,23 @@ the three packages is a Biome rule, not just this page. Dependabot opens grouped
 and GitHub Actions. Workflows pin every action by full commit SHA with a version comment
 (`uses: actions/checkout@<sha> # v7.0.1`); Dependabot bumps the SHA and the comment together. Not built yet: a periodic `claude --help` flag-drift check (needs the CLI, so a
 local schedule rather than Actions) and a manual-dispatch smoke run with `--model haiku`.
+
+### Dashboard component tests
+
+`apps/web/test/components/*.test.tsx` render the components of `apps/web/components` with
+`react-dom/server`'s `renderToStaticMarkup` and assert the markup; no browser, no snapshot files.
+Node strips types but not JSX, so `pretest` compiles the tests and what they import with
+`tsc -p tsconfig.test.json` into the git-ignored `apps/web/.test-build/`; `test/register.mjs` then
+resolves the `@/` alias and swaps in the stubs of `test/stubs/` (`next/link` as a plain `<a>`,
+`next/navigation` with a no-op router and a settable path and query, the schedule server actions).
+Components never import a stub. To test a new component:
+
+1. Add `test/components/<name>.test.tsx`, import the component by relative path, render it with fixture data.
+2. One `test()` per visible state: text, the classes that pick the tokens, disabled controls, `title` / `aria-*`.
+3. A client component renders its initial state only. When a state needs a click (open, confirm, edit),
+   split the markup into an exported `<Name>View` taking that state as props (`AgentRunNowView`,
+   `ScheduleActionsView`) and render the view in each state; pure logic goes to `apps/web/lib` and its own test.
+4. A Next.js module that a component imports and Node cannot run gets a stub in `test/stubs/` and a line in `test/register.mjs`.
 
 ## Issue and review flow by agents
 

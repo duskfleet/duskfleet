@@ -709,9 +709,19 @@ a.stat.tile-link:active,
 }
 
 /* ---- run table ----------------------------------------------------------- */
+/* a fixed layout ignores a cell's min-width, so the minimum sits on the table and the wrapper
+   scrolls; 1 px of bottom padding keeps the table's 1 px shadow */
+.runs-scroll {
+  overflow-x: auto;
+  padding-bottom: 1px;
+}
 /* separate borders so the rounded outline clips the header and rows */
 .runs {
   width: 100%;
+  /* the 752 px of fixed columns + 200 px for Run */
+  min-width: 952px;
+  /* DS-25: one column grid for every run table (RunColumns), so Running and Recent line up */
+  table-layout: fixed;
   border-collapse: separate;
   border-spacing: 0;
   background: var(--panel);
@@ -763,18 +773,41 @@ a.stat.tile-link:active,
   white-space: nowrap;
   font-variant-numeric: tabular-nums;
 }
+/* a long header ("Cost / API value") wraps inside its fixed column instead of running into the next */
+.runs th.num {
+  white-space: normal;
+}
+/* column widths include the 14 px cell padding; Run takes what is left */
+.runs .c-status {
+  width: 152px;
+}
+.runs .c-model {
+  width: 120px;
+}
+.runs .c-duration {
+  width: 116px;
+}
+.runs .c-turns {
+  width: 88px;
+}
+.runs .c-cost {
+  width: 120px;
+}
+.runs .c-when {
+  width: 156px;
+}
 .runs td.status {
-  width: 1%;
   white-space: nowrap;
 }
-.runs .what {
-  min-width: 320px;
+/* the status badge inside the Run cell, only where the Status column is hidden */
+.runs .what .status-inline {
+  display: none;
 }
+/* one line with an ellipsis; the full prompt is the title */
 .runs .what .prompt {
-  display: -webkit-box;
-  -webkit-line-clamp: 2;
-  -webkit-box-orient: vertical;
+  white-space: nowrap;
   overflow: hidden;
+  text-overflow: ellipsis;
   color: var(--text);
   font-weight: 500;
   line-height: 22px;
@@ -1802,7 +1835,7 @@ h2 .h2-id {
   border-bottom: 0;
 }
 .agent-table .c-status {
-  width: 124px;
+  width: 144px; /* the needs-review pill is ~116 px; 124 px left it 100 px */
 }
 .agent-table .c-model {
   width: 96px;
@@ -1912,11 +1945,18 @@ h2 .h2-id {
   width: 3px;
 }
 
-/* Agent/Row, narrow: the same cells as a 4-line block; the thead's labels move into the row */
 @media (max-width: 720px) {
   .agents-kpis {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
+  .ar-id {
+    max-width: 200px;
+  }
+}
+
+/* Agent/Row, tablet and narrow: the same cells as a 4-line block; the thead's labels move
+   into the row. From 1024 px down, so no squeezed table step between desktop and phone. */
+@media (max-width: 1024px) {
   .ms.sort-menu {
     display: none;
   }
@@ -1949,9 +1989,6 @@ h2 .h2-id {
     grid-column: 1 / 4;
     grid-row: 1;
     align-self: center;
-  }
-  .ar-id {
-    max-width: 200px;
   }
   .ar-status {
     grid-column: 4;
@@ -2049,6 +2086,10 @@ h2 .h2-id {
   align-items: center;
   flex-wrap: wrap;
   font-size: 14px;
+}
+/* the outcome of a run-now request goes under the buttons, never beside them */
+.ad-run-now .ad-run-msg {
+  flex-basis: 100%;
 }
 .ad-btn {
   font: inherit;
@@ -2199,6 +2240,12 @@ h2 .h2-id {
 }
 .ad-filter .ms {
   flex: 0 1 260px;
+}
+/* Recent runs on the agent page: a fixed 420 px side column leaves the table less room than the
+   Runs page, so the table scrolls inside the panel (RunTable's wrapper) before Run drops under 200 px.
+   Model is hidden here: 632 px of fixed columns + 200 */
+.ad-runs .runs {
+  min-width: 832px;
 }
 .ad-runs .col-model {
   display: none;
@@ -2683,7 +2730,8 @@ summary:focus-visible {
 .sched-group > h2 a {
   color: inherit;
 }
-/* one card per schedule: what it runs on the left, last firings on the right, actions below */
+/* one card per schedule (DS-24): name and actions in the header, an optional message under it,
+   what it runs on the left, last firings on the right, stats in the footer */
 .sched-list {
   display: grid;
   gap: 12px;
@@ -2692,6 +2740,7 @@ summary:focus-visible {
   display: grid;
   grid-template-columns: minmax(0, 1fr) 420px;
   column-gap: 24px;
+  row-gap: 12px;
   background: var(--panel);
   border: 1px solid var(--border);
   border-radius: 12px;
@@ -2706,14 +2755,56 @@ summary:focus-visible {
 .sched-card:target {
   border-color: var(--accent);
 }
+.sched-card .sched-head {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px 16px;
+  flex-wrap: wrap;
+  min-width: 0;
+}
+.sched-card .sched-head .sched-actions,
+.sched-card .sched-head .sched-edit {
+  flex: none;
+  margin-top: 0;
+}
+/* the card's only message home: warn strip for auto / budget pauses, muted line otherwise; never truncated */
+.sched-card .sched-msg {
+  grid-column: 1 / -1;
+  margin: 0;
+  font-size: 14px;
+  line-height: 21px;
+  letter-spacing: 0.01em;
+  color: var(--muted);
+  overflow-wrap: anywhere;
+}
+.sched-card .sched-msg.warn {
+  color: var(--warn);
+  background: var(--warn-tint);
+  border: 1px solid var(--warn-border);
+  border-radius: 6px;
+  padding: 6px 10px;
+}
+.sched-card .sched-msg.bad {
+  color: var(--bad-ink);
+}
+.sched-card .sched-msg a {
+  color: inherit;
+  text-decoration: underline;
+}
 .sched-card .main {
   min-width: 0;
+}
+.sched-card .main > .meta:first-child {
+  margin-top: 0;
 }
 .sched-card .title-row {
   display: flex;
   align-items: center;
   gap: 10px;
   flex-wrap: wrap;
+  min-width: 0;
 }
 .sched-card h3 {
   font-family: var(--font-display);
@@ -2824,7 +2915,6 @@ summary:focus-visible {
   justify-content: space-between;
   gap: 12px;
   flex-wrap: wrap;
-  margin-top: 12px;
   padding-top: 10px;
   border-top: 1px solid var(--border);
   font-size: 14px;
@@ -2840,19 +2930,11 @@ summary:focus-visible {
 .sched-card .foot-facts .skips {
   color: var(--warn);
 }
-.sched-card .foot-facts .err {
-  color: var(--bad-ink);
-  overflow-wrap: anywhere;
-}
 .sched-card .foot-facts .idle {
   font-variant-numeric: tabular-nums;
 }
 .sched-card .foot-facts .idle.warn {
   color: var(--warn);
-}
-.sched-card .foot .sched-actions,
-.sched-card .foot .sched-edit {
-  margin-top: 0;
 }
 /* firing squares, shared by the cards and the legend */
 .sq {
@@ -3321,11 +3403,13 @@ details.desc ul {
   .runs .col-turns {
     display: none;
   }
+  /* Status 152 + Elapsed 116 + Cost 120 + 200 for Run */
+  .runs,
+  .ad-runs .runs {
+    min-width: 588px;
+  }
   .toolbar .search {
     flex-basis: 100%;
-  }
-  .runs .what {
-    min-width: 0;
   }
   .runs th,
   .runs td {
@@ -3389,11 +3473,31 @@ details.desc ul {
     margin-left: 0;
     transform: none;
   }
-  .runs .col-duration {
+  /* DS-25 at 390: Run and Cost only; the badge moves into the Run cell, the title takes two lines */
+  .runs .col-duration,
+  .runs .col-status {
     display: none;
   }
   .runs .when {
     display: none;
+  }
+  .runs .c-cost {
+    width: 104px;
+  }
+  /* Cost 104 + 200 for Run */
+  .runs,
+  .ad-runs .runs {
+    min-width: 304px;
+  }
+  .runs .what .status-inline {
+    display: flex;
+    margin-bottom: 4px;
+  }
+  .runs .what .prompt {
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    white-space: normal;
   }
   .stat .value {
     font-size: 21px;
@@ -3424,6 +3528,16 @@ details.desc ul {
   }
   .sched-card .last {
     flex-wrap: wrap;
+  }
+  /* DS-24 at 390: the actions wrap under the name, left-aligned */
+  .sched-card .sched-head {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+  .sched-card .sched-head .sched-actions,
+  .sched-card .sched-head .sched-edit {
+    flex: 0 1 auto;
+    max-width: 100%;
   }
 }
 
@@ -4633,11 +4747,19 @@ details.desc ul {
   gap: 8px;
   margin-left: auto;
 }
+/* three tiles: three equal columns, then the two-column step of every .stats grid
+   with the odd last tile spanning the row, so no cell is left empty */
 .cost-kpis {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   margin-bottom: 20px;
 }
-.stat .value.faint-value {
-  color: var(--faint);
+@media (max-width: 900px) {
+  .cost-kpis {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .cost-kpis .stat:last-child:nth-child(odd) {
+    grid-column: 1 / -1;
+  }
 }
 .cost-panel .panel-head {
   display: flex;
@@ -4687,18 +4809,6 @@ details.desc ul {
   letter-spacing: 0;
   color: var(--muted);
   min-width: 3em;
-}
-/* Runs page: where the By model table was */
-.moved-line {
-  margin: 24px 0 0;
-  font-size: 14px;
-  line-height: 21px;
-}
-.moved-line a {
-  color: var(--muted);
-}
-.moved-line a:hover {
-  color: var(--text);
 }
 @media (max-width: 600px) {
   .trend-toolbar .kept,

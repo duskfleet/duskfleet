@@ -93,7 +93,11 @@ test("spreadLabels clamps every label to the plot box", () => {
 });
 
 const counts = (...rates) =>
-  rates.map((r) => (r === null ? { finished: 0, clean: 0, needsReview: 0, cancelled: 0 } : { finished: 10, clean: r / 10, needsReview: 10 - r / 10, cancelled: 0 }));
+  rates.map((r) =>
+    r === null
+      ? { finished: 0, clean: 0, needsReview: 0, cancelled: 0 }
+      : { finished: 10, clean: r / 10, needsReview: 10 - r / 10, cancelled: 0 },
+  );
 
 test("agentRows ranks the lowest current clean rate first with the change over the period", () => {
   const rows = agentRows([

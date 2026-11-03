@@ -5,7 +5,7 @@
 import assert from "node:assert/strict";
 import { spawn, spawnSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, readdirSync, realpathSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { hostname, tmpdir } from "node:os";
 import path from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
@@ -35,14 +35,15 @@ function makeRoot() {
   return { root, configDir, project: realpathSync(project) };
 }
 
-function cli(configDir, args, extraEnv = {}) {
+function cli(configDir, args, extraEnv = {}, cwd = undefined) {
   return spawnSync(process.execPath, [cliEntry, ...args], {
     env: testEnv({ DUSKFLEET_CONFIG: configDir, DUSKFLEET_LOG_LEVEL: "warn", ...extraEnv }),
     encoding: "utf8",
+    cwd,
   });
 }
 
-test("cli run --project accepts a registered id or a path; unknown ids, relative paths and both flags fail clearly", () => {
+test("cli run --project accepts a registered id or a path; unknown ids and both flags fail clearly", () => {
   const { root, configDir, project } = makeRoot();
   try {
     const byId = cli(configDir, ["run", "--project", "demo", "--", "hello"]);
@@ -63,13 +64,126 @@ test("cli run --project accepts a registered id or a path; unknown ids, relative
       "a value that is not path-like is an id",
     );
 
-    const relative = cli(configDir, ["run", "--project", "./project", "--", "hello"]);
-    assert.notEqual(relative.status, 0);
-    assert.match(relative.stderr, /project path must be absolute: \.\/project/);
-
     const both = cli(configDir, ["run", "--project", "demo", "--project-id", "demo", "--", "hello"]);
     assert.notEqual(both.status, 0);
     assert.match(both.stderr, /mutually exclusive/);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("cli run --project resolves a relative path from the shell directory and records the absolute path (#353)", () => {
+  const { root, configDir } = makeRoot();
+  try {
+    const scratch = path.join(root, "scratch");
+    mkdirSync(scratch);
+    const real = realpathSync(scratch);
+
+    const dot = cli(configDir, ["run", "--project", ".", "--", "hello"], {}, scratch);
+    assert.equal(dot.status, 0, dot.stderr);
+    const run = JSON.parse(dot.stdout);
+    assert.equal(run.projectPath, real, "`.` is the shell directory, stored absolute");
+    assert.equal(run.projectId, null);
+
+    const dotSlash = cli(configDir, ["run", "--project", "./scratch", "--", "hello"], {}, root);
+    assert.equal(dotSlash.status, 0, dotSlash.stderr);
+    assert.equal(JSON.parse(dotSlash.stdout).projectPath, real);
+
+    const bare = cli(configDir, ["run", "--project", "scratch", "--", "hello"], {}, root);
+    assert.equal(bare.status, 0, bare.stderr);
+    assert.equal(JSON.parse(bare.stdout).projectPath, real, "a bare name that is a directory here is a path");
+
+    const registered = cli(configDir, ["run", "--project", "../project", "--", "hello"], {}, scratch);
+    assert.equal(registered.status, 0, registered.stderr);
+    assert.equal(
+      JSON.parse(registered.stdout).projectId,
+      "demo",
+      "a relative path to a registered project gets its id",
+    );
+
+    const missing = cli(configDir, ["run", "--project", "./nowhere", "--", "hello"], {}, root);
+    assert.notEqual(missing.status, 0);
+    assert.match(missing.stderr, /not an existing directory: .*nowhere/);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("cli run: a failed run prints cause and fix first; stdout is trimmed unless --json", () => {
+  const { root, configDir, project } = makeRoot();
+  try {
+    // Logged out: fake-claude's "auth" prompt fails with "Invalid API key · Please run /login".
+    const auth = cli(configDir, ["run", "--project", project, "--", "auth"]);
+    assert.equal(auth.status, 1);
+    const lines = auth.stderr.split("\n");
+    const top = lines.slice(0, 5).join("\n");
+    assert.match(top, /^run \S+ failed/m, auth.stderr);
+    assert.match(top, /^cause: Claude is not logged in: .*Please run \/login/m);
+    assert.match(top, /^fix: Claude Code is not authenticated: run "claude" in a terminal and log in/m);
+    assert.match(auth.stderr, /^more: duskfleet run-info \S+/m);
+    const trimmed = JSON.parse(auth.stdout);
+    assert.equal(trimmed.errorCode, "auth_required", "scripts still get the record");
+    assert.equal(trimmed.status, "failed");
+    assert.equal("argv" in trimmed.command, false, "no spawned command line (system prompt) on stdout");
+    assert.equal("rawResultJson" in trimmed, false);
+    assert.equal(trimmed.command.cwd, project);
+
+    const full = JSON.parse(cli(configDir, ["run", "--project", project, "--json", "--", "auth"]).stdout);
+    assert.ok(Array.isArray(full.command.argv) && full.command.argv.includes("--append-system-prompt"));
+    assert.equal(typeof full.rawResultJson, "string", "--json prints the full record");
+
+    // A review reason without an error code gets the reason's fix.
+    const budget = cli(configDir, ["run", "--project", project, "--", "budget"]);
+    assert.equal(budget.status, 1);
+    assert.match(budget.stderr, /\(budget exhausted/);
+    assert.match(budget.stderr, /^fix: raise the agent's max_budget_usd/m);
+
+    // A clean run: no block, same trimmed shape.
+    const ok = cli(configDir, ["run", "--project", project, "--", "ok"]);
+    assert.equal(ok.status, 0, ok.stderr);
+    assert.doesNotMatch(ok.stderr, /^(cause|fix|more):/m);
+    const okRun = JSON.parse(ok.stdout);
+    assert.equal(okRun.status, "completed");
+    assert.equal("argv" in okRun.command, false);
+    assert.equal("rawResultJson" in okRun, false);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("doctor lists the stuck pending and running rows of a dead owner its startup sweep failed", () => {
+  const { root, configDir, project } = makeRoot();
+  try {
+    const first = cli(configDir, ["run", "--project", project, "--", "hello"]);
+    assert.equal(first.status, 0, first.stderr);
+    const second = cli(configDir, ["run", "--project", project, "--", "hello"]);
+    assert.equal(second.status, 0, second.stderr);
+    const pendingId = JSON.parse(first.stdout).id;
+    const runningId = JSON.parse(second.stdout).id;
+    const dead = spawnSync(process.execPath, ["-e", ""]).pid;
+    const owner = `mcp@${hostname()}:${dead}`;
+    const db = openDatabase(loadConfig(configDir).dataDir);
+    const stuck = db.prepare(
+      "UPDATE runs SET status = ?, started_at = NULL, ended_at = NULL, error = NULL, owner = ? WHERE id = ?",
+    );
+    stuck.run("pending", owner, pendingId);
+    stuck.run("running", owner, runningId);
+    db.close();
+
+    const doctor = cli(configDir, ["doctor"]);
+    assert.equal(doctor.status, 0, doctor.stderr);
+    const { orphans } = JSON.parse(doctor.stdout);
+    assert.deepEqual(
+      orphans.recovered.map((r) => [r.id, r.was, r.owner]).sort(),
+      [
+        [pendingId, "pending", owner],
+        [runningId, "running", owner],
+      ].sort(),
+    );
+    assert.match(orphans.advice, /marked 2 run\(s\) failed/);
+
+    const again = JSON.parse(cli(configDir, ["doctor"]).stdout);
+    assert.deepEqual(again.orphans, { recovered: [], advice: null }, "already failed by the first doctor");
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

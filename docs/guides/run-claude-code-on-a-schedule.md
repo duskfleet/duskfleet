@@ -146,8 +146,10 @@ journalctl --user -u claude-nightly.service      # what it printed
 `Persistent=true` runs a missed tick once after boot. A `oneshot` service is never started twice
 at the same time by its timer (`man systemd.timer`).
 
-These two units have not been run on a Linux machine yet, only read. If `systemctl` refuses one,
-`systemd-analyze --user verify ~/.config/systemd/user/claude-nightly.*` says why.
+These two units are written from the systemd documentation and reviewed, not yet run on a Linux
+machine (the cron and launchd examples were run on macOS). If `systemctl` refuses one,
+`systemd-analyze --user verify ~/.config/systemd/user/claude-nightly.*` says why; a report of a
+real run, working or not, is welcome as an issue.
 
 ## What goes wrong unattended
 

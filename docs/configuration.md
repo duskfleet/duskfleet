@@ -136,7 +136,7 @@ for it). `max_concurrent_runs` always stays the hard cap. See
 |---|---|
 | `DUSKFLEET_CONFIG` | Directory containing `duskfleet.yaml` (default: the closest ancestor `config/` of the running package / cwd) |
 | `CLAUDE_BIN` | Path to the Claude Code binary (overrides `claude.binary`). Read by Duskfleet only: it is not passed on to agent runs. |
-| `DUSKFLEET_LOG_LEVEL` | `debug` \| `info` \| `warn` \| `error` |
+| `DUSKFLEET_LOG_LEVEL` | `debug` \| `info` \| `warn` \| `error`, on stderr. Default: `warn` for one-shot CLI commands (`--verbose` = `info`), `info` for `serve` and the MCP server. When set, it wins over both. |
 
 ### What reaches a run
 

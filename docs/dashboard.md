@@ -43,18 +43,26 @@ starting anything and asks for another `--port`.
 A Next.js app that reads the database the MCP server writes (SQLite WAL mode). It can run
 while the MCP server is running or not; it only needs `config/` and `data/duskfleet.db`. It
 has no authentication and answers on localhost only (see [Remote access](#remote-access)).
+It never writes runs; it edits agent files, schedules and the editable settings keys (the
+list closes this page).
 It sends no telemetry: the `dev` and `build` scripts set `NEXT_TELEMETRY_DISABLED=1` (on
 Windows, an [experimental platform](../README.md#platform-support), set it in your shell first), and `start` / `duskfleet-web` (`bin/start.mjs`) default it
-to `1` on every platform.
+to `1` on every platform. `bin/start.mjs` also drops the `- Network:` line of Next's start banner:
+the server answers on `127.0.0.1` only, so that address is not reachable from the network.
 
 Five views, plus the [trend](#trends) of the runs. The runs list and a running run's detail auto-refresh every 3 seconds (pause button
 in the nav); the other pages are static.
 
-- **Runs**: KPI cards (clean runs, needs review, spend) computed on the current project / agent
+- **Runs** (the home page, `/`; `/runs` redirects there and keeps its query string): KPI cards (clean runs, needs review, spend) computed on the current project / agent
   filter; a Project and an Agent multi-select on the search line (repeated params,
   `?project=a&project=b&agent=x`: any of the projects AND any of the agents; a single `?agent=`
   still works; each select's × drops its filter), prompt search (`?q=`), `?schedule=` and
   `?limit=` (load older).
+  **Running now** counts the real runs not ended yet, `running` or `pending` (being spawned),
+  and the Running list above Recent shows the same rows. The Agents page uses the same
+  definition for its running state, so both pages agree (the Agents tile counts agents, an agent
+  with two live runs once). A `pending` row whose process died before the spawn is failed as
+  orphaned by the next sweep (see [troubleshooting](troubleshooting.md#runs)), not shown forever.
   The KPI cards filter the list by how runs ended, `?outcome=` (real runs only, gate runs left
   out, by the stored review verdict):
   - `needs_review`: every run with a review reason (click the **Needs review** card; it also shows
@@ -92,13 +100,13 @@ in the nav); the other pages are static.
   command and the exact command executed. Home paths print as `~/…`; Copy buttons give the
   full value.
 - **Agents**: four tiles (agents, running now, needs review, auto-paused), Project / Status
-  filters, a search on id and description and a sort (last run, id, runs, clean, cost), then one
-  table per project ("Any project" first), one row per agent: status (running with a pending or
+  filters, a search on id and description and a sort (id by default, last run, runs, clean, cost),
+  then one table per project ("Any project" first, then projects by id), one row per agent: status (running with a pending or
   running run, else "paused · auto" when a bound schedule was auto-paused, else needs review from
   the stored review reasons of its last run, else idle; the tiles and the Status filter count the
   same status), id and kind, a one-line description, model, runs over 7 days with a per-day
-  sparkline, clean %, cost and last run, and links to its runs and schedule. Under about 720 px
-  the same row reflows into a four-line block, each number under its column label.
+  sparkline, clean %, cost and last run, and links to its runs and schedule. From tablet width
+  (1024 px) down the same row reflows into a four-line block, each number under its column label.
 - **Agent** (`/agents/<id>`): everything that configures one agent. Header with kind, builtin /
   override chip, status, project, model and file; 30-day tiles over UTC days (runs and cost with
   sparklines, clean %, needs review; gate runs left out of the counts, kept in the cost); the system prompt (own) or the link target with the project persona
@@ -106,22 +114,27 @@ in the nav); the other pages are static.
   past 8 entries expands in place) and limits, including daily caps and the monthly budget; the
   bound schedules; and the needs-review reasons over 30 days, each bar opening Runs filtered by
   agent and reason. User agents can be deleted or unlinked here, with an inline confirmation;
-  builtins are read-only. **Run now…** appears only when a schedule runs the agent and uses that
+  builtins are never edited here. **Run now…** appears only when a schedule runs the agent and uses that
   schedule's run now (see Schedules below): the dashboard never starts a run itself.
 - **Schedules**: a status strip (kill switch, lease holder and when its lease expires, next
   firing, last 7 days fired / skipped busy), then the schedules grouped by project (the
   schedule's own, else its agent's; "no project" last), one card each, titled by its agent (a link to the agent's card on Agents,
-  which links its runs): cron (raw and in plain words), the schedule name, project, model, the
+  which links its runs), with the card's actions in its header: run now, pause / resume, edit the
+  cron and time zone, delete (inline confirmation); the changes go through the same validation as
+  `update_schedule`. Under the header, at most one message, never truncated: the auto-pause reason
+  (its last run linked) or a monthly budget pause in an amber strip; "paused · nothing fires until
+  Resume" (by hand, or by a budget whose tick another schedule of the scope tripped), or what the
+  gate said on its run of consecutive skips, as a plain line; the error of a failed fire in red,
+  also on a paused card with that plain pause line in front. Then
+  cron (raw and in plain words), the schedule name, project, model, the
   [gate](schedules.md#gates-skip-cheaply-when-there-is-no-work) and on-failure policy in force, the
   prompt, the last 10 firings as squares coloured by how the run they started **ended** (clean,
   needs review from the stored review reasons, failed, running, cancelled, skipped busy, skipped by
-  the gate, run gone), and a footer with the next tick (theoretical one for paused schedules), the
-  fired / skipped counters, the [idle cost](schedules.md#idle-cost) over 7 days (no-op runs out of
-  all runs and the dollars they cost, amber when at least half were no-ops), what the gate skipped
-  and cost, and the last error. A "next: resume" badge says the next fire will resume the last run
-  (`on_failure: resume_once`). Each card can be run now, paused / resumed, have its cron and time
-  zone edited, or be deleted (inline confirmation); the changes go through the same validation as
-  `update_schedule`. **Run now** does not start Claude from the dashboard: it marks the row and the
+  the gate, run gone), and a footer of stats only: the next tick (theoretical one for paused
+  schedules), the fired / skipped counters, the [idle cost](schedules.md#idle-cost) over 7 days
+  (no-op runs out of all runs and the dollars they cost, amber when at least half were no-ops) and
+  what the gate skipped and cost. A "next: resume" badge says the next fire will resume the last
+  run (`on_failure: resume_once`). **Run now** does not start Claude from the dashboard: it marks the row and the
   process that holds the scheduler lease fires it on its next tick (within `tick_seconds`, paused
   or not, busy = skip), so it waits while no process ticks. A callout warns when only an MCP host
   ticks, with the `install-service` command. Creating a schedule and changing its agent, project,
@@ -210,14 +223,13 @@ With no finished run in the period, the page offers the 1-year view instead.
 
 ## Costs
 
-`/costs` (the **Spent** card of the Runs page, or the "Spend by model moved to Costs" line under
-the run list) shows where the money goes over time, on the agent / project filter the page was
+`/costs` (the **Spent** card of the Runs page) shows where the money goes over time, on the agent / project filter the page was
 opened with. `?range=` is the same period selector as `/trends`, same UTC buckets; `?by=agent`
 (default), `project` or `model` picks the split. Runs count by their start time, as budgets do.
 
 - **KPIs**: spend this UTC month (gates included) against the budget of the scope in view; the
   spend of the whole period with its average per bucket; the average cost of a real run this
-  month; the budget's warning threshold and whether it hard-stops.
+  month.
 - **Spend per day / week / month**: stacked bars of the real runs' `cost_usd`, one segment per
   agent, project or model. The top spender of the period is in the accent colour, every other
   segment in the faint one (hover a segment for its name and amount). Totals sit above the bars
@@ -286,5 +298,5 @@ had died out of budget, and nobody noticed for 11 hours.
 The dashboard never mutates runs or builtins: the Claude Code child processes belong to the
 MCP server process, so cancelling goes through `cancel_run` (Cowork) or the CLI. Its writes are
 the actions on user agent files (delete, unlink), on schedule rows (pause / resume, edit
-when, delete), all through the core API the MCP tools use, and the Settings page's edits of
+when, delete, run now), all through the core API the MCP tools use, and the Settings page's edits of
 `config/duskfleet.yaml` (core's `writeGlobalFile`).

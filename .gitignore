@@ -15,6 +15,8 @@ packages/duskfleet/LICENSE
 apps/web/LICENSE
 # copy of packages/mcp/dist/tools.json made by apps/web/scripts/copy-tools.mjs
 apps/web/tools.json
+# component tests compiled by tsc -p apps/web/tsconfig.test.json (npm test -w @duskfleet/web)
+apps/web/.test-build/
 .DS_Store
 
 # machine-specific MCP registration; copy from .mcp.json.example

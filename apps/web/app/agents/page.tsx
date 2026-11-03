@@ -31,7 +31,8 @@ const STATES: Array<{ value: AgentState; label: string }> = [
   { value: "review", label: "needs review" },
   { value: "paused", label: "paused · auto" },
 ];
-const SORTS = { last: "last run", id: "id", runs: "runs", clean: "clean", cost: "cost" } as const;
+// Sorted by id by default (owner decision 2026-11-02): the alphabetical order is the one a reader can predict
+const SORTS = { id: "id", last: "last run", runs: "runs", clean: "clean", cost: "cost" } as const;
 type Sort = keyof typeof SORTS;
 
 const many = (v: string | string[] | undefined): string[] =>
@@ -50,7 +51,8 @@ interface Row {
 export default async function AgentsPage({ searchParams }: { searchParams: Promise<Search> }) {
   const sp = await searchParams;
   const agents = listAgents();
-  const projects = listProjects();
+  // Registry order is the file order; the page shows projects alphabetically, like the agents
+  const projects = [...listProjects()].sort((a, b) => a.id.localeCompare(b.id));
   const stats = new Map(agentStats().map((s) => [s.agentId, s]));
   const weeks = agentWindows(7);
   const schedulesByAgent = new Map<string, string[]>();
@@ -85,16 +87,16 @@ export default async function AgentsPage({ searchParams }: { searchParams: Promi
   const statuses = many(sp.status).filter((v) => STATES.some((s) => s.value === v));
   const q = one(sp.q)?.trim() || undefined;
   const sortParam = one(sp.sort);
-  const sort: Sort = sortParam && Object.hasOwn(SORTS, sortParam) ? (sortParam as Sort) : "last";
+  const sort: Sort = sortParam && Object.hasOwn(SORTS, sortParam) ? (sortParam as Sort) : "id";
   const filtered = Boolean(projectIds.length || statuses.length || q);
 
   type Next = { project?: string[]; status?: string[]; q?: string | undefined; sort?: Sort };
   const qs = (next: Next) => {
     const p = new URLSearchParams();
-    const merged = { project: projectIds, status: statuses, q, sort: sort === "last" ? undefined : sort, ...next };
+    const merged = { project: projectIds, status: statuses, q, sort: sort === "id" ? undefined : sort, ...next };
     for (const k of ["project", "status", "q", "sort"] as const) {
       const v = merged[k];
-      for (const x of Array.isArray(v) ? v : [v]) if (x && !(k === "sort" && x === "last")) p.append(k, x);
+      for (const x of Array.isArray(v) ? v : [v]) if (x && !(k === "sort" && x === "id")) p.append(k, x);
     }
     const s = p.toString();
     return s ? `/agents?${s}` : "/agents";
@@ -121,7 +123,7 @@ export default async function AgentsPage({ searchParams }: { searchParams: Promi
   };
   shown.sort((a, b) => by[sort](a, b) || a.agent.id.localeCompare(b.agent.id));
 
-  // One group per project, the general-purpose one first; empty groups are left out.
+  // One group per project, the general-purpose one first, then projects by id; empty groups are left out.
   const groups = [
     { key: ANY, label: "Any project", id: null as string | null },
     ...projects.map((p) => ({ key: p.id, label: "Project", id: p.id as string | null })),
@@ -246,7 +248,7 @@ export default async function AgentsPage({ searchParams }: { searchParams: Promi
             {statuses.map((s) => (
               <input key={`s-${s}`} type="hidden" name="status" value={s} />
             ))}
-            {sort !== "last" && <input type="hidden" name="sort" value={sort} />}
+            {sort !== "id" && <input type="hidden" name="sort" value={sort} />}
             <input
               type="search"
               name="q"

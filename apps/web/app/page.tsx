@@ -3,8 +3,18 @@ import Link from "next/link";
 import { AutoRefresh } from "@/components/AutoRefresh";
 import { MultiSelect, type MultiSelectOption } from "@/components/MultiSelect";
 import { RunTable } from "@/components/RunTable";
-import { budgetAlerts, listAgents, listProjects, listRuns, listSchedules, overview, type RunsFilter } from "@/lib/data";
+import {
+  activeRuns,
+  budgetAlerts,
+  listAgents,
+  listProjects,
+  listRuns,
+  listSchedules,
+  overview,
+  type RunsFilter,
+} from "@/lib/data";
 import { fmtClock, fmtCost, fmtDayClock, fmtInt, fmtPct, fmtSplit } from "@/lib/format";
+import { isActiveRun } from "@/lib/running";
 
 export const dynamic = "force-dynamic";
 
@@ -104,8 +114,8 @@ export default async function RunsPage({ searchParams }: { searchParams: Promise
     href: qs({ agent: toggled(agentIds, a.id) }),
   }));
 
-  const running = listRuns({ ...filter, status: "running", limit: 50 });
-  const recent = listRuns({ ...filter, limit }).filter((r) => r.status !== "running");
+  const running = activeRuns({ ...filter, limit: 50 });
+  const recent = listRuns({ ...filter, limit }).filter((r) => !isActiveRun(r));
   // KPIs stay on the agent / project scope: the outcome tiles show the whole picture they filter.
   const o = overview({ agentIds: filter.agentIds, projectPaths: filter.projectPaths });
   const spend = costLabels(o.cost);
@@ -413,10 +423,6 @@ export default async function RunsPage({ searchParams }: { searchParams: Promise
           )}
         </div>
       )}
-
-      <p className="moved-line">
-        <Link href={costsHref}>Spend by model moved to Costs →</Link>
-      </p>
     </>
   );
 }
