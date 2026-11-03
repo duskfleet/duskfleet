@@ -12,7 +12,8 @@ export class ProjectValidationError extends Error {
  * Validates a project path before anything is executed against it.
  *
  * Rules:
- *  - must be absolute (after ~ expansion)
+ *  - must be absolute (after ~ expansion); the CLI resolves a relative `--project` against its
+ *    cwd before calling this, the MCP server and the scheduler pass what they were given
  *  - must exist and be a directory
  *  - symlinks are resolved; the real path is what gets used as cwd
  *  - must not be `/` or the user's home directory itself
@@ -24,7 +25,12 @@ export function validateProjectPath(input: string, config: DuskFleetConfig): str
   }
   const expanded = expandHome(input.trim());
   if (!path.isAbsolute(expanded)) {
-    throw new ProjectValidationError(`project path must be absolute: ${input}`);
+    // Only the CLI has a meaningful working directory and resolves relative paths before this point;
+    // the MCP server and the scheduler cannot, so say where an absolute path comes from.
+    throw new ProjectValidationError(
+      `project path must be absolute: ${input} (only the CLI resolves a relative path, from its shell directory; ` +
+        "pass the full path, as printed by pwd in the project folder, or a registered project id)",
+    );
   }
   if (!isDirectory(expanded)) {
     throw new ProjectValidationError(`project path is not an existing directory: ${expanded}`);

@@ -205,7 +205,8 @@ npm workspaces, one `config/` and one SQLite database shared by three deliverabl
   `~/.claude/settings.json`. Keep it unless the hook is removed.
 - Children run with `--strict-mcp-config`: they never see the caller's MCP servers,
   so Duskfleet cannot recurse into itself.
-- Project paths must be absolute (`~` is expanded). Prefer `project_id` from
+- Project paths must be absolute (`~` is expanded); only the CLI's `run --project` resolves a
+  relative one, from its cwd (`resolveCliProject`), before core sees it. Prefer `project_id` from
   `config/projects.yaml` in prompts and docs.
 - Scripts that import `@modelcontextprotocol/sdk` must live under `packages/mcp/` to
   resolve the module.
