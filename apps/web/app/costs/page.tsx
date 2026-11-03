@@ -62,8 +62,8 @@ export default async function CostsPage({ searchParams }: { searchParams: Promis
   const period = unitCount(s.starts.length, s.bucket);
 
   // ---- rows: one per agent, project path or model of the period ----
-  const runCounts = finishedRunsBy(by, s.starts[0] ?? now.toISOString().slice(0, 10));
-  const rows = costRows(s.series, runCounts);
+  const finishedBy = finishedRunsBy(by, s.starts[0] ?? now.toISOString().slice(0, 10));
+  const rows = costRows(s.series, finishedBy.runs, finishedBy.spent);
   const projectIds = new Map(projects.map((p) => [p.path.replace(/\/+$/, ""), p.id]));
   const projectId = (path: string) => projectIds.get(path.replace(/\/+$/, ""));
   const label = (key: string) =>
@@ -114,7 +114,8 @@ export default async function CostsPage({ searchParams }: { searchParams: Promis
   const monthWords = costLabels(month.cost);
   const periodUsd = s.total + s.gateTotal;
   const finished = rows.reduce((n, r) => n + r.runs, 0);
-  const avgRun = finished ? s.total / finished : null;
+  // Same runs on both sides: a running run's cost is in the bars but not in the average.
+  const avgRun = finished ? rows.reduce((n, r) => n + r.finishedSpent, 0) / finished : null;
 
   // ---- chart ----
   const stacks = costStacks(s.series, s.totals, ticked).map((x) => ({
@@ -269,8 +270,15 @@ export default async function CostsPage({ searchParams }: { searchParams: Promis
         </h2>
         {rows.length === 0 ? (
           <div className="trend-empty">
-            <strong>No spend in {RANGE_PHRASES[range]}</strong>
+            <strong>
+              {s.gateTotal > 0 ? "No run spend" : "No spend"} in {RANGE_PHRASES[range]}
+            </strong>
             <span>Costs appear here once runs report them.{range !== "1y" && " Try a longer period."}</span>
+            {s.gateTotal > 0 && (
+              <span title="Schedule gate agents decide whether a tick has work">
+                {fmtCost(s.gateTotal)} on gates, not in the bars
+              </span>
+            )}
             {range !== "1y" && (
               <Link href={costsHref({ range: "1y" })} className="btn">
                 Show 1 year

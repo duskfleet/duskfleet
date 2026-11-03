@@ -32,9 +32,17 @@ test("costRows ranks by spend, joins finished runs, keeps run-only keys", () => 
     rows.map((r) => r.key),
     ["a", "b", "c", "d"],
   );
-  assert.deepEqual(rows[0], { key: "a", spent: 4, runs: 8, share: 4 / 7, avg: 0.5 });
+  assert.deepEqual(rows[0], { key: "a", spent: 4, runs: 8, finishedSpent: 4, share: 4 / 7, avg: 0.5 });
   assert.equal(rows[1].avg, null);
-  assert.deepEqual(rows[3], { key: "d", spent: 0, runs: 2, share: 0, avg: 0 });
+  assert.deepEqual(rows[3], { key: "d", spent: 0, runs: 2, finishedSpent: 0, share: 0, avg: 0 });
+});
+
+test("costRows averages the finished runs' spend only, not a running run's cost", () => {
+  const rows = costRows(series, new Map([["a", 2]]), new Map([["a", 1]]));
+  assert.equal(rows[0].spent, 4);
+  assert.equal(rows[0].finishedSpent, 1);
+  assert.equal(rows[0].avg, 0.5);
+  assert.equal(rows[1].finishedSpent, 0);
 });
 
 test("resolveTicks: no param = the top 5 spenders, an empty param = none, unknown keys dropped", () => {

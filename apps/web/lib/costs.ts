@@ -41,17 +41,22 @@ export interface CostRow {
   runs: number;
   /** Share of the period total, 0..1 (0 when nothing was spent). */
   share: number;
-  /** spent / runs; null without a finished run. */
+  /** Spend of the finished real runs only: the numerator of `avg`. */
+  finishedSpent: number;
+  /** finishedSpent / runs; null without a finished run. */
   avg: number | null;
 }
 
 /**
  * Every key of the period, spent or merely run, ranked by spend (then runs, then key): the
- * split's spend series joined with its finished-run counts.
+ * split's spend series joined with its finished-run counts. `finishedSpent` is the spend of those
+ * finished runs, so the average covers the same runs as its count (a running run's cost stays
+ * out of it); without it the whole spend is used.
  */
 export function costRows(
   series: ReadonlyArray<{ key: string; total: number }>,
   runs: ReadonlyMap<string, number>,
+  finishedSpent?: ReadonlyMap<string, number>,
 ): CostRow[] {
   const spent = new Map(series.map((s) => [s.key, s.total]));
   const keys = new Set([...spent.keys(), ...[...runs].filter(([, n]) => n > 0).map(([k]) => k)]);
@@ -60,7 +65,15 @@ export function costRows(
     .map((key) => {
       const usd = spent.get(key) ?? 0;
       const n = runs.get(key) ?? 0;
-      return { key, spent: usd, runs: n, share: total > 0 ? usd / total : 0, avg: n > 0 ? usd / n : null };
+      const done = finishedSpent ? (finishedSpent.get(key) ?? 0) : usd;
+      return {
+        key,
+        spent: usd,
+        runs: n,
+        finishedSpent: done,
+        share: total > 0 ? usd / total : 0,
+        avg: n > 0 ? done / n : null,
+      };
     })
     .sort((a, b) => b.spent - a.spent || b.runs - a.runs || a.key.localeCompare(b.key));
 }

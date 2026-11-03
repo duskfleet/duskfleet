@@ -878,17 +878,24 @@ const COST_KEY_SQL: Record<CostSplitBy, string> = {
 
 /**
  * Finished real runs (gates excluded) per agent, project path or model since `from` (a bucket
- * start date, UTC), for the runs and avg/run columns of the /costs ranked table.
+ * start date, UTC), for the runs and avg/run columns of the /costs ranked table: their count and
+ * their spend, so an average never divides a running run's cost by the finished runs only.
  */
-export function finishedRunsBy(by: CostSplitBy, from: string): Map<string, number> {
+export function finishedRunsBy(
+  by: CostSplitBy,
+  from: string,
+): { runs: Map<string, number>; spent: Map<string, number> } {
   const rows = services()
     .db.prepare(
-      `SELECT ${COST_KEY_SQL[by]} AS k, COUNT(*) AS n FROM runs
+      `SELECT ${COST_KEY_SQL[by]} AS k, COUNT(*) AS n, COALESCE(SUM(cost_usd), 0) AS cost FROM runs
        WHERE kind = 'run' AND status IN ('completed','failed','timed_out','cancelled') AND created_at >= ?
        GROUP BY k`,
     )
-    .all(`${from}T00:00:00.000Z`) as Array<{ k: string | null; n: number }>;
-  return new Map(rows.map((r) => [r.k ?? "unknown", r.n]));
+    .all(`${from}T00:00:00.000Z`) as Array<{ k: string | null; n: number; cost: number }>;
+  return {
+    runs: new Map(rows.map((r) => [r.k ?? "unknown", r.n])),
+    spent: new Map(rows.map((r) => [r.k ?? "unknown", r.cost])),
+  };
 }
 
 /**
