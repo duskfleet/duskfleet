@@ -5,7 +5,9 @@
 # comment naming the reasons. A PR that is merely behind main is updated in place. It also
 # expires stale locks: a `flow: in-progress` / `flow: in-review` PR, or a `flow: in-progress`
 # issue without a PR, idle for more than two hours (the run that took it is gone) goes back to
-# the state it was taken from.
+# the state it was taken from. A Dependabot patch/minor PR in `flow: ready-to-merge` with the
+# reviewer's approve on its head is approved and put on auto-merge (--auto-merge); no other PR
+# ever merges without the owner.
 #
 # Token: the default GITHUB_TOKEN can comment and relabel, but a push it makes (the
 # update-branch merge) starts no workflow, so the updated PR would sit without a CI run, and a
@@ -13,7 +15,9 @@
 # Set the repository secret PR_GATE_TOKEN to a token of a user with write access (classic:
 # `repo`; fine-grained: "Contents: read and write", "Pull requests: read and write", "Issues:
 # read and write", "Metadata: read") and both work; without it the job still relabels but
-# never updates a branch.
+# never updates a branch and never merges. The Dependabot approval only counts toward the
+# ruleset's code-owner review when PR_GATE_TOKEN belongs to the code owner, and the reviewer
+# agent must post with the same account: the gate trusts no other account's verdict.
 name: PR gate (relabel conflicting and red PRs)
 run-name: PR gate after ${{ github.event_name == 'workflow_run' && 'checks' || github.event_name }}
 
@@ -56,7 +60,7 @@ jobs:
           GH_REPO: ${{ github.repository }}
         run: |
           if [ -n "$PR_GATE_TOKEN" ]; then
-            GH_TOKEN="$PR_GATE_TOKEN" node scripts/pr-gate.mjs --update-branch
+            GH_TOKEN="$PR_GATE_TOKEN" node scripts/pr-gate.mjs --update-branch --auto-merge
           else
             echo "::notice::PR_GATE_TOKEN secret is not set: relabelling only, no update-branch (see the header of this workflow)"
             GH_TOKEN="$GITHUB_TOKEN" node scripts/pr-gate.mjs
