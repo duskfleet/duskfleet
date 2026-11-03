@@ -1,16 +1,23 @@
 "use server";
 
 /**
- * Settings writes from the dashboard: the editable keys of config/duskfleet.yaml, through
+ * Settings writes from the dashboard: the editable keys of duskfleet.yaml (wherever the loader found it), through
  * core's writeGlobalFile (comments kept, the change rolled back when the loader refuses it).
  * Every process re-reads the file on its next run or tick, so nothing is restarted here.
  * The scheduler kill switch has its own action: no section save can change it.
  */
 import { writeFileSync } from "node:fs";
 import path from "node:path";
-import { EDITABLE_GLOBAL_KEYS, type EditableGlobalKey, type GlobalValue, writeGlobalFile } from "@duskfleet/core";
+import {
+  EDITABLE_GLOBAL_KEYS,
+  type EditableGlobalKey,
+  type GlobalValue,
+  globalConfigPath,
+  writeGlobalFile,
+} from "@duskfleet/core";
 import { revalidatePath } from "next/cache";
-import { config, services } from "@/lib/data";
+import { config, homeDir, services } from "@/lib/data";
+import { tildePath } from "@/lib/format";
 import { SETTINGS_MARKER } from "@/lib/settings";
 
 export interface SettingsResult {
@@ -29,7 +36,8 @@ function write(changes: Partial<Record<EditableGlobalKey, GlobalValue>>): Settin
     // Only the source line's "outside the dashboard" depends on it.
   }
   revalidatePath("/", "layout");
-  return { ok: true, message: "Saved to config/duskfleet.yaml.", savedAt: new Date().toISOString() };
+  const file = tildePath(globalConfigPath(services().configDir), homeDir());
+  return { ok: true, message: `Saved to ${file}.`, savedAt: new Date().toISOString() };
 }
 
 export async function saveSettingsAction(

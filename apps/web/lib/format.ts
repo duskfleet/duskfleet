@@ -1,5 +1,13 @@
 import type { CostBasis, CostSplit } from "@duskfleet/core";
 
+/**
+ * How the wrap-up reserve is sized (core's `budgetPlan`, docs/agents.md "Budget reserve and
+ * wrap-up pass"): shown wherever a wrap-up amount appears, since $0.25 next to a $0.50 budget
+ * reads like an error otherwise.
+ */
+export const WRAP_UP_RESERVE_RULE =
+  "Reserve for the wrap-up pass: 10 % of the budget, at least $0.50, never more than half (wrap_up_reserve_usd overrides it)";
+
 export function fmtDuration(ms: number | null | undefined): string {
   if (ms === null || ms === undefined) return "–";
   const s = Math.round(ms / 1000);

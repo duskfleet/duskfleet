@@ -19,7 +19,6 @@ import { spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { homedir, userInfo } from "node:os";
 import path from "node:path";
-import { type DataSource, dataDirFor, type LocationContext } from "@duskfleet/core";
 
 export type ServicePlatform = "darwin" | "linux" | "win32";
 
@@ -104,50 +103,9 @@ function xml(s: string): string {
   return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 }
 
-/**
- * Where the service runs and which config it reads. From a checkout (`repoRoot` found by
- * walking up from cli.js) the service runs in the repo and finds `config/` itself; the
- * resolved config is exported only when it is somewhere else. From an installed package
- * there is no repo root: the service runs in the config directory's parent and always gets
- * DUSKFLEET_CONFIG, or it would not find its config and restart in a loop.
- */
-export function serviceDirs(
-  repoRoot: string | null,
-  configDir: string,
-): { repoRoot: string; configDir: string | null } {
-  const resolved = path.resolve(configDir);
-  if (repoRoot) {
-    return { repoRoot, configDir: resolved === path.resolve(repoRoot, "config") ? null : resolved };
-  }
-  return { repoRoot: path.dirname(resolved), configDir: resolved };
-}
-
-/**
- * The data directory a service unit or an MCP host entry must carry as DUSKFLEET_DATA, or null
- * when the process it starts resolves the same directory by itself. A unit (launchd, systemd,
- * Task Scheduler) and a GUI host do not see this shell's DUSKFLEET_DATA or XDG_* variables:
- * from DUSKFLEET_DATA always, from the user-level default whenever the process, reading the same
- * `configDir` without XDG variables, would derive another directory (XDG_DATA_HOME set here, or
- * XDG_CONFIG_HOME: the exported config is then not its user-level config, so it would fall back to
- * ../data next to it). A data dir from duskfleet.yaml (data_dir or ../data) follows the config,
- * which is exported separately.
- */
-export function exportedDataDir(
-  dataDir: string,
-  dataSource: DataSource,
-  configDir: string,
-  ctx: LocationContext = {},
-): string | null {
-  const resolved = path.resolve(dataDir);
-  if (dataSource === "env") return resolved;
-  if (dataSource !== "user") return null;
-  const env = ctx.env ?? process.env;
-  // Simulate the unit: same config dir (data_dir is unset, or the source would be "config"), no
-  // XDG_* variables; Windows keeps its per-user APPDATA / LOCALAPPDATA.
-  const unitEnv: NodeJS.ProcessEnv = { APPDATA: env["APPDATA"], LOCALAPPDATA: env["LOCALAPPDATA"] };
-  const derived = path.resolve(dataDirFor(configDir, null, { ...ctx, env: unitEnv }).dataDir);
-  return derived === resolved ? null : resolved;
-}
+// Where the service runs, which config and data directory it must be told about: shared with
+// the MCP host entry (`mcp register`, the dashboard's /mcp page), so they live in core.
+export { exportedDataDir, serviceDirs } from "@duskfleet/core";
 
 /**
  * `npx duskfleet install-service` runs from npm's temporary cache (`.../_npx/<hash>/...`):
