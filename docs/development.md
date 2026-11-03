@@ -296,7 +296,15 @@ local run-data handling, and recommended configuration.
 - **Schema change**: append a migration in `packages/core/src/storage/db.ts`; never edit an existing one. Then pin its digest in `packages/mcp/test/migrations.test.js` (the failing test prints it).
 - **Run status changes**: only `RunManager`, through `assertTransition`.
 - **New dashboard view**: add a route under `apps/web/app/` and a query in `apps/web/lib/data.ts`.
-- **Evals**: implement the interfaces in `packages/core/src/evals/types.ts`; the run pipeline does not need to change.
+- **Evals**: implement the `Evaluator` interface in `packages/core/src/evals/types.ts`; the run pipeline does not need to change.
+  An evaluator returns `evals.details` in the schema of `packages/core/src/evals/score.ts` (version 1:
+  `checks`, `dimensions`, `cost`, `latency`) and `scoreEval` derives status and score, in this order:
+  hard checks first (any failed check = the run is invalid: `fail`, null score, rubric not scored), then
+  rubric dimensions scored 0-1 or 0-2 (score = mean of `score / scale`, in [0, 1]); pairwise
+  comparisons come later as a new schema version. Cost and latency of the evaluation are stored beside
+  the score, never blended into it. Evaluators write only to `evals` (`EvalRepository.record`, through
+  `runEvaluator`), never to `runs`; an LLM evaluator is a second run with its own `maxBudgetUsd`
+  (refused when missing or not positive).
 - **Claude CLI flags**: verify every flag against `claude --help` before using it. The ones the
   executor uses, checked against `claude --help` of Claude Code 2.1.285:
 
