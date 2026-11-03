@@ -51,7 +51,8 @@ const PACKAGES = [
 
 const FORBIDDEN = [
   { re: /(^|\/)test\//, why: "test files" },
-  { re: /\.test\.[cm]?[jt]s$/, why: "test files" },
+  { re: /\.test\.[cm]?[jt]sx?$/, why: "test files" },
+  { re: /(^|\/)\.test-build\//, why: "compiled component tests" },
   { re: /\.map$/, why: "source map" },
   { re: /(^|\/)data\//, why: "runtime data" },
   { re: /(^|\/)\.env/, why: "environment file" },

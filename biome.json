@@ -8,6 +8,7 @@
       "apps/web/app/**",
       "apps/web/lib/**",
       "apps/web/components/**",
+      "apps/web/test/**",
       "scripts/**",
       "*.json",
       "!!**/dist",

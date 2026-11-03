@@ -109,6 +109,48 @@ test("cli run --project resolves a relative path from the shell directory and re
   }
 });
 
+test("cli run: a failed run prints cause and fix first; stdout is trimmed unless --json", () => {
+  const { root, configDir, project } = makeRoot();
+  try {
+    // Logged out: fake-claude's "auth" prompt fails with "Invalid API key · Please run /login".
+    const auth = cli(configDir, ["run", "--project", project, "--", "auth"]);
+    assert.equal(auth.status, 1);
+    const lines = auth.stderr.split("\n");
+    const top = lines.slice(0, 5).join("\n");
+    assert.match(top, /^run \S+ failed/m, auth.stderr);
+    assert.match(top, /^cause: Claude is not logged in: .*Please run \/login/m);
+    assert.match(top, /^fix: Claude Code is not authenticated: run "claude" in a terminal and log in/m);
+    assert.match(auth.stderr, /^more: duskfleet run-info \S+/m);
+    const trimmed = JSON.parse(auth.stdout);
+    assert.equal(trimmed.errorCode, "auth_required", "scripts still get the record");
+    assert.equal(trimmed.status, "failed");
+    assert.equal("argv" in trimmed.command, false, "no spawned command line (system prompt) on stdout");
+    assert.equal("rawResultJson" in trimmed, false);
+    assert.equal(trimmed.command.cwd, project);
+
+    const full = JSON.parse(cli(configDir, ["run", "--project", project, "--json", "--", "auth"]).stdout);
+    assert.ok(Array.isArray(full.command.argv) && full.command.argv.includes("--append-system-prompt"));
+    assert.equal(typeof full.rawResultJson, "string", "--json prints the full record");
+
+    // A review reason without an error code gets the reason's fix.
+    const budget = cli(configDir, ["run", "--project", project, "--", "budget"]);
+    assert.equal(budget.status, 1);
+    assert.match(budget.stderr, /\(budget exhausted/);
+    assert.match(budget.stderr, /^fix: raise the agent's max_budget_usd/m);
+
+    // A clean run: no block, same trimmed shape.
+    const ok = cli(configDir, ["run", "--project", project, "--", "ok"]);
+    assert.equal(ok.status, 0, ok.stderr);
+    assert.doesNotMatch(ok.stderr, /^(cause|fix|more):/m);
+    const okRun = JSON.parse(ok.stdout);
+    assert.equal(okRun.status, "completed");
+    assert.equal("argv" in okRun.command, false);
+    assert.equal("rawResultJson" in okRun, false);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("doctor lists the stuck pending and running rows of a dead owner its startup sweep failed", () => {
   const { root, configDir, project } = makeRoot();
   try {
