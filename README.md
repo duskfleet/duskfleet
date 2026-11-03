@@ -1,9 +1,9 @@
 <div align="center">
 
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="docs/assets/logo-dark.svg">
-  <source media="(prefers-color-scheme: light)" srcset="docs/assets/logo-light.svg">
-  <img alt="Duskfleet" src="docs/assets/logo-light.svg" width="400">
+  <source media="(prefers-color-scheme: dark)" srcset="docs/assets/readme-hero-dark.png">
+  <source media="(prefers-color-scheme: light)" srcset="docs/assets/readme-hero-light.png">
+  <img alt="Duskfleet dashboard, Runs view: running agents, clean-run rate, runs that need review and spend" src="docs/assets/readme-hero-light.png" width="880">
 </picture>
 
 # Duskfleet
@@ -17,9 +17,10 @@ Website: [duskfleet.com](https://duskfleet.com/?utm_source=github&utm_medium=rea
 [![CI](https://github.com/duskfleet/duskfleet/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/duskfleet/duskfleet/actions/workflows/ci.yml)
 [![Node 24+](https://img.shields.io/badge/node-24%2B-339933?logo=node.js&logoColor=white)](https://nodejs.org/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-F0783A)](LICENSE)
-[![MCP tools: 15](https://img.shields.io/badge/MCP%20tools-15-E24B5A)](docs/mcp-server.md)
+[![MCP tools: 19](https://img.shields.io/badge/MCP%20tools-19-E24B5A)](docs/mcp-server.md)
 
 [Quick start](#quick-start) ·
+[From source](#from-source) ·
 [How it works](#how-it-works) ·
 [What you get](#what-you-get) ·
 [Status and roadmap](#status-and-roadmap) ·
@@ -59,33 +60,36 @@ vX.Y.Z`), and [Claude Code](https://docs.anthropic.com/en/docs/claude-code) inst
 
 This table is the one place that states platform support; other pages link here.
 
+Nothing to clone: the CLI comes from npm.
+
 ```bash
-git clone https://github.com/duskfleet/duskfleet.git
-cd duskfleet
-npm install
-npm run build
-npm run cli -- init --yes      # checks Node and the Claude Code login, prepares config and data
-npm run cli -- doctor          # Claude binary, version, where config and data live
+npx duskfleet init             # checks Node and the Claude Code login, creates the config and data directories
+npx duskfleet doctor           # Claude binary, version, where config and data live
 ```
 
-`init` without `--yes` asks before the optional steps (registering the MCP server in Claude Code
-or Claude Desktop); in a clone it finds the repo's `config/` and leaves it as it is. See
-[`init`](docs/cli.md#init).
+Install only from the [`duskfleet/duskfleet`](https://github.com/duskfleet/duskfleet) repository
+on GitHub or the [`duskfleet`](https://www.npmjs.com/package/duskfleet) package on npm. No other
+source is official.
+
+`init` creates the user-level config and data directories (`~/.config/duskfleet` and
+`~/.local/share/duskfleet` on Linux and macOS, [Configuration](docs/configuration.md)) and, on a
+terminal, offers to register the MCP server in Claude Code or Claude Desktop; `--yes` skips the
+questions. See [`init`](docs/cli.md#init).
 
 Duskfleet ships no starter agent: create your first one, on the cheapest model. `agents create`
-writes it to `data/agents/fixer.md` (git-ignored) with safe defaults: a $0.50 budget, no
+writes it to the data directory's `agents/fixer.md` with safe defaults: a $0.50 budget, no
 permission prompts (`dontAsk`), file tools plus the common test commands, 10 minutes.
 
 ```bash
-npm run cli -- agents create fixer --model haiku -- "You fix the failing test in this project. Run the tests, read the failure, change the minimum code, run them again. No git, no installs."
+npx duskfleet agents create fixer --model haiku -- "You fix the failing test in this project. Run the tests, read the failure, change the minimum code, run them again. No git, no installs."
 ```
 
 Then try it on a small throwaway project of your own (anything with a failing test will do):
 
 ```bash
-npm run cli -- run --project /abs/path/to/scratch-project --agent fixer -- "Fix the failing test"
-npm run cli -- runs
-npm run web                    # dashboard on http://localhost:4777
+npx duskfleet run --project /abs/path/to/scratch-project --agent fixer -- "Fix the failing test"
+npx duskfleet runs
+npx duskfleet dashboard        # installs the dashboard on first use, opens http://localhost:4777
 ```
 
 Before running agents unattended, review the [security boundaries](docs/security.md) and set
@@ -95,11 +99,31 @@ Before running agents unattended, review the [security boundaries](docs/security
 > Real runs cost money. An agent without an explicit `model` uses the Claude Code default; set
 > `haiku` or `sonnet` while experimenting.
 
-Then register the MCP server in Claude Desktop or Claude Code (the dashboard's **MCP** page
-prints the snippet with your paths) and ask the assistant to create agents, start runs and set
-up schedules: see [MCP server](docs/mcp-server.md). To keep schedules firing with Claude
-Desktop closed, register the scheduler as a per-user service once with
-`npm run cli -- install-service` ([Schedules](docs/schedules.md#who-ticks)).
+Then register the MCP server in Claude Code or Claude Desktop, if `init` did not:
+`npx duskfleet mcp register --target claude-code --dry-run` shows the change, the same command
+without `--dry-run` makes it (`--target claude-desktop` for the desktop app). Ask the assistant
+to create agents, start runs and set up schedules: see [MCP server](docs/mcp-server.md).
+
+To keep schedules firing with Claude Desktop closed, register the scheduler as a per-user
+service once. The service needs a global install, not npx's temporary cache:
+`npm i -g duskfleet`, then `duskfleet install-service`
+([Schedules](docs/schedules.md#who-ticks)).
+
+## From source
+
+For contributors, or to run an unreleased `main`:
+
+```bash
+git clone https://github.com/duskfleet/duskfleet.git
+cd duskfleet
+npm install
+npm run build
+npm run cli -- init --yes
+```
+
+In a clone every `npx duskfleet <command>` above is `npm run cli -- <command>`, and the dashboard
+is `npm run web`; `init` finds the repo's `config/` and leaves it as it is, and the data lands in
+the clone's `data/` (git-ignored). Setup, rules and checks: [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## How it works
 

@@ -423,10 +423,6 @@ export default async function RunsPage({ searchParams }: { searchParams: Promise
           )}
         </div>
       )}
-
-      <p className="moved-line">
-        <Link href={costsHref}>Spend by model moved to Costs →</Link>
-      </p>
     </>
   );
 }

@@ -220,14 +220,13 @@ With no finished run in the period, the page offers the 1-year view instead.
 
 ## Costs
 
-`/costs` (the **Spent** card of the Runs page, or the "Spend by model moved to Costs" line under
-the run list) shows where the money goes over time, on the agent / project filter the page was
+`/costs` (the **Spent** card of the Runs page) shows where the money goes over time, on the agent / project filter the page was
 opened with. `?range=` is the same period selector as `/trends`, same UTC buckets; `?by=agent`
 (default), `project` or `model` picks the split. Runs count by their start time, as budgets do.
 
 - **KPIs**: spend this UTC month (gates included) against the budget of the scope in view; the
   spend of the whole period with its average per bucket; the average cost of a real run this
-  month; the budget's warning threshold and whether it hard-stops.
+  month.
 - **Spend per day / week / month**: stacked bars of the real runs' `cost_usd`, one segment per
   agent, project or model. The top spender of the period is in the accent colour, every other
   segment in the faint one (hover a segment for its name and amount). Totals sit above the bars
