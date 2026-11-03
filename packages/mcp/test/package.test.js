@@ -11,6 +11,7 @@ import path from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 import { ConfigNotFoundError, loadConfig, resolveConfigDir } from "@duskfleet/core";
+import { COMMAND_HELP } from "../dist/cli-help.js";
 import { testEnv } from "./helpers.js";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -52,6 +53,62 @@ test("--help prints the usage on stdout with exit 0 and loads no config; no comm
   assert.match(none.stderr, /Usage:/);
   assert.match(none.stderr, /First time here\? Run: npx duskfleet init\n$/);
   assert.match(run(workspaceCli, ["--help"]).stdout, /First time here\? Run: npx duskfleet init\n$/);
+});
+
+test("every command answers --help / -h with its own usage and exit 0, without a config", () => {
+  const missing = path.join(tmpdir(), "duskfleet-no-such-config");
+  for (const command of Object.keys(COMMAND_HELP)) {
+    for (const flag of ["--help", "-h"]) {
+      const r = run(workspaceCli, [command, flag], { DUSKFLEET_CONFIG: missing });
+      assert.equal(r.status, 0, `${command} ${flag}: ${r.stderr}`);
+      assert.equal(r.stderr, "", `${command} ${flag}`);
+      assert.match(r.stdout, new RegExp(`^Usage:\\n  duskfleet ${command}`), `${command} ${flag}`);
+      assert.match(r.stdout, /\nExample:\n {2}duskfleet /);
+      assert.match(r.stdout, /\nDocs: https:\/\/github\.com\/duskfleet\/duskfleet\/blob\/main\/docs\/.+\.md/);
+    }
+  }
+  // A subcommand's --help is its command's; --help after -- is part of a prompt, not a flag.
+  const sub = run(workspaceCli, ["agents", "create", "--help"], { DUSKFLEET_CONFIG: missing });
+  assert.equal(sub.status, 0, sub.stderr);
+  assert.match(sub.stdout, /duskfleet agents create <id>/);
+  const prompt = run(workspaceCli, ["run", "--", "--help"], { DUSKFLEET_CONFIG: missing });
+  assert.equal(prompt.status, 2);
+  assert.match(prompt.stderr, /^error: run needs a project: --project <id or path>\n/);
+  // tools --help is the usage, not the JSON catalogue.
+  assert.doesNotMatch(run(workspaceCli, ["tools", "--help"]).stdout, /^[[{]/);
+});
+
+test("an unknown command is named with the command list, exit 2, before any config load", () => {
+  for (const env of [{ DUSKFLEET_CONFIG: path.join(tmpdir(), "duskfleet-no-such-config") }, {}]) {
+    const r = run(workspaceCli, ["bogus"], env);
+    assert.equal(r.status, 2, r.stderr);
+    assert.equal(r.stdout, "");
+    assert.match(r.stderr, /^unknown command: bogus\ncommands: init, agents, .*doctor\n/);
+    assert.doesNotMatch(r.stderr, /Config file not found/);
+  }
+});
+
+test("a missing required argument is named with that command's usage, exit 2, before any config load", () => {
+  const env = { DUSKFLEET_CONFIG: path.join(tmpdir(), "duskfleet-no-such-config") };
+  const cases = [
+    [["run", "--project", "demo"], /^error: run needs a prompt after --: /, "run"],
+    [["run", "--project", "demo", "--"], /^error: run needs a prompt after --: /, "run"],
+    [["run", "--", "hello"], /^error: run needs a project: /, "run"],
+    [["run-info"], /^error: run-info needs a run id\n/, "run-info"],
+    [["schedules", "run-now"], /^error: schedules run-now needs a schedule id or name\n/, "schedules"],
+    [["agents", "create"], /^error: agents create needs an agent id: /, "agents"],
+    [["agents", "nope"], /^error: unknown agents subcommand: nope\n/, "agents"],
+    [["budgets", "set", "global"], /^error: budgets set needs --amount <usd>\n/, "budgets"],
+    [["runs", "--status", "done"], /^error: unknown status "done": one of /, "runs"],
+    [["mcp", "nope"], /^error: unknown mcp subcommand: nope\n/, "mcp"],
+  ];
+  for (const [args, first, command] of cases) {
+    const r = run(workspaceCli, args, env);
+    assert.equal(r.status, 2, `${args.join(" ")}: ${r.stderr}`);
+    assert.match(r.stderr, first, args.join(" "));
+    assert.match(r.stderr, new RegExp(`\\n\\nUsage:\\n  duskfleet ${command}`), args.join(" "));
+    assert.doesNotMatch(r.stderr, /Config file not found/, args.join(" "));
+  }
 });
 
 test("a command that finds no config ends with the init hint; other errors do not", () => {
