@@ -46,6 +46,11 @@
 import { spawn } from "node:child_process";
 import { appendFileSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 
+// Leave through process.exit on SIGTERM (cancel, timeout, grace kill, MCP restart). Without a
+// handler the default action can land while Node writes its NODE_V8_COVERAGE file at exit and
+// leave it empty, which fails the whole `test:coverage` report ("coverage file is empty").
+process.on("SIGTERM", () => process.exit(143));
+
 const args = process.argv.slice(2);
 const sessionIdx = args.indexOf("--session-id");
 const resumeIdx = args.indexOf("--resume");

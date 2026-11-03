@@ -229,7 +229,8 @@ function parseAgentCreate(args: string[]): { id: string; fields: Record<string, 
  * resolved from the shell's directory. Only the CLI does this: the MCP server's and the scheduler's
  * cwd mean nothing to the caller, so core keeps requiring absolute paths there.
  */
-function resolveCliProject(value: string, registered: (id: string) => boolean, cwd = process.cwd()): string {
+function resolveCliProject(raw: string, registered: (id: string) => boolean, cwd = process.cwd()): string {
+  const value = raw.trim(); // as core does: " /abs/proj" is still absolute, not relative to cwd
   if (registered(value) || value.startsWith("~") || path.isAbsolute(value)) return value;
   const candidate = path.resolve(cwd, value);
   const relativePath = value === "." || value === ".." || /[\\/]/.test(value) || /^[A-Za-z]:/.test(value);
