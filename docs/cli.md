@@ -1,37 +1,45 @@
 # CLI
 
 The CLI uses the same orchestration code as the MCP server and is the quickest way to test.
-`npm run cli --` is shorthand for `node packages/mcp/dist/cli.js`.
+The commands below are written for the npm package: `npx duskfleet <command>`, or
+`duskfleet <command>` after a global install (`npm i -g duskfleet`). In a clone of this
+repository (after `npm run build`) the same command is `npm run cli -- <command>`, shorthand for
+`node packages/mcp/dist/cli.js <command>`.
 
 ```bash
-npm run cli -- init                                       # guided setup; see "init" below
-npm run cli -- init --yes [--mcp claude-code|claude-desktop]   # the same without prompts (scripts, CI)
-npm run cli -- doctor                                     # Claude binary, version, config and data paths
-npm run cli -- doctor --probe                             # plus one real hello run on haiku (costs cents)
-npm run cli -- run --project ~/Documents/Projects/my-app -- "Add a README section describing the build"
-npm run cli -- run --project my-app --agent my-reviewer --model sonnet -- "Review src/ for obvious bugs"   # registered id or path (--project-id is the explicit form)
-npm run cli -- run --no-wait --project /path -- "..."     # return immediately (see the note below)
-npm run cli -- runs --status completed --limit 10
-npm run cli -- run-info <run_id> --events   # includes subagents; --events adds the timeline
-npm run cli -- repair-subagents             # backfill subagent rows of finished runs from their logs
-npm run cli -- agents                                     # empty list + a hint to agents create on a fresh install
-npm run cli -- agents create fixer --model haiku -- "You fix the failing test in this project. ..."   # see below
-npm run cli -- projects
-npm run cli -- schedules
-npm run cli -- schedules run-now "pr review"              # schedule id or name; the lease holder fires it on its next tick
-npm run cli -- budgets                                    # monthly budgets with this month's spend and state
-npm run cli -- budgets set project my-app --amount 50 [--warn 80] [--no-hard-stop]   # or: global | agent <id>
-npm run cli -- budgets delete <budget id>
-npm run cli -- dashboard [--port 4777] [--no-open] [--no-install]   # install @duskfleet/web on demand, start it (see dashboard.md)
-npm run cli -- serve                                      # long-running scheduler process
-npm run cli -- install-service [--print]                  # register `serve` with launchd / systemd --user / Task Scheduler
-npm run cli -- uninstall-service
-npm run cli -- mcp register --target claude-desktop --dry-run   # or claude-code; preview, then --yes to apply (see mcp-server.md)
-npm run cli -- mcp status                                 # which Claude hosts have a duskfleet entry; no config needed
-npm run cli -- tools                                      # the MCP tool catalogue
-npm run cli -- --help                                     # the usage (also -h); no config needed
-npm run cli -- --version                                  # the package version (also -v); duskfleet-mcp --version too
+npx duskfleet init                                       # guided setup; see "init" below
+npx duskfleet init --yes [--mcp claude-code|claude-desktop]   # the same without prompts (scripts, CI)
+npx duskfleet doctor                                     # Claude binary, version, config and data paths
+npx duskfleet doctor --probe                             # plus one real hello run on haiku (costs cents)
+npx duskfleet run --project ~/Documents/Projects/my-app -- "Add a README section describing the build"
+npx duskfleet run --project my-app --agent my-reviewer --model sonnet -- "Review src/ for obvious bugs"   # registered id or path (--project-id is the explicit form)
+npx duskfleet run --no-wait --project /path -- "..."     # return immediately (see the note below)
+npx duskfleet runs --status completed --limit 10
+npx duskfleet run-info <run_id> --events   # includes subagents; --events adds the timeline
+npx duskfleet repair-subagents             # backfill subagent rows of finished runs from their logs
+npx duskfleet agents                                     # empty list + a hint to agents create on a fresh install
+npx duskfleet agents create fixer --model haiku -- "You fix the failing test in this project. ..."   # see below
+npx duskfleet projects
+npx duskfleet schedules
+npx duskfleet schedules run-now "pr review"              # schedule id or name; the lease holder fires it on its next tick
+npx duskfleet budgets                                    # monthly budgets with this month's spend and state
+npx duskfleet budgets set project my-app --amount 50 [--warn 80] [--no-hard-stop]   # or: global | agent <id>
+npx duskfleet budgets delete <budget id>
+npx duskfleet dashboard [--port 4777] [--no-open] [--no-install]   # install @duskfleet/web on demand, start it (see dashboard.md)
+npx duskfleet serve                                      # long-running scheduler process
+duskfleet install-service [--print]                      # global install only: register `serve` with launchd / systemd --user / Task Scheduler
+duskfleet uninstall-service
+npx duskfleet mcp register --target claude-desktop --dry-run   # or claude-code; preview, then --yes to apply (see mcp-server.md)
+npx duskfleet mcp status                                 # which Claude hosts have a duskfleet entry; no config needed
+npx duskfleet tools                                      # the MCP tool catalogue
+npx duskfleet --help                                     # the usage (also -h); no config needed
+npx duskfleet --version                                  # the package version (also -v); duskfleet-mcp --version too
 ```
+
+`install-service` refuses to run from npx's temporary cache (npm can evict it, and the service
+would point at a file that is gone): install the package globally first, `npm i -g duskfleet`,
+then `duskfleet install-service`. In a clone, `npm run cli -- install-service` registers the
+clone's build ([Schedules](schedules.md#who-ticks)).
 
 `duskfleet` with no arguments prints the usage on stderr and exits 2; `--help` prints it on
 stdout and exits 0. Both end with `First time here? Run: npx duskfleet init`, and so does the
@@ -71,10 +79,10 @@ Duskfleet ships no starter agent and `default_agent` is `null`, so a run needs `
 README Quick start creates one, then runs it:
 
 ```bash
-npm run cli -- init --yes
-npm run cli -- doctor
-npm run cli -- agents create fixer --model haiku -- "You fix the failing test in this project. Run the tests, read the failure, change the minimum code, run them again. No git, no installs."
-npm run cli -- run --project /abs/path/to/scratch-project --agent fixer -- "Fix the failing test"
+npx duskfleet init
+npx duskfleet doctor
+npx duskfleet agents create fixer --model haiku -- "You fix the failing test in this project. Run the tests, read the failure, change the minimum code, run them again. No git, no installs."
+npx duskfleet run --project /abs/path/to/scratch-project --agent fixer -- "Fix the failing test"
 ```
 
 A run with no agent, when none exists, fails with
@@ -108,7 +116,8 @@ prompt included) and `rawResultJson`; `run --json` prints the full record, the s
 ## agents create
 
 `agents create <id> [flags] -- "<system prompt>"` writes an **own** agent (the prompt is its
-persona) to `user_agents_dir` (`data/agents/<id>.md`), the same file and the same checks as the
+persona) to `user_agents_dir` (`agents/<id>.md` in the data directory; `data/agents/<id>.md` in a
+clone), the same file and the same checks as the
 MCP tool `create_agent`: the spec is validated before anything is written, home directory paths
 and secret-looking values are refused in every field, and the file is removed again if the
 config no longer loads. An existing id is refused unless `--force` is given. For a **link**

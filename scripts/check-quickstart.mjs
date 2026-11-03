@@ -3,8 +3,10 @@
  * Replays the README "Quick start" against the fake Claude (packages/mcp/test/fake-claude.js):
  * no network, no login, no cost. Run after `npm run build` (it uses packages/mcp/dist/cli.js).
  *
- * Every line of the section's ```bash blocks is either replayed (`npm run cli -- ...`, run as
- * `node packages/mcp/dist/cli.js ...`) or on the known skip list (clone, install, build, web).
+ * Every line of the section's ```bash blocks is either replayed (`npx duskfleet ...`, or the
+ * clone form `npm run cli -- ...`, run as `node packages/mcp/dist/cli.js ...`: the same entry the
+ * published `duskfleet` bin points to) or on the known skip list (clone, install, build, and the
+ * long-running dashboard). The "From source" section is a different level-2 section: not replayed.
  * Any other line fails the check, so a Quick start that grows a step this script does not know
  * gets noticed. The run goes against a temporary scratch project with one failing test, with
  * DUSKFLEET_CONFIG on a temporary copy of config/ (data_dir ../data lands in the temp dir too).
@@ -22,10 +24,25 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const cliEntry = path.join(root, "packages", "mcp", "dist", "cli.js");
 const fakeClaude = path.join(root, "packages", "mcp", "test", "fake-claude.js");
 const PROJECT_PLACEHOLDER = "/abs/path/to/scratch-project";
-const REQUIRED = ["doctor", "agents create", "run", "runs"];
+const REQUIRED = ["init", "doctor", "agents create", "run", "runs"];
 
 /** Lines that set up the checkout (CI already did) or start a long-running process. */
-const SKIP = [/^git clone /, /^cd duskfleet$/, /^npm install$/, /^npm ci\b/, /^npm run build$/, /^npm run web$/];
+const SKIP = [
+  /^git clone /,
+  /^cd duskfleet$/,
+  /^npm install$/,
+  /^npm ci\b/,
+  /^npm run build$/,
+  /^npm run web$/,
+  /^npx duskfleet dashboard\b/,
+];
+
+/** The CLI arguments of a replayable line (`npx duskfleet <args>` or `npm run cli -- <args>`), else null. */
+export function cliArgs(words) {
+  if (words[0] === "npx" && words[1] === "duskfleet") return words.slice(2);
+  if (words[0] === "npm" && words[1] === "run" && words[2] === "cli" && words[3] === "--") return words.slice(4);
+  return null;
+}
 
 function fail(message) {
   process.stderr.write(`check:quickstart: ${message}\n`);
@@ -126,10 +143,10 @@ function main() {
       // Split first, then substitute: splitWords reads a backslash as an escape, so a Windows
       // temp path substituted before splitting would be mangled.
       const words = splitWords(line).map((w) => w.replaceAll(PROJECT_PLACEHOLDER, project));
-      if (words[0] !== "npm" || words[1] !== "run" || words[2] !== "cli" || words[3] !== "--") {
+      const args = cliArgs(words);
+      if (!args) {
         fail(`unknown Quick start step (replay it or add it to SKIP in scripts/check-quickstart.mjs): ${line}`);
       }
-      const args = words.slice(4);
       const command = args[0] === "agents" ? `agents ${args[1]}` : args[0];
       process.stdout.write(`run   ${line}\n`);
       const result = spawnSync(process.execPath, [cliEntry, ...args], {
