@@ -14,6 +14,7 @@ npx duskfleet doctor --probe                             # plus one real hello r
 npx duskfleet run --project ~/Documents/Projects/my-app -- "Add a README section describing the build"
 npx duskfleet run --project my-app --agent my-reviewer --model sonnet -- "Review src/ for obvious bugs"   # registered id or path (--project-id is the explicit form)
 npx duskfleet run --no-wait --project /path -- "..."     # return immediately (see the note below)
+npx duskfleet run --project . --agent fixer -- "..."     # relative path: resolved from the shell's directory
 npx duskfleet runs --status completed --limit 10
 npx duskfleet run-info <run_id> --events   # includes subagents; --events adds the timeline
 npx duskfleet repair-subagents             # backfill subagent rows of finished runs from their logs
@@ -37,6 +38,12 @@ npx duskfleet run --help                                 # one command's usage, 
 npx duskfleet --version                                  # the package version (also -v); duskfleet-mcp --version too
 ```
 
+`run --project` takes a registered project id or a path. A relative path (`.`, `../app`,
+`./scratch`, or a bare name that is a directory where you are and not a registered id) is resolved
+from the shell's directory, and the run records the absolute path; `~` is expanded. Only the CLI
+does this: the MCP tools (`run_agent`'s `project_path`) and schedules have no meaningful working
+directory and keep requiring an absolute path or a registered id.
+
 `install-service` refuses to run from npx's temporary cache (npm can evict it, and the service
 would point at a file that is gone): install the package globally first, `npm i -g duskfleet`,
 then `duskfleet install-service`. In a clone, `npm run cli -- install-service` registers the
@@ -59,6 +66,13 @@ Only commands that need the config report a missing one (`init`, `tools`, `mcp s
 `DUSKFLEET_CONFIG`, a `config/` above the CLI, else the user-level directory; see
 [where config and data live](configuration.md#where-config-and-data-live)). `--version` prints the version of the installed
 `duskfleet` package and needs neither a config nor Node 24.
+
+Logs go to stderr, so stdout stays the command's JSON. A one-shot command logs warnings and
+errors only; `--verbose`, anywhere before a `--`, brings the info lines back (config loaded,
+executor ready, `storage: applied N migrations (M → N)` after an upgrade). `serve` and the MCP
+server keep info: their log is the record. `DUSKFLEET_LOG_LEVEL=debug|info|warn|error` overrides
+both defaults and `--verbose`
+([environment variables](configuration.md#environment-variables)).
 
 ## init
 

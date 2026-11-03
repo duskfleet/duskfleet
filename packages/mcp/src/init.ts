@@ -214,7 +214,7 @@ export async function runInit(options: InitOptions): Promise<number> {
       "Next:",
       "  duskfleet doctor",
       '  duskfleet agents create fixer --model haiku -- "You fix failing tests. Run the tests, fix the code, run them again."',
-      '  duskfleet run --project <absolute path> --agent fixer -- "Make the tests pass"',
+      '  duskfleet run --project <path> --agent fixer -- "Make the tests pass"',
     ].join("\n"),
   );
   if (claudeFix) {

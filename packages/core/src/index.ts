@@ -249,4 +249,4 @@ export {
   trendBuckets,
 } from "./storage/trends.js";
 
-export { type LogLevel, logger } from "./util/log.js";
+export { type LogLevel, logger, parseLogLevel, setDefaultLogLevel } from "./util/log.js";

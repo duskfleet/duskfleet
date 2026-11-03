@@ -1,4 +1,4 @@
-import { readFileSync } from "node:fs";
+import { readFileSync, statSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 /**
@@ -38,6 +38,7 @@ import {
   type DataSource,
   effectivePath,
   findRepoRoot,
+  type LogLevel,
   loadConfig,
   mcpServerConfig,
   parseHolder,
@@ -46,6 +47,7 @@ import {
   type RunStatus,
   resolveConfigDir,
   runCostLabel,
+  setDefaultLogLevel,
   subagentView,
   summarizeRun,
 } from "@duskfleet/core";
@@ -116,6 +118,9 @@ function usage(asked = false): never {
       "  duskfleet doctor [--probe]",
       "  duskfleet --help",
       "  duskfleet --version",
+      "",
+      "Any command takes --verbose: info logs on stderr (default: warnings and errors only,",
+      "except serve). DUSKFLEET_LOG_LEVEL=debug|info|warn|error overrides both.",
       "",
       INIT_HINT,
       "",
@@ -216,6 +221,25 @@ function parseAgentCreate(args: string[]): { id: string; fields: Record<string, 
   if (values.model) fields["model"] = values.model;
   if (values["disallowed-tools"] !== undefined) fields["disallowed_tools"] = csv(values["disallowed-tools"]);
   return { id, fields, force: values.force };
+}
+
+/**
+ * `run --project`: a registered id stays an id, an absolute or `~` path is passed as is, and a
+ * relative path (`.`, `..`, anything with a separator, or a bare name that is a directory here) is
+ * resolved from the shell's directory. Only the CLI does this: the MCP server's and the scheduler's
+ * cwd mean nothing to the caller, so core keeps requiring absolute paths there.
+ */
+function resolveCliProject(raw: string, registered: (id: string) => boolean, cwd = process.cwd()): string {
+  const value = raw.trim(); // as core does: " /abs/proj" is still absolute, not relative to cwd
+  if (registered(value) || value.startsWith("~") || path.isAbsolute(value)) return value;
+  const candidate = path.resolve(cwd, value);
+  const relativePath = value === "." || value === ".." || /[\\/]/.test(value) || /^[A-Za-z]:/.test(value);
+  if (relativePath) return candidate;
+  try {
+    return statSync(candidate).isDirectory() ? candidate : value;
+  } catch {
+    return value; // not a directory here: core reads it as a project id ("unknown project ...")
+  }
 }
 
 /** What the service runs: this node, this dist/cli.js, this repo (or config), the resolved claude binary. */
@@ -320,8 +344,31 @@ async function mcpRegister(
   return 0;
 }
 
+/**
+ * The arguments without `--verbose`, and whether it was there. Taken out wherever it stands
+ * before a `--` (after it, everything is the prompt), so every command accepts it.
+ */
+function takeVerbose(args: string[]): { args: string[]; verbose: boolean } {
+  const end = args.indexOf("--");
+  const head = end === -1 ? args : args.slice(0, end);
+  const tail = end === -1 ? [] : args.slice(end);
+  const kept = head.filter((a) => a !== "--verbose");
+  return { args: [...kept, ...tail], verbose: kept.length !== head.length };
+}
+
+/**
+ * Log level of a CLI invocation when DUSKFLEET_LOG_LEVEL is not set (the variable always wins):
+ * `serve` keeps `info`, its log is the record; a one-shot command shows warnings and errors only,
+ * `--verbose` brings `info` back.
+ */
+function cliLogLevel(command: string | undefined, verbose: boolean): LogLevel {
+  return command === "serve" || verbose ? "info" : "warn";
+}
+
 async function main(): Promise<void> {
-  const [command, ...rest] = process.argv.slice(2);
+  const { args, verbose } = takeVerbose(process.argv.slice(2));
+  const [command, ...rest] = args;
+  setDefaultLogLevel(cliLogLevel(command, verbose));
   if (!command) usage();
   // Before bootstrap: help must work without a config (a fresh `npx duskfleet --help`).
   if (command === "--help" || command === "-h" || command === "help") usage(true);
@@ -470,7 +517,7 @@ async function main(): Promise<void> {
         const agent = createAgentFromFields("own", fields, config, () => app.runs.reloadConfig());
         const { systemPrompt: _p, ...shown } = agent;
         process.stderr.write(
-          `agent "${id}" written to ${agent.sourcePath}\nnext: duskfleet run --project <id or absolute path> --agent ${id} -- "<task>"\n`,
+          `agent "${id}" written to ${agent.sourcePath}\nnext: duskfleet run --project <id or path> --agent ${id} -- "<task>"\n`,
         );
         print({ created: true, overrode: existing?.source ?? null, agent: shown });
         return done();
@@ -607,8 +654,9 @@ async function main(): Promise<void> {
 
       const app = await open();
       const input: Parameters<typeof app.runs.startRun>[0] = { prompt };
-      // --project takes a registered id or an absolute path (core decides which); --project-id is the explicit form.
-      if (values.project) input.projectPath = values.project;
+      // --project takes a registered id or a path, relative ones resolved from the shell directory
+      // (core decides id vs path); --project-id is the explicit form.
+      if (values.project) input.projectPath = resolveCliProject(values.project, (id) => app.config.projects.has(id));
       if (values["project-id"]) input.projectId = values["project-id"];
       if (values.agent) input.agentId = values.agent;
       if (values.model) input.model = values.model;
