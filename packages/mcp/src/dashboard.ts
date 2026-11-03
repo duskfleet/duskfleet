@@ -297,6 +297,8 @@ export interface StartDashboardOptions {
   entry: string;
   port: number;
   configDir: string;
+  /** dist/index.js of the duskfleet install running this CLI, passed as DUSKFLEET_MCP_ENTRY. */
+  mcpEntry?: string;
   open: boolean;
   log: (line: string) => void;
 }
@@ -315,6 +317,7 @@ export async function startDashboard(options: StartDashboardOptions): Promise<nu
     env: {
       ...process.env,
       DUSKFLEET_CONFIG: configDir,
+      ...(options.mcpEntry ? { DUSKFLEET_MCP_ENTRY: options.mcpEntry } : {}),
       PORT: String(port),
       NEXT_TELEMETRY_DISABLED: "1",
     },

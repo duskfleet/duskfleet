@@ -63,6 +63,21 @@ export {
   userDataDir,
 } from "./config/locations.js";
 export {
+  claudeCodeAddArgs,
+  desktopConfigPath,
+  desktopSnippet,
+  exportedDataDir,
+  inNpxCache,
+  type McpServerConfigInput,
+  type McpServerEntry,
+  mcpServerConfig,
+  SERVER_NAME,
+  type ServerEntryInput,
+  serverEntry,
+  serviceDirs,
+  shellLine,
+} from "./config/mcp-entry.js";
+export {
   PROJECT_ID_PATTERN,
   projectIdFromPath,
   readUserProjects,
