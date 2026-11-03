@@ -85,6 +85,7 @@ export {
   upsertUserProject,
 } from "./config/project-files.js";
 export * from "./config/types.js";
+export * from "./evals/score.js";
 export * from "./evals/types.js";
 export {
   childEnv,
