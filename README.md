@@ -1,9 +1,9 @@
 <div align="center">
 
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="docs/assets/readme-hero-dark.png">
-  <source media="(prefers-color-scheme: light)" srcset="docs/assets/readme-hero-light.png">
-  <img alt="Duskfleet dashboard, Runs view: running agents, clean-run rate, runs that need review and spend" src="docs/assets/readme-hero-light.png" width="880">
+  <source media="(prefers-color-scheme: dark)" srcset="docs/assets/logo-dark.svg">
+  <source media="(prefers-color-scheme: light)" srcset="docs/assets/logo-light.svg">
+  <img alt="Duskfleet" src="docs/assets/logo-light.svg" width="400">
 </picture>
 
 # Duskfleet
@@ -42,6 +42,12 @@ project on your disk and keeps a record of what happened.
   local SQLite database, plus a JSONL log per run.
 - **Cron schedules and a dashboard**: schedules fire from a local process, and a dashboard on
   localhost shows runs, schedules and agents.
+
+<div align="center">
+
+<img alt="Duskfleet dashboard, Runs view: running agents, clean-run rate, runs that need review and spend" src="docs/assets/readme-hero-dark.png" width="880">
+
+</div>
 
 ## Quick start
 
