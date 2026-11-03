@@ -50,13 +50,18 @@ error of any command that finds no config (no `duskfleet.yaml` in the directory 
 
 ## init
 
-`init` prepares a first configuration. Each step prints its result; the first failure stops
-with the fix and exit 1:
+`init` prepares a first configuration. Each step prints its result; a config that cannot be
+written or loaded stops with the fix and exit 1:
 
 1. **Node**: the version (Node 24+ is checked before any command runs).
 2. **Claude Code**: the binary (same lookup as runs: `CLAUDE_BIN`, `claude.binary`, `PATH`,
    `~/.local/bin/claude`), its version, and the login from `claude auth status --json`. Not
-   logged in: it prints `claude auth login` and stops.
+   installed, not starting or not logged in does **not** stop `init`: the problem is printed
+   here, the config is written anyway, the fix is repeated after the summary (`Claude Code is not
+   logged in: run claude auth login, then check it with: duskfleet doctor --probe`) and the exit
+   code is 0. Before the login, `doctor`, `agents`, `projects`, `runs`, `schedules`, `budgets`,
+   `agents create` and the dashboard work; `run`, `serve` and scheduled runs fail with
+   `auth_required` and the same fix (`errorCode`, [what a run records](#what-a-run-records)).
 3. **Config and data**: creates the user-level config directory with a starter `duskfleet.yaml`
    and the data directory ([where config and data live](configuration.md#where-config-and-data-live)).
    A config that already exists (user-level, a checkout's `config/`, or `DUSKFLEET_CONFIG`) is
@@ -69,8 +74,9 @@ with the fix and exit 1:
    created: Duskfleet ships none.
 
 `init --yes` asks nothing: steps 1-3 and the summary, step 4 only with `--mcp claude-code` or
-`--mcp claude-desktop`; without `--mcp` it never writes a Claude config file. Any failed check
-exits non-zero. On something that is not a terminal (a script) without `--yes`, step 4 is
+`--mcp claude-desktop`; without `--mcp` it never writes a Claude config file. It too succeeds
+without a Claude login, so a script can prepare a machine before anyone logs in; a config that
+cannot be written or loaded, or a failed `--mcp` registration, exits non-zero. On something that is not a terminal (a script) without `--yes`, step 4 is
 skipped.
 
 ## First run
