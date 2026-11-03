@@ -9,7 +9,7 @@ import { fileURLToPath } from "node:url";
  *   duskfleet agents
  *   duskfleet agents create <id> [--model <m>] [--budget <usd>] [...] [--force] -- "<system prompt>"
  *   duskfleet projects
- *   duskfleet run --project <id or path> [--agent <id>] [--model <m>] [--no-wait] -- "<prompt>"
+ *   duskfleet run --project <id or path> [--agent <id>] [--model <m>] [--no-wait] [--json] -- "<prompt>"
  *   duskfleet runs [--status <s>] [--limit <n>]
  *   duskfleet run-info <run_id> [--events]
  *   duskfleet repair-subagents # backfill subagent rows of finished runs from their logs
@@ -66,6 +66,7 @@ import {
   serverEntry,
 } from "./mcp-register.js";
 import { PROBE_COST_NOTE, type ProbeReport, probeNotRun, runProbe } from "./probe.js";
+import { runReportLines, trimmedRun } from "./run-report.js";
 import {
   exportedDataDir,
   installService,
@@ -98,7 +99,7 @@ function usage(asked = false): never {
       "                          [--allowed-tools <a,b>] [--disallowed-tools <a,b>] [--timeout <minutes>]",
       '                          [--description <text>] [--force] (-- "<system prompt>" | --prompt-file <file>)',
       "  duskfleet projects",
-      '  duskfleet run --project <id or path> [--agent <id>] [--model <m>] [--no-wait] -- "<prompt>"',
+      '  duskfleet run --project <id or path> [--agent <id>] [--model <m>] [--no-wait] [--json] -- "<prompt>"',
       "  duskfleet runs [--status <status>] [--limit <n>]",
       "  duskfleet run-info <run_id> [--events]",
       "  duskfleet repair-subagents",
@@ -622,6 +623,7 @@ async function main(): Promise<void> {
           agent: { type: "string", short: "a" },
           model: { type: "string", short: "m" },
           "no-wait": { type: "boolean", default: false },
+          json: { type: "boolean", default: false },
         },
       });
       const prompt = positionals.join(" ").trim();
@@ -643,7 +645,10 @@ async function main(): Promise<void> {
       if (!values["no-wait"]) {
         run = await app.runs.waitForRun(run.id, 24 * 60 * 60 * 1000);
       }
-      print(run);
+      // A run that did not end clean: cause and fix first, on stderr, before the record.
+      const report = runReportLines(run);
+      if (report) process.stderr.write(`${report.join("\n")}\n`);
+      print(values.json ? run : trimmedRun(run));
       return done(run.status === "completed" || run.status === "running" ? 0 : 1);
     }
     case "runs": {
