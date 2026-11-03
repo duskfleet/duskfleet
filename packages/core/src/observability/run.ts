@@ -5,7 +5,14 @@
 
 import type { DeniedTool, RunMcpInfo, SubagentRecord, UsageByModel } from "../execution/types.js";
 import { runCostLabel } from "./billing.js";
-import type { FailureCode, FailureDetail, FailureFamily } from "./failure.js";
+import {
+  CLAUDE_NOT_FOUND_FIX,
+  type FailureCode,
+  type FailureDetail,
+  type FailureFamily,
+  failureFix,
+  isClaudeNotFound,
+} from "./failure.js";
 
 export const RUN_STATUSES = ["pending", "running", "completed", "failed", "cancelled", "timed_out"] as const;
 export type RunStatus = (typeof RUN_STATUSES)[number];
@@ -247,6 +254,41 @@ export const REVIEW_REASON_LABELS: Record<ReviewReason, string> = {
   mcp_missing: "allow-listed MCP server not mounted",
   empty_run: "no work done",
 };
+
+/** What a human does about each review reason, in one line (the second half of the hint table, see `FAILURE_FIXES`). */
+export const REVIEW_REASON_FIXES: Record<ReviewReason, string> = {
+  budget_exhausted: "raise the agent's max_budget_usd or narrow the task",
+  timed_out: "raise the agent's timeout_minutes or narrow the task",
+  orphaned: "the process supervising the run is gone (restart, crash): run it again",
+  nonzero_exit: "Claude Code exited with an error: read the error and the run log",
+  failed: "read the error and the run log",
+  permission_denied:
+    "unattended runs get no permission prompts: add the denied tools to the agent's allowed_tools (or disallow them)",
+  context_exhausted: "the context window filled up: split the task or narrow the prompt",
+  mcp_missing: "an allow-listed MCP server was not mounted: check the mcp__ names in allowed_tools, then run again",
+  empty_run: "the run made no tool call: check the prompt and the agent's allowed_tools",
+};
+
+/**
+ * The one fix line for a run that ended badly, or null when there is nothing to fix: the failure
+ * code's fix first (most specific), then a binary that was not found, then the first review
+ * reason's. A permission denial names the denied tools.
+ */
+export function runFixHint(
+  run: Pick<Run, "status" | "errorCode" | "errorDetail" | "error" | "reviewReasons" | "deniedTools">,
+): string | null {
+  if (run.errorCode) return failureFix(run.errorCode, run.errorDetail);
+  if (run.status === "failed" && isClaudeNotFound(run.error)) return CLAUDE_NOT_FOUND_FIX;
+  const reason = run.reviewReasons[0];
+  if (!reason) return null;
+  // nonzero_exit / failed alone say little; a denial or a budget stop listed after them is the actionable one.
+  const actionable = run.reviewReasons.find((r) => r !== "nonzero_exit" && r !== "failed") ?? reason;
+  if (actionable === "permission_denied" && run.deniedTools.length > 0) {
+    const names = [...new Set(run.deniedTools.map((d) => d.tool))].join(", ");
+    return `${REVIEW_REASON_FIXES.permission_denied}; denied: ${names}`;
+  }
+  return REVIEW_REASON_FIXES[actionable];
+}
 
 /** The run stopped because `--max-budget-usd` was reached (`terminal_reason: budget_exhausted`, `subtype: error_max_budget_usd`; verified 2026-10-14 on CLI 2.1.299). */
 export function isBudgetExhausted(terminationReason: string | null | undefined): boolean {

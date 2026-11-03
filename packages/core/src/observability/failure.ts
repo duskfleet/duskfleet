@@ -45,6 +45,37 @@ export const FAILURE_LABELS: Record<FailureCode, string> = {
   refusal: "the model refused",
 };
 
+/**
+ * What a human does about each code, in one line: the hint table `duskfleet run` prints under a
+ * failed run and `doctor --probe` gives as advice. One place, so they cannot drift apart.
+ */
+export const FAILURE_FIXES: Record<FailureCode, string> = {
+  auth_required: 'Claude Code is not authenticated: run "claude" in a terminal and log in (or check ANTHROPIC_API_KEY)',
+  model_not_found: "check the model name (--model, or the agent's model:) against `claude --help`",
+  max_turns_exhausted: "the run used all its turns: split the task or narrow the prompt",
+  provider_quota: "the account's usage limit is reached: run again after it resets",
+  transient_upstream: "the API was overloaded or unavailable: run again later",
+  refusal: "the model refused: read the result before relying on it",
+};
+
+/** A run whose `claude` binary could not be spawned (no failure code: the process never started). */
+export const CLAUDE_NOT_FOUND_FIX =
+  "Claude Code was not found: install it (https://docs.claude.com/en/docs/claude-code), or set claude.binary in duskfleet.yaml or CLAUDE_BIN";
+
+/** True when the run's error says the binary could not be spawned because it does not exist. */
+export function isClaudeNotFound(error: string | null | undefined): boolean {
+  // Node's spawn error ("spawn /path/to/claude ENOENT"), alone or behind "spawn failed: ".
+  return typeof error === "string" && /\bspawn\b[^\n]*\bENOENT\b/.test(error);
+}
+
+/** The fix line of one code, with what its detail adds (login URL, reset time). */
+export function failureFix(code: FailureCode, detail: FailureDetail | null = null): string {
+  const fix = FAILURE_FIXES[code];
+  if (code === "auth_required" && detail?.loginUrl) return `${fix}, or open ${detail.loginUrl}`;
+  if (code === "provider_quota" && detail?.retryNotBefore) return `${fix} (${detail.retryNotBefore})`;
+  return fix;
+}
+
 /** Extra facts some codes carry. Stored as `error_detail_json`. */
 export interface FailureDetail {
   /** auth_required: the login URL the error message gave, when it gave one. */

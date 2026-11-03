@@ -12,7 +12,7 @@ import { randomUUID } from "node:crypto";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import type { ClaudeConfig, Executor } from "@duskfleet/core";
+import { type ClaudeConfig, type Executor, FAILURE_FIXES } from "@duskfleet/core";
 
 export const PROBE_MODEL = "haiku";
 export const PROBE_PROMPT = "Reply with the single word: pong";
@@ -145,7 +145,7 @@ export function probeAdvice(
   }
   if (outcome === "failed") {
     if (error && AUTH_PATTERN.test(error)) {
-      return 'Claude Code is not authenticated: run "claude" interactively and log in (or check ANTHROPIC_API_KEY), then probe again';
+      return `${FAILURE_FIXES.auth_required}, then probe again`;
     }
     return "the probe run failed (see probe.error); scheduled runs would likely fail the same way";
   }
