@@ -9,6 +9,8 @@
  *   3. Config and data: the user-level directories with the starter duskfleet.yaml
  *      (`initUserConfig`); an existing config is reported and left untouched.
  *   4. MCP registration, optional: asked on a terminal; under --yes only with --mcp <target>.
+ *      Then, on a terminal only and never under --yes, the optional guided first run
+ *      (`first-run.ts`: a read-only `first-run` agent on haiku, cost stated before asking).
  *   5. What was created, where, and the next commands.
  *
  * Duskfleet ships no agent (owner decision 2026-10-26): the next commands start with
@@ -36,6 +38,11 @@ export interface InitOptions {
   entryFileUrl: string;
   /** Step 4, run once the config exists; returns the exit code of `mcp register`. */
   registerMcp(target: McpTarget): Promise<number>;
+  /**
+   * The optional guided first run after step 4 (`first-run.ts`, the same code as `run --first`):
+   * asks before spending anything; returns its exit code. Only on a terminal, never under --yes.
+   */
+  firstRun(): Promise<number>;
 }
 
 export interface LoginStatus {
@@ -146,6 +153,11 @@ async function checkClaude(location: ConfigLocation): Promise<string | null> {
   return null;
 }
 
+/** The guided first run spends money: offered on a terminal only, never under --yes. */
+export function offersFirstRun(yes: boolean, isTTY: boolean): boolean {
+  return !yes && isTTY;
+}
+
 /**
  * Runs the setup; returns the exit code (0, or 1 when the config cannot be written or loaded).
  * A missing or logged-out Claude Code is not a failure: the hint is printed and the exit is 0.
@@ -204,6 +216,19 @@ export async function runInit(options: InitOptions): Promise<number> {
     }
   } else if (options.yes || process.stdin.isTTY) {
     out("[4/5] MCP registration: skipped (later: duskfleet mcp register --target claude-code|claude-desktop)");
+  }
+
+  // Guided first run (optional, interactive only): asks first, says what it costs. A refused
+  // path or a failed run is reported by the step itself and does not undo the setup above.
+  // Not offered when step 2 found no usable Claude Code: the run would only fail (#349).
+  if (offersFirstRun(options.yes, process.stdin.isTTY === true) && claudeFix) {
+    out("Guided first run: skipped until Claude Code is logged in (then: duskfleet run --first)");
+  } else if (offersFirstRun(options.yes, process.stdin.isTTY === true)) {
+    try {
+      await options.firstRun();
+    } catch (err) {
+      fail(`First run: ${err instanceof Error ? err.message : String(err)} (try again: duskfleet run --first)`);
+    }
   }
 
   // 5. Summary and next commands

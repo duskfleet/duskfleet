@@ -15,6 +15,7 @@ npx duskfleet run --project ~/Documents/Projects/my-app -- "Add a README section
 npx duskfleet run --project my-app --agent my-reviewer --model sonnet -- "Review src/ for obvious bugs"   # registered id or path (--project-id is the explicit form)
 npx duskfleet run --no-wait --project /path -- "..."     # return immediately (see the note below)
 npx duskfleet run --project . --agent fixer -- "..."     # relative path: resolved from the shell's directory
+npx duskfleet run --first [--project /path]              # the guided first run of init again (haiku, costs cents)
 npx duskfleet runs --status completed --limit 10
 npx duskfleet run-info <run_id> --events   # includes subagents; --events adds the timeline
 npx duskfleet repair-subagents             # backfill subagent rows of finished runs from their logs
@@ -96,14 +97,59 @@ written or loaded stops with the fix and exit 1:
 4. **MCP registration** (optional): on a terminal it asks `Register the MCP server in Claude Code
    / Claude Desktop / skip?` and then does what `mcp register --target ... --yes` does (preview,
    backup of an existing file, write; see [MCP server](mcp-server.md)).
-5. What was created, where, and the next commands: `doctor`, `agents create`, `run`. No agent is
-   created: Duskfleet ships none.
+   Then, on a terminal only, it offers the [guided first run](#guided-first-run) (a real run
+   on haiku that costs cents; the answer defaults to no).
+5. What was created, where, and the next commands: `doctor`, `agents create`, `run`. Duskfleet
+   ships no agent; the only one `init` can create is `first-run`, and only when you accept the
+   guided first run.
 
 `init --yes` asks nothing: steps 1-3 and the summary, step 4 only with `--mcp claude-code` or
 `--mcp claude-desktop`; without `--mcp` it never writes a Claude config file. It too succeeds
 without a Claude login, so a script can prepare a machine before anyone logs in; a config that
 cannot be written or loaded, or a failed `--mcp` registration, exits non-zero. On something that is not a terminal (a script) without `--yes`, step 4 is
 skipped.
+
+## Guided first run
+
+The last, optional step of an interactive `init` (never under `--yes`, and skipped with one line
+when step 2 found Claude Code missing or logged out), and `run --first` to repeat it at any time
+(same code). **It costs real money**: one run on haiku, usually a few cents, stated before you
+answer:
+
+```text
+Try a first run on a project of yours? It creates a read-only "first-run" agent, runs it with haiku and costs cents. [y/N]
+```
+
+On `y` it asks for the absolute path of a project directory (`run --first --project <path>`
+skips that question), then:
+
+1. Checks the path like every run does: absolute, an existing directory, not `/` or your home,
+   and inside `allowed_project_roots` when that list is set
+   ([configuration](configuration.md)). A path outside it is refused with the file to edit;
+   nothing is created.
+2. Registers the directory in the private project registry (`data/projects.yaml`), unless it
+   is already a project (also when registered through a symlink).
+3. Creates the agent `first-run` through the same path as `agents create` (own, `model: haiku`,
+   `permission_mode: dontAsk`, `allowed_tools: [Read, Grep, Glob]`, `disallowed_tools: [Edit,
+   Write, NotebookEdit]`, budget $0.25, 5 minutes; system prompt "You describe projects. You
+   never change files."). When `first-run` already exists it is used only if it keeps the
+   step's promise: `permission_mode: dontAsk`, Edit, Write and NotebookEdit disallowed, no
+   write, Bash or MCP tool allowed, `inherit_mcp` off, a budget of at most $0.25, and no binding
+   to another project. Otherwise the step stops before registering anything and names what
+   to change.
+4. Runs it with `--model haiku` and the prompt `Describe this project in three sentences. Do not
+   change any file.`, waits, and prints the status, the duration, the tokens, the cost (or API
+   value on a subscription), what the agent said, and `duskfleet run-info <run id>` /
+   `duskfleet dashboard` to see more. A run that needs review gets one line saying why, with a
+   link to [the dashboard page](dashboard.md). When the run is refused before it starts (agent
+   or project busy, a daily cap, a spent monthly budget), the step prints the reason, runs
+   nothing and goes on to step 5.
+5. When step 3 created the agent, asks `Keep the first-run agent? [Y/n]`. `n` deletes
+   `data/agents/first-run.md` (the same rule as `delete_agent`: user files only); the run keeps
+   its agent id either way. An agent that existed before is never offered for deletion.
+
+`run --first` exits 0 when the run completed, 1 when the path or the run was refused or the run did not
+complete. It takes no `--agent`, `--model` or prompt: those are fixed.
 
 ## First run
 

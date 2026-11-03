@@ -10,6 +10,7 @@ import { fileURLToPath } from "node:url";
  *   duskfleet agents create <id> [--model <m>] [--budget <usd>] [...] [--force] -- "<system prompt>"
  *   duskfleet projects
  *   duskfleet run --project <id or path> [--agent <id>] [--model <m>] [--no-wait] [--json] -- "<prompt>"
+ *   duskfleet run --first [--project <absolute path>]   # the guided first run of init (first-run.ts)
  *   duskfleet runs [--status <s>] [--limit <n>]
  *   duskfleet run-info <run_id> [--events]
  *   duskfleet repair-subagents # backfill subagent rows of finished runs from their logs
@@ -54,6 +55,7 @@ import {
 import { bootstrap } from "./bootstrap.js";
 import { commandHelp, isCommand, unknownCommandText, wantsHelp } from "./cli-help.js";
 import { assertPortFree, ensureWeb, findWeb, parsePort, startDashboard } from "./dashboard.js";
+import { runFirstRun, stdinPrompter } from "./first-run.js";
 import { runInit } from "./init.js";
 import {
   applyDesktop,
@@ -100,6 +102,7 @@ function usage(asked = false): never {
       '                          [--description <text>] [--force] (-- "<system prompt>" | --prompt-file <file>)',
       "  duskfleet projects",
       '  duskfleet run --project <id or path> [--agent <id>] [--model <m>] [--no-wait] [--json] -- "<prompt>"',
+      "  duskfleet run --first [--project <absolute path>]",
       "  duskfleet runs [--status <status>] [--limit <n>]",
       "  duskfleet run-info <run_id> [--events]",
       "  duskfleet repair-subagents",
@@ -434,6 +437,16 @@ async function main(): Promise<void> {
           app.close();
         }
       },
+      firstRun: async () => {
+        const app = await bootstrap(import.meta.url, { role: "cli" });
+        const prompter = stdinPrompter();
+        try {
+          return await runFirstRun(app, { askToStart: true }, prompter);
+        } finally {
+          prompter.close();
+          app.close();
+        }
+      },
     });
     process.exit(code);
   }
@@ -644,8 +657,22 @@ async function main(): Promise<void> {
           model: { type: "string", short: "m" },
           "no-wait": { type: "boolean", default: false },
           json: { type: "boolean", default: false },
+          first: { type: "boolean", default: false },
         },
       });
+      if (values.first) {
+        // The guided first run of init, again: fixed agent, model and prompt (first-run.ts).
+        if (positionals.length || values.agent || values.model || values["project-id"] || values["no-wait"]) {
+          throw new Error("run --first takes only --project <absolute path>; agent, model and prompt are fixed");
+        }
+        const app = await open();
+        const prompter = stdinPrompter();
+        try {
+          return done(await runFirstRun(app, { askToStart: false, projectPath: values.project }, prompter));
+        } finally {
+          prompter.close();
+        }
+      }
       const prompt = positionals.join(" ").trim();
       if (!prompt) commandUsage("run", 'run needs a prompt after --: run --project <id or path> -- "<prompt>"');
       if (!values.project && !values["project-id"]) {
