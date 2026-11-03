@@ -45,11 +45,21 @@
  */
 import { spawn } from "node:child_process";
 import { appendFileSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import v8 from "node:v8";
 
-// Leave through process.exit on SIGTERM (cancel, timeout, grace kill, MCP restart). Without a
-// handler the default action can land while Node writes its NODE_V8_COVERAGE file at exit and
-// leave it empty, which fails the whole `test:coverage` report ("coverage file is empty").
-process.on("SIGTERM", () => process.exit(143));
+// SIGTERM (cancel, timeout, grace kill, MCP restart) without a handler can land while Node writes
+// its NODE_V8_COVERAGE file at exit and leave it empty, which fails the whole `test:coverage`
+// report ("coverage file is empty"). With a handler a SIGTERM during that write waits for it; one
+// that arrives earlier writes the coverage now, then dies of the signal as a real claude does
+// (exit code null, never a 143 that would read as nonzero_exit).
+process.on("SIGTERM", () => {
+  if (process.env.NODE_V8_COVERAGE) {
+    v8.takeCoverage();
+    v8.stopCoverage();
+  }
+  process.removeAllListeners("SIGTERM");
+  process.kill(process.pid, "SIGTERM");
+});
 
 const args = process.argv.slice(2);
 const sessionIdx = args.indexOf("--session-id");
