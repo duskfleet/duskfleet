@@ -8,6 +8,9 @@ Commands are written for the npm package (`npx duskfleet <command>`, or `duskfle
 after `npm i -g duskfleet`); in a clone of this repository the same command is
 `npm run cli -- <command>`.
 
+For `claude -p` scheduled by hand (cron, launchd, systemd) rather than through Duskfleet, see
+the guide [Run Claude Code on a schedule on your own machine](guides/run-claude-code-on-a-schedule.md).
+
 ## Install and doctor
 
 - **`Duskfleet needs Node 24 or newer; you have vX.Y.Z`** (exit code 1, from the CLI and the MCP
