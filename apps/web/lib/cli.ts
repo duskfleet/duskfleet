@@ -14,8 +14,11 @@ export type InstallForm = "checkout" | "global" | "npx";
 
 export interface Install {
   form: InstallForm;
-  /** Version of the running duskfleet package, pinned in the npx form. */
-  version: string;
+  /**
+   * Version of the running duskfleet package, pinned in the npx form; null when no package.json
+   * could be read (the commands are then unpinned, never `duskfleet@unknown`).
+   */
+  version: string | null;
   /** Absolute dist/index.js of the MCP server of this install; null when it cannot be found. */
   mcpEntry: string | null;
 }
@@ -52,7 +55,7 @@ export function detectInstall(facts: InstallFacts): Install {
     const entry = path.join(root, "packages", "mcp", "dist", "index.js");
     return {
       form: "checkout",
-      version: facts.readVersion(path.join(root, "packages", "mcp", "package.json")) ?? "unknown",
+      version: facts.readVersion(path.join(root, "packages", "mcp", "package.json")),
       mcpEntry: facts.exists(entry) ? entry : null,
     };
   }
@@ -62,7 +65,7 @@ export function detectInstall(facts: InstallFacts): Install {
   const version =
     (entry && facts.readVersion(path.resolve(entry, "..", "..", "package.json"))) ||
     (facts.webDir && facts.readVersion(path.join(facts.webDir, "package.json"))) ||
-    "unknown";
+    null;
   return { form: entry && inNpxCache(entry) ? "npx" : "global", version, mcpEntry: entry };
 }
 
@@ -71,11 +74,27 @@ function inNpxCache(file: string): boolean {
   return path.resolve(file).split(/[\\/]/).includes("_npx");
 }
 
+/** `duskfleet@<version>`, or plain `duskfleet` (latest) when the version is unknown. */
+function packageSpec(version: string | null): string {
+  return version ? `duskfleet@${version}` : "duskfleet";
+}
+
 /** The prefix that runs the CLI for this install. */
 export function cliPrefix(install: Pick<Install, "form" | "version">): string {
   if (install.form === "checkout") return "npm run cli --";
-  if (install.form === "npx") return `npx -y duskfleet@${install.version}`;
+  if (install.form === "npx") return `npx -y ${packageSpec(install.version)}`;
   return "duskfleet";
+}
+
+/**
+ * The MCP entry to show for this install, or null when none can be written: no entry found, or
+ * the npx form without a version (its host entry pins `duskfleet@<version>`; the page then shows
+ * `mcp register`, which knows its own version).
+ */
+export function usableMcpEntry(install: Install): string | null {
+  if (!install.mcpEntry) return null;
+  if (install.form === "npx" && !install.version) return null;
+  return install.mcpEntry;
 }
 
 /** A CLI command for this install: `cliCommand(install, "schedules")` -> `duskfleet schedules`. */
@@ -88,6 +107,6 @@ export function cliCommand(install: Pick<Install, "form" | "version">, args: str
  * evicts), so that form installs the package globally first.
  */
 export function installServiceCommand(install: Pick<Install, "form" | "version">): string {
-  if (install.form === "npx") return `npm install -g duskfleet@${install.version} && duskfleet install-service`;
+  if (install.form === "npx") return `npm install -g ${packageSpec(install.version)} && duskfleet install-service`;
   return cliCommand(install, "install-service");
 }

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import path from "node:path";
 import { test } from "node:test";
-import { cliCommand, cliPrefix, detectInstall, installServiceCommand } from "../lib/cli.ts";
+import { cliCommand, cliPrefix, detectInstall, installServiceCommand, usableMcpEntry } from "../lib/cli.ts";
 
 const REPO = path.resolve("/work/duskfleet");
 const GLOBAL_ENTRY = path.resolve("/usr/local/lib/node_modules/duskfleet/dist/index.js");
@@ -93,7 +93,23 @@ test("detectInstall: no entry anywhere leaves mcpEntry null, never a placeholder
   const install = detectInstall(facts({}));
   assert.equal(install.form, "global");
   assert.equal(install.mcpEntry, null);
-  assert.equal(install.version, "unknown");
+  assert.equal(install.version, null);
+});
+
+test("an unknown version leaves the commands unpinned, never duskfleet@unknown", () => {
+  assert.equal(cliCommand({ form: "npx", version: null }, "schedules"), "npx -y duskfleet schedules");
+  assert.equal(
+    installServiceCommand({ form: "npx", version: null }),
+    "npm install -g duskfleet && duskfleet install-service",
+  );
+  assert.equal(cliCommand({ form: "global", version: null }, "schedules"), "duskfleet schedules");
+});
+
+test("usableMcpEntry: the npx form without a version has no entry to show (mcp register fallback)", () => {
+  assert.equal(usableMcpEntry({ form: "npx", version: null, mcpEntry: NPX_ENTRY }), null);
+  assert.equal(usableMcpEntry({ form: "npx", version: "0.1.0", mcpEntry: NPX_ENTRY }), NPX_ENTRY);
+  assert.equal(usableMcpEntry({ form: "global", version: null, mcpEntry: GLOBAL_ENTRY }), GLOBAL_ENTRY);
+  assert.equal(usableMcpEntry({ form: "global", version: "0.1.0", mcpEntry: null }), null);
 });
 
 test("cliCommand renders the command of each install form", () => {

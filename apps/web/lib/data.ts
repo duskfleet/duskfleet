@@ -55,7 +55,7 @@ import {
   utcDayStart,
   utcMonthStart,
 } from "@duskfleet/core";
-import { cliCommand, detectInstall, type Install } from "./cli";
+import { cliCommand, detectInstall, type Install, usableMcpEntry } from "./cli";
 import { ACTIVE_SQL, ACTIVE_STATUSES } from "./running";
 import { listScoped, scopeList } from "./scope";
 import { mergeSeries } from "./trends";
@@ -1069,13 +1069,15 @@ export function mcpSetup() {
   } catch {
     claudeBin = null;
   }
-  const entry = inst.mcpEntry
+  const serverEntry = usableMcpEntry(inst);
+  const entry = serverEntry
     ? mcpServerConfig({
         nodeBin: process.execPath,
-        serverEntry: inst.mcpEntry,
+        serverEntry,
         claudeBin,
         config: cfg,
-        version: inst.version,
+        // Pinned only in the npx form, where usableMcpEntry guarantees a version.
+        version: inst.version ?? "",
       }).entry
     : null;
   return {
