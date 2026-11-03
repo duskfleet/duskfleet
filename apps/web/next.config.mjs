@@ -9,6 +9,11 @@ const nextConfig = {
   // @duskfleet/web tarball cannot require it at runtime). Its node: builtins (node:sqlite,
   // child_process) stay external: webpack leaves them to the Node.js server runtime.
   env: { DUSKFLEET_VERSION: version ?? "" },
+  // The run list is the home page; /runs (a natural guess, every other list has its own path)
+  // lands there. Next.js keeps the query string, so /runs?agent=x opens /?agent=x.
+  async redirects() {
+    return [{ source: "/runs", destination: "/", permanent: false }];
+  },
 };
 
 export default nextConfig;
