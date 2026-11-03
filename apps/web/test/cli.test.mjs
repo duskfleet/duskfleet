@@ -5,7 +5,7 @@ import { cliCommand, cliPrefix, detectInstall, installServiceCommand } from "../
 
 const REPO = path.resolve("/work/duskfleet");
 const GLOBAL_ENTRY = path.resolve("/usr/local/lib/node_modules/duskfleet/dist/index.js");
-const NPX_ENTRY = path.resolve("/home/u/.npm/_npx/abc123/node_modules/duskfleet/dist/index.js");
+const NPX_ENTRY = path.resolve("/var/cache/npm/_npx/abc123/node_modules/duskfleet/dist/index.js");
 
 /** Facts for detectInstall over an in-memory file list: path -> package.json version (or true). */
 function facts(files, overrides = {}) {
@@ -51,7 +51,7 @@ test("detectInstall: the CLI's entry inside a checkout wins over the working dir
 });
 
 test("detectInstall: a config/ root without the MCP sources is not a checkout", () => {
-  const userDir = path.resolve("/home/u/project");
+  const userDir = path.resolve("/srv/project");
   const install = detectInstall(
     facts(
       {
