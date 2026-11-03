@@ -35,14 +35,15 @@ function makeRoot() {
   return { root, configDir, project: realpathSync(project) };
 }
 
-function cli(configDir, args, extraEnv = {}) {
+function cli(configDir, args, extraEnv = {}, cwd = undefined) {
   return spawnSync(process.execPath, [cliEntry, ...args], {
     env: testEnv({ DUSKFLEET_CONFIG: configDir, DUSKFLEET_LOG_LEVEL: "warn", ...extraEnv }),
     encoding: "utf8",
+    cwd,
   });
 }
 
-test("cli run --project accepts a registered id or a path; unknown ids, relative paths and both flags fail clearly", () => {
+test("cli run --project accepts a registered id or a path; unknown ids and both flags fail clearly", () => {
   const { root, configDir, project } = makeRoot();
   try {
     const byId = cli(configDir, ["run", "--project", "demo", "--", "hello"]);
@@ -63,13 +64,46 @@ test("cli run --project accepts a registered id or a path; unknown ids, relative
       "a value that is not path-like is an id",
     );
 
-    const relative = cli(configDir, ["run", "--project", "./project", "--", "hello"]);
-    assert.notEqual(relative.status, 0);
-    assert.match(relative.stderr, /project path must be absolute: \.\/project/);
-
     const both = cli(configDir, ["run", "--project", "demo", "--project-id", "demo", "--", "hello"]);
     assert.notEqual(both.status, 0);
     assert.match(both.stderr, /mutually exclusive/);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("cli run --project resolves a relative path from the shell directory and records the absolute path (#353)", () => {
+  const { root, configDir } = makeRoot();
+  try {
+    const scratch = path.join(root, "scratch");
+    mkdirSync(scratch);
+    const real = realpathSync(scratch);
+
+    const dot = cli(configDir, ["run", "--project", ".", "--", "hello"], {}, scratch);
+    assert.equal(dot.status, 0, dot.stderr);
+    const run = JSON.parse(dot.stdout);
+    assert.equal(run.projectPath, real, "`.` is the shell directory, stored absolute");
+    assert.equal(run.projectId, null);
+
+    const dotSlash = cli(configDir, ["run", "--project", "./scratch", "--", "hello"], {}, root);
+    assert.equal(dotSlash.status, 0, dotSlash.stderr);
+    assert.equal(JSON.parse(dotSlash.stdout).projectPath, real);
+
+    const bare = cli(configDir, ["run", "--project", "scratch", "--", "hello"], {}, root);
+    assert.equal(bare.status, 0, bare.stderr);
+    assert.equal(JSON.parse(bare.stdout).projectPath, real, "a bare name that is a directory here is a path");
+
+    const registered = cli(configDir, ["run", "--project", "../project", "--", "hello"], {}, scratch);
+    assert.equal(registered.status, 0, registered.stderr);
+    assert.equal(
+      JSON.parse(registered.stdout).projectId,
+      "demo",
+      "a relative path to a registered project gets its id",
+    );
+
+    const missing = cli(configDir, ["run", "--project", "./nowhere", "--", "hello"], {}, root);
+    assert.notEqual(missing.status, 0);
+    assert.match(missing.stderr, /not an existing directory: .*nowhere/);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

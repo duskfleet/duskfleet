@@ -1,4 +1,4 @@
-import { readFileSync } from "node:fs";
+import { readFileSync, statSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 /**
@@ -208,6 +208,24 @@ function parseAgentCreate(args: string[]): { id: string; fields: Record<string, 
   if (values.model) fields["model"] = values.model;
   if (values["disallowed-tools"] !== undefined) fields["disallowed_tools"] = csv(values["disallowed-tools"]);
   return { id, fields, force: values.force };
+}
+
+/**
+ * `run --project`: a registered id stays an id, an absolute or `~` path is passed as is, and a
+ * relative path (`.`, `..`, anything with a separator, or a bare name that is a directory here) is
+ * resolved from the shell's directory. Only the CLI does this: the MCP server's and the scheduler's
+ * cwd mean nothing to the caller, so core keeps requiring absolute paths there.
+ */
+function resolveCliProject(value: string, registered: (id: string) => boolean, cwd = process.cwd()): string {
+  if (registered(value) || value.startsWith("~") || path.isAbsolute(value)) return value;
+  const candidate = path.resolve(cwd, value);
+  const relativePath = value === "." || value === ".." || /[\\/]/.test(value) || /^[A-Za-z]:/.test(value);
+  if (relativePath) return candidate;
+  try {
+    return statSync(candidate).isDirectory() ? candidate : value;
+  } catch {
+    return value; // not a directory here: core reads it as a project id ("unknown project ...")
+  }
 }
 
 /** What the service runs: this node, this dist/cli.js, this repo (or config), the resolved claude binary. */
@@ -440,7 +458,7 @@ async function main(): Promise<void> {
         const agent = createAgentFromFields("own", fields, config, () => app.runs.reloadConfig());
         const { systemPrompt: _p, ...shown } = agent;
         process.stderr.write(
-          `agent "${id}" written to ${agent.sourcePath}\nnext: duskfleet run --project <id or absolute path> --agent ${id} -- "<task>"\n`,
+          `agent "${id}" written to ${agent.sourcePath}\nnext: duskfleet run --project <id or path> --agent ${id} -- "<task>"\n`,
         );
         print({ created: true, overrode: existing?.source ?? null, agent: shown });
         return done();
@@ -569,8 +587,9 @@ async function main(): Promise<void> {
       if (!prompt || (!values.project && !values["project-id"])) usage();
 
       const input: Parameters<typeof app.runs.startRun>[0] = { prompt };
-      // --project takes a registered id or an absolute path (core decides which); --project-id is the explicit form.
-      if (values.project) input.projectPath = values.project;
+      // --project takes a registered id or a path, relative ones resolved from the shell directory
+      // (core decides id vs path); --project-id is the explicit form.
+      if (values.project) input.projectPath = resolveCliProject(values.project, (id) => app.config.projects.has(id));
       if (values["project-id"]) input.projectId = values["project-id"];
       if (values.agent) input.agentId = values.agent;
       if (values.model) input.model = values.model;
