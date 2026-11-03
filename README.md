@@ -10,6 +10,8 @@
 
 ### Run, record and schedule unattended Claude Code agents on your local projects.
 
+*Your agents sail at dusk.*
+
 **A fleet of agents for your own machine.**
 
 Website: [duskfleet.com](https://duskfleet.com/?utm_source=github&utm_medium=readme&utm_campaign=always-on&utm_content=hero)
@@ -21,13 +23,16 @@ Website: [duskfleet.com](https://duskfleet.com/?utm_source=github&utm_medium=rea
 
 [Quick start](#quick-start) ·
 [From source](#from-source) ·
+[Before / after](#before--after) ·
 [How it works](#how-it-works) ·
 [What you get](#what-you-get) ·
+[Commands](#commands) ·
+[FAQ](#faq) ·
 [Status and roadmap](#status-and-roadmap) ·
 [Documentation](#documentation) ·
 [Contributing](#contributing) ·
-[Star history](#star-history) ·
 [License](#license) ·
+[Star history](#star-history) ·
 [Website](https://duskfleet.com/?utm_source=github&utm_medium=readme&utm_campaign=always-on&utm_content=readme)
 
 </div>
@@ -134,6 +139,17 @@ In a clone every `npx duskfleet <command>` above is `npm run cli -- <command>`, 
 is `npm run web`; `init` finds the repo's `config/` and leaves it as it is, and the data lands in
 the clone's `data/` (git-ignored). Setup, rules and checks: [CONTRIBUTING.md](CONTRIBUTING.md).
 
+## Before / after
+
+**Before**: `claude -p` started by hand or from a crontab, the output in a terminal, and no
+record of what happened overnight.
+
+**After**: agents are Markdown files ([Agents](docs/agents.md)); cron schedules skip a tick when
+the agent is busy, never queue and never catch up ([Schedules](docs/schedules.md#policies));
+every event, tool call, permission denial, token and dollar lands in SQLite plus a JSONL log per
+run ([What a run records](docs/cli.md#what-a-run-records)); and in the dashboard a run that hit a
+permission denial is "needs review", never green ([Needs review](docs/dashboard.md#needs-review)).
+
 ## How it works
 
 ```
@@ -161,6 +177,56 @@ with diagrams: [How it works](docs/how-it-works.md).
 | **Dashboard** | Runs with cost, timeline and issues; a run that hit a permission denial is "needs review", never green. [Dashboard](docs/dashboard.md) |
 | **MCP tools** | 19 tools to create agents, start and inspect runs and manage schedules from a chat. [MCP server](docs/mcp-server.md) |
 | **CLI** | The same operations from a terminal, plus `serve` and `install-service` for the scheduler. [CLI](docs/cli.md) |
+
+## Commands
+
+Each command is `npx duskfleet <command>` (`duskfleet <command>` after `npm i -g duskfleet`, or
+`npm run cli -- <command>` in a clone), and every CLI command answers `--help`; the last two
+rows are npm scripts of a clone. The full reference, with every
+option: [CLI](docs/cli.md).
+
+| Command | What it does |
+|---|---|
+| `doctor` | Claude binary and version, where config and data live, scheduler state. [CLI](docs/cli.md#doctor-logs-and-diffs) |
+| `run --project <id or path> --agent <id> [--model <m>] [--no-wait] -- "<task>"` | Starts one run and prints its record. [CLI](docs/cli.md) |
+| `runs` | Lists recorded runs, with `needsReview` and the reasons. [CLI](docs/cli.md#what-a-run-records) |
+| `run-info <run_id> [--events]` | One run in full, subagents included; `--events` adds the timeline. [CLI](docs/cli.md) |
+| `agents`, `projects`, `schedules` | Lists agents, registered projects and schedules. [CLI](docs/cli.md) |
+| `schedules run-now <id or name>` | Asks the scheduler to fire a schedule on its next tick. [Schedules](docs/schedules.md), [CLI](docs/cli.md#firing-an-agent-from-a-script-or-a-git-hook) |
+| `serve` | The long-running scheduler process. [Schedules](docs/schedules.md#who-ticks) |
+| `install-service [--print]`, `uninstall-service` | Registers `serve` as a per-user service (launchd, systemd, Task Scheduler), or removes it. [Schedules](docs/schedules.md#who-ticks) |
+| `tools` | The MCP tool catalogue. [CLI](docs/cli.md), [MCP server](docs/mcp-server.md#tools) |
+| `repair-subagents` | Backfills subagent rows of finished runs from their logs. [CLI](docs/cli.md) |
+| `npm run web` | The dashboard from a clone, on http://localhost:4777. [Dashboard](docs/dashboard.md) |
+| `npm run build`, `npm test`, `npm run check` | Build, tests, and the full CI gate, in a clone. [Development](docs/development.md#build-and-test) |
+
+## FAQ
+
+**Why local and not a cloud service?** Your projects and your Claude Code login already live on
+your machine, so the agents sail from there: Duskfleet runs `claude -p` in the project directory
+and keeps the record in a local SQLite file, with no account and nothing in between. [How it works](docs/how-it-works.md)
+
+**What does a night of agents cost?** Whatever Claude Code bills for the runs. Duskfleet records
+tokens and `costUsd` per run, and marks subscription costs "reported, not billed". An agent
+without a `model` uses the Claude Code default: set `haiku` or `sonnet` while experimenting.
+[What a run records](docs/cli.md#what-a-run-records)
+
+**What happens when a run goes wrong?** It is never green: a permission denial, a timeout, an
+exhausted budget or an empty run makes it "needs review", and a run whose process died is marked
+orphaned instead of staying `running` forever. The fixes are one page away.
+[Needs review](docs/dashboard.md#needs-review), [Troubleshooting](docs/troubleshooting.md)
+
+**Do schedules run with Claude Desktop closed?** Only if something else holds the scheduler:
+`serve`, registered once as a per-user service with `install-service`. With the MCP server
+alone, schedules stop when the host closes. [Who ticks](docs/schedules.md#who-ticks)
+
+**Does Duskfleet handle Claude authentication?** No. Claude Code must be installed and logged in
+for the user that runs Duskfleet; a run without a login fails with `auth_required` and the
+command to fix it. [Quick start](#quick-start), [CLI](docs/cli.md#what-a-run-records)
+
+**Which OS?** macOS and Linux. Windows service support exists (a Task Scheduler task) but has not
+been exercised by the maintainers. [Platform support](#platform-support),
+[Who ticks](docs/schedules.md#who-ticks)
 
 ## Status and roadmap
 
@@ -191,6 +257,10 @@ start.
 
 Setup, rules and good first issues: [CONTRIBUTING.md](CONTRIBUTING.md).
 
+## License
+
+[MIT](LICENSE)
+
 ## Star history
 
 <a href="https://star-history.com/#duskfleet/duskfleet&Date">
@@ -200,7 +270,3 @@ Setup, rules and good first issues: [CONTRIBUTING.md](CONTRIBUTING.md).
     <img alt="Star history of duskfleet/duskfleet" src="https://api.star-history.com/svg?repos=duskfleet/duskfleet&type=Date">
   </picture>
 </a>
-
-## License
-
-[MIT](LICENSE)

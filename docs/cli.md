@@ -14,6 +14,7 @@ npx duskfleet doctor --probe                             # plus one real hello r
 npx duskfleet run --project ~/Documents/Projects/my-app -- "Add a README section describing the build"
 npx duskfleet run --project my-app --agent my-reviewer --model sonnet -- "Review src/ for obvious bugs"   # registered id or path (--project-id is the explicit form)
 npx duskfleet run --no-wait --project /path -- "..."     # return immediately (see the note below)
+npx duskfleet run --project . --agent fixer -- "..."     # relative path: resolved from the shell's directory
 npx duskfleet runs --status completed --limit 10
 npx duskfleet run-info <run_id> --events   # includes subagents; --events adds the timeline
 npx duskfleet repair-subagents             # backfill subagent rows of finished runs from their logs
@@ -36,6 +37,12 @@ npx duskfleet --help                                     # the usage (also -h); 
 npx duskfleet run --help                                 # one command's usage, options, example and doc link (any command)
 npx duskfleet --version                                  # the package version (also -v); duskfleet-mcp --version too
 ```
+
+`run --project` takes a registered project id or a path. A relative path (`.`, `../app`,
+`./scratch`, or a bare name that is a directory where you are and not a registered id) is resolved
+from the shell's directory, and the run records the absolute path; `~` is expanded. Only the CLI
+does this: the MCP tools (`run_agent`'s `project_path`) and schedules have no meaningful working
+directory and keep requiring an absolute path or a registered id.
 
 `install-service` refuses to run from npx's temporary cache (npm can evict it, and the service
 would point at a file that is gone): install the package globally first, `npm i -g duskfleet`,
