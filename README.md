@@ -10,6 +10,8 @@
 
 ### Run, record and schedule unattended Claude Code agents on your local projects.
 
+*Your agents sail at dusk.*
+
 **A fleet of agents for your own machine.**
 
 Website: [duskfleet.com](https://duskfleet.com/?utm_source=github&utm_medium=readme&utm_campaign=always-on&utm_content=hero)
@@ -21,13 +23,14 @@ Website: [duskfleet.com](https://duskfleet.com/?utm_source=github&utm_medium=rea
 
 [Quick start](#quick-start) ·
 [From source](#from-source) ·
+[Before / after](#before--after) ·
 [How it works](#how-it-works) ·
 [What you get](#what-you-get) ·
 [Status and roadmap](#status-and-roadmap) ·
 [Documentation](#documentation) ·
 [Contributing](#contributing) ·
-[Star history](#star-history) ·
 [License](#license) ·
+[Star history](#star-history) ·
 [Website](https://duskfleet.com/?utm_source=github&utm_medium=readme&utm_campaign=always-on&utm_content=readme)
 
 </div>
@@ -133,6 +136,17 @@ In a clone every `npx duskfleet <command>` above is `npm run cli -- <command>`, 
 is `npm run web`; `init` finds the repo's `config/` and leaves it as it is, and the data lands in
 the clone's `data/` (git-ignored). Setup, rules and checks: [CONTRIBUTING.md](CONTRIBUTING.md).
 
+## Before / after
+
+**Before**: `claude -p` started by hand or from a crontab, the output in a terminal, and no
+record of what happened overnight.
+
+**After**: agents are Markdown files ([Agents](docs/agents.md)); cron schedules skip a tick when
+the agent is busy, never queue and never catch up ([Schedules](docs/schedules.md#policies));
+every event, tool call, permission denial, token and dollar lands in SQLite plus a JSONL log per
+run ([What a run records](docs/cli.md#what-a-run-records)); and in the dashboard a run that hit a
+permission denial is "needs review", never green ([Needs review](docs/dashboard.md#needs-review)).
+
 ## How it works
 
 ```
@@ -190,6 +204,10 @@ start.
 
 Setup, rules and good first issues: [CONTRIBUTING.md](CONTRIBUTING.md).
 
+## License
+
+[MIT](LICENSE)
+
 ## Star history
 
 <a href="https://star-history.com/#duskfleet/duskfleet&Date">
@@ -199,7 +217,3 @@ Setup, rules and good first issues: [CONTRIBUTING.md](CONTRIBUTING.md).
     <img alt="Star history of duskfleet/duskfleet" src="https://api.star-history.com/svg?repos=duskfleet/duskfleet&type=Date">
   </picture>
 </a>
-
-## License
-
-[MIT](LICENSE)
