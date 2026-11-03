@@ -146,6 +146,13 @@ label event, so the clock restarts and a run still at work is never interrupted.
 their side of it: swap the label first, push or post before the timeout, never end a run with
 work "still running in the background".
 
+Last, the gate clears finished work: every issue or PR closed (or merged) in the last 30 days
+loses all its `flow:` labels, since `Closes #n` closes the issue but leaves its
+`flow: in-progress` lock on the board; `area:` and `priority:` labels stay, open items are not
+touched, no comment is posted, and `--dry-run` lists what it would remove. `--repo <owner/name>`
+(or `GH_REPO`) runs the same script against another repository, such as a site repo with its
+own copy of the workflow.
+
 ## Schedules and limits
 
 One cron schedule per agent ([`docs/examples/schedules.yaml`](examples/schedules.yaml)),
