@@ -108,21 +108,23 @@ export function closedFlowLabels(item, { now, days = CLEANUP_DAYS }) {
 // --- Dependabot auto-merge: pure parts, tested without network ---
 
 const READY_LABEL = "flow: ready-to-merge";
-// The author as `gh pr list` (app/dependabot) and the REST API (dependabot[bot]) name it.
-const DEPENDABOT_LOGINS = new Set(["app/dependabot", "dependabot[bot]", "dependabot"]);
+const DEPENDABOT_LOGIN = "dependabot[bot]";
 
 // A Dependabot PR by its author, its branch and its repository: a fork branch named
 // `dependabot/x` with a forged title is someone else's PR.
-export function isDependabotPr(pr) {
+export function isDependabotPr(pr, repositoryOwner) {
   return (
-    DEPENDABOT_LOGINS.has(pr.author?.login ?? "") &&
+    !pr.isDraft &&
+    pr.author?.login === DEPENDABOT_LOGIN &&
     pr.isCrossRepository === false &&
+    Boolean(repositoryOwner) &&
+    pr.headRepositoryOwner?.login?.toLowerCase() === repositoryOwner.toLowerCase() &&
     typeof pr.headRefName === "string" &&
     pr.headRefName.startsWith("dependabot/")
   );
 }
 
-const VERSION = /^v?(\d+)(?:\.(\d+))?(?:\.(\d+))?$/;
+const VERSION = /^v?(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/;
 
 // "patch", "minor", "major" or "unknown" (a SHA, a pre-release, anything not plain semver).
 // Under the caret rule of npm, 0.x moves its breaking changes one place right: a 0.x minor and
@@ -175,6 +177,11 @@ export function bumpScope(title = "", body = "") {
   return { ok: true, reason: "", bumps };
 }
 
+// Expose the parsed version changes for focused tests and callers that need the detail.
+export function dependabotBumps(title = "", body = "") {
+  return bumpScope(title, body).bumps;
+}
+
 const REVIEWED = /^Reviewed\s+([0-9a-f]{40})\b/i;
 const VERDICT_LINE = /^VERDICT:\s*(approve|changes)\b/gim;
 
@@ -196,14 +203,25 @@ export function headVerdict(comments, { headSha, login }) {
 // What the gate does with a Dependabot PR before any merge-state read: "skip" (not a candidate,
 // `why` says which condition failed), "owner" (approved, but outside patch/minor: one comment,
 // the owner merges) or "merge" (approve, auto-merge, keep current).
-export function dependabotDecision(pr, { verdict }) {
+export function dependabotDecision(pr, { verdict, repositoryOwner }) {
   const labels = (pr.labels ?? []).map((label) => (typeof label === "string" ? label : label?.name));
-  if (!isDependabotPr(pr)) return { action: "skip", why: "not Dependabot's own branch in this repository" };
+  if (!isDependabotPr(pr, repositoryOwner)) return { action: "skip", why: "not Dependabot's own branch in this repository" };
   if (!labels.includes(READY_LABEL)) return { action: "skip", why: `not labelled ${READY_LABEL}` };
   if (verdict !== "approve") return { action: "skip", why: "no reviewer approval for the current head" };
   const scope = bumpScope(pr.title, pr.body);
   if (!scope.ok) return { action: "owner", why: scope.reason };
   return { action: "merge", why: scope.bumps.map((b) => `${b.name} ${b.from} to ${b.to}`).join(", ") };
+}
+
+// The update-branch and auto-merge API calls need the user token, never the workflow token.
+// Returning "skip" in a dry run too keeps its preview faithful to what this run can do.
+export function dependabotAction(mergeStateStatus, canUpdateBranch) {
+  if (!canUpdateBranch) return "skip";
+  return dependabotNextStep(mergeStateStatus);
+}
+
+export function dependabotNextStep(mergeStateStatus) {
+  return mergeStateStatus === "BEHIND" ? "update" : "merge";
 }
 
 // The reviewed SHA a head stands for, or null. The head itself when the reviewer approved it;
@@ -244,6 +262,14 @@ function gh(ghArgs, { input } = {}) {
   // GH_REPO also fills the {owner}/{repo} placeholders of `gh api`.
   const env = repo ? { ...process.env, GH_REPO: repo } : process.env;
   return execFileSync("gh", ghArgs, { encoding: "utf8", input, env, maxBuffer: 64 * 1024 * 1024 });
+}
+let repositoryOwnerCache;
+function repositoryOwner() {
+  if (!repositoryOwnerCache) {
+    const nameWithOwner = JSON.parse(gh(["repo", "view", "--json", "nameWithOwner"])).nameWithOwner;
+    repositoryOwnerCache = nameWithOwner.split("/")[0];
+  }
+  return repositoryOwnerCache;
 }
 function sleep(ms) {
   Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
@@ -496,7 +522,7 @@ function recheckAutoMerge(pr) {
     if (!reviewed) {
       why = "the head is neither a reviewer-approved commit nor an update-branch merge of one";
     } else {
-      const decision = dependabotDecision(pr, { verdict: "approve" });
+      const decision = dependabotDecision(pr, { verdict: "approve", repositoryOwner: repositoryOwner() });
       if (decision.action !== "merge") why = decision.why;
     }
   }
@@ -526,14 +552,15 @@ function recheckAutoMerge(pr) {
 // owner with one comment. Returns the summary bucket.
 function dependabot(pr) {
   if (!autoMerge && !dryRun) return "skipped";
-  if (!isDependabotPr(pr)) return "skipped";
+  const owner = repositoryOwner();
+  if (!isDependabotPr(pr, owner)) return "skipped";
   if (pr.autoMergeRequest) return recheckAutoMerge(pr);
   if (!pr.labels.some((label) => label.name === READY_LABEL)) return "skipped";
 
   const login = ownLogin();
   if (!login) return "skipped";
   const verdict = headVerdict(issueComments(pr.number), { headSha: pr.headRefOid, login });
-  const decision = dependabotDecision(pr, { verdict });
+  const decision = dependabotDecision(pr, { verdict, repositoryOwner: owner });
   if (decision.action === "skip") {
     console.log(`PR #${pr.number}: Dependabot, ${decision.why}, left alone`);
     return "skipped";
@@ -551,6 +578,20 @@ function dependabot(pr) {
   if (mergeable !== "MERGEABLE") {
     console.log(`PR #${pr.number}: Dependabot, merge state ${mergeable}, next run`);
     return "skipped";
+  }
+  const action = dependabotAction(mergeStateStatus, updateBranch);
+  if (action === "skip") {
+    console.log(`PR #${pr.number}: approved but ${mergeStateStatus === "BEHIND" ? "behind; branch update requires --update-branch" : "auto-merge needs the PR_GATE_TOKEN run (--update-branch)"}`);
+    return "skipped";
+  }
+  if (action === "update") {
+    if (dryRun) {
+      console.log(`PR #${pr.number}: would update ${pr.baseRefName}; auto-merge waits for review of the new head`);
+      return "updated";
+    }
+    console.log(`PR #${pr.number}: behind ${pr.baseRefName}, updating the branch (the reviewer approves the new head)`);
+    gh(["api", "-X", "PUT", `repos/{owner}/{repo}/pulls/${pr.number}/update-branch`]);
+    return "updated";
   }
   console.log(`PR #${pr.number}: Dependabot ${decision.why}: approve ${pr.headRefOid.slice(0, 7)}, enable auto-merge`);
   if (dryRun) {
@@ -671,7 +712,7 @@ function main() {
       "--limit",
       "200",
       "--json",
-      "number,title,isDraft,author,labels,baseRefName,headRefName,headRefOid,mergeable,mergeStateStatus,statusCheckRollup,body,isCrossRepository,autoMergeRequest",
+      "number,title,isDraft,author,labels,baseRefName,headRefName,headRefOid,headRepositoryOwner,mergeable,mergeStateStatus,statusCheckRollup,body,isCrossRepository,autoMergeRequest",
     ]),
   );
 
