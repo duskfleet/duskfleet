@@ -33,6 +33,7 @@ npx duskfleet mcp register --target claude-desktop --dry-run   # or claude-code;
 npx duskfleet mcp status                                 # which Claude hosts have a duskfleet entry; no config needed
 npx duskfleet tools                                      # the MCP tool catalogue
 npx duskfleet --help                                     # the usage (also -h); no config needed
+npx duskfleet run --help                                 # one command's usage, options, example and doc link (any command)
 npx duskfleet --version                                  # the package version (also -v); duskfleet-mcp --version too
 ```
 
@@ -42,8 +43,19 @@ then `duskfleet install-service`. In a clone, `npm run cli -- install-service` r
 clone's build ([Schedules](schedules.md#who-ticks)).
 
 `duskfleet` with no arguments prints the usage on stderr and exits 2; `--help` prints it on
-stdout and exits 0. Both end with `First time here? Run: npx duskfleet init`, and so does the
-error of any command that finds no config (no `duskfleet.yaml` in the directory the lookup picked:
+stdout and exits 0. Both end with `First time here? Run: npx duskfleet init`.
+
+Every command answers `--help` (or `-h`) with its own usage: one block with the options, an
+example and the link to its doc page, on stdout with exit 0, with or without a config
+(`duskfleet run --help`, `duskfleet agents create --help`). A `--help` after `--` is part of the
+prompt, not a flag. A wrong invocation is named before any config is loaded, on stderr with exit 2:
+an unknown command prints `unknown command: <name>` and the list of commands; a missing argument
+prints what is missing (`error: run needs a prompt after --: ...`, `error: run-info needs a run id`)
+followed by that command's usage.
+
+Only commands that need the config report a missing one (`init`, `tools`, `mcp status`,
+`uninstall-service` and every `--help` work without). That error ends with the same init hint
+(no config means no `duskfleet.yaml` in the directory the lookup picked:
 `DUSKFLEET_CONFIG`, a `config/` above the CLI, else the user-level directory; see
 [where config and data live](configuration.md#where-config-and-data-live)). `--version` prints the version of the installed
 `duskfleet` package and needs neither a config nor Node 24.
