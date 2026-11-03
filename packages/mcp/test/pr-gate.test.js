@@ -3,6 +3,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
+  approvedAncestor,
   bumpLevel,
   bumpScope,
   closedFlowLabels,
@@ -211,4 +212,35 @@ test("dependabotDecision: merge only with label, author, approval and a patch/mi
     action: "owner",
     why: "actions/checkout 4 to 7 is a major bump",
   });
+});
+
+test("approvedAncestor: the approved head, or update-branch merges on top of it, nothing else", () => {
+  const reviewed = "a".repeat(40);
+  const graph = {
+    // update-branch merge: first parent the reviewed head, second parent already on main
+    m1: [reviewed, "main1"],
+    // a second update-branch on top of the first
+    m2: ["m1", "main2"],
+    // a merge bringing in a commit main does not have
+    evil: [reviewed, "side"],
+    // a plain commit on top of the reviewed head
+    plain: [reviewed],
+    // a force-pushed head with no link to the reviewed one
+    forced: ["base0"],
+  };
+  const opts = {
+    verdictFor: (sha) => (sha === reviewed ? "approve" : null),
+    parents: (sha) => graph[sha] ?? [],
+    inBase: (sha) => sha.startsWith("main"),
+  };
+  assert.equal(approvedAncestor(reviewed, opts), reviewed);
+  assert.equal(approvedAncestor("m1", opts), reviewed);
+  assert.equal(approvedAncestor("m2", opts), reviewed);
+  assert.equal(approvedAncestor("evil", opts), null);
+  assert.equal(approvedAncestor("plain", opts), null);
+  assert.equal(approvedAncestor("forced", opts), null);
+  // a changes verdict on the reviewed head does not count
+  assert.equal(approvedAncestor("m1", { ...opts, verdictFor: () => "changes" }), null);
+  // the walk is bounded
+  assert.equal(approvedAncestor("m2", { ...opts, maxDepth: 1 }), null);
 });

@@ -138,11 +138,16 @@ token's own account; the last `VERDICT:` line of that comment decides) approves,
 bump in the title and body is semver patch or minor (on `0.x` a minor counts as major; a
 grouped PR must list as many bumps as its title announces). The gate re-reads the head,
 approves that reviewed SHA as the token's user (the ruleset on `main` requires a code-owner
-review, so the token must be the code owner's), enables GitHub auto-merge (squash; the
-repository deletes merged branches) and updates the branch when it is behind; the approval
-survives that merge commit because the ruleset does not dismiss stale reviews. GitHub merges
-once `checks` passes on the up-to-date head. One `[pr-gate]` comment per head says auto-merge
-is on; a PR already on auto-merge is only kept current. A major or unparsable bump with the
+review, so the token must be the code owner's), enables GitHub auto-merge bound to that SHA
+(squash, `--match-head-commit`; the repository deletes merged branches) and updates the branch
+when it is behind; the approval survives that merge commit because the ruleset does not dismiss
+stale reviews. GitHub merges once `checks` passes on the up-to-date head. One `[pr-gate]`
+comment per head says auto-merge is on. Because stale approvals survive any push, a PR already
+on auto-merge is re-verified on every run: it must still carry `flow: ready-to-merge`, its head
+must be a reviewer-approved SHA or an update-branch merge commit (second parent already on the
+base) on top of one, and its bumps must still be patch or minor. Otherwise (a Dependabot
+force-push to a new version, any other commit, the label removed) the gate disables
+auto-merge with one `[pr-gate]` comment per head, and the head needs a new review. A major or unparsable bump with the
 same label is never merged: it gets one `[pr-gate]` comment per head and waits for the owner.
 `--dry-run` lists the candidates and what a real run would do, after the same merge-state
 checks.

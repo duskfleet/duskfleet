@@ -41,8 +41,11 @@
 // Then the gate re-reads the head (an approval only ever lands on the reviewed SHA), approves
 // that SHA, enables auto-merge (squash; the repository deletes merged branches) and, when the
 // PR is behind its base, updates the branch: the approval survives that merge commit, since the
-// ruleset does not dismiss stale reviews. One `[pr-gate]` comment per head says so. A PR that
-// already has auto-merge on is only kept up to date. A major or unparsable bump stays for the
+// ruleset does not dismiss stale reviews. The merge request carries --match-head-commit, so it
+// binds to the reviewed SHA. One `[pr-gate]` comment per head says so. A PR that already has
+// auto-merge on is re-verified every run (label, approval of its head or of the head an
+// update-branch merge commit sits on, patch/minor scope) and kept up to date; when any of it
+// fails, auto-merge is disabled with one `[pr-gate]` comment per head. A major or unparsable bump stays for the
 // owner, with one `[pr-gate]` comment per head saying why. --dry-run lists the candidates and
 // what a real run would do, after the same merge-state checks.
 //
@@ -201,6 +204,23 @@ export function dependabotDecision(pr, { verdict }) {
   const scope = bumpScope(pr.title, pr.body);
   if (!scope.ok) return { action: "owner", why: scope.reason };
   return { action: "merge", why: scope.bumps.map((b) => `${b.name} ${b.from} to ${b.to}`).join(", ") };
+}
+
+// The reviewed SHA a head stands for, or null. The head itself when the reviewer approved it;
+// otherwise only update-branch merge commits are tolerated: two parents, the second already in
+// the base, the first leading (through more such merges) to an approved SHA. Anything else (a
+// force-push, a plain commit, a merge bringing in commits the base lacks) is unreviewed.
+// `verdictFor(sha)`, `parents(sha)` and `inBase(sha)` are injected, so this is tested without
+// network.
+export function approvedAncestor(headSha, { verdictFor, parents, inBase, maxDepth = 10 }) {
+  let sha = headSha;
+  for (let depth = 0; depth <= maxDepth; depth++) {
+    if (verdictFor(sha) === "approve") return sha;
+    const ps = parents(sha) ?? [];
+    if (ps.length !== 2 || !inBase(ps[1])) return null;
+    sha = ps[0];
+  }
+  return null;
 }
 
 const args = process.argv.slice(2);
@@ -443,19 +463,72 @@ function keepCurrent(pr, mergeStateStatus) {
   return true;
 }
 
+function commitParents(sha) {
+  return JSON.parse(gh(["api", `repos/{owner}/{repo}/commits/${sha}`, "--jq", "[.parents[].sha]"]));
+}
+
+// Whether `sha` is already on `base` (the compare of base...sha says the SHA is behind or equal).
+function inBase(base, sha) {
+  const status = gh(["api", `repos/{owner}/{repo}/compare/${encodeURIComponent(base)}...${sha}`, "--jq", ".status"]);
+  return ["behind", "identical"].includes(status.trim());
+}
+
+// A Dependabot PR already on auto-merge, re-verified every run: the ruleset does not dismiss
+// stale approvals, so a push after the request (Dependabot force-pushing a major, a commit by
+// anyone) would merge unreviewed. It stays queued only while it is labelled ready-to-merge, its
+// head is an approved SHA or an update-branch merge of one, and its bumps are still patch or
+// minor; otherwise auto-merge is disabled (fail closed, also when the checks cannot run) with
+// one `[pr-gate]` comment per head. Returns the summary bucket.
+function recheckAutoMerge(pr) {
+  let why = null;
+  const login = ownLogin();
+  if (!pr.labels.some((label) => label.name === READY_LABEL)) {
+    why = `no longer labelled ${READY_LABEL}`;
+  } else if (!login) {
+    why = "the gate's own login is unreadable, so the reviewer's approval cannot be re-checked";
+  } else {
+    const comments = issueComments(pr.number);
+    const reviewed = approvedAncestor(pr.headRefOid, {
+      verdictFor: (sha) => headVerdict(comments, { headSha: sha, login }),
+      parents: commitParents,
+      inBase: (sha) => inBase(pr.baseRefName, sha),
+    });
+    if (!reviewed) {
+      why = "the head is neither a reviewer-approved commit nor an update-branch merge of one";
+    } else {
+      const decision = dependabotDecision(pr, { verdict: "approve" });
+      if (decision.action !== "merge") why = decision.why;
+    }
+  }
+
+  if (why) {
+    console.log(`PR #${pr.number}: Dependabot on auto-merge, ${why}: disabling auto-merge`);
+    if (dryRun) return "disabled";
+    gh(["pr", "merge", String(pr.number), "--disable-auto"]);
+    const said = issueComments(pr.number).some(
+      (c) => c.body?.startsWith(`${MARKER} Auto-merge disabled`) && c.body.includes(`head ${pr.headRefOid}`),
+    );
+    if (!said) {
+      comment(pr.number, [
+        `${MARKER} Auto-merge disabled, head ${pr.headRefOid}: ${why}. A new review of this head is needed before it can merge (docs/self-hosting-development.md, "The PR gate").`,
+      ]);
+    }
+    return "disabled";
+  }
+
+  // Still the reviewed change: only keep the branch current. A merge commit gets no new approval.
+  const { mergeable, mergeStateStatus } = mergeState(pr);
+  if (mergeable !== "MERGEABLE") return "skipped";
+  return keepCurrent(pr, mergeStateStatus) ? "updated" : "queued";
+}
+
 // A Dependabot PR (see the header): approve, auto-merge and keep current, or leave it to the
 // owner with one comment. Returns the summary bucket.
 function dependabot(pr) {
   if (!autoMerge && !dryRun) return "skipped";
-  if (!isDependabotPr(pr) || !pr.labels.some((label) => label.name === READY_LABEL)) return "skipped";
-
-  if (pr.autoMergeRequest) {
-    // Already approved and queued by an earlier run: only keep the branch current. The head
-    // may be a merge commit by now; it gets no new approval.
-    const { mergeable, mergeStateStatus } = mergeState(pr);
-    if (mergeable !== "MERGEABLE") return "skipped";
-    return keepCurrent(pr, mergeStateStatus) ? "updated" : "queued";
-  }
+  if (!isDependabotPr(pr)) return "skipped";
+  if (pr.autoMergeRequest) return recheckAutoMerge(pr);
+  if (!pr.labels.some((label) => label.name === READY_LABEL)) return "skipped";
 
   const login = ownLogin();
   if (!login) return "skipped";
@@ -510,7 +583,9 @@ function dependabot(pr) {
       `body=${MARKER} Approved for the reviewer agent's approve on head ${pr.headRefOid} (Dependabot ${decision.why}).`,
     ]);
   }
-  gh(["pr", "merge", String(pr.number), "--squash", "--auto"]);
+  // --match-head-commit binds the request to the reviewed SHA: GitHub refuses it when the head
+  // moved between the re-read above and this call.
+  gh(["pr", "merge", String(pr.number), "--squash", "--auto", "--match-head-commit", pr.headRefOid]);
   keepCurrent(pr, mergeStateStatus);
   if (!alreadyHanded(pr)) {
     comment(pr.number, [
@@ -613,6 +688,7 @@ function main() {
     cleared: 0,
     queued: 0,
     owner: 0,
+    disabled: 0,
     skipped: 0,
     failed: 0,
   };
@@ -686,7 +762,7 @@ function main() {
   }
 
   console.log(
-    `pr-gate${dryRun ? " (dry run)" : ""}: ${summary.handed} handed back, ${summary.updated} updated, ${summary.clean} clean, ${summary.locked} locked and alive, ${summary.expired} stale locks expired, ${summary.waiting} waiting for a contributor, ${summary.revived} back for review, ${summary.cleared} closed items cleared of flow labels, ${summary.queued} Dependabot PRs on auto-merge, ${summary.owner} Dependabot PRs left to the owner, ${summary.skipped} not gated, ${summary.failed} failed`,
+    `pr-gate${dryRun ? " (dry run)" : ""}: ${summary.handed} handed back, ${summary.updated} updated, ${summary.clean} clean, ${summary.locked} locked and alive, ${summary.expired} stale locks expired, ${summary.waiting} waiting for a contributor, ${summary.revived} back for review, ${summary.cleared} closed items cleared of flow labels, ${summary.queued} Dependabot PRs on auto-merge, ${summary.owner} Dependabot PRs left to the owner, ${summary.disabled} Dependabot auto-merges disabled,${summary.skipped} not gated, ${summary.failed} failed`,
   );
   if (summary.failed > 0) process.exitCode = 1;
 }
