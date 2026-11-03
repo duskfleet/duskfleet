@@ -4,7 +4,7 @@ import { getRun, runPatchPath } from "@/lib/data";
 
 export const dynamic = "force-dynamic";
 
-/** The patch of what the run changed in git, as plain text. Read-only: serves only a file under data/logs. */
+/** The patch of what the run changed in git, as plain text. Writes nothing; serves only a file under data/logs. */
 export async function GET(_req: Request, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   const run = getRun(id)?.run;

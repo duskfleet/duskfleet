@@ -19,7 +19,7 @@ duskfleet/
 │   ├── mcp/             @duskfleet/mcp  — MCP server (stdio) + CLI + tests
 │   └── duskfleet/       duskfleet       — the published npm package: mcp + core bundled (no source)
 └── apps/
-    └── web/             @duskfleet/web  — Next.js dashboard (read-only), published too
+    └── web/             @duskfleet/web  — Next.js dashboard (never writes runs), published too
 ```
 
 A local `playground/` directory is ignored by version control: put a throwaway project there
