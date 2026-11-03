@@ -106,6 +106,31 @@ npx duskfleet run --project /abs/path/to/scratch-project --agent fixer -- "Fix t
 A run with no agent, when none exists, fails with
 `Known agents: (none: no agent file in <config>/agents or <user agents dir>; create one with "agents create <id>")`.
 
+## What run prints
+
+On stderr, the run id and its log as it starts. When the run did not end clean (failed, timed
+out, cancelled, or completed but [needs review](dashboard.md#needs-review)), a short block follows before
+anything else: the status with its review reasons, the cause in one line, the fix when there is
+one, and where to look next. A run against a Claude that is not logged in:
+
+```text
+run 7f3c9a2e-... started (session 0b1d...)
+log: <data>/logs/7f3c9a2e-....jsonl
+run 7f3c9a2e-... failed (non-zero exit code)
+cause: Claude is not logged in: Not logged in · Please run /login
+fix: Claude Code is not authenticated: run "claude" in a terminal and log in (or check ANTHROPIC_API_KEY)
+more: duskfleet run-info 7f3c9a2e-..., or the run's page in the dashboard; full record: run --json
+```
+
+The fix lines come from one table in core (`FAILURE_FIXES` per error code, `REVIEW_REASON_FIXES`
+per review reason, plus a `claude` binary that was not found), the same one `doctor --probe`
+uses for its advice. A permission denial names the denied tools.
+
+On stdout, the run record as JSON for scripts (exit 0 for `completed` or, with `--no-wait`,
+`running`; 1 otherwise). It leaves out `command.argv` (the full spawned command line, system
+prompt included) and `rawResultJson`; `run --json` prints the full record, the same as
+`run-info <run_id>`.
+
 ## agents create
 
 `agents create <id> [flags] -- "<system prompt>"` writes an **own** agent (the prompt is its
