@@ -1,0 +1,14 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": false,
+    "noCheck": true,
+    "incremental": false,
+    "outDir": ".test-build",
+    "rootDir": ".",
+    "jsx": "react-jsx",
+    "plugins": []
+  },
+  "include": ["test/components/**/*.tsx", "test/stubs/*.ts", "test/stubs/*.tsx"],
+  "exclude": ["node_modules", ".next", ".test-build"]
+}
