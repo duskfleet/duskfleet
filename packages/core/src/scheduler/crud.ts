@@ -11,7 +11,7 @@ import {
   ON_FAILURE_POLICIES,
   type OnFailurePolicy,
 } from "../config/types.js";
-import { isResumable, type LastRunSummary, lastRunSummary, type Run } from "../observability/run.js";
+import { isResumable, type LastRunSummary, lastRunSummary, normalizeRunTitle, type Run } from "../observability/run.js";
 import type { ScheduleRepository } from "../storage/schedules.js";
 import { assertTimeZone, CronError, nextFire, parseCron } from "./cron.js";
 import { validateGate } from "./gate.js";
@@ -80,6 +80,8 @@ export function validateScheduleInput(
   if (input.continueSession != null && typeof input.continueSession !== "boolean") {
     throw new Error("continue must be true or false");
   }
+  if (input.title != null && typeof input.title !== "string") throw new Error("title must be a string");
+  normalizeRunTitle(input.title);
   if (input.noopPattern != null) parseNoopPattern(input.noopPattern);
   if (input.gate != null) validateGate(config, input.gate, scheduleProjectId(input, agent));
   validatePolicies(input);
@@ -288,6 +290,8 @@ export function updateSchedule(
     onFailure: patch.onFailure === undefined ? existing.onFailure : patch.onFailure,
     resumeBudgetUsd: patch.resumeBudgetUsd === undefined ? existing.resumeBudgetUsd : patch.resumeBudgetUsd,
     continueSession: patch.continueSession ?? existing.continueSession,
+    // null or "" clears it; normalized here because the repository writes the patch as given.
+    title: patch.title === undefined ? existing.title : patch.title,
     noopPattern: patch.noopPattern === undefined ? existing.noopPattern : patch.noopPattern,
     gate: patch.gate === undefined ? existing.gate : patch.gate,
     concurrencyPolicy: patch.concurrencyPolicy ?? existing.concurrencyPolicy,
@@ -301,7 +305,12 @@ export function updateSchedule(
   if (merged.name !== existing.name && repo.findByName(merged.name))
     throw new Error(`a schedule named "${merged.name}" already exists`);
   const nextRunAt = merged.enabled ? nextRunAtFor(merged.cron, merged.timeZone!, now) : null;
-  return repo.update(id, { ...merged, nextRunAt, ...(merged.enabled ? { pausedReason: null } : {}) });
+  return repo.update(id, {
+    ...merged,
+    title: normalizeRunTitle(merged.title),
+    nextRunAt,
+    ...(merged.enabled ? { pausedReason: null } : {}),
+  });
 }
 
 /**

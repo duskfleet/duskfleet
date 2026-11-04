@@ -6,6 +6,7 @@
 
 import { randomUUID } from "node:crypto";
 import type { DatabaseSync } from "node:sqlite";
+import { normalizeRunTitle } from "../observability/run.js";
 import {
   type CatchUpPolicy,
   type ConcurrencyPolicy,
@@ -53,6 +54,7 @@ interface ScheduleRow {
   on_failure: string | null;
   resume_budget_usd: number | null;
   continue_session: number | null;
+  title: string | null;
   noop_pattern: string | null;
   gate_json: string | null;
   concurrency_policy: string | null;
@@ -124,6 +126,7 @@ function rowToSchedule(r: ScheduleRow): Schedule {
     onFailure: (r.on_failure as Schedule["onFailure"]) ?? null,
     resumeBudgetUsd: r.resume_budget_usd ?? null,
     continueSession: r.continue_session === 1,
+    title: r.title ?? null,
     noopPattern: r.noop_pattern ?? null,
     gate: parseGate(r.gate_json, r.name),
     concurrencyPolicy: (r.concurrency_policy as ConcurrencyPolicy | null) ?? DEFAULT_CONCURRENCY_POLICY,
@@ -194,8 +197,8 @@ export class ScheduleRepository {
       .prepare(
         `INSERT INTO schedules (id, name, agent_id, project_id, prompt, model, cron, time_zone, enabled, created_at, updated_at, next_run_at,
            last_fired_at, last_outcome, last_error, last_run_id, fires, skips, on_failure, resume_budget_usd, noop_pattern, gate_json,
-           concurrency_policy, catch_up_policy, trigger_kind, continue_session)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, NULL, NULL, 0, 0, ?, ?, ?, ?, ?, ?, ?, ?)`,
+           concurrency_policy, catch_up_policy, trigger_kind, continue_session, title)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, NULL, NULL, 0, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         id,
@@ -218,6 +221,7 @@ export class ScheduleRepository {
         input.catchUpPolicy ?? DEFAULT_CATCH_UP_POLICY,
         input.triggerKind ?? DEFAULT_TRIGGER_KIND,
         input.continueSession ? 1 : 0,
+        normalizeRunTitle(input.title),
       );
     return this.get(id)!;
   }
@@ -238,6 +242,7 @@ export class ScheduleRepository {
       onFailure: "on_failure",
       resumeBudgetUsd: "resume_budget_usd",
       continueSession: "continue_session",
+      title: "title",
       noopPattern: "noop_pattern",
       gate: "gate_json",
       concurrencyPolicy: "concurrency_policy",
