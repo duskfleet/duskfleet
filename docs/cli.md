@@ -29,7 +29,7 @@ npx duskfleet budgets set project my-app --amount 50 [--warn 80] [--no-hard-stop
 npx duskfleet budgets delete <budget id>
 npx duskfleet dashboard [--port 4777] [--no-open] [--no-install]   # install @duskfleet/web on demand, start it (see dashboard.md)
 npx duskfleet serve                                      # long-running scheduler process
-duskfleet install-service [--print]                      # global install only: register `serve` with launchd / systemd --user / Task Scheduler
+duskfleet install-service [--print] [--no-keep-awake]    # global install only: register `serve` with launchd / systemd --user / Task Scheduler
 duskfleet uninstall-service
 npx duskfleet mcp register --target claude-desktop --dry-run   # or claude-code; preview, then --yes to apply (see mcp-server.md)
 npx duskfleet mcp status                                 # which Claude hosts have a duskfleet entry; no config needed
@@ -49,6 +49,12 @@ directory and keep requiring an absolute path or a registered id.
 would point at a file that is gone): install the package globally first, `npm i -g duskfleet`,
 then `duskfleet install-service`. In a clone, `npm run cli -- install-service` registers the
 clone's build ([Schedules](schedules.md#who-ticks)).
+
+On macOS `install-service` keeps the Mac awake by default (`--keep-awake`): the launchd unit runs
+`serve` under `caffeinate -i -s`, which blocks idle sleep, and system sleep while on AC power
+only (on battery the Mac may still sleep). `--no-keep-awake` renders the unit without
+`caffeinate`. On Linux and Windows the flag changes nothing; `install-service` prints how to
+disable sleep there. `doctor` reports `scheduler.keepAwake` on macOS.
 
 `duskfleet` with no arguments prints the usage on stderr and exits 2; `--help` prints it on
 stdout and exits 0. Both end with `First time here? Run: npx duskfleet init`.

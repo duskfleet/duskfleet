@@ -21,7 +21,7 @@ npm run cli -- agents create <id> --model haiku -- "<system prompt>"   # own age
 npm run cli -- schedules run-now <id or name>   # stamps run_requested_at; the lease holder fires it next tick.
                      # The command for git hooks / scripts: `run --no-wait` leaves the run unread once the CLI exits
 npm run cli -- serve  # long-running scheduler process; the MCP server also ticks
-npm run cli -- install-service [--print] | uninstall-service   # register `serve` with launchd / systemd --user / Task Scheduler
+npm run cli -- install-service [--print] [--no-keep-awake] | uninstall-service   # register `serve` with launchd / systemd --user / Task Scheduler (macOS: under caffeinate)
 npm run cli -- run --project <project id or abs path> --agent <agent id> --model haiku -- "task"
 npm run web          # Next.js dashboard, http://localhost:4777
 npm run check        # what CI runs, same order: check:public, lint (biome ci), build, check:docs, check:quickstart, check:pack, typecheck, test
@@ -203,6 +203,9 @@ npm workspaces, one `config/` and one SQLite database shared by three deliverabl
 - **Unattended runs get no permission prompts.** `permission_mode: acceptEdits` does
   not allow Bash; an agent that must run tests needs `allowed_tools` such as
   `Bash(npm test:*)` in its frontmatter, otherwise it ends with a permission denial.
+- **A sleeping Mac times out every scheduled run** (0 tool calls, then auto-pause; 2026-10-23,
+  2026-11-03): the launchd unit runs `serve` under `caffeinate -i -s` (`--keep-awake`, default;
+  holds on AC power only), `doctor` reports `scheduler.keepAwake`; check `pmset -g log` first.
 - **User-level Stop hooks hang headless children.** `claude.setting_sources:
   [project, local]` in `config/duskfleet.yaml` makes child sessions skip
   `~/.claude/settings.json`. Keep it unless the hook is removed.

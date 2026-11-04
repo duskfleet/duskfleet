@@ -20,7 +20,7 @@ import { fileURLToPath } from "node:url";
  *   duskfleet tools           # MCP tool catalogue (names, descriptions, input schemas)
  *   duskfleet dashboard [--port <n>] [--no-open] [--no-install]   # install @duskfleet/web on demand, start it
  *   duskfleet serve            # long-running scheduler process (what the service runs)
- *   duskfleet install-service [--print]   # register `serve` with launchd / systemd --user / Task Scheduler
+ *   duskfleet install-service [--print] [--no-keep-awake]   # register `serve` with launchd / systemd --user / Task Scheduler (macOS: under caffeinate)
  *   duskfleet uninstall-service
  *   duskfleet mcp register --target claude-code|claude-desktop [--dry-run] [--yes]   # preview, backup, write
  *   duskfleet mcp status       # which Claude hosts have a duskfleet entry, and what it runs
@@ -72,8 +72,10 @@ import { runReportLines, trimmedRun } from "./run-report.js";
 import {
   exportedDataDir,
   installService,
+  keepAwakeStatus,
   renderService,
   type ServiceTarget,
+  serveSleepWarning,
   serviceDirs,
   serviceStatus,
   uninstallService,
@@ -114,7 +116,7 @@ function usage(asked = false): never {
       "  duskfleet tools",
       "  duskfleet dashboard [--port 4777] [--no-open] [--no-install]",
       "  duskfleet serve",
-      "  duskfleet install-service [--print]",
+      "  duskfleet install-service [--print] [--no-keep-awake]",
       "  duskfleet uninstall-service",
       "  duskfleet mcp register --target claude-code|claude-desktop [--dry-run] [--yes]",
       "  duskfleet mcp status",
@@ -465,14 +467,23 @@ async function main(): Promise<void> {
 
   switch (command) {
     case "install-service": {
-      const { values } = parseArgs({ args: rest, options: { print: { type: "boolean", default: false } } });
+      const { values } = parseArgs({
+        args: rest,
+        options: {
+          print: { type: "boolean", default: false },
+          "keep-awake": { type: "boolean", default: false },
+          "no-keep-awake": { type: "boolean", default: false },
+        },
+      });
+      if (values["keep-awake"] && values["no-keep-awake"]) {
+        commandUsage("install-service", "--keep-awake and --no-keep-awake exclude each other");
+      }
       const app = await open();
-      const target = serviceTarget(
-        app.executor.binary,
-        app.config.dataDir,
-        app.config.configDir,
-        app.config.dataSource,
-      );
+      const target = {
+        ...serviceTarget(app.executor.binary, app.config.dataDir, app.config.configDir, app.config.dataSource),
+        // macOS only, default on: serve runs under caffeinate -i -s
+        keepAwake: !values["no-keep-awake"],
+      };
       if (values.print) {
         const unit = renderService(target);
         process.stderr.write(`# ${unit.unitPath}\n`);
@@ -488,6 +499,7 @@ async function main(): Promise<void> {
         label: unit.label,
         unitPath: unit.unitPath,
         logPath: target.logPath,
+        keepAwake: unit.keepAwake,
         ran,
         status,
         notes: unit.notes,
@@ -573,6 +585,8 @@ async function main(): Promise<void> {
         ticking: leaseLive,
         holder: holder ? { role: holder.role, host: holder.host, pid: holder.pid, expiresAt: lease!.expiresAt } : null,
         service,
+        // macOS: whether the service wraps serve in caffeinate, and when the Mac sleeps otherwise.
+        keepAwake: process.platform === "darwin" ? keepAwakeStatus() : null,
         advice: !app.config.scheduler.enabled
           ? "scheduler.enabled is false in duskfleet.yaml: nothing fires"
           : service.running
@@ -793,6 +807,8 @@ async function main(): Promise<void> {
       process.stderr.write(
         `duskfleet serve: scheduler ticking every ${app.config.scheduler.tickSeconds}s (holder ${app.scheduler.status().holder}); Ctrl-C to stop\n`,
       );
+      const sleepWarning = serveSleepWarning(process.platform, process.ppid);
+      if (sleepWarning) process.stderr.write(`${sleepWarning}\n`);
       // The scheduler's own interval is unref'd (it must not keep the MCP server alive) and a
       // pending promise does not hold the event loop either, so without a ref'd handle this
       // process exited with 0 right after its first tick and launchd restarted it every 10 s
