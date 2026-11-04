@@ -309,6 +309,14 @@ local run-data handling, and recommended configuration.
   the score, never blended into it. Evaluators write only to `evals` (`EvalRepository.record`, through
   `runEvaluator`), never to `runs`; an LLM evaluator is a second run with its own `maxBudgetUsd`
   (refused when missing or not positive).
+  The LLM judge (`createLlmJudge`, `packages/core/src/evals/llm-judge.ts`) is that second run:
+  read-only (`dontAsk` + `disallowedTools: [Edit, Write, NotebookEdit]`, strict MCP), launched on an
+  `Executor` directly, so it writes no `runs` row. Its rubric is binary: each criterion is PASS or FAIL,
+  stored as a 0-1 dimension (score = share passed) with the judge's `rationale` and `evidence`. The
+  answer must be strict JSON with `rationale` and `evidence` before `passed` for every criterion
+  (`parseJudgeOutput`; anything else is an `error` eval), and the judged transcript, supplied by the
+  caller's `loadTranscript`, is fenced off in the prompt as untrusted evidence. Nothing calls the
+  judge after a run yet.
 - **Claude CLI flags**: verify every flag against `claude --help` before using it. The ones the
   executor uses, checked against `claude --help` of Claude Code 2.1.285:
 

@@ -32,6 +32,8 @@ export interface EvalRubricDimension {
   /** Integer in [0, scale]. */
   score: number;
   rationale?: string;
+  /** What in the evaluated run supports the score (the LLM judge's quote or fact). */
+  evidence?: string;
 }
 
 export interface EvalCost {
