@@ -1,6 +1,7 @@
 /**
- * Evaluation foundations. Nothing produces evals yet; the types, the score schema
- * (`score.ts`) and the table exist so that evaluators can be added without touching the Run model.
+ * Evaluation foundations: the types, the score schema (`score.ts`) and the table, so that
+ * evaluators can be added without touching the Run model. The first evaluator is the LLM judge
+ * (`llm-judge.ts`); nothing calls it after a run yet.
  *
  * Isolation: evaluators write only to `evals`, through `EvalRepository`, never to `runs` (a run's
  * status and review reasons belong to `RunManager`). An LLM evaluator is a second, read-only
@@ -9,7 +10,7 @@
  * Planned:
  *  - deterministic evaluators (tests_passed, build_passed, files_exist, ...)
  *    defined in config/evals/*.yaml and run after a run reaches a terminal state
- *  - LLM evaluators implemented as a second, read-only Claude Code run
+ *  - wiring the LLM judge as a post-run hook, with criteria from config
  */
 
 import { randomUUID } from "node:crypto";
