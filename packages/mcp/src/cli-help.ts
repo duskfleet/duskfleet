@@ -123,8 +123,12 @@ export const COMMAND_HELP: Readonly<Record<string, CommandHelp>> = {
     doc: `${DOCS}/schedules.md#who-ticks`,
   },
   "install-service": {
-    usage: ["duskfleet install-service [--print]"],
-    options: ["--print   print the unit and its install commands, change nothing"],
+    usage: ["duskfleet install-service [--print] [--keep-awake | --no-keep-awake]"],
+    options: [
+      "--print           print the unit and its install commands, change nothing",
+      "--keep-awake      macOS: run serve under caffeinate -i -s, no sleep while on AC (default)",
+      "--no-keep-awake   macOS: render the unit without caffeinate; the Mac may sleep",
+    ],
     example: "duskfleet install-service --print",
     doc: `${DOCS}/schedules.md#who-ticks`,
   },

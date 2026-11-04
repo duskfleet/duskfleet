@@ -13,7 +13,9 @@ import { formatHolder, parseHolder } from "@duskfleet/core";
 import {
   exportedDataDir,
   installService,
+  keepAwakeStatus,
   renderService,
+  serveSleepWarning,
   serviceDirs,
   serviceStatus,
   uninstallService,
@@ -55,6 +57,117 @@ test("launchd plist: node, cli, serve, cwd, log, PATH and CLAUDE_BIN; xml-escape
   assert.match(u.content, /<key>CLAUDE_BIN<\/key><string>\/home\/me\/\.local\/bin\/claude<\/string>/);
   assert.match(u.content, /<key>StandardErrorPath<\/key><string>\/opt\/dusk fleet\/data\/logs\/serve\.log<\/string>/);
   assert.ok(u.installCommands.some((c) => c.includes("launchctl bootstrap gui/")));
+});
+
+test("launchd plist keeps the Mac awake by default: caffeinate -i -s in front of node", () => {
+  const u = renderService({ ...base, platform: "darwin" });
+  assert.equal(u.keepAwake, true);
+  assert.match(
+    u.content,
+    /<key>ProgramArguments<\/key>\s*<array>\s*<string>\/usr\/bin\/caffeinate<\/string>\s*<string>-i<\/string>\s*<string>-s<\/string>\s*<string>\/opt\/node\/bin\/node<\/string>\s*<string>\/opt\/dusk fleet\/packages\/mcp\/dist\/cli\.js<\/string>\s*<string>serve<\/string>\s*<\/array>/,
+  );
+  assert.match(u.content, /<key>KeepAlive<\/key><true\/>/);
+  assert.ok(u.notes.some((n) => /caffeinate -i -s/.test(n) && /AC power/.test(n) && /battery/.test(n)));
+  // explicit true renders the same unit
+  assert.equal(renderService({ ...base, platform: "darwin", keepAwake: true }).content, u.content);
+});
+
+test("--no-keep-awake renders the launchd unit as before keep-awake: node first, no caffeinate", () => {
+  const u = renderService({ ...base, platform: "darwin", keepAwake: false });
+  assert.equal(u.keepAwake, false);
+  assert.doesNotMatch(u.content, /caffeinate/);
+  assert.match(u.content, /<key>ProgramArguments<\/key>\s*<array>\s*<string>\/opt\/node\/bin\/node<\/string>/);
+  assert.ok(u.notes.some((n) => /Keep-awake is off/.test(n)));
+});
+
+test("Linux and Windows units never wrap serve; their notes say how to disable sleep", () => {
+  const lin = renderService({ ...base, platform: "linux" });
+  assert.equal(lin.keepAwake, false);
+  assert.doesNotMatch(lin.content, /caffeinate|systemd-inhibit/);
+  assert.ok(lin.notes.some((n) => n.includes("systemctl mask sleep.target suspend.target")));
+  const win = renderService({ ...base, platform: "win32", user: "PC\\me" });
+  assert.equal(win.keepAwake, false);
+  assert.ok(win.notes.some((n) => n.includes("powercfg /change standby-timeout-ac 0")));
+});
+
+const PMSET = [
+  "System-wide power settings:",
+  "Currently in use:",
+  " standby              1",
+  " Sleep On Power Button 1",
+  " disksleep            10",
+  " sleep                1 (sleep prevented by caffeinate)",
+  " displaysleep         10",
+].join("\n");
+
+test("doctor keep-awake: the loaded job's program, pmset sleep values, advice", () => {
+  const home = mkdtempSync(path.join(tmpdir(), "duskfleet-awake-"));
+  try {
+    const wrapped = fakeExec({
+      "launchctl print": { status: 0, stdout: "\tstate = running\n\tprogram = /usr/bin/caffeinate\n", stderr: "" },
+      "pmset -g": { status: 0, stdout: PMSET, stderr: "" },
+    });
+    const a = keepAwakeStatus(wrapped.exec, home);
+    assert.deepEqual([a.wrapsCaffeinate, a.sleepMinutes, a.diskSleepMinutes], [true, 1, 10]);
+    assert.match(a.advice, /AC power only.*battery.*1 min/);
+
+    const never = keepAwakeStatus(
+      fakeExec({
+        "launchctl print": { status: 0, stdout: "\tprogram = /usr/bin/caffeinate\n", stderr: "" },
+        "pmset -g": { status: 0, stdout: " sleep                0\n disksleep            0\n", stderr: "" },
+      }).exec,
+      home,
+    );
+    assert.deepEqual([never.wrapsCaffeinate, never.sleepMinutes, never.advice], [true, 0, null]);
+
+    const bare = keepAwakeStatus(
+      fakeExec({
+        "launchctl print": { status: 0, stdout: "\tprogram = /opt/node/bin/node\n", stderr: "" },
+        "pmset -g": { status: 0, stdout: PMSET, stderr: "" },
+      }).exec,
+      home,
+    );
+    assert.equal(bare.wrapsCaffeinate, false);
+    assert.match(bare.advice, /does not keep the Mac awake.*install-service/);
+
+    // not loaded, no plist: nothing to tell; pmset unreadable: null values
+    const none = keepAwakeStatus(
+      fakeExec({
+        "launchctl print": { status: 113, stdout: "", stderr: "Could not find service" },
+        "pmset -g": { status: null, stdout: "", stderr: "ENOENT" },
+      }).exec,
+      home,
+    );
+    assert.deepEqual(
+      [none.wrapsCaffeinate, none.sleepMinutes, none.diskSleepMinutes, none.advice],
+      [null, null, null, null],
+    );
+
+    // not loaded but the plist is on disk: read from the file
+    const unloaded = fakeExec({ "launchctl print": { status: 113, stdout: "", stderr: "" } });
+    installService({ ...base, platform: "darwin", home, logPath: path.join(home, "serve.log") }, fakeExec().exec);
+    assert.equal(keepAwakeStatus(unloaded.exec, home).wrapsCaffeinate, true);
+    installService(
+      { ...base, platform: "darwin", home, logPath: path.join(home, "serve.log"), keepAwake: false },
+      fakeExec().exec,
+    );
+    assert.equal(keepAwakeStatus(unloaded.exec, home).wrapsCaffeinate, false);
+  } finally {
+    rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test("serve warns once on macOS when its parent is not caffeinate", () => {
+  const parent = (comm) => fakeExec({ "ps -o comm=": { status: 0, stdout: `${comm}\n`, stderr: "" } });
+  assert.equal(serveSleepWarning("darwin", 42, parent("/usr/bin/caffeinate").exec), null);
+  const shell = parent("-zsh");
+  assert.match(serveSleepWarning("darwin", 42, shell.exec), /may sleep.*install-service --keep-awake/);
+  assert.deepEqual(shell.calls[0], ["ps", "-o", "comm=", "-p", "42"]);
+  assert.match(serveSleepWarning("darwin", 1, parent("/sbin/launchd").exec), /caffeinate/);
+  // other platforms: no check, no warning
+  const lin = fakeExec();
+  assert.equal(serveSleepWarning("linux", 42, lin.exec), null);
+  assert.equal(lin.calls.length, 0);
 });
 
 test("systemd user unit: quoted ExecStart, Restart=always, log append, no CLAUDE_BIN when unknown", () => {

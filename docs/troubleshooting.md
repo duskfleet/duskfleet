@@ -199,6 +199,16 @@ outcome is recorded on the firing: `lastOutcome` / `lastError` in `list_schedule
   If the service is running but nothing fires, read `data/logs/serve.log` (the service writes
   there, not to the terminal); a `claude` not found there means the unit's PATH / `CLAUDE_BIN`
   are stale, re-run `install-service`.
+- **Runs time out overnight**: every scheduled run of the night is `timed_out` with 0 tool
+  calls, some schedules are auto-paused in the morning, and nothing ran for hours. The machine
+  slept (macOS Deep Idle, or 15-minute maintenance wake cycles on AC). Check with
+  `pmset -g log | grep -E "Sleep|Wake"` (macOS): sleep entries during the gap confirm it. Fix:
+  re-run `install-service` (on macOS it wraps `serve` in `caffeinate -i -s` unless
+  `--no-keep-awake` was passed), keep a laptop on AC power (`caffeinate -s` holds only there),
+  then resume the auto-paused schedules. `doctor`'s `scheduler.keepAwake` says whether the unit
+  keeps the Mac awake and after how many idle minutes it would sleep; `data/logs/serve.log`
+  shows "not running under caffeinate" when it does not. On Linux and Windows disable sleep in
+  the power settings ([Schedules](schedules.md#who-ticks)).
 - **The service runs old code**: `install-service` again after every `npm run build` (it
   restarts the process), or `launchctl kickstart -k gui/$(id -u)/com.duskfleet.scheduler` /
   `systemctl --user restart duskfleet.service`.
