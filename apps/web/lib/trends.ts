@@ -113,6 +113,11 @@ export function xTickIndexes(n: number, max = 7): number[] {
   return out;
 }
 
+/** Line box of a chart end label, px: `.chart-ends > span` in globals.css sets this line-height. */
+export const END_LABEL_LINE = 18;
+/** Minimum distance between two end labels' centres, px: one line box plus 2 px of air. */
+export const END_LABEL_GAP = END_LABEL_LINE + 2;
+
 /**
  * Vertical positions (px) for end-of-line labels: each label at its line's end, pushed down
  * so labels keep `gap` px apart, then pulled back up when the last one would leave `height`,

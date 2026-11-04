@@ -347,7 +347,8 @@ export default async function CostsPage({ searchParams }: { searchParams: Promis
       <p className="trend-note">
         The split sets what the table ranks (agent, project or model); ticked rows are drawn, the rest fold into
         &quot;others&quot;. Runs count finished runs of the period; the budget overlay is the global one, ticks never
-        filter it. {monthWords.basis === "subscription" ? `${monthWords.note} ` : ""}UTC buckets.
+        filter it.{monthWords.basis === "subscription" ? ` Amounts are usage at API value, ${monthWords.note}.` : ""}{" "}
+        Buckets are UTC days, weeks or months.
       </p>
     </>
   );
