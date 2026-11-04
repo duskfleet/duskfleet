@@ -128,6 +128,8 @@ interface ActiveRun {
   gitBase: string | null;
   /** When `last_event_at` was last written (0 = never); throttled to LAST_EVENT_WRITE_MS. */
   lastEventWriteMs: number;
+  /** Why the row could not be marked `running` after the spawn (the child was then stopped); null when it was. */
+  startError: string | null;
 }
 
 /** What the wrap-up pass is told. It must not start new work; it must leave a trace of where the run stopped. */
@@ -574,12 +576,31 @@ export class RunManager {
       startedAtMs: Date.now(),
       gitBase,
       lastEventWriteMs: 0,
+      startError: null,
     });
-    this.transition(run, "running", {
-      startedAt: new Date().toISOString(),
-      command: handle.command,
-      billingType: handle.billingType ?? null,
-    });
+    // Listen for the end before anything else can throw: a child nobody listens to runs to its
+    // result and leaves the row open forever, invisible to the orphan sweep (its owner is alive).
+    void handle.done.then((result) => this.onPhaseFinished(runId, result));
+    try {
+      this.transition(run, "running", {
+        startedAt: new Date().toISOString(),
+        command: handle.command,
+        billingType: handle.billingType ?? null,
+      });
+    } catch (err) {
+      // The child is up but the row could not be marked running (a locked database, typically).
+      // Stop the child: the completion path closes the row (pending -> failed, with this reason)
+      // and the caller learns the run did not start.
+      const message = err instanceof Error ? err.message : String(err);
+      const active = this.active.get(runId);
+      if (active) {
+        active.startError = message;
+        active.cancelRequested = true;
+      }
+      handle.cancel();
+      log.error("run spawned but could not be marked running; stopping it", { runId, pid: handle.pid, err: message });
+      throw err;
+    }
     log.info("run started", {
       runId,
       agent: agent.id,
@@ -589,8 +610,6 @@ export class RunManager {
       budgetUsd: budget.main,
       reserveUsd: budget.reserve,
     });
-
-    void handle.done.then((result) => this.onPhaseFinished(runId, result));
 
     return this.runs.get(runId)!;
   }
@@ -995,14 +1014,21 @@ export class RunManager {
         return;
       }
       if (active?.gitBase) this.recordDiff(runId, active.projectPath, active.gitBase);
-      this.transition(current, result.outcome, {
+      // A row still `pending` here was never marked running (see startRun): it ends failed with
+      // that reason whatever the child did (it was stopped by Duskfleet, not cancelled by anyone).
+      const neverRan = current.status === "pending";
+      const outcome: RunStatus = neverRan ? "failed" : result.outcome;
+      const error = neverRan
+        ? `run could not be marked running after the spawn (${active?.startError ?? "unknown reason"}); the process was stopped${result.error ? `: ${result.error}` : ""}`
+        : result.error;
+      this.transition(current, outcome, {
         endedAt: result.endedAt,
         durationMs: result.durationMs,
         modelUsed: result.model,
         claudeSessionId: result.sessionId,
         exitCode: result.exitCode,
         terminationReason: result.terminationReason,
-        error: result.error,
+        error,
         resultText: result.resultText,
         numTurns: result.numTurns,
         toolCalls: result.toolCalls,
@@ -1025,7 +1051,7 @@ export class RunManager {
       });
       log.info("run finished", {
         runId,
-        status: result.outcome,
+        status: outcome,
         durationMs: result.durationMs,
         costUsd: result.costUsd,
         phases: phases.length,

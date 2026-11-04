@@ -8,6 +8,15 @@ All notable changes to Duskfleet are listed here. The format follows
 
 ## [Unreleased]
 
+### Fixed
+
+- A run that spawned but could not be marked `running` (a "database is locked" write at a
+  wake-up with several Duskfleet processes) was left `pending` forever while its child ran to
+  the result: the end listener was attached after the failing write, and the orphan sweep leaves
+  a live owner's rows alone. The listener now comes first, the child is stopped and the row ends
+  `failed` with the reason. The database is opened with a 5 s busy timeout, so writes from
+  `serve`, MCP servers, the CLI and the dashboard wait for each other instead of failing.
+
 ## [0.1.0] - 2026-10-31
 
 First public release. Duskfleet runs Claude Code agents unattended in your projects, from an MCP

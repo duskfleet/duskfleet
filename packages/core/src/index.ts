@@ -228,7 +228,7 @@ export {
   type CostSplitBy,
   costSeries,
 } from "./storage/costs.js";
-export { migrationDigests, openDatabase } from "./storage/db.js";
+export { BUSY_TIMEOUT_MS, migrationDigests, openDatabase } from "./storage/db.js";
 export {
   type ListRunsFilter,
   NEEDS_REVIEW_SQL,
