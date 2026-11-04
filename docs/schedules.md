@@ -61,13 +61,15 @@ closes.** To run them unattended, register `serve` as a per-user service once:
 ```bash
 npm run cli -- install-service            # writes the unit from your real paths and starts it
 npm run cli -- install-service --print    # only show the unit
+npm run cli -- install-service --no-keep-awake   # macOS: no caffeinate, the Mac may sleep
 npm run cli -- uninstall-service
-npm run cli -- doctor                     # "scheduler.service" says whether it is running
+npm run cli -- doctor                     # "scheduler.service" says whether it is running,
+                                          # "scheduler.keepAwake" (macOS) whether the Mac stays awake
 ```
 
 | Platform | Mechanism | Unit |
 |---|---|---|
-| macOS | launchd LaunchAgent (`RunAtLoad`, `KeepAlive`) | `~/Library/LaunchAgents/com.duskfleet.scheduler.plist` |
+| macOS | launchd LaunchAgent (`RunAtLoad`, `KeepAlive`), `serve` under `caffeinate -i -s` | `~/Library/LaunchAgents/com.duskfleet.scheduler.plist` |
 | Linux | systemd user unit (`Restart=always`) | `~/.config/systemd/user/duskfleet.service` |
 | Windows (experimental) | Task Scheduler logon task, no time limit, restart on failure | task "Duskfleet Scheduler", XML kept under `%LOCALAPPDATA%\Duskfleet` |
 
@@ -92,7 +94,24 @@ Things to know:
 
 - `install-service` is idempotent and restarts the service. **Run it again after every
   `npm run build`**, otherwise the service keeps running the old code (same as the MCP server).
-- While the machine sleeps nothing runs; missed ticks are not caught up (see Policies).
+- While the machine sleeps nothing runs; missed ticks are not caught up (see Policies). A run
+  that was going when it fell asleep times out with 0 tool calls, and a few of those in a row
+  auto-pause the schedule.
+- macOS: the unit runs `/usr/bin/caffeinate -i -s <node> <cli.js> serve` (keep-awake, the
+  default): `-i` blocks idle sleep, `-s` system sleep, so the Mac stays awake while the service
+  is loaded. **`-s` only holds on AC power** (macOS ignores it on battery, by design): a laptop
+  on battery still sleeps, keep it plugged in overnight. `pmset -g assertions` lists the
+  `PreventUserIdleSystemSleep` / `PreventSystemSleep` assertions held by `caffeinate`.
+  `--no-keep-awake` renders the unit without it, and `serve` then logs one warning at start
+  ("not running under caffeinate, the machine may sleep"). `doctor` reports
+  `scheduler.keepAwake`: whether the installed unit wraps `caffeinate` and the `pmset -g`
+  `sleep` / `disksleep` minutes.
+- Linux: the unit does not inhibit sleep (a `systemd-inhibit` lock from a `--user` unit needs a
+  logind session and polkit rights it may not have). Disable sleep in the desktop's power
+  settings or with `sudo systemctl mask sleep.target suspend.target hibernate.target
+  hybrid-sleep.target`; `install-service` prints this hint.
+- Windows: the task does not keep the PC awake either; set Sleep to "Never" on AC power
+  (`powercfg /change standby-timeout-ac 0`); `install-service` prints this hint.
 - Linux: `loginctl enable-linger $USER` keeps the unit alive when you are logged out.
 - Windows (experimental, see the note above): check `data/logs/serve.log` if `doctor` reports
   the task running but nothing fires, and report what you find as an issue.

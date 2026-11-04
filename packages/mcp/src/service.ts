@@ -16,7 +16,7 @@
  * restarts the service, which is also how new code is picked up after a build.
  */
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { homedir, userInfo } from "node:os";
 import path from "node:path";
 
@@ -50,6 +50,12 @@ export interface ServiceTarget {
   home?: string;
   /** Windows only: account the task runs as; defaults to the current user. */
   user?: string;
+  /**
+   * macOS only: run `serve` under `caffeinate -i -s` so the Mac does not idle-sleep (and, on AC,
+   * does not system-sleep) while the service is loaded. Default true; `--no-keep-awake` = false.
+   * Linux and Windows have no equivalent in the unit: the notes print how to disable sleep.
+   */
+  keepAwake?: boolean;
 }
 
 export interface ServiceUnit {
@@ -57,6 +63,8 @@ export interface ServiceUnit {
   label: string;
   unitPath: string;
   content: string;
+  /** The unit keeps the machine awake (macOS with caffeinate in front of serve). */
+  keepAwake: boolean;
   /** The commands `install` runs, for the user to read or repeat by hand. */
   installCommands: string[];
   uninstallCommands: string[];
@@ -80,6 +88,14 @@ export interface ServiceStatus {
 const LAUNCHD_LABEL = "com.duskfleet.scheduler";
 const SYSTEMD_UNIT = "duskfleet.service";
 const WINDOWS_TASK = "Duskfleet Scheduler";
+/** `-i` prevents idle sleep, `-s` system sleep (honoured on AC power only, by design). */
+export const CAFFEINATE = "/usr/bin/caffeinate";
+export const CAFFEINATE_ARGS = ["-i", "-s"];
+
+const LINUX_SLEEP_HINT =
+  "While the machine sleeps nothing runs and missed ticks are not caught up. To keep it awake, disable sleep in the desktop's power settings or with `sudo systemctl mask sleep.target suspend.target hibernate.target hybrid-sleep.target`.";
+const WINDOWS_SLEEP_HINT =
+  'While the PC sleeps nothing runs and missed ticks are not caught up. To keep it awake on AC power, set Settings > System > Power > Sleep to "Never" (or `powercfg /change standby-timeout-ac 0`).';
 
 export function isSupportedPlatform(p: NodeJS.Platform): p is ServicePlatform {
   return p === "darwin" || p === "linux" || p === "win32";
@@ -143,6 +159,8 @@ export function renderService(t: ServiceTarget): ServiceUnit {
     if (t.claudeBin) env.push(["CLAUDE_BIN", t.claudeBin]);
     if (t.configDir) env.push(["DUSKFLEET_CONFIG", t.configDir]);
     if (t.dataDir) env.push(["DUSKFLEET_DATA", t.dataDir]);
+    const keepAwake = t.keepAwake !== false;
+    const program = [...(keepAwake ? [CAFFEINATE, ...CAFFEINATE_ARGS] : []), t.nodeBin, t.cliEntry, "serve"];
     const content = [
       '<?xml version="1.0" encoding="UTF-8"?>',
       '<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">',
@@ -151,9 +169,7 @@ export function renderService(t: ServiceTarget): ServiceUnit {
       `  <key>Label</key><string>${LAUNCHD_LABEL}</string>`,
       "  <key>ProgramArguments</key>",
       "  <array>",
-      `    <string>${xml(t.nodeBin)}</string>`,
-      `    <string>${xml(t.cliEntry)}</string>`,
-      "    <string>serve</string>",
+      ...program.map((a) => `    <string>${xml(a)}</string>`),
       "  </array>",
       `  <key>WorkingDirectory</key><string>${xml(t.repoRoot)}</string>`,
       "  <key>RunAtLoad</key><true/>",
@@ -176,6 +192,7 @@ export function renderService(t: ServiceTarget): ServiceUnit {
       label: LAUNCHD_LABEL,
       unitPath,
       content,
+      keepAwake,
       installCommands: [
         `launchctl bootout ${domain}/${LAUNCHD_LABEL} 2>/dev/null`,
         `launchctl bootstrap ${domain} "${unitPath}"`,
@@ -185,6 +202,9 @@ export function renderService(t: ServiceTarget): ServiceUnit {
       notes: [
         "A LaunchAgent runs in your login session, so the service sees the same `claude` login as your terminal.",
         "The service starts at login and is restarted if it dies. While the Mac sleeps nothing runs; missed ticks are not caught up.",
+        keepAwake
+          ? "Keep-awake: serve runs under `caffeinate -i -s`, so the Mac does not sleep while the service is loaded and on AC power. On battery `-s` is ignored by design and the Mac may still sleep: keep it plugged in overnight."
+          : "Keep-awake is off (--no-keep-awake): the Mac may idle-sleep and every run due meanwhile is skipped. Run install-service without --no-keep-awake to wrap serve in caffeinate.",
         `After every \`npm run build\` run install-service again (or \`launchctl kickstart -k ${domain}/${LAUNCHD_LABEL}\`) to load the new code.`,
       ],
     };
@@ -220,6 +240,7 @@ export function renderService(t: ServiceTarget): ServiceUnit {
       label: SYSTEMD_UNIT,
       unitPath,
       content,
+      keepAwake: false,
       installCommands: [
         "systemctl --user daemon-reload",
         `systemctl --user enable ${SYSTEMD_UNIT}`,
@@ -233,6 +254,7 @@ export function renderService(t: ServiceTarget): ServiceUnit {
       notes: [
         "A systemd user unit runs in your login session, so the service sees the same `claude` login as your terminal.",
         "To keep it running when you are logged out: `loginctl enable-linger $USER`.",
+        LINUX_SLEEP_HINT,
         `After every \`npm run build\` run install-service again (or \`systemctl --user restart ${SYSTEMD_UNIT}\`) to load the new code.`,
       ],
     };
@@ -296,6 +318,7 @@ export function renderService(t: ServiceTarget): ServiceUnit {
     label: WINDOWS_TASK,
     unitPath,
     content,
+    keepAwake: false,
     installCommands: [
       `schtasks /Create /F /TN "${WINDOWS_TASK}" /XML "${unitPath}"`,
       `schtasks /Run /TN "${WINDOWS_TASK}"`,
@@ -305,6 +328,7 @@ export function renderService(t: ServiceTarget): ServiceUnit {
       "A logon task in Task Scheduler runs as you, so the service sees the same `claude` login as your terminal.",
       "The task starts at logon, has no time limit and is restarted on failure. A console window may flash briefly at logon.",
       "After every `npm run build` run install-service again to restart the task with the new code.",
+      WINDOWS_SLEEP_HINT,
       "Windows support has not been exercised by the maintainers yet: if `doctor` shows the service running but schedules never fire, check data/logs/serve.log and open an issue.",
     ],
   };
@@ -486,4 +510,64 @@ export function serviceStatus(platform: NodeJS.Platform, exec: Exec = realExec, 
   if (r.status !== 0) return { ...base, installed: false, running: false, pid: null, detail: "not installed" };
   const status = /^Status:\s*(.+)$/m.exec(r.stdout)?.[1]?.trim() ?? "unknown";
   return { ...base, installed: true, running: /running/i.test(status), pid: null, detail: `Task Scheduler: ${status}` };
+}
+
+// ---- keeping the machine awake ------------------------------------------------
+
+export interface KeepAwakeStatus {
+  /** The service unit runs serve under caffeinate. null = no unit installed, nothing to tell. */
+  wrapsCaffeinate: boolean | null;
+  /** `pmset -g` values in minutes (0 = never); null when unreadable. */
+  sleepMinutes: number | null;
+  diskSleepMinutes: number | null;
+  advice: string | null;
+}
+
+function pmsetValue(out: string, key: string): number | null {
+  const m = new RegExp(`^\\s*${key}\\s+(\\d+)`, "m").exec(out);
+  return m ? Number(m[1]) : null;
+}
+
+/**
+ * macOS: does the installed service keep the Mac awake, and when would the Mac sleep otherwise.
+ * Reads the loaded job (`launchctl print`, its `program` line), else the plist on disk. Never throws.
+ */
+export function keepAwakeStatus(exec: Exec = realExec, home = homedir()): KeepAwakeStatus {
+  let wraps: boolean | null = null;
+  const loaded = exec("launchctl", ["print", `${launchdDomain()}/${LAUNCHD_LABEL}`]);
+  if (loaded.status === 0) {
+    const program = /^\s*program = (.+)$/m.exec(loaded.stdout)?.[1]?.trim();
+    wraps = program ? path.basename(program) === "caffeinate" : loaded.stdout.includes(CAFFEINATE);
+  } else {
+    const unitPath = serviceUnitPath("darwin", home);
+    if (unitPath && existsSync(unitPath)) {
+      try {
+        wraps = readFileSync(unitPath, "utf8").includes(`<string>${CAFFEINATE}</string>`);
+      } catch {
+        wraps = null;
+      }
+    }
+  }
+  const pm = exec("pmset", ["-g"]);
+  const sleepMinutes = pm.status === 0 ? pmsetValue(pm.stdout, "sleep") : null;
+  const diskSleepMinutes = pm.status === 0 ? pmsetValue(pm.stdout, "disksleep") : null;
+  const sleeps = sleepMinutes !== 0 ? `after ${sleepMinutes ?? "?"} min idle` : null;
+  let advice: string | null = null;
+  if (wraps === false) {
+    advice = `the service does not keep the Mac awake${sleeps ? ` (it sleeps ${sleeps})` : ""}: scheduled runs are skipped while it sleeps; run "duskfleet install-service" (keep-awake is the default)`;
+  } else if (wraps && sleeps) {
+    advice = `caffeinate keeps the Mac awake on AC power only; on battery it still sleeps ${sleeps}`;
+  }
+  return { wrapsCaffeinate: wraps, sleepMinutes, diskSleepMinutes, advice };
+}
+
+/**
+ * `serve` on macOS not started under caffeinate (by hand, or a unit installed with
+ * --no-keep-awake or before keep-awake existed): the one warning it logs at start. Null otherwise.
+ */
+export function serveSleepWarning(platform: NodeJS.Platform, ppid: number, exec: Exec = realExec): string | null {
+  if (platform !== "darwin") return null;
+  const r = exec("ps", ["-o", "comm=", "-p", String(ppid)]);
+  if (r.status === 0 && path.basename(r.stdout.trim()) === "caffeinate") return null;
+  return "duskfleet serve: warning: not running under caffeinate, the machine may sleep and skip scheduled runs; install-service --keep-awake";
 }
