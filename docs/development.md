@@ -292,7 +292,11 @@ local run-data handling, and recommended configuration.
   from `agents create` or `create_agent`), so a builtin is only ever a specialised pattern nobody
   runs without naming it. Drop a Markdown file in `config/agents/` and list it under "Builtin
   agents" in `docs/agents.md`. Builtins are general-purpose (no `project:`, no `add_dirs`, no
-  personal paths); `packages/core/test/builtin-agents.test.js` checks it.
+  personal paths) and unattended: an explicit `permission_mode` (`acceptEdits` or `dontAsk`),
+  `model`, `timeout_minutes` and `max_budget_usd`, and a prompt that says it runs unattended and
+  nobody can answer a question. One marked `isolated: true` is read-only: `dontAsk` with `Edit`,
+  `Write` and `NotebookEdit` in `disallowed_tools`. `packages/core/test/builtin-agents.test.js`
+  checks all of it, and fails when `config/agents` is empty.
 - **Schema change**: append a migration in `packages/core/src/storage/db.ts`; never edit an existing one. Then pin its digest in `packages/mcp/test/migrations.test.js` (the failing test prints it).
 - **Run status changes**: only `RunManager`, through `assertTransition`.
 - **New dashboard view**: add a route under `apps/web/app/` and a query in `apps/web/lib/data.ts`.
