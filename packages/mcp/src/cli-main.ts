@@ -842,10 +842,11 @@ async function main(): Promise<void> {
       const subagents = app.runs.agents(id).map((s) => subagentView(s)); // same names as get_run
       const diff = app.runs.diff(id); // same field as get_run
       const costLabel = runCostLabel(run.billingType); // same field as get_run
+      const artifacts = app.runs.artifacts(id).map(({ kind, value, source }) => ({ kind, value, source })); // same field as get_run
       print(
         values.events
-          ? { ...run, costLabel, diff, subagents, events: app.runs.events(id) }
-          : { ...run, costLabel, diff, subagents },
+          ? { ...run, costLabel, diff, artifacts, subagents, events: app.runs.events(id) }
+          : { ...run, costLabel, diff, artifacts, subagents },
       );
       return done();
     }

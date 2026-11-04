@@ -38,6 +38,9 @@
  *   "mcp-missing-once" -> like "ok", but the first spawn's init lists no claude.ai connector
  *                 (only the project's "duskfleet" server); later spawns list Figma
  *   "mcp-missing" -> like "ok", every spawn's init lists no claude.ai connector
+ *   "git-pr"  -> like "ok", after three Bash calls of a developer run: `git push -u origin <branch>`
+ *                 (new-branch push report), `git rev-parse HEAD`, `gh pr create --head <branch>`
+ *                 printing the PR URL; the result text repeats the URL next to a short SHA
  *
  * With `--resume <id>` (the wrap-up pass) the prompt is Duskfleet's fixed text, so the
  * behaviour comes from FAKE_CLAUDE_RESUME instead: unset = a short successful pass that
@@ -511,6 +514,40 @@ if (resumeIdx >= 0) {
       message: { role: "user", content: [{ tool_use_id: "toolu_m1", type: "tool_result", content: "[]" }] },
     });
   }
+  if (prompt === "git-pr") {
+    // A developer run's tail: push the branch, read HEAD, open the PR (run artifacts). Bash
+    // tool_results carry stdout + stderr as one string; git push writes its report on stderr.
+    const bash = (id, command, output) => {
+      out({
+        type: "assistant",
+        message: {
+          model,
+          role: "assistant",
+          content: [{ type: "tool_use", id, name: "Bash", input: { command, description: "git" } }],
+          usage: { input_tokens: 10, output_tokens: 5 },
+        },
+      });
+      out({
+        type: "user",
+        message: {
+          role: "user",
+          content: [{ tool_use_id: id, type: "tool_result", content: output, is_error: false }],
+        },
+        tool_use_result: { stdout: output, stderr: "", interrupted: false, isImage: false },
+      });
+    };
+    bash(
+      "toolu_g1",
+      "git -C /work/demo push -u origin issue/7-fix-login",
+      "remote: \nremote: Create a pull request for 'issue/7-fix-login' on GitHub by visiting:\nremote:      https://github.com/example/demo/pull/new/issue/7-fix-login\nremote: \nTo github.com:example/demo.git\n * [new branch]      issue/7-fix-login -> issue/7-fix-login\nbranch 'issue/7-fix-login' set up to track 'origin/issue/7-fix-login'.",
+    );
+    bash("toolu_g2", "git -C /work/demo rev-parse HEAD", "0123456789abcdef0123456789abcdef01234567");
+    bash(
+      "toolu_g3",
+      "gh pr create --head issue/7-fix-login --base main --title 'Fix login (#7)' --body-file tmp/7-body.md",
+      "https://github.com/example/demo/pull/8",
+    );
+  }
   out({
     type: "assistant",
     message: {
@@ -552,7 +589,9 @@ if (resumeIdx >= 0) {
                 ? "Found SL-9 in Ready, so this is not NO_WORK"
                 : prompt === "prose-exit"
                   ? "The 503 retry test now passes; the not logged in banner is fixed."
-                  : "Done: created hello.txt";
+                  : prompt === "git-pr"
+                    ? "Opened https://github.com/example/demo/pull/8 from issue/7-fix-login at deadbee."
+                    : "Done: created hello.txt";
   out({
     type: "result",
     subtype: isError ? "error_during_execution" : "success",

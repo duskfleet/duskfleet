@@ -27,6 +27,13 @@ import {
 } from "../execution/types.js";
 import { captureRunDiff, headSha } from "../git/diff.js";
 import {
+  type ArtifactFinding,
+  artifactsFromBash,
+  artifactsFromResultText,
+  type RunArtifact,
+  uniqueArtifacts,
+} from "../observability/artifacts.js";
+import {
   isBudgetExhausted,
   isResumable,
   isTerminal,
@@ -130,6 +137,8 @@ interface ActiveRun {
   lastEventWriteMs: number;
   /** Why the row could not be marked `running` after the spawn (the child was then stopped); null when it was. */
   startError: string | null;
+  /** PRs, branches and commits read from the main session's Bash output so far (both passes). */
+  artifacts: ArtifactFinding[];
 }
 
 /** What the wrap-up pass is told. It must not start new work; it must leave a trace of where the run stopped. */
@@ -333,6 +342,11 @@ export class RunManager {
   /** What the run changed in its git checkout (the `diff` event), or null. A pure read. */
   diff(runId: string) {
     return this.runs.diff(runId);
+  }
+
+  /** PRs, branches and commits the run produced (`run_artifacts`). A pure read. */
+  artifacts(runId: string): RunArtifact[] {
+    return this.runs.listArtifacts(runId);
   }
 
   /** Subagent invocations recorded for a run (see RunAgent). A pure read. */
@@ -577,6 +591,7 @@ export class RunManager {
       gitBase,
       lastEventWriteMs: 0,
       startError: null,
+      artifacts: [],
     });
     // Listen for the end before anything else can throw: a child nobody listens to runs to its
     // result and leaves the row open forever, invisible to the orphan sweep (its owner is alive).
@@ -1014,6 +1029,7 @@ export class RunManager {
         return;
       }
       if (active?.gitBase) this.recordDiff(runId, active.projectPath, active.gitBase);
+      this.recordArtifacts(runId, active?.artifacts ?? [], result.resultText);
       // A run whose start failed after the spawn (see startRun) ends failed with that reason
       // whatever the child did: it was stopped by Duskfleet, not cancelled by anyone. Keyed on
       // startError, not on the row: the lock can hit after the row was already stored running.
@@ -1083,6 +1099,21 @@ export class RunManager {
       const message = err instanceof Error ? err.message : String(err);
       log.warn("diff capture failed", { runId, err: message });
       this.runs.addEvent(runId, "note", { message: `git diff of the run could not be recorded: ${message}` });
+    }
+  }
+
+  /**
+   * The `run_artifacts` rows: PRs, branches and commits from the Bash output, then PR URLs of the
+   * final text. Written before the final status, like the diff; a failure is a note, never a lost result.
+   */
+  private recordArtifacts(runId: string, fromTools: ArtifactFinding[], resultText: string | null): void {
+    try {
+      const findings = uniqueArtifacts([...fromTools, ...artifactsFromResultText(resultText)]);
+      if (findings.length) this.runs.addArtifacts(runId, findings);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      log.warn("artifact recording failed", { runId, err: message });
+      this.runs.addEvent(runId, "note", { message: `run artifacts could not be recorded: ${message}` });
     }
   }
 
@@ -1200,6 +1231,12 @@ export class RunManager {
           { name: event.name, summary: summarizeToolInput(event.name, event.input) },
           event.agentId,
         );
+        break;
+      }
+      case "bash_result": {
+        // Only the main session's calls count, as for the run's model and last text.
+        if (event.agentId !== null) break;
+        this.active.get(runId)?.artifacts.push(...artifactsFromBash(event.command, event.output));
         break;
       }
       case "subagent_start": {

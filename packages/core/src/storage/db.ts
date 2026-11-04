@@ -324,6 +324,22 @@ const MIGRATIONS: ReadonlyArray<{ version: number; sql: string; backfill?: (db: 
       ALTER TABLE schedules ADD COLUMN deferred_reason TEXT;
     `,
   },
+  {
+    // What a run produced in git / GitHub (observability/artifacts.ts): a PR URL, a branch, a
+    // 40-char commit SHA, read from the main session's Bash output or its final text when it ends.
+    version: 23,
+    sql: `
+      CREATE TABLE IF NOT EXISTS run_artifacts (
+        id         INTEGER PRIMARY KEY AUTOINCREMENT,
+        run_id     TEXT NOT NULL REFERENCES runs(id) ON DELETE CASCADE,
+        kind       TEXT NOT NULL CHECK (kind IN ('pr', 'branch', 'commit')),
+        value      TEXT NOT NULL,
+        source     TEXT NOT NULL CHECK (source IN ('tool_result', 'result_text')),
+        created_at TEXT NOT NULL,
+        UNIQUE (run_id, kind, value)
+      );
+    `,
+  },
 ];
 
 /**
