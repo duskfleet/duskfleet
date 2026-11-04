@@ -869,6 +869,35 @@ export function costs(
   return costSeries(services().db, { range, by, ...filter });
 }
 
+/** The split key of costSeries (core storage/costs.ts), for counting runs per row of the /costs table. */
+const COST_KEY_SQL: Record<CostSplitBy, string> = {
+  agent: "agent_id",
+  project: "project_path",
+  model: `COALESCE(NULLIF(model_used, '${MIXED_MODEL}'), model_requested, 'default')`,
+};
+
+/**
+ * Finished real runs (gates excluded) per agent, project path or model since `from` (a bucket
+ * start date, UTC), for the runs and avg/run columns of the /costs ranked table: their count and
+ * their spend, so an average never divides a running run's cost by the finished runs only.
+ */
+export function finishedRunsBy(
+  by: CostSplitBy,
+  from: string,
+): { runs: Map<string, number>; spent: Map<string, number> } {
+  const rows = services()
+    .db.prepare(
+      `SELECT ${COST_KEY_SQL[by]} AS k, COUNT(*) AS n, COALESCE(SUM(cost_usd), 0) AS cost FROM runs
+       WHERE kind = 'run' AND status IN ('completed','failed','timed_out','cancelled') AND created_at >= ?
+       GROUP BY k`,
+    )
+    .all(`${from}T00:00:00.000Z`) as Array<{ k: string | null; n: number; cost: number }>;
+  return {
+    runs: new Map(rows.map((r) => [r.k ?? "unknown", r.n])),
+    spent: new Map(rows.map((r) => [r.k ?? "unknown", r.cost])),
+  };
+}
+
 /**
  * This UTC month's spend on a scope, for the /costs KPIs: every run (gates are spend, as budgets
  * count them), by billing type, plus the real runs started and their spend.
