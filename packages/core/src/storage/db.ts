@@ -338,11 +338,20 @@ const MIGRATIONS: ReadonlyArray<{ version: number; sql: string; backfill?: (db: 
     `,
   },
   {
+    // Run titles (run_agent title, run --title, a schedule's title stamped on every fire): what the
+    // run is for, shown instead of the truncated first prompt line (runLabel). NULL = no title.
+    version: 24,
+    sql: `
+      ALTER TABLE runs ADD COLUMN title TEXT;
+      ALTER TABLE schedules ADD COLUMN title TEXT;
+    `,
+  },
+  {
     // Fail closed on unknown cost: how a finished run's cost_usd is known (reported = API key or
     // unknown billing type, estimated = subscription, unpriced = no cost; NULL while it runs) and
     // whether a budget counts unpriced and running runs at a stand-in amount (count, the default)
     // or ignores them (allow). Finished rows are backfilled; old unpriced rows of the month count.
-    version: 24,
+    version: 25,
     sql: `
       ALTER TABLE runs ADD COLUMN cost_status TEXT;
       ALTER TABLE budgets ADD COLUMN unpriced_policy TEXT NOT NULL DEFAULT 'count' CHECK (unpriced_policy IN ('count', 'allow'));

@@ -16,6 +16,7 @@ function run(over: Partial<RunWithProject> = {}): RunWithProject {
     projectId: "demo",
     projectLabel: "demo",
     prompt: "Fix the agents table\n\nmore detail",
+    title: null,
     modelRequested: "haiku",
     modelUsed: "claude-haiku-4-5-20251001",
     status: "completed",

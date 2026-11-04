@@ -187,7 +187,7 @@ npm workspaces, one `config/` and one SQLite database shared by three deliverabl
   Monthly budgets (`budgets` table, migration 18; scope global / agent / project, UTC month) come
   last: a spent `hard_stop` one throws `BudgetError` (`orchestration/budget.ts`), pauses the
   scope's schedules and the tick is `skipped_budget`; nothing resumes them automatically.
-  Unknown costs fail closed (migration 24): `runs.cost_status` (reported / estimated / unpriced,
+  Unknown costs fail closed (migration 25): `runs.cost_status` (reported / estimated / unpriced,
   set at the terminal transition, `costStatusOf`), and under `budgets.unpriced_policy: count` an
   unpriced or running run counts as its agent's `max_budget_usd`, else as the whole remaining
   budget; over only by running runs (`overByRunning`) refuses without pausing schedules.

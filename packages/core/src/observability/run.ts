@@ -56,6 +56,12 @@ export interface Run {
   projectPath: string;
   projectId: string | null;
   prompt: string;
+  /**
+   * What the run is for, given by the caller (`run_agent { title }`, `run --title`, a schedule's
+   * `title`; migration 24), at most `RUN_TITLE_MAX` characters. Null = none: readers show
+   * `runLabel(run)`, which falls back to the first prompt line.
+   */
+  title: string | null;
   modelRequested: string | null;
   modelUsed: string | null;
   status: RunStatus;
@@ -142,7 +148,7 @@ export interface Run {
    */
   billingType: BillingType | null;
   /**
-   * How `costUsd` is known (migration 24, `costStatusOf`): `reported` (API key), `estimated`
+   * How `costUsd` is known (migration 25, `costStatusOf`): `reported` (API key), `estimated`
    * (subscription: reported, not charged) or `unpriced` (no cost). Set by `RunManager` at the
    * terminal transition, null while pending or running. Budgets count an unpriced run at a
    * stand-in amount unless the budget sets `unpriced_policy: allow`.
@@ -162,6 +168,43 @@ export interface Run {
    * older rows. Read through `runSilence`.
    */
   lastEventAt?: string | null;
+}
+
+/** Longest accepted run / schedule title, in characters (after trimming). */
+export const RUN_TITLE_MAX = 120;
+
+/**
+ * A caller's title as stored: trimmed, empty = null. Throws when longer than `RUN_TITLE_MAX`.
+ * Shared by run_agent, the CLI's `run --title` and schedule create/update.
+ */
+export function normalizeRunTitle(title: string | null | undefined): string | null {
+  if (title == null) return null;
+  const t = title.trim();
+  if (t.length === 0) return null;
+  if (t.length > RUN_TITLE_MAX) throw new Error(`title must be at most ${RUN_TITLE_MAX} characters (got ${t.length})`);
+  return t;
+}
+
+/**
+ * What a run is listed under, the same for every reader (MCP, CLI, dashboard): its title when set,
+ * else the first non-empty line of the prompt, markdown markers stripped, cut at a word boundary
+ * around `max` characters.
+ */
+export function runLabel(run: Pick<Run, "title" | "prompt">, max = 80): string {
+  if (run.title) return run.title;
+  const line = run.prompt
+    .split("\n")
+    .map((l) => l.trim())
+    .find((l) => l.length > 0);
+  if (!line) return "(empty prompt)";
+  const clean = line
+    .replace(/^#+\s*/, "")
+    .replace(/\*\*/g, "")
+    .replace(/^[-*]\s+/, "");
+  if (clean.length <= max) return clean;
+  const cut = clean.slice(0, max);
+  const sp = cut.lastIndexOf(" ");
+  return `${(sp > max * 0.6 ? cut.slice(0, sp) : cut).replace(/[\s,;:.]+$/, "")}…`;
 }
 
 /** Minimum gap between two writes of `last_event_at` for one run (one UPDATE per event would be wasteful). */
@@ -393,6 +436,10 @@ export function summarizeRun(run: Run) {
     scheduleId: run.scheduleId,
     projectPath: run.projectPath,
     projectId: run.projectId,
+    /** The caller's title; null when none was given. */
+    title: run.title,
+    /** What to list the run under: the title, else the first prompt line (runLabel). */
+    label: runLabel(run),
     prompt: run.prompt.length > 140 ? run.prompt.slice(0, 137) + "..." : run.prompt,
     model: run.modelUsed ?? run.modelRequested,
     /** Eval bundle: the agent definition and Claude Code version this run used; null when unknown. */
