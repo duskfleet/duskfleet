@@ -84,7 +84,11 @@ they arrive and keeps the raw stream in `data/logs/<run_id>.jsonl`:
 `RunManager` is the only writer of a run's status, and every change goes through a checked
 transition. Each run records its owner process; orphan recovery closes a `running` row, or a
 `pending` one whose process died between recording the run and spawning claude, as failed only
-when that owner is gone, so several Duskfleet processes can share the database safely.
+when that owner is gone, so several Duskfleet processes can share the database safely. Their
+writes wait up to 5 s for each other (SQLite busy timeout) rather than failing with "database is
+locked". A run that spawned but could not be marked `running` (that write failed anyway) is
+stopped at once and ends `failed` with the reason: its process listens for the end before that
+write, so a child nobody listens to can never leave its row open while its owner is alive.
 
 ## Run lifecycle
 
