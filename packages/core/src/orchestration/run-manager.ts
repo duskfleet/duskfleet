@@ -32,6 +32,7 @@ import {
   isResumable,
   isTerminal,
   LAST_EVENT_WRITE_MS,
+  normalizeRunTitle,
   orphanedError,
   type Run,
   type RunAgent,
@@ -82,6 +83,11 @@ export interface StartRunInput {
   kind?: RunKind;
   /** Overrides the agent's max_budget_usd (gate runs). */
   maxBudgetUsd?: number;
+  /**
+   * What the run is for (run_agent `title`, `run --title`, a schedule's title): trimmed, empty =
+   * none, at most RUN_TITLE_MAX characters (`normalizeRunTitle`, checked before anything starts).
+   */
+  title?: string | null;
 }
 
 export interface ResumeRunInput {
@@ -105,6 +111,8 @@ export interface ContinueRunInput {
   /** Default: the agent's model. */
   model?: string;
   scheduleId?: string;
+  /** The new run's title (see StartRunInput.title); not inherited from the original run. */
+  title?: string | null;
 }
 
 /** What a resumed run is told. The session already holds the task and everything done so far. */
@@ -427,6 +435,7 @@ export class RunManager {
     const { agent, projectPath, projectId, project } = this.resolveTarget(input);
     const prompt = input.prompt?.trim();
     if (!prompt) throw new Error("prompt is empty");
+    const title = normalizeRunTitle(input.title);
 
     const busy = this.capacityError(agent, projectPath);
     if (busy) throw new BusyError(busy);
@@ -503,6 +512,7 @@ export class RunManager {
       projectPath,
       projectId,
       prompt,
+      title,
       modelRequested: input.model ?? null,
       modelUsed: null,
       status: "pending",
@@ -706,6 +716,8 @@ export class RunManager {
         };
     if (fromRun.modelRequested) startInput.model = fromRun.modelRequested;
     if (input.scheduleId) startInput.scheduleId = input.scheduleId;
+    // The retry of the same task keeps the original run's title.
+    if (fromRun.title) startInput.title = fromRun.title;
     return this.startRun(startInput);
   }
 
@@ -735,6 +747,7 @@ export class RunManager {
     const model = input.model ?? fromRun.modelRequested;
     if (model) start.model = model;
     if (input.scheduleId) start.scheduleId = input.scheduleId;
+    if (input.title != null) start.title = input.title;
     return this.startRun(start);
   }
 

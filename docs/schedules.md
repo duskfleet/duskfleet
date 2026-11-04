@@ -184,6 +184,18 @@ so the agent keeps what it read and did on earlier fires.
 
 A one-off continuation is `run_agent` with `resume_run_id` ([MCP server](mcp-server.md)).
 
+## Run titles
+
+A schedule's prompt is the same on every fire, so its runs would all be listed under the same
+first prompt line. `title` on a schedule (`create_schedule` / `update_schedule`, at most 120
+characters, trimmed) is stamped on every run it fires, so they list as "nightly review" instead.
+`title: ""` on `update_schedule` removes it; runs fired afterwards fall back to the first prompt
+line. A `resume_once` retry keeps the title of the run it resumes.
+
+A single run gets its own title with `run_agent { title }` or `duskfleet run --title <text>`.
+`list_runs`, `get_run`, `duskfleet runs` and `duskfleet run-info` return the stored `title`
+(null when none) and the `label` every reader shows: the title, else the first prompt line.
+
 ## Gates: skip cheaply when there is no work
 
 A gate is a cheap check that runs before the real run on every tick, so a schedule that finds
