@@ -97,6 +97,10 @@ npm workspaces, one `config/` and one SQLite database shared by three deliverabl
   `scheduler.auto_pause_after` ended runs all empty (0 tool calls) or needs review = pause with
   `paused_reason`, outcome `auto_paused`; resume clears it, `auto_paused_at` bounds the next streak.
   `scheduler.auto_pause: false` (read every tick) skips the check and keeps the threshold.
+  Continuing a session (`run_agent { resume_run_id }`, a schedule's `continue`, migration 23) is
+  `continued_from_run_id`, never `resumed_from_run_id` (that one is the single `resume_once` retry,
+  unique): no retry count, chains allowed, `continueRefusal` + `continueMismatch` decide, any refusal
+  or unknown session = fresh session plus a note, never a skipped tick; `resume_once` wins when it applies.
   `install-service` (`packages/mcp/src/service.ts`) renders a per-user unit (launchd,
   systemd --user, Task Scheduler XML) from machine paths: never version a unit, re-run it
   after every build (it restarts the service). Not the OS crontab.
@@ -183,7 +187,7 @@ npm workspaces, one `config/` and one SQLite database shared by three deliverabl
   Monthly budgets (`budgets` table, migration 18; scope global / agent / project, UTC month) come
   last: a spent `hard_stop` one throws `BudgetError` (`orchestration/budget.ts`), pauses the
   scope's schedules and the tick is `skipped_budget`; nothing resumes them automatically.
-  Unknown costs fail closed (migration 23): `runs.cost_status` (reported / estimated / unpriced,
+  Unknown costs fail closed (migration 24): `runs.cost_status` (reported / estimated / unpriced,
   set at the terminal transition, `costStatusOf`), and under `budgets.unpriced_policy: count` an
   unpriced or running run counts as its agent's `max_budget_usd`, else as the whole remaining
   budget; over only by running runs (`overByRunning`) refuses without pausing schedules.

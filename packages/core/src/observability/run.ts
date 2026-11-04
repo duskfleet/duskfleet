@@ -126,6 +126,13 @@ export interface Run {
    * `RunRepository.resumedBy`.
    */
   resumedFromRunId: string | null;
+  /**
+   * Set when this run continued the Claude session of an earlier run (`run_agent { resume_run_id }`
+   * or a schedule's `continue: true`; migration 23). Not a retry: `retries` does not go up, a run
+   * may be continued many times and a continuation can be continued again. Null for a fresh
+   * session, including a continuation that fell back to one (match check failed, session unknown).
+   */
+  continuedFromRunId: string | null;
   /** `gate` = a schedule's gate agent deciding whether there is work; its cost is counted apart. `run` otherwise. */
   kind: RunKind;
   /**
@@ -135,7 +142,7 @@ export interface Run {
    */
   billingType: BillingType | null;
   /**
-   * How `costUsd` is known (migration 23, `costStatusOf`): `reported` (API key), `estimated`
+   * How `costUsd` is known (migration 24, `costStatusOf`): `reported` (API key), `estimated`
    * (subscription: reported, not charged) or `unpriced` (no cost). Set by `RunManager` at the
    * terminal transition, null while pending or running. Budgets count an unpriced run at a
    * stand-in amount unless the budget sets `unpriced_policy: allow`.
@@ -418,6 +425,8 @@ export function summarizeRun(run: Run) {
     wrapUp: summarizeWrapUp(run),
     /** The run whose session this one resumed (on_failure: resume_once); null for a fresh run. */
     resumedFromRunId: run.resumedFromRunId,
+    /** The run whose session this one continued (resume_run_id, a schedule's continue); null otherwise. */
+    continuedFromRunId: run.continuedFromRunId,
     retries: run.retries,
     error: run.error,
   };
@@ -427,6 +436,23 @@ export function summarizeRun(run: Run) {
 export function isResumable(run: Pick<Run, "status" | "terminationReason" | "claudeSessionId">): boolean {
   if (!run.claudeSessionId) return false;
   return run.status === "timed_out" || (run.status === "failed" && isBudgetExhausted(run.terminationReason));
+}
+
+/**
+ * Why `run` cannot be continued (run_agent `resume_run_id`, a schedule's `continue`), or null when
+ * it can: any ended run with a Claude session, except a cancelled one and one that exhausted its
+ * context (resuming a full session fails at once; this is also what keeps a continuing schedule
+ * from growing its context forever).
+ */
+export function continueRefusal(
+  run: Pick<Run, "id" | "status" | "claudeSessionId" | "contextExhausted" | "reviewReasons">,
+): string | null {
+  if (!isTerminal(run.status)) return `run ${run.id} is still ${run.status}; only an ended run can be continued`;
+  if (run.status === "cancelled") return `run ${run.id} was cancelled; a cancelled run is not continued`;
+  if (run.contextExhausted || run.reviewReasons.includes("context_exhausted"))
+    return `run ${run.id} exhausted its context; resuming a full session fails at once`;
+  if (!run.claudeSessionId) return `run ${run.id} has no Claude session to continue`;
+  return null;
 }
 
 export function summarizeWrapUp(

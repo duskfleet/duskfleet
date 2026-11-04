@@ -153,6 +153,13 @@ export interface Schedule {
   onFailure: OnFailurePolicy | null;
   /** Budget of the resumed run; null = the agent's `resume_budget_usd`, else its `max_budget_usd`. */
   resumeBudgetUsd: number | null;
+  /**
+   * `continue` (migration 23): every fire continues the Claude session of the schedule's last
+   * ended run, whatever its outcome, with the schedule's prompt. A cancelled or context-exhausted
+   * last run, or one whose agent, project path or agent hash no longer match, gets a fresh session
+   * plus a note (never a skipped tick). `on_failure: resume_once` wins when it applies.
+   */
+  continueSession: boolean;
   /** Marker in a run's final message that means "nothing to do" (idle-cost stats); null = `scheduler.noop_pattern`. */
   noopPattern: string | null;
   /** Checked before every fresh run; null = no gate. */
@@ -194,6 +201,8 @@ export interface ScheduleInput {
   enabled?: boolean;
   onFailure?: OnFailurePolicy | null;
   resumeBudgetUsd?: number | null;
+  /** Default false. */
+  continueSession?: boolean;
   noopPattern?: string | null;
   gate?: ScheduleGate | null;
   concurrencyPolicy?: ConcurrencyPolicy;

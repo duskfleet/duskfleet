@@ -325,11 +325,24 @@ const MIGRATIONS: ReadonlyArray<{ version: number; sql: string; backfill?: (db: 
     `,
   },
   {
+    // Continuing a session (run_agent resume_run_id, a schedule's continue): the run whose Claude
+    // session this run continues. Apart from resumed_from_run_id (the one retry of on_failure:
+    // resume_once, unique): a run may be continued any number of times and a continuation can be
+    // continued again (a chain), so the index is not unique. continue_session = the schedule's
+    // `continue` flag: every fire continues the schedule's last ended run.
+    version: 23,
+    sql: `
+      ALTER TABLE runs ADD COLUMN continued_from_run_id TEXT;
+      CREATE INDEX IF NOT EXISTS idx_runs_continued_from ON runs(continued_from_run_id);
+      ALTER TABLE schedules ADD COLUMN continue_session INTEGER NOT NULL DEFAULT 0;
+    `,
+  },
+  {
     // Fail closed on unknown cost: how a finished run's cost_usd is known (reported = API key or
     // unknown billing type, estimated = subscription, unpriced = no cost; NULL while it runs) and
     // whether a budget counts unpriced and running runs at a stand-in amount (count, the default)
     // or ignores them (allow). Finished rows are backfilled; old unpriced rows of the month count.
-    version: 23,
+    version: 24,
     sql: `
       ALTER TABLE runs ADD COLUMN cost_status TEXT;
       ALTER TABLE budgets ADD COLUMN unpriced_policy TEXT NOT NULL DEFAULT 'count' CHECK (unpriced_policy IN ('count', 'allow'));
@@ -404,11 +417,20 @@ function migrationsLine(count: number, from: number, to: number): string {
   return `applied ${count} migration${count === 1 ? "" : "s"} (${from} → ${to})`;
 }
 
+/** How long a write waits for another process's transaction before it fails with "database is locked". */
+export const BUSY_TIMEOUT_MS = 5000;
+
 export function openDatabase(dataDir: string): DatabaseSync {
   mkdirSync(dataDir, { recursive: true });
   const file = path.join(dataDir, "duskfleet.db");
   adoptLegacyDatabase(dataDir, file);
   const db = new DatabaseSync(file);
+  // Several processes write this file (serve, one MCP server per host session, the CLI, the
+  // dashboard's few writes). Without a busy timeout a write that meets another process's
+  // transaction fails at once with "database is locked", and a tick failing between two writes
+  // leaves half a state behind (a run spawned but never marked running, seen 2026-11-03). Wait instead.
+  // First, before journal_mode = WAL: switching the mode needs a lock too.
+  db.exec(`PRAGMA busy_timeout = ${BUSY_TIMEOUT_MS};`);
   db.exec("PRAGMA journal_mode = WAL;");
   db.exec("PRAGMA foreign_keys = ON;");
   db.exec("CREATE TABLE IF NOT EXISTS schema_migrations (version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL);");

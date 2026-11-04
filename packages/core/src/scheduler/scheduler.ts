@@ -478,6 +478,13 @@ export class Scheduler {
       const input: Parameters<RunManager["startRun"]>[0] = { prompt: s.prompt, agentId: s.agentId, scheduleId: s.id };
       if (s.projectId) input.projectId = s.projectId;
       if (s.model) input.model = s.model;
+      // continue: the session of the last ended run, whatever its outcome. startRun checks it can
+      // be continued and still matches (agent, project path, agent hash); otherwise it starts a
+      // fresh session and notes why. resume_once, above, wins when it applies.
+      if (s.continueSession) {
+        const last = this.runs.lastEndedRunOfSchedule(s.id);
+        if (last) input.continueFrom = last;
+      }
       const run = await this.runs.startRun(input);
       if (resumable && resumeError)
         this.runs.note(run.id, `started fresh: the resume of run ${resumable.id} was refused (${resumeError})`);

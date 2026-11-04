@@ -115,6 +115,7 @@ export {
   createStreamState,
   ingestLine,
   isRawHandBack,
+  isSessionNotFound,
   looksLikeContextExhaustion,
   type ParsedResult,
   type StreamState,
@@ -167,6 +168,8 @@ export { DailyCapError, utcDayStart } from "./orchestration/daily-cap.js";
 export { ProjectValidationError, validateProjectPath } from "./orchestration/project-validation.js";
 export {
   budgetPlan,
+  type ContinueRunInput,
+  continueMismatch,
   mergeResults,
   type ResumeRunInput,
   RunManager,
@@ -234,7 +237,7 @@ export {
   type CostSplitBy,
   costSeries,
 } from "./storage/costs.js";
-export { migrationDigests, openDatabase } from "./storage/db.js";
+export { BUSY_TIMEOUT_MS, migrationDigests, openDatabase } from "./storage/db.js";
 export {
   type ListRunsFilter,
   NEEDS_REVIEW_SQL,

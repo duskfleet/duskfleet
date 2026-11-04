@@ -63,7 +63,7 @@ export function runCostLabel(billingType: string | null | undefined): string {
 }
 
 /**
- * How a finished run's `costUsd` is known (`runs.cost_status`, migration 23). There is no price
+ * How a finished run's `costUsd` is known (`runs.cost_status`, migration 24). There is no price
  * table: `reported` = Claude Code's `total_cost_usd` on an API key (or on an unknown billing type),
  * `estimated` = the same number on a subscription (reported, not charged), `unpriced` = no cost
  * at all (no `result` line). Null while the run is pending or running: its cost is not settled.

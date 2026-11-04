@@ -18,7 +18,7 @@ import { logger } from "../util/log.js";
 import { childEnv } from "./child-env.js";
 import { missingMcpServers } from "./mcp.js";
 import { effectivePath } from "./search-path.js";
-import { createStreamState, ingestLine, looksLikeContextExhaustion } from "./stream-json.js";
+import { createStreamState, ingestLine, isSessionNotFound, looksLikeContextExhaustion } from "./stream-json.js";
 import {
   type ExecutionEvent,
   type ExecutionHandle,
@@ -429,6 +429,7 @@ function finalResult(input: {
     permissionDenials: r?.permissionDenials ?? 0,
     deniedTools: r?.deniedTools ?? [],
     contextExhausted: looksLikeContextExhaustion(r),
+    sessionNotFound: isSessionNotFound(r),
     failure: classifyFailure({
       outcome: input.outcome,
       // A result line with is_error false carries the agent's prose even when the exit code is

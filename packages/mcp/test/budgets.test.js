@@ -292,15 +292,15 @@ test("a running run counts at its stand-in: refused while it runs, without pausi
   }
 });
 
-test("migration 23 backfills cost_status of finished runs; old unpriced rows of the month count", async () => {
+test("migration 24 backfills cost_status of finished runs; old unpriced rows of the month count", async () => {
   const t = setup();
   try {
     const priced = await t.run("other");
     const crashed = await t.run("other", "crash");
     t.db.prepare("UPDATE runs SET billing_type = 'subscription' WHERE id = ?").run(priced.id);
-    // Back to schema 22, as an upgraded installation would be.
+    // Back to schema 23, as an upgraded installation would be.
     t.db.exec(
-      "ALTER TABLE runs DROP COLUMN cost_status; ALTER TABLE budgets DROP COLUMN unpriced_policy; DELETE FROM schema_migrations WHERE version = 23;",
+      "ALTER TABLE runs DROP COLUMN cost_status; ALTER TABLE budgets DROP COLUMN unpriced_policy; DELETE FROM schema_migrations WHERE version = 24;",
     );
     const dataDir = path.dirname(t.db.prepare("PRAGMA database_list").get().file);
     const db = openDatabase(dataDir);

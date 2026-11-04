@@ -12,7 +12,7 @@ export type BudgetScope = (typeof BUDGET_SCOPES)[number];
 export const DEFAULT_WARN_PERCENT = 80;
 
 /**
- * What a budget does with runs whose cost is unknown (migration 23): `count` (default, fail
+ * What a budget does with runs whose cost is unknown (migration 24): `count` (default, fail
  * closed) counts each unpriced or still running run at a stand-in amount, `allow` ignores them.
  */
 export const UNPRICED_POLICIES = ["count", "allow"] as const;
