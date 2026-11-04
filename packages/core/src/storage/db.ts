@@ -395,12 +395,13 @@ export function openDatabase(dataDir: string): DatabaseSync {
   const file = path.join(dataDir, "duskfleet.db");
   adoptLegacyDatabase(dataDir, file);
   const db = new DatabaseSync(file);
-  db.exec("PRAGMA journal_mode = WAL;");
   // Several processes write this file (serve, one MCP server per host session, the CLI, the
   // dashboard's few writes). Without a busy timeout a write that meets another process's
   // transaction fails at once with "database is locked", and a tick failing between two writes
   // leaves half a state behind (a run spawned but never marked running, seen 2026-11-03). Wait instead.
+  // First, before journal_mode = WAL: switching the mode needs a lock too.
   db.exec(`PRAGMA busy_timeout = ${BUSY_TIMEOUT_MS};`);
+  db.exec("PRAGMA journal_mode = WAL;");
   db.exec("PRAGMA foreign_keys = ON;");
   db.exec("CREATE TABLE IF NOT EXISTS schema_migrations (version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL);");
 

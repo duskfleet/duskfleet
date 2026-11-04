@@ -1014,9 +1014,10 @@ export class RunManager {
         return;
       }
       if (active?.gitBase) this.recordDiff(runId, active.projectPath, active.gitBase);
-      // A row still `pending` here was never marked running (see startRun): it ends failed with
-      // that reason whatever the child did (it was stopped by Duskfleet, not cancelled by anyone).
-      const neverRan = current.status === "pending";
+      // A run whose start failed after the spawn (see startRun) ends failed with that reason
+      // whatever the child did: it was stopped by Duskfleet, not cancelled by anyone. Keyed on
+      // startError, not on the row: the lock can hit after the row was already stored running.
+      const neverRan = active?.startError != null;
       const outcome: RunStatus = neverRan ? "failed" : result.outcome;
       const error = neverRan
         ? `run could not be marked running after the spawn (${active?.startError ?? "unknown reason"}); the process was stopped${result.error ? `: ${result.error}` : ""}`
@@ -1049,6 +1050,13 @@ export class RunManager {
         rawResultJson: result.rawResult === null ? null : JSON.stringify(result.rawResult),
         phases,
       });
+      if (neverRan && current.resumedFromRunId) {
+        // Nothing ran: give the claim back so the one retry is not used up (as for a spawn failure).
+        this.runs.releaseResumeClaim(runId);
+        this.runs.addEvent(runId, "note", {
+          message: `resume of run ${current.resumedFromRunId} did not start; the retry is still available`,
+        });
+      }
       log.info("run finished", {
         runId,
         status: outcome,

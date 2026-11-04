@@ -17,15 +17,34 @@ import { ClaudeCodeExecutor, loadConfig, openDatabase, RunManager, RunRepository
 const here = path.dirname(fileURLToPath(import.meta.url));
 const fakeBinary = path.join(here, "fake-claude.js");
 
-/** A repository whose first write of `status: running` fails like a locked database. */
+/**
+ * A repository whose first write of `status: running` fails like a locked database: the row
+ * update itself (`at: "update"`), or the status_change event written right after it, once the
+ * row is already stored `running` (`at: "event"`). `armed` false lets runs through until set.
+ */
 class LockedOnRunning extends RunRepository {
   failed = 0;
+  at = "update";
+  armed = true;
   update(id, patch) {
-    if (patch.status === "running" && this.failed === 0) {
+    if (this.at === "update" && this.armed && patch.status === "running" && this.failed === 0) {
       this.failed += 1;
       throw new Error("database is locked");
     }
     super.update(id, patch);
+  }
+  addEvent(runId, type, payload, agentId) {
+    if (
+      this.at === "event" &&
+      this.armed &&
+      type === "status_change" &&
+      payload?.to === "running" &&
+      this.failed === 0
+    ) {
+      this.failed += 1;
+      throw new Error("database is locked");
+    }
+    return super.addEvent(runId, type, payload, agentId);
   }
 }
 
@@ -74,6 +93,59 @@ test("a run whose `running` write fails is stopped and ends failed with the reas
     assert.equal(app.repo.listByStatus("pending").length, 0);
     assert.equal(app.repo.listByStatus("running").length, 0);
     assert.ok(run.reviewReasons.length > 0, "a failed run needs review");
+  } finally {
+    await app.cleanup();
+  }
+});
+
+test("a lock on the status_change event, after the row is stored running, still ends failed with the reason", async () => {
+  const app = makeApp();
+  app.repo.at = "event";
+  try {
+    await assert.rejects(app.manager.startRun({ prompt: "hang", projectPath: app.project }), /database is locked/);
+    assert.equal(app.repo.failed, 1);
+    const [row] = app.repo.listByStatus("running").concat(app.repo.listByStatus("failed"));
+    assert.ok(row, "the row was stored running before the event write failed");
+    const run = await app.manager.waitForRun(row.id, 10_000);
+    assert.equal(run.status, "failed", "running -> failed, not the cancelled outcome of the stopped child");
+    assert.match(
+      run.error,
+      /could not be marked running after the spawn \(database is locked\); the process was stopped/,
+    );
+    assert.equal(app.repo.listByStatus("running").length, 0);
+  } finally {
+    await app.cleanup();
+  }
+});
+
+test("a resume whose running write fails gives the claim back: the one retry is still available", async () => {
+  const app = makeApp();
+  app.repo.armed = false;
+  try {
+    const started = await app.manager.startRun({ prompt: "budget", projectPath: app.project });
+    const first = await app.manager.waitForRun(started.id, 10_000);
+    assert.equal(first.terminationReason, "budget_exhausted");
+
+    app.repo.armed = true;
+    await assert.rejects(app.manager.resumeRun({ runId: first.id }), /database is locked/);
+    const [stopped] = app.repo
+      .listByStatus("pending")
+      .concat(app.repo.listByStatus("failed"))
+      .filter((r) => r.id !== first.id);
+    assert.ok(stopped, "the resume row was inserted");
+    const ended = await app.manager.waitForRun(stopped.id, 10_000);
+    assert.equal(ended.status, "failed");
+    assert.equal(ended.resumedFromRunId, null, "claim released");
+    assert.equal(app.repo.resumedBy(first.id), null);
+    assert.ok(
+      app.repo
+        .events(stopped.id)
+        .some((e) => e.type === "note" && /did not start; the retry is still available/.test(e.payload.message)),
+    );
+
+    const retry = await app.manager.resumeRun({ runId: first.id });
+    assert.equal(retry.resumedFromRunId, first.id, "the next resume is not refused");
+    await app.manager.waitForRun(retry.id, 10_000);
   } finally {
     await app.cleanup();
   }
