@@ -605,6 +605,20 @@ export function mergeUsageByModel(a: UsageByModel | null, b: UsageByModel | null
 }
 
 /**
+ * `claude -p --resume <id>` for a session it does not have (verified with Claude Code 2.1.318,
+ * 2026-11-04): exit 1, no init line, no model call, one result line with subtype
+ * `error_during_execution`, `num_turns: 0` and `errors: ["No conversation found with session ID: <id>"]`.
+ */
+export function isSessionNotFound(result: ParsedResult | null): boolean {
+  if (!result || result.subtype !== "error_during_execution" || result.numTurns !== 0) return false;
+  const errors = (result.raw as { errors?: unknown } | null)?.errors;
+  return (
+    Array.isArray(errors) &&
+    errors.some((e) => typeof e === "string" && e.startsWith("No conversation found with session ID"))
+  );
+}
+
+/**
  * Only structured signals count: terminal reason, result subtype, stop reason, and
  * the result text *when the run is an error*. Scanning a successful run's prose
  * produced false positives (a reviewer writing "context" and "limitation" was

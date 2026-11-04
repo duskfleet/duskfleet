@@ -27,6 +27,7 @@ import {
 } from "../execution/types.js";
 import { captureRunDiff, headSha } from "../git/diff.js";
 import {
+  continueRefusal,
   isBudgetExhausted,
   isResumable,
   isTerminal,
@@ -72,6 +73,11 @@ export interface StartRunInput {
   scheduleId?: string;
   /** Internal: continue the session of an earlier run instead of starting a new one (see resumeRun). */
   resume?: { fromRun: Run; budgetUsd: number };
+  /**
+   * Internal: continue the session of `fromRun` (see continueRun) with this prompt. Only when the
+   * agent, project path and agent hash all match the original run; otherwise a fresh session plus a note.
+   */
+  continueFrom?: Run;
   /** `gate` for a schedule's gate agent (no wrap-up reserve, cost counted apart). Default `run`. */
   kind?: RunKind;
   /** Overrides the agent's max_budget_usd (gate runs). */
@@ -84,6 +90,21 @@ export interface ResumeRunInput {
   scheduleId?: string;
   /** Budget of the resumed run; defaults to the agent's resume_budget_usd, else its max_budget_usd. */
   budgetUsd?: number;
+}
+
+export interface ContinueRunInput {
+  /** The run whose Claude session to continue (`continueRefusal` says which ones can be). */
+  runId: string;
+  /** The new task, sent into the continued session. */
+  prompt: string;
+  /** Default: the original run's agent. A different agent fails the match check: fresh session plus a note. */
+  agentId?: string;
+  /** Default: the original run's project. A different directory fails the match check. */
+  projectId?: string;
+  projectPath?: string;
+  /** Default: the agent's model. */
+  model?: string;
+  scheduleId?: string;
 }
 
 /** What a resumed run is told. The session already holds the task and everything done so far. */
@@ -130,6 +151,8 @@ interface ActiveRun {
   lastEventWriteMs: number;
   /** Why the row could not be marked `running` after the spawn (the child was then stopped); null when it was. */
   startError: string | null;
+  /** The run whose session the main pass resumes (a continuation); cleared once it fell back to a fresh session. */
+  continuedFromRunId: string | null;
 }
 
 /** What the wrap-up pass is told. It must not start new work; it must leave a trace of where the run stopped. */
@@ -414,8 +437,17 @@ export class RunManager {
 
     const runId = randomUUID();
     const resume = input.resume ?? null;
+    if (resume && input.continueFrom) throw new Error("resume and continueFrom are mutually exclusive");
+    const agentHash = agentDefinitionHash(agent, projectPath);
+    // A continuation resumes the earlier session only when it is the same agent, in the same
+    // directory, with the same definition; anything else starts a fresh session (noted below).
+    const continueFrom = input.continueFrom ?? null;
+    const notContinued = continueFrom
+      ? (continueRefusal(continueFrom) ?? continueMismatch(continueFrom, agent.id, projectPath, agentHash))
+      : null;
+    const continued = continueFrom && !notContinued ? continueFrom : null;
     // A resumed run continues the earlier run's session under its own run id and log.
-    const sessionId = resume?.fromRun.claudeSessionId ?? randomUUID();
+    const sessionId = resume?.fromRun.claudeSessionId ?? continued?.claudeSessionId ?? randomUUID();
     const model = input.model ?? agent.model;
     const timeoutMinutes = agent.timeoutMinutes ?? this.config.claude.defaultTimeoutMinutes;
     const kind: RunKind = input.kind ?? "run";
@@ -437,7 +469,7 @@ export class RunManager {
       maxBudgetUsd: budget.main,
       logPath,
     };
-    if (resume) request.resumeSessionId = sessionId;
+    if (resume || continued) request.resumeSessionId = sessionId;
     if (model) request.model = model;
     if (agent.allowedTools) request.allowedTools = agent.allowedTools;
     if (agent.disallowedTools) request.disallowedTools = agent.disallowedTools;
@@ -511,9 +543,10 @@ export class RunManager {
       resumedFromRunId: resume?.fromRun.id ?? null,
       kind,
       billingType: null,
-      agentHash: agentDefinitionHash(agent, projectPath),
+      agentHash,
       claudeCodeVersion: null,
       lastEventAt: null,
+      continuedFromRunId: continued?.id ?? null,
     };
 
     // Insert first so that events emitted by the executor always find the row. For a resume the
@@ -537,6 +570,17 @@ export class RunManager {
         resumedFromRunId: resume.fromRun.id,
       });
     }
+    if (continued) {
+      this.runs.addEvent(runId, "note", {
+        message: `continues the session of run ${continued.id} (${continued.status})`,
+        continuedFromRunId: continued.id,
+      });
+    } else if (continueFrom) {
+      this.runs.addEvent(runId, "note", {
+        message: `started a fresh session: the session of run ${continueFrom.id} is not continued (${notContinued})`,
+        notContinuedFromRunId: continueFrom.id,
+      });
+    }
 
     // What the checkout looked like before the agent touched it; the diff event compares with it.
     const gitBase = headSha(projectPath);
@@ -558,6 +602,8 @@ export class RunManager {
     }
     if (resume)
       this.runs.addEvent(resume.fromRun.id, "note", { message: `resumed by run ${runId}`, resumedByRunId: runId });
+    if (continued)
+      this.runs.addEvent(continued.id, "note", { message: `continued by run ${runId}`, continuedByRunId: runId });
 
     this.active.set(runId, {
       handle,
@@ -577,6 +623,7 @@ export class RunManager {
       gitBase,
       lastEventWriteMs: 0,
       startError: null,
+      continuedFromRunId: continued?.id ?? null,
     });
     // Listen for the end before anything else can throw: a child nobody listens to runs to its
     // result and leaves the row open forever, invisible to the orphan sweep (its owner is alive).
@@ -660,6 +707,45 @@ export class RunManager {
     if (fromRun.modelRequested) startInput.model = fromRun.modelRequested;
     if (input.scheduleId) startInput.scheduleId = input.scheduleId;
     return this.startRun(startInput);
+  }
+
+  /**
+   * Start a run that continues the Claude session of an ended run (`run_agent { resume_run_id }`)
+   * with a new prompt. Refused for a run that cannot be continued (`continueRefusal`: not ended,
+   * cancelled, context exhausted, no session). Defaults to the original run's agent, project and
+   * requested model; when agent, project path or agent hash differ from the original run the
+   * session is not resumed: a fresh session plus a note. Not a retry: `retries` stays 0 and
+   * `on_failure: resume_once` is untouched.
+   */
+  async continueRun(input: ContinueRunInput): Promise<Run> {
+    const fromRun = this.runs.get(input.runId);
+    if (!fromRun) throw new Error(`run not found: ${input.runId}`);
+    const refusal = continueRefusal(fromRun);
+    if (refusal) throw new Error(`cannot continue: ${refusal}`);
+    const start: StartRunInput = {
+      prompt: input.prompt,
+      agentId: input.agentId ?? fromRun.agentId,
+      continueFrom: fromRun,
+    };
+    if (input.projectId) start.projectId = input.projectId;
+    else if (input.projectPath) start.projectPath = input.projectPath;
+    // The original run's project: by id when it had one (the registry path may be a symlink of the resolved one).
+    else if (fromRun.projectId) start.projectId = fromRun.projectId;
+    else start.projectPath = fromRun.projectPath;
+    const model = input.model ?? fromRun.modelRequested;
+    if (model) start.model = model;
+    if (input.scheduleId) start.scheduleId = input.scheduleId;
+    return this.startRun(start);
+  }
+
+  /** The schedule's most recent ended run (not a gate), whatever its outcome: what `continue: true` continues. */
+  lastEndedRunOfSchedule(scheduleId: string): Run | null {
+    return this.runs.lastEndedRunOfSchedule(scheduleId);
+  }
+
+  /** The runs that continued `runId`'s session, oldest first. */
+  continuedBy(runId: string): Run[] {
+    return this.runs.continuedBy(runId);
   }
 
   cancelRun(id: string): Run {
@@ -904,6 +990,16 @@ export class RunManager {
       this.onFinished(runId, result, [phaseOf("main", result, null)]);
       return;
     }
+    if (
+      active.phase === "main" &&
+      active.continuedFromRunId &&
+      result.sessionNotFound &&
+      !active.cancelRequested &&
+      !isTerminal(this.runs.get(runId)?.status ?? "failed") &&
+      this.startFreshSession(runId, active)
+    ) {
+      return;
+    }
     const budgetUsd = active.phase === "main" ? (active.request.maxBudgetUsd ?? null) : active.reserveUsd;
     active.phases.push(phaseOf(active.phase, result, budgetUsd));
     const runOpen = !isTerminal(this.runs.get(runId)?.status ?? "failed");
@@ -932,6 +1028,43 @@ export class RunManager {
       return;
     }
     this.onFinished(runId, result, active.phases);
+  }
+
+  /**
+   * A continuation whose session Claude Code does not know (`sessionNotFound`: it stopped before
+   * any model call, cost 0) falls back to a fresh session with the same prompt and envelope, once,
+   * and says so in a note. The failed attempt is not a phase of the run. Returns false when nothing
+   * could be started (the run then closes on the failed attempt).
+   */
+  private startFreshSession(runId: string, active: ActiveRun): boolean {
+    const fromRunId = active.continuedFromRunId;
+    const unknown = active.request.resumeSessionId;
+    active.continuedFromRunId = null;
+    const { resumeSessionId: _resumed, ...rest } = active.request;
+    const request: ExecutionRequest = { ...rest, sessionId: randomUUID() };
+    const couldNotStart = (reason: string) => {
+      this.runs.addEvent(runId, "note", {
+        message: `the session of run ${fromRunId} is unknown to Claude Code and a fresh session could not start: ${reason}`,
+      });
+      return false;
+    };
+    let handle: ExecutionHandle;
+    try {
+      handle = this.executor.execute(request, (event) => this.onEvent(runId, event));
+    } catch (err) {
+      return couldNotStart(err instanceof Error ? err.message : String(err));
+    }
+    if (handle.pid === null) return couldNotStart("the process did not spawn (no pid)");
+    active.handle = handle;
+    active.request = request;
+    this.runs.update(runId, { claudeSessionId: request.sessionId, continuedFromRunId: null, command: handle.command });
+    this.runs.addEvent(runId, "note", {
+      message: `session ${unknown} of run ${fromRunId} is unknown to Claude Code (No conversation found): started a fresh session ${request.sessionId} with the same prompt`,
+      notContinuedFromRunId: fromRunId,
+    });
+    log.warn("continued session unknown; fresh session started", { runId, fromRunId, pid: handle.pid });
+    void handle.done.then((result) => this.onPhaseFinished(runId, result));
+    return true;
   }
 
   /** Resume the session with the reserve budget. Returns false when nothing could be started (the run then closes on the main result). */
@@ -1235,6 +1368,24 @@ export class RunManager {
         break; // assistant_text and stderr go to the log file only
     }
   }
+}
+
+/**
+ * Why a continuation of `from` must start a fresh session: a different agent, project directory or
+ * agent definition (hash) than the original run. Null when all three match.
+ */
+export function continueMismatch(
+  from: Pick<Run, "agentId" | "projectPath" | "agentHash">,
+  agentId: string,
+  projectPath: string,
+  agentHash: string | null,
+): string | null {
+  const diffs: string[] = [];
+  if (from.agentId !== agentId) diffs.push(`agent ${from.agentId}, now ${agentId}`);
+  if (from.projectPath !== projectPath) diffs.push(`project path ${from.projectPath}, now ${projectPath}`);
+  if (from.agentHash === null) diffs.push("the original run recorded no agent hash");
+  else if (from.agentHash !== agentHash) diffs.push("the agent definition changed since");
+  return diffs.length ? diffs.join("; ") : null;
 }
 
 function phaseOf(phase: RunPhase["phase"], r: ExecutionResult, budgetUsd: number | null): RunPhase {

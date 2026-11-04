@@ -41,7 +41,8 @@
  *
  * With `--resume <id>` (the wrap-up pass) the prompt is Duskfleet's fixed text, so the
  * behaviour comes from FAKE_CLAUDE_RESUME instead: unset = a short successful pass that
- * says where it stopped; "budget" = exhausts the reserve too; "hang" = never ends.
+ * says where it stopped; "budget" = exhausts the reserve too; "hang" = never ends;
+ * "unknown-session" = Claude Code has no such session (the verified error_during_execution shape).
  */
 import { spawn } from "node:child_process";
 import { appendFileSync, readFileSync, rmSync, writeFileSync } from "node:fs";
@@ -98,6 +99,30 @@ const stdinPrompt = readFileSync(0, "utf8").trim() || "ok";
 const prompt = process.env.FAKE_CLAUDE_MODE ?? stdinPrompt;
 
 const out = (o) => process.stdout.write(JSON.stringify(o) + "\n");
+
+if (resumeIdx >= 0 && process.env.FAKE_CLAUDE_RESUME === "unknown-session") {
+  // `--resume <uuid>` of a session Claude Code does not have, verified with 2.1.318 on 2026-11-04:
+  // no init line, no model call, one result line, the reason on stderr too, exit 1.
+  process.stderr.write(`No conversation found with session ID: ${sessionId}\n`);
+  out({
+    type: "result",
+    subtype: "error_during_execution",
+    duration_ms: 0,
+    duration_api_ms: 0,
+    is_error: true,
+    num_turns: 0,
+    stop_reason: null,
+    session_id: sessionId,
+    total_cost_usd: 0,
+    usage: { input_tokens: 0, cache_creation_input_tokens: 0, cache_read_input_tokens: 0, output_tokens: 0 },
+    modelUsage: {},
+    permission_denials: [],
+    uuid: "56c65b99-9206-4818-892e-f869c342803e",
+    errors: [`No conversation found with session ID: ${sessionId}`],
+    result_index: 0,
+  });
+  process.exit(1);
+}
 
 if (prompt === "edit") {
   // Edits the project checkout like an agent would (for the diff event), then behaves like "ok".
