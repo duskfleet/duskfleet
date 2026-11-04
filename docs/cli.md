@@ -25,7 +25,7 @@ npx duskfleet projects
 npx duskfleet schedules
 npx duskfleet schedules run-now "pr review"              # schedule id or name; the lease holder fires it on its next tick
 npx duskfleet budgets                                    # monthly budgets with this month's spend and state
-npx duskfleet budgets set project my-app --amount 50 [--warn 80] [--no-hard-stop]   # or: global | agent <id>
+npx duskfleet budgets set project my-app --amount 50 [--warn 80] [--no-hard-stop] [--unpriced count|allow]   # or: global | agent <id>
 npx duskfleet budgets delete <budget id>
 npx duskfleet dashboard [--port 4777] [--no-open] [--no-install]   # install @duskfleet/web on demand, start it (see dashboard.md)
 npx duskfleet serve                                      # long-running scheduler process

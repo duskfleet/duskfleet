@@ -164,7 +164,11 @@ outcome is recorded on the firing: `lastOutcome` / `lastError` in `list_schedule
   ([daily caps](agents.md#daily-caps)).
 - **`skipped_budget`**: a hard-stop monthly budget covering the run is spent; the scope's
   schedules are paused too and stay paused. Fix: raise the budget, then resume the schedules by
-  hand ([monthly budgets](agents.md#monthly-budgets)).
+  hand ([monthly budgets](agents.md#monthly-budgets)). When the message says "standing in for
+  N unpriced run(s)", runs without a recorded cost (crashes, timeouts, cancels) fill the budget
+  at their stand-in: `duskfleet doctor` lists them under `unpricedRuns`; set a `max_budget_usd`
+  on those agents, or `unpriced_policy: allow` on the budget
+  ([unknown costs fail closed](agents.md#unknown-costs-fail-closed)).
 - **`skipped_gate`**: the schedule's gate found no work; its reason is `lastError`
   ([gates](schedules.md#gates-skip-cheaply-when-there-is-no-work)).
 - **`auto_paused`**: the last `scheduler.auto_pause_after` runs were all empty or needed

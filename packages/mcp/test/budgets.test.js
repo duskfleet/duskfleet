@@ -2,7 +2,8 @@
  * Monthly budgets per scope (global / agent / project): validation and one budget per scope,
  * spend counted from this UTC month's runs, a spent hard-stop budget refuses runs with
  * BudgetError and pauses the schedules of its scope (tick recorded as skipped_budget), and a
- * warn-only budget never refuses.
+ * warn-only budget never refuses. Runs of unknown cost (cost_status unpriced, or still running)
+ * count at a stand-in under unpriced_policy: count, and not at all under allow.
  */
 import assert from "node:assert/strict";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
@@ -48,6 +49,10 @@ function setup() {
   writeFileSync(path.join(configDir, "agents", "coder.md"), `---\nproject: demo\n---\nBe brief.\n`);
   writeFileSync(path.join(configDir, "agents", "helper.md"), `---\nproject: demo\n---\nHelp.\n`);
   writeFileSync(path.join(configDir, "agents", "other.md"), `---\nproject: side\n---\nElsewhere.\n`);
+  writeFileSync(
+    path.join(configDir, "agents", "capped.md"),
+    `---\nproject: side\nmax_budget_usd: 0.25\n---\nCapped.\n`,
+  );
   const config = loadConfig(configDir);
   const db = openDatabase(config.dataDir);
   const runs = new RunManager(
@@ -57,8 +62,8 @@ function setup() {
   );
   const repo = new ScheduleRepository(db);
   const scheduler = new Scheduler(repo, runs, { tickMs: 1000, holder: "A" });
-  const run = async (agentId) => {
-    const r = await runs.startRun({ prompt: "ok", agentId });
+  const run = async (agentId, prompt = "ok") => {
+    const r = await runs.startRun({ prompt, agentId });
     return runs.waitForRun(r.id, 15_000);
   };
   const close = async () => {
@@ -184,6 +189,140 @@ test("a spent global budget refuses every run; a warn-only (hard_stop: false) bu
     t.runs.deleteBudget(budget.id);
     assert.equal(t.runs.budgetReason({ agentId: "coder" }), null, "no budget, no refusal");
     assert.equal(t.repo.get(s.id).enabled, false, "deleting the budget does not resume what it paused");
+  } finally {
+    await t.close();
+  }
+});
+
+test("cost_status is settled with the run: reported / estimated by billing type, unpriced without a result", async () => {
+  const t = setup();
+  try {
+    const priced = await t.run("coder");
+    assert.equal(priced.costUsd, 0.0123);
+    assert.equal(priced.costStatus, priced.billingType === "subscription" ? "estimated" : "reported");
+    const crashed = await t.run("coder", "crash");
+    assert.equal(crashed.costUsd, null);
+    assert.equal(crashed.costStatus, "unpriced", "no result line: unpriced");
+    assert.throws(
+      () => t.runs.setBudget({ scope: "global", amountUsd: 1, unpricedPolicy: "ignore" }),
+      /unpriced_policy must be one of count, allow/,
+    );
+    assert.equal(t.runs.setBudget({ scope: "global", amountUsd: 1 }).unpricedPolicy, "count", "count by default");
+  } finally {
+    await t.close();
+  }
+});
+
+test("an unpriced run counts as its agent's max_budget_usd, or as the whole remaining budget; allow ignores it", async () => {
+  const t = setup();
+  try {
+    const capped = await t.run("capped", "crash");
+    assert.equal(capped.costStatus, "unpriced");
+    t.runs.setBudget({ scope: "project", scopeId: "side", amountUsd: 1 });
+    let [s] = t.runs.budgetStatuses();
+    assert.equal(s.spentUsd, 0);
+    assert.equal(s.unpricedRuns, 1);
+    assert.equal(s.standInUsd, 0.25, "the agent's max_budget_usd stands in");
+    assert.equal(s.countedUsd, 0.25);
+    assert.equal(s.state, "ok");
+
+    const sched = t.scheduler.create({ name: "other hourly", agentId: "other", prompt: "ok", cron: "0 * * * *" });
+    await t.run("other", "crash"); // no max_budget_usd: the whole remaining budget
+    [s] = t.runs.budgetStatuses();
+    assert.equal(s.unpricedRuns, 2);
+    assert.equal(s.countedUsd, 1);
+    assert.equal(s.state, "over");
+    assert.equal(s.overByRunning, false);
+    await assert.rejects(t.runs.startRun({ prompt: "ok", agentId: "other" }), (err) => {
+      assert.ok(err instanceof BudgetError);
+      assert.match(
+        err.message,
+        /\$1 counted of \$1 this month, UTC: \$0 recorded plus \$1 standing in for 2 unpriced run/,
+      );
+      assert.match(err.message, /or set unpriced_policy: allow on it/);
+      return true;
+    });
+    assert.equal(t.repo.get(sched.id).enabled, false, "settled over: the scope's schedules are paused");
+
+    const unpriced = t.runs.unpricedRunsByBudget();
+    assert.equal(unpriced.length, 1, "doctor lists the budget with unpriced runs");
+    assert.deepEqual(
+      unpriced[0].runs.map((r) => [r.agentId, r.standInUsd]),
+      [
+        ["capped", 0.25],
+        ["other", null],
+      ],
+    );
+
+    t.runs.setBudget({ scope: "project", scopeId: "side", amountUsd: 1, unpricedPolicy: "allow" });
+    [s] = t.runs.budgetStatuses();
+    assert.equal(s.unpricedRuns, 2, "still reported");
+    assert.equal(s.standInUsd, 0);
+    assert.equal(s.state, "ok", "allow: unknown costs do not count");
+    assert.equal((await t.run("other")).status, "completed");
+  } finally {
+    await t.close();
+  }
+});
+
+test("a running run counts at its stand-in: refused while it runs, without pausing schedules", async () => {
+  const t = setup();
+  try {
+    const sched = t.scheduler.create({ name: "other hourly", agentId: "other", prompt: "ok", cron: "0 * * * *" });
+    t.runs.setBudget({ scope: "project", scopeId: "side", amountUsd: 0.2 });
+    const going = await t.runs.startRun({ prompt: "hang", agentId: "capped" });
+    let [s] = t.runs.budgetStatuses();
+    assert.equal(s.runningRuns, 1);
+    assert.equal(s.standInUsd, 0.25);
+    assert.equal(s.state, "over");
+    assert.equal(s.overByRunning, true);
+    await assert.rejects(t.runs.startRun({ prompt: "ok", agentId: "other" }), (err) => {
+      assert.ok(err instanceof BudgetError);
+      assert.match(err.message, /hard_stop refuses new runs until they end/);
+      return true;
+    });
+    assert.equal(t.repo.get(sched.id).enabled, true, "over only by a running run: nothing paused");
+    t.runs.cancelRun(going.id);
+    await t.runs.waitForRun(going.id, 15_000);
+    [s] = t.runs.budgetStatuses();
+    assert.equal(s.runningRuns, 0);
+    assert.equal(s.unpricedRuns, 1, "cancelled without a result: unpriced");
+  } finally {
+    await t.close();
+  }
+});
+
+test("migration 23 backfills cost_status of finished runs; old unpriced rows of the month count", async () => {
+  const t = setup();
+  try {
+    const priced = await t.run("other");
+    const crashed = await t.run("other", "crash");
+    t.db.prepare("UPDATE runs SET billing_type = 'subscription' WHERE id = ?").run(priced.id);
+    // Back to schema 22, as an upgraded installation would be.
+    t.db.exec(
+      "ALTER TABLE runs DROP COLUMN cost_status; ALTER TABLE budgets DROP COLUMN unpriced_policy; DELETE FROM schema_migrations WHERE version = 23;",
+    );
+    const dataDir = path.dirname(t.db.prepare("PRAGMA database_list").get().file);
+    const db = openDatabase(dataDir);
+    try {
+      const rows = new RunRepository(db);
+      assert.equal(rows.get(priced.id).costStatus, "estimated", "subscription: estimated");
+      assert.equal(rows.get(crashed.id).costStatus, "unpriced");
+      rows.budgets.upsert({
+        scope: "global",
+        scopeId: null,
+        amountUsd: 5,
+        warnPercent: 80,
+        hardStop: true,
+        unpricedPolicy: "count",
+      });
+      assert.deepEqual(
+        rows.budgets.unknownCostSince({ scope: "global", scopeId: null }, utcMonthStart(new Date())).map((r) => r.id),
+        [crashed.id],
+      );
+    } finally {
+      db.close();
+    }
   } finally {
     await t.close();
   }

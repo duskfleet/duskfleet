@@ -202,9 +202,23 @@ export default async function RunsPage({ searchParams }: { searchParams: Promise
                 {label}: {fmtCost(b.spentUsd)} of {fmtCost(b.amountUsd)} {used} this month ({b.percent}%).
               </strong>{" "}
               {words.basis === "mixed" && <>{fmtSplit(b.cost, "mixed")}. </>}
+              {b.standInUsd > 0 && (
+                <>
+                  Counted {fmtCost(b.countedUsd)}: {fmtCost(b.standInUsd)} stands in for{" "}
+                  {[
+                    b.unpricedRuns ? `${b.unpricedRuns} run(s) without a recorded cost` : "",
+                    b.runningRuns ? `${b.runningRuns} run(s) still going` : "",
+                  ]
+                    .filter(Boolean)
+                    .join(" and ")}{" "}
+                  (unpriced_policy: count; doctor lists them).{" "}
+                </>
+              )}
               {spent
                 ? b.hardStop
-                  ? `${over}: new runs in this scope are refused and its schedules were paused until the month turns (UTC) or the budget is raised.`
+                  ? b.overByRunning
+                    ? `${over} counting the runs still going: new runs in this scope are refused until they end; no schedule was paused.`
+                    : `${over}: new runs in this scope are refused and its schedules were paused until the month turns (UTC) or the budget is raised.`
                   : `${over}; hard_stop is off, so runs still start.`
                 : `Past its ${b.warnPercent}% warning threshold.`}
             </div>

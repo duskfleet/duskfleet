@@ -152,7 +152,13 @@ export {
   budgetStatus,
   budgetStatuses,
   budgetStatusOf,
+  DEFAULT_UNPRICED_POLICY,
   DEFAULT_WARN_PERCENT,
+  UNPRICED_POLICIES,
+  type UnknownCostRow,
+  type UnknownCostRun,
+  type UnpricedPolicy,
+  unknownCostRuns,
   utcMonthStart,
   validateBudgetInput,
 } from "./orchestration/budget.js";

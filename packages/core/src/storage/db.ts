@@ -324,6 +324,23 @@ const MIGRATIONS: ReadonlyArray<{ version: number; sql: string; backfill?: (db: 
       ALTER TABLE schedules ADD COLUMN deferred_reason TEXT;
     `,
   },
+  {
+    // Fail closed on unknown cost: how a finished run's cost_usd is known (reported = API key or
+    // unknown billing type, estimated = subscription, unpriced = no cost; NULL while it runs) and
+    // whether a budget counts unpriced and running runs at a stand-in amount (count, the default)
+    // or ignores them (allow). Finished rows are backfilled; old unpriced rows of the month count.
+    version: 23,
+    sql: `
+      ALTER TABLE runs ADD COLUMN cost_status TEXT;
+      ALTER TABLE budgets ADD COLUMN unpriced_policy TEXT NOT NULL DEFAULT 'count' CHECK (unpriced_policy IN ('count', 'allow'));
+      UPDATE runs SET cost_status = CASE
+          WHEN cost_usd IS NULL THEN 'unpriced'
+          WHEN billing_type = 'subscription' THEN 'estimated'
+          ELSE 'reported'
+        END
+        WHERE status IN ('completed', 'failed', 'cancelled', 'timed_out');
+    `,
+  },
 ];
 
 /**

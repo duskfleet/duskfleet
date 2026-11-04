@@ -16,7 +16,7 @@ import { fileURLToPath } from "node:url";
  *   duskfleet repair-subagents # backfill subagent rows of finished runs from their logs
  *   duskfleet schedules
  *   duskfleet schedules run-now <id or name>   # stamp run_requested_at; the lease holder fires it next tick
- *   duskfleet budgets [set <global | agent <id> | project <id>> --amount <usd> [--warn <pct>] [--no-hard-stop] | delete <id>]
+ *   duskfleet budgets [set <global | agent <id> | project <id>> --amount <usd> [--warn <pct>] [--no-hard-stop] [--unpriced count|allow] | delete <id>]
  *   duskfleet tools           # MCP tool catalogue (names, descriptions, input schemas)
  *   duskfleet dashboard [--port <n>] [--no-open] [--no-install]   # install @duskfleet/web on demand, start it
  *   duskfleet serve            # long-running scheduler process (what the service runs)
@@ -32,6 +32,7 @@ import { parseArgs } from "node:util";
 import {
   assertAgentIdFree,
   type BudgetInput,
+  budgetLabel,
   ConfigNotFoundError,
   costTotals,
   costTotalsLine,
@@ -111,7 +112,7 @@ function usage(asked = false): never {
       "  duskfleet schedules",
       "  duskfleet schedules run-now <schedule id or name>",
       "  duskfleet budgets",
-      "  duskfleet budgets set <global | agent <id> | project <id>> --amount <usd> [--warn <percent>] [--no-hard-stop]",
+      "  duskfleet budgets set <global | agent <id> | project <id>> --amount <usd> [--warn <percent>] [--no-hard-stop] [--unpriced count|allow]",
       "  duskfleet budgets delete <budget id>",
       "  duskfleet tools",
       "  duskfleet dashboard [--port 4777] [--no-open] [--no-install]",
@@ -642,6 +643,22 @@ async function main(): Promise<void> {
         dataSource: app.config.dataSource,
         agents: [...app.config.agents.keys()],
         scheduler,
+        // Runs of this UTC month that ended without a cost, per budget: under unpriced_policy count
+        // each stands in at its agent's max_budget_usd (or the whole remaining budget).
+        unpricedRuns: app.runs.unpricedRunsByBudget().map(({ budget, runs }) => ({
+          budget: budgetLabel(budget),
+          budgetId: budget.id,
+          unpricedPolicy: budget.unpricedPolicy,
+          state: budget.state,
+          spentUsd: budget.spentUsd,
+          countedUsd: budget.countedUsd,
+          amountUsd: budget.amountUsd,
+          runs: runs.map((r) => ({ id: r.id, agentId: r.agentId, standInUsd: r.standInUsd })),
+          advice:
+            budget.unpricedPolicy === "allow"
+              ? `unpriced_policy is allow: these ${runs.length} run(s) do not count`
+              : `${runs.length} run(s) without a recorded cost count against the ${budgetLabel(budget)} budget (a missing max_budget_usd counts as the whole remaining budget); set unpriced_policy: allow on the budget to ignore them`,
+        })),
         // Rows whose owning process was gone, failed by this process's startup sweep: `running`
         // ones (orphans) and `pending` ones (the process died between the insert and the spawn).
         orphans: {
@@ -771,6 +788,7 @@ async function main(): Promise<void> {
             amount: { type: "string" },
             warn: { type: "string" },
             "no-hard-stop": { type: "boolean", default: false },
+            unpriced: { type: "string" },
           },
         });
         const [scope, scopeId] = positionals;
@@ -781,6 +799,7 @@ async function main(): Promise<void> {
         if (scopeId) input.scopeId = scopeId;
         if (values.warn) input.warnPercent = Number(values.warn);
         if (values["no-hard-stop"]) input.hardStop = false;
+        if (values.unpriced) input.unpricedPolicy = values.unpriced as NonNullable<BudgetInput["unpricedPolicy"]>;
         print(app.runs.setBudget(input));
         return done();
       }

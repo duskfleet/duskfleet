@@ -185,6 +185,7 @@ npm run cli -- budgets
 | `amount_usd` | spend allowed per UTC month, compared with the recorded `cost_usd` of the scope's runs created since the 1st at 00:00 UTC (gate runs included) |
 | `warn_percent` | default 80: from this share of `amount_usd` the budget is `warn` |
 | `hard_stop` | default true: once the spend reaches `amount_usd` (`over`), new runs in the scope are refused and its schedules paused. `false` = warn only, runs still start |
+| `unpriced_policy` | default `count`: runs of unknown cost count at a stand-in amount (below). `allow` = only recorded costs count. CLI `--unpriced count\|allow` |
 
 Every budget covering a run (global, the agent's, the project's) is checked in `startRun`,
 after the busy guards and the daily caps, before anything is spawned. A spent hard-stop budget
@@ -192,12 +193,38 @@ throws a `BudgetError` (message `budget: the <scope> budget is spent ...`) and p
 enabled schedule of the scope (global: all of them; agent: that agent's; project: the schedules
 that run on it, by their own `project_id` or their agent's binding). A schedule tick refused
 this way is `skipped_budget`. Paused schedules stay paused when the month turns or the budget
-is raised or deleted: resume them by hand. A run in progress is not stopped, so a month can end
-above the amount by at most one run's `max_budget_usd` per active run.
+is raised or deleted: resume them by hand. A run in progress is not stopped, but it counts while
+it runs (below), so parallel runs cannot overshoot a budget their stand-ins already fill.
+
+### Unknown costs fail closed
+
+Every finished run records how its cost is known, `costStatus` (`cost_status`, migration 23):
+`reported` (Claude Code's `total_cost_usd` on an API key, or an unknown billing type),
+`estimated` (the same number on a subscription: reported, not charged) or `unpriced` (no cost:
+the run ended without a `result` line, e.g. a crash, a timeout or a cancel). There is no price
+table. While a run is pending or running its `costStatus` is null.
+
+Under `unpriced_policy: count` (the default) a budget counts every run of its scope this month
+whose cost is unknown, an `unpriced` one or one still running, at a **stand-in**: the agent's
+`max_budget_usd` when it sets one, otherwise **the whole remaining budget** (without a per-run
+cap the worst case is unbounded, so a hard-stop budget refuses new runs). A running run is
+settled by its result. A run that never started (refused at spawn, a pending row swept as an
+orphan) could not spend anything and is not counted. A budget that is `over` only because of
+the stand-ins of runs still going (`overByRunning`) refuses new runs but pauses no schedule:
+it settles when those runs end.
+
+The migration backfills the finished runs (`reported` / `estimated` by their stored billing
+type, `unpriced` where `cost_usd` is NULL), and the unpriced rows of the current month **do
+count** after the upgrade: that is the point of failing closed. `duskfleet doctor` lists them
+per budget (`unpricedRuns`: run id, agent, stand-in) so a blocked budget is explainable; the
+escape hatch is `unpriced_policy: allow` on that budget
+(`npm run cli -- budgets set global --amount 200 --unpriced allow`).
 
 The dashboard's **Runs** page shows a banner for each budget at `warn` (amber) or `over`
-(coral when it stops runs); `list_budgets` and `duskfleet budgets` report `spentUsd`,
-`percent`, `state` (`ok` \| `warn` \| `over`) and `periodStart` for every budget.
+(coral when it stops runs); `list_budgets` and `duskfleet budgets` report `spentUsd` (recorded
+cost), `unpricedRuns`, `runningRuns`, `standInUsd`, `countedUsd` (spent plus stand-ins: what
+`percent` and `state` compare with `amount_usd`), `percent`, `state` (`ok` \| `warn` \| `over`),
+`overByRunning`, `unpricedPolicy` and `periodStart` for every budget.
 
 ## Resume once on failure
 

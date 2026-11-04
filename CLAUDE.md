@@ -183,6 +183,10 @@ npm workspaces, one `config/` and one SQLite database shared by three deliverabl
   Monthly budgets (`budgets` table, migration 18; scope global / agent / project, UTC month) come
   last: a spent `hard_stop` one throws `BudgetError` (`orchestration/budget.ts`), pauses the
   scope's schedules and the tick is `skipped_budget`; nothing resumes them automatically.
+  Unknown costs fail closed (migration 23): `runs.cost_status` (reported / estimated / unpriced,
+  set at the terminal transition, `costStatusOf`), and under `budgets.unpriced_policy: count` an
+  unpriced or running run counts as its agent's `max_budget_usd`, else as the whole remaining
+  budget; over only by running runs (`overByRunning`) refuses without pausing schedules.
 - **Subagents are rows, not prose** (`run_agents`, migration 5): the parser folds Claude Code's
   `task_started` / `task_notification` lines and the `agent_id` of nested messages into one
   `SubagentRecord` per Agent call; `RunManager` writes them on `subagent_start` / `subagent_end`

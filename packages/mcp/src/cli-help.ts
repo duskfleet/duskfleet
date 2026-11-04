@@ -91,13 +91,14 @@ export const COMMAND_HELP: Readonly<Record<string, CommandHelp>> = {
   budgets: {
     usage: [
       "duskfleet budgets",
-      "duskfleet budgets set <global | agent <id> | project <id>> --amount <usd> [--warn <percent>] [--no-hard-stop]",
+      "duskfleet budgets set <global | agent <id> | project <id>> --amount <usd> [--warn <percent>] [--no-hard-stop] [--unpriced count|allow]",
       "duskfleet budgets delete <budget id>",
     ],
     options: [
       "--amount <usd>       monthly amount (UTC month)",
       "--warn <percent>     warn at this share of the amount",
       "--no-hard-stop       warn only, never pause the scope's schedules",
+      "--unpriced <policy>  count (default): runs of unknown cost count at a stand-in; allow: ignore them",
     ],
     example: "duskfleet budgets set project my-app --amount 50 --warn 80",
     doc: `${DOCS}/schedules.md`,

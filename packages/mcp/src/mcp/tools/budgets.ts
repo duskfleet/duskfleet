@@ -1,4 +1,4 @@
-import { BUDGET_SCOPES, type BudgetInput } from "@duskfleet/core";
+import { BUDGET_SCOPES, type BudgetInput, UNPRICED_POLICIES } from "@duskfleet/core";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { errorResult, jsonResult, type ToolContext } from "../server.js";
@@ -10,8 +10,12 @@ export function registerBudgetTools(server: McpServer, ctx: ToolContext): void {
       title: "List budgets",
       description:
         "List the monthly budgets (one per scope: global, agent <id>, project <id>; calendar month in UTC) with this month's " +
-        "spentUsd (recorded cost of the scope's runs, gate runs included), percent and state: ok, warn (at or past warn_percent) " +
-        "or over (spend reached amount_usd). A spent hard_stop budget refuses new runs in its scope and pauses its schedules (skipped_budget).",
+        "spentUsd (recorded cost of the scope's runs, gate runs included), the runs of unknown cost (unpricedRuns: ended without " +
+        "a cost; runningRuns: not settled yet) and the standInUsd they count for, countedUsd (spentUsd + standInUsd), percent and " +
+        "state: ok, warn (at or past warn_percent) or over (countedUsd reached amount_usd). Under unpriced_policy count (default) " +
+        "an unknown run counts as its agent's max_budget_usd, or as the whole remaining budget when the agent sets none. A spent " +
+        "hard_stop budget refuses new runs in its scope and pauses its schedules (skipped_budget); over only by running runs " +
+        "(overByRunning) it refuses without pausing.",
       inputSchema: {},
     },
     async () => jsonResult({ budgets: ctx.runs.budgetStatuses() }),
@@ -46,6 +50,13 @@ export function registerBudgetTools(server: McpServer, ctx: ToolContext): void {
           .boolean()
           .optional()
           .describe("Default true: refuse runs and pause the scope's schedules once spent. false = warn only"),
+        unpriced_policy: z
+          .enum(UNPRICED_POLICIES)
+          .optional()
+          .describe(
+            "count (default, fail closed): a run with no recorded cost, or still running, counts as its agent's max_budget_usd, " +
+              "or as the whole remaining budget when the agent sets none. allow: only recorded costs count",
+          ),
       },
     },
     async (args) => {
@@ -54,6 +65,7 @@ export function registerBudgetTools(server: McpServer, ctx: ToolContext): void {
         if (args.scope_id !== undefined) input.scopeId = args.scope_id;
         if (args.warn_percent !== undefined) input.warnPercent = args.warn_percent;
         if (args.hard_stop !== undefined) input.hardStop = args.hard_stop;
+        if (args.unpriced_policy !== undefined) input.unpricedPolicy = args.unpriced_policy;
         return jsonResult({ set: true, budget: ctx.runs.setBudget(input) });
       } catch (err) {
         return errorResult(err);

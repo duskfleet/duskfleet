@@ -8,6 +8,10 @@ All notable changes to Duskfleet are listed here. The format follows
 
 ## [Unreleased]
 
+### Changed
+
+- Budgets fail closed on unknown run cost: every finished run records `cost_status` (`reported`, `estimated` on a subscription, `unpriced` without a cost; migration 23), and under the new per-budget `unpriced_policy: count` (default) an unpriced or still running run counts as its agent's `max_budget_usd`, or as the whole remaining budget when the agent sets none. **Upgrade note:** existing finished runs are backfilled and the unpriced ones of the current month count at once, so a hard-stop budget may refuse runs right after the upgrade; `duskfleet doctor` lists them per budget, and `unpriced_policy: allow` (`budgets set ... --unpriced allow`, `set_budget`) ignores them ([#58](https://github.com/duskfleet/duskfleet/issues/58)).
+
 ## [0.1.0] - 2026-10-31
 
 First public release. Duskfleet runs Claude Code agents unattended in your projects, from an MCP

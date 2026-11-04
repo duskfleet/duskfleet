@@ -4,7 +4,7 @@
  */
 
 import type { DeniedTool, RunMcpInfo, SubagentRecord, UsageByModel } from "../execution/types.js";
-import { runCostLabel } from "./billing.js";
+import { type CostStatus, runCostLabel } from "./billing.js";
 import {
   CLAUDE_NOT_FOUND_FIX,
   type FailureCode,
@@ -134,6 +134,13 @@ export interface Run {
    * cost is what Claude Code reports, not billed). Null until the run spawns, and for older rows.
    */
   billingType: BillingType | null;
+  /**
+   * How `costUsd` is known (migration 23, `costStatusOf`): `reported` (API key), `estimated`
+   * (subscription: reported, not charged) or `unpriced` (no cost). Set by `RunManager` at the
+   * terminal transition, null while pending or running. Budgets count an unpriced run at a
+   * stand-in amount unless the budget sets `unpriced_policy: allow`.
+   */
+  costStatus?: CostStatus | null;
   /**
    * Eval bundle (migration 19), with `modelUsed`: what exactly ran, so runs compare like with like.
    * `agentHash` is `agentDefinitionHash` at start time (spec + project agent file of a link);
@@ -392,6 +399,8 @@ export function summarizeRun(run: Run) {
     billingType: run.billingType,
     /** What costUsd is: "Cost" (billed on an API key) or "API value" (subscription or unknown). */
     costLabel: runCostLabel(run.billingType),
+    /** reported | estimated | unpriced once the run ended; null while it runs. */
+    costStatus: run.costStatus ?? null,
     numTurns: run.numTurns,
     toolCalls: run.toolCalls,
     deniedTools: run.deniedTools,

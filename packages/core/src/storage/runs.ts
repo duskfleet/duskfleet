@@ -1,6 +1,7 @@
 import type { DatabaseSync } from "node:sqlite";
 import type { DeniedTool, RunMcpInfo, SubagentRecord, SubagentStatus, UsageByModel } from "../execution/types.js";
 import type { RunDiff } from "../git/diff.js";
+import { COST_STATUSES, type CostStatus } from "../observability/billing.js";
 import { FAILURE_CODES, FAILURE_FAMILY, type FailureCode, type FailureDetail } from "../observability/failure.js";
 import type {
   ReviewReason,
@@ -58,6 +59,7 @@ interface RunRow {
   resumed_from_run_id: string | null;
   kind: string | null;
   billing_type: string | null;
+  cost_status: string | null;
   error_code: string | null;
   error_family: string | null;
   error_detail_json: string | null;
@@ -111,6 +113,9 @@ function rowToRun(r: RunRow): Run {
     resumedFromRunId: r.resumed_from_run_id ?? null,
     kind: r.kind === "gate" ? "gate" : "run",
     billingType: r.billing_type === "api" || r.billing_type === "subscription" ? r.billing_type : null,
+    costStatus: (COST_STATUSES as readonly string[]).includes(r.cost_status ?? "")
+      ? (r.cost_status as CostStatus)
+      : null,
     agentHash: r.agent_hash ?? null,
     claudeCodeVersion: r.claude_code_version ?? null,
     lastEventAt: r.last_event_at ?? null,
@@ -222,6 +227,7 @@ export type RunPatch = Partial<
     | "phases"
     | "reviewReasons"
     | "billingType"
+    | "costStatus"
     | "claudeCodeVersion"
     | "lastEventAt"
   >
@@ -261,6 +267,7 @@ const PATCH_COLUMNS: Record<keyof RunPatch, string> = {
   phases: "phases_json",
   reviewReasons: "review_reasons_json",
   billingType: "billing_type",
+  costStatus: "cost_status",
   claudeCodeVersion: "claude_code_version",
   lastEventAt: "last_event_at",
 };
@@ -313,8 +320,8 @@ export class RunRepository {
            cache_read_tokens, cache_creation_tokens, cost_usd, permission_denials, denied_tools_json, mcp_json, human_intervention,
            context_exhausted, retries, log_path, raw_result_json, schedule_id, owner, phases_json, review_reasons_json, resumed_from_run_id, kind,
            usage_by_model_json, billing_type, error_code, error_family, error_detail_json, agent_hash, claude_code_version,
-           last_event_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+           last_event_at, cost_status)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         run.id,
@@ -365,6 +372,7 @@ export class RunRepository {
         run.agentHash ?? null,
         run.claudeCodeVersion ?? null,
         run.lastEventAt ?? null,
+        run.costStatus ?? null,
       );
   }
 
