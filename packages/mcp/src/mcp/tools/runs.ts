@@ -48,7 +48,8 @@ export function registerRunTools(server: McpServer, ctx: ToolContext): void {
         "Launch a Claude Code agent against a local project. The project directory becomes the working directory, " +
         "so the project's CLAUDE.md, .claude/ settings, skills and agents apply. Returns the run immediately " +
         "(status running) unless wait_seconds is given, in which case it waits up to that long for completion. " +
-        "Poll with get_run afterwards.",
+        "Poll with get_run afterwards. With resume_run_id the new prompt continues that ended run's Claude session " +
+        "(same agent, project and agent definition; otherwise a fresh session and a note in the run's events).",
       inputSchema: {
         prompt: z.string().min(1).describe("The task for the agent"),
         project_path: z
@@ -71,6 +72,12 @@ export function registerRunTools(server: McpServer, ctx: ToolContext): void {
           .string()
           .optional()
           .describe("Claude model alias or id, e.g. 'sonnet', 'opus'. Omit to use the agent/CLI default"),
+        resume_run_id: z
+          .string()
+          .optional()
+          .describe(
+            "Continue the Claude session of this ended run (get_run / list_runs id) with the new prompt. Agent and project default to that run's; refused for a cancelled, running or context-exhausted run. When the agent, the project path or the agent definition no longer match, or Claude Code no longer has the session, the run starts a fresh session and says so in a note",
+          ),
         wait_seconds: z
           .number()
           .int()
@@ -87,7 +94,10 @@ export function registerRunTools(server: McpServer, ctx: ToolContext): void {
         if (args.project_id !== undefined) input.projectId = args.project_id;
         if (args.agent_id !== undefined) input.agentId = args.agent_id;
         if (args.model !== undefined) input.model = args.model;
-        let run = await ctx.runs.startRun(input);
+        let run =
+          args.resume_run_id !== undefined
+            ? await ctx.runs.continueRun({ ...input, runId: args.resume_run_id })
+            : await ctx.runs.startRun(input);
         if (args.wait_seconds) {
           run = await ctx.runs.waitForRun(run.id, args.wait_seconds * 1000);
         }
@@ -119,14 +129,16 @@ export function registerRunTools(server: McpServer, ctx: ToolContext): void {
       const subagents = ctx.runs.agents(run_id).map((s) => presentSubagent(s, Boolean(include_output)));
       /** The run that continued this one's session after a budget / timeout failure (on_failure: resume_once), or null. */
       const resumedByRunId = ctx.runs.resumedBy(run_id)?.id ?? null;
+      /** The runs that continued this one's session (run_agent resume_run_id, a schedule's continue), oldest first. */
+      const continuedByRunIds = ctx.runs.continuedBy(run_id).map((r) => r.id);
       /** What the run changed in its git checkout (files, line counts, patch path), or null. */
       const diff = ctx.runs.diff(run_id);
       /** PRs, branches and commits the run produced (run_artifacts). */
       const artifacts = ctx.runs.artifacts(run_id).map(({ kind, value, source }) => ({ kind, value, source }));
       return jsonResult(
         include_output
-          ? { ...view, resumedByRunId, diff, artifacts, subagents, events: ctx.runs.events(run_id) }
-          : { ...view, resumedByRunId, diff, artifacts, subagents },
+          ? { ...view, resumedByRunId, continuedByRunIds, diff, artifacts, subagents, events: ctx.runs.events(run_id) }
+          : { ...view, resumedByRunId, continuedByRunIds, diff, artifacts, subagents },
       );
     },
   );

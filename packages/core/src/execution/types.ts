@@ -181,6 +181,11 @@ export interface ExecutionResult {
   deniedTools: DeniedTool[];
   /** Heuristic: the run stopped because the context window was exhausted. */
   contextExhausted: boolean;
+  /**
+   * `--resume <id>` named a session Claude Code does not have (`isSessionNotFound`): it stopped
+   * before any model call. Executors that cannot tell leave it out.
+   */
+  sessionNotFound?: boolean;
   /** Why the run failed, as a code (`classifyFailure`); null when unknown or when it did not fail. */
   failure: FailureClassification | null;
   /** Full raw result object from the tool, for later analysis. */
