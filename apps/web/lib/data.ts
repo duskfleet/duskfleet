@@ -264,8 +264,8 @@ export function listRuns(filter: RunsFilter = {}): RunWithProject[] {
   if (filter.status) f.status = filter.status;
   if (filter.outcome) f.outcome = filter.outcome;
   if (filter.reason) f.reason = filter.reason;
-  // The outcome KPIs count real runs only: a gate run must not show up under them.
-  if (filter.outcome || filter.reason) f.kind = "run";
+  // The outcome KPIs and the By model counts are real runs only: a gate run must not show up under them.
+  if (filter.outcome || filter.reason || filter.models?.length) f.kind = "run";
   // Core filters on one agent and one project: a multi-select asks once per (agent, project) pair.
   let list: Run[] = listScoped(
     scopeList(filter.agentId, filter.agentIds),
