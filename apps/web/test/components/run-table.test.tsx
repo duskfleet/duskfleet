@@ -54,6 +54,7 @@ function run(over: Partial<RunWithProject> = {}): RunWithProject {
     phases: [],
     reviewReasons: [],
     resumedFromRunId: null,
+    continuedFromRunId: null,
     kind: "run",
     billingType: "subscription",
     agentHash: null,

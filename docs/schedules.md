@@ -159,6 +159,31 @@ Set it with `create_schedule` / `update_schedule` (`on_failure: resume_once | no
 the [wrap-up pass](agents.md#budget-reserve-and-wrap-up-pass): the wrap-up records where the
 run stopped, the resume picks it up from there.
 
+## Continue the session across fires
+
+`continue: true` on a schedule (`create_schedule` / `update_schedule`, default false) makes
+every fire **continue the Claude session** of the schedule's last ended run, whatever its
+outcome, instead of starting a new one. The schedule's own prompt is sent into that session,
+so the agent keeps what it read and did on earlier fires.
+
+- The run is a normal fire (`started`, gate, WIP guards, caps and budgets as usual), linked to
+  the run it continues by `continuedFromRunId`. It is not a retry: `retries` stays 0 and the
+  `on_failure` retry is untouched.
+- A last run that was **cancelled** or **exhausted its context** is not continued: the fire
+  starts a fresh session. This is what keeps a continuing schedule from growing its context
+  forever.
+- The session is resumed only when the **agent, the project path and the agent definition
+  (`agentHash`)** all match the run being continued. When one differs (you edited the agent
+  file, for example), the fire starts a fresh session plus a `note` event that says why. A
+  mismatch never skips the tick.
+- If Claude Code no longer has the session ("No conversation found with session ID", no model
+  call, cost 0), the run falls back to a fresh session once, with the same prompt, and says so
+  in a note. `continuedFromRunId` is then null.
+- With `on_failure: resume_once`, a budget or timeout failure is first **resumed** (that is
+  the retry). `continue` applies again from the next cron fire, and continues the resume run.
+
+A one-off continuation is `run_agent` with `resume_run_id` ([MCP server](mcp-server.md)).
+
 ## Gates: skip cheaply when there is no work
 
 A gate is a cheap check that runs before the real run on every tick, so a schedule that finds

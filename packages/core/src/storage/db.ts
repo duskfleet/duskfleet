@@ -324,6 +324,19 @@ const MIGRATIONS: ReadonlyArray<{ version: number; sql: string; backfill?: (db: 
       ALTER TABLE schedules ADD COLUMN deferred_reason TEXT;
     `,
   },
+  {
+    // Continuing a session (run_agent resume_run_id, a schedule's continue): the run whose Claude
+    // session this run continues. Apart from resumed_from_run_id (the one retry of on_failure:
+    // resume_once, unique): a run may be continued any number of times and a continuation can be
+    // continued again (a chain), so the index is not unique. continue_session = the schedule's
+    // `continue` flag: every fire continues the schedule's last ended run.
+    version: 23,
+    sql: `
+      ALTER TABLE runs ADD COLUMN continued_from_run_id TEXT;
+      CREATE INDEX IF NOT EXISTS idx_runs_continued_from ON runs(continued_from_run_id);
+      ALTER TABLE schedules ADD COLUMN continue_session INTEGER NOT NULL DEFAULT 0;
+    `,
+  },
 ];
 
 /**

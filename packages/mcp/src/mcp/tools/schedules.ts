@@ -115,6 +115,12 @@ const scheduleFields = {
     .positive()
     .optional()
     .describe("Budget of the resumed run; defaults to the agent's resume_budget_usd, else its max_budget_usd"),
+  continue: z
+    .boolean()
+    .optional()
+    .describe(
+      "Default false. true: every fire continues the Claude session of the schedule's last ended run (whatever its outcome) with the schedule's prompt. A cancelled or context-exhausted last run, or one whose agent, project path or agent definition changed, gets a fresh session plus a note, never a skipped tick. on_failure: resume_once wins when it applies",
+    ),
   noop_pattern: z
     .string()
     .min(1)
@@ -185,6 +191,7 @@ export function registerScheduleTools(server: McpServer, ctx: ToolContext): void
         if (args.enabled !== undefined) input.enabled = args.enabled;
         if (args.on_failure !== undefined) input.onFailure = args.on_failure;
         if (args.resume_budget_usd !== undefined) input.resumeBudgetUsd = args.resume_budget_usd;
+        if (args.continue !== undefined) input.continueSession = args.continue;
         if (args.noop_pattern !== undefined) input.noopPattern = args.noop_pattern;
         if (args.gate !== undefined) input.gate = toGate(args.gate);
         if (args.concurrency_policy !== undefined) input.concurrencyPolicy = args.concurrency_policy;
@@ -216,6 +223,7 @@ export function registerScheduleTools(server: McpServer, ctx: ToolContext): void
         enabled: scheduleFields.enabled,
         on_failure: scheduleFields.on_failure,
         resume_budget_usd: scheduleFields.resume_budget_usd,
+        continue: scheduleFields.continue,
         noop_pattern: scheduleFields.noop_pattern,
         clear_noop_pattern: z
           .boolean()
@@ -244,6 +252,7 @@ export function registerScheduleTools(server: McpServer, ctx: ToolContext): void
         const patch: Parameters<typeof ctx.scheduler.update>[1] = {};
         if (args.on_failure !== undefined) patch.onFailure = args.on_failure;
         if (args.resume_budget_usd !== undefined) patch.resumeBudgetUsd = args.resume_budget_usd;
+        if (args.continue !== undefined) patch.continueSession = args.continue;
         if (args.noop_pattern !== undefined) patch.noopPattern = args.noop_pattern;
         else if (args.clear_noop_pattern) patch.noopPattern = null;
         if (args.gate !== undefined) patch.gate = toGate(args.gate);

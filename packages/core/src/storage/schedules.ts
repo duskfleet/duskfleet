@@ -52,6 +52,7 @@ interface ScheduleRow {
   run_requested_at: string | null;
   on_failure: string | null;
   resume_budget_usd: number | null;
+  continue_session: number | null;
   noop_pattern: string | null;
   gate_json: string | null;
   concurrency_policy: string | null;
@@ -122,6 +123,7 @@ function rowToSchedule(r: ScheduleRow): Schedule {
     runRequestedAt: r.run_requested_at ?? null,
     onFailure: (r.on_failure as Schedule["onFailure"]) ?? null,
     resumeBudgetUsd: r.resume_budget_usd ?? null,
+    continueSession: r.continue_session === 1,
     noopPattern: r.noop_pattern ?? null,
     gate: parseGate(r.gate_json, r.name),
     concurrencyPolicy: (r.concurrency_policy as ConcurrencyPolicy | null) ?? DEFAULT_CONCURRENCY_POLICY,
@@ -192,8 +194,8 @@ export class ScheduleRepository {
       .prepare(
         `INSERT INTO schedules (id, name, agent_id, project_id, prompt, model, cron, time_zone, enabled, created_at, updated_at, next_run_at,
            last_fired_at, last_outcome, last_error, last_run_id, fires, skips, on_failure, resume_budget_usd, noop_pattern, gate_json,
-           concurrency_policy, catch_up_policy, trigger_kind)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, NULL, NULL, 0, 0, ?, ?, ?, ?, ?, ?, ?)`,
+           concurrency_policy, catch_up_policy, trigger_kind, continue_session)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, NULL, NULL, 0, 0, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         id,
@@ -215,6 +217,7 @@ export class ScheduleRepository {
         input.concurrencyPolicy ?? DEFAULT_CONCURRENCY_POLICY,
         input.catchUpPolicy ?? DEFAULT_CATCH_UP_POLICY,
         input.triggerKind ?? DEFAULT_TRIGGER_KIND,
+        input.continueSession ? 1 : 0,
       );
     return this.get(id)!;
   }
@@ -234,6 +237,7 @@ export class ScheduleRepository {
       nextRunAt: "next_run_at",
       onFailure: "on_failure",
       resumeBudgetUsd: "resume_budget_usd",
+      continueSession: "continue_session",
       noopPattern: "noop_pattern",
       gate: "gate_json",
       concurrencyPolicy: "concurrency_policy",

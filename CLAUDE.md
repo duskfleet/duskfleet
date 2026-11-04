@@ -97,6 +97,10 @@ npm workspaces, one `config/` and one SQLite database shared by three deliverabl
   `scheduler.auto_pause_after` ended runs all empty (0 tool calls) or needs review = pause with
   `paused_reason`, outcome `auto_paused`; resume clears it, `auto_paused_at` bounds the next streak.
   `scheduler.auto_pause: false` (read every tick) skips the check and keeps the threshold.
+  Continuing a session (`run_agent { resume_run_id }`, a schedule's `continue`, migration 23) is
+  `continued_from_run_id`, never `resumed_from_run_id` (that one is the single `resume_once` retry,
+  unique): no retry count, chains allowed, `continueRefusal` + `continueMismatch` decide, any refusal
+  or unknown session = fresh session plus a note, never a skipped tick; `resume_once` wins when it applies.
   `install-service` (`packages/mcp/src/service.ts`) renders a per-user unit (launchd,
   systemd --user, Task Scheduler XML) from machine paths: never version a unit, re-run it
   after every build (it restarts the service). Not the OS crontab.
