@@ -77,6 +77,9 @@ export function validateScheduleInput(
   if (input.resumeBudgetUsd != null && !(Number.isFinite(input.resumeBudgetUsd) && input.resumeBudgetUsd > 0)) {
     throw new Error("resume_budget_usd must be a positive number");
   }
+  if (input.continueSession != null && typeof input.continueSession !== "boolean") {
+    throw new Error("continue must be true or false");
+  }
   if (input.noopPattern != null) parseNoopPattern(input.noopPattern);
   if (input.gate != null) validateGate(config, input.gate, scheduleProjectId(input, agent));
   validatePolicies(input);
@@ -284,6 +287,7 @@ export function updateSchedule(
     enabled: patch.enabled ?? existing.enabled,
     onFailure: patch.onFailure === undefined ? existing.onFailure : patch.onFailure,
     resumeBudgetUsd: patch.resumeBudgetUsd === undefined ? existing.resumeBudgetUsd : patch.resumeBudgetUsd,
+    continueSession: patch.continueSession ?? existing.continueSession,
     noopPattern: patch.noopPattern === undefined ? existing.noopPattern : patch.noopPattern,
     gate: patch.gate === undefined ? existing.gate : patch.gate,
     concurrencyPolicy: patch.concurrencyPolicy ?? existing.concurrencyPolicy,

@@ -64,6 +64,7 @@ interface RunRow {
   agent_hash: string | null;
   claude_code_version: string | null;
   last_event_at: string | null;
+  continued_from_run_id: string | null;
 }
 
 function rowToRun(r: RunRow): Run {
@@ -114,6 +115,7 @@ function rowToRun(r: RunRow): Run {
     agentHash: r.agent_hash ?? null,
     claudeCodeVersion: r.claude_code_version ?? null,
     lastEventAt: r.last_event_at ?? null,
+    continuedFromRunId: r.continued_from_run_id ?? null,
   };
 }
 
@@ -224,6 +226,7 @@ export type RunPatch = Partial<
     | "billingType"
     | "claudeCodeVersion"
     | "lastEventAt"
+    | "continuedFromRunId"
   >
 >;
 
@@ -263,6 +266,7 @@ const PATCH_COLUMNS: Record<keyof RunPatch, string> = {
   billingType: "billing_type",
   claudeCodeVersion: "claude_code_version",
   lastEventAt: "last_event_at",
+  continuedFromRunId: "continued_from_run_id",
 };
 
 /**
@@ -313,8 +317,8 @@ export class RunRepository {
            cache_read_tokens, cache_creation_tokens, cost_usd, permission_denials, denied_tools_json, mcp_json, human_intervention,
            context_exhausted, retries, log_path, raw_result_json, schedule_id, owner, phases_json, review_reasons_json, resumed_from_run_id, kind,
            usage_by_model_json, billing_type, error_code, error_family, error_detail_json, agent_hash, claude_code_version,
-           last_event_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+           last_event_at, continued_from_run_id)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         run.id,
@@ -365,6 +369,7 @@ export class RunRepository {
         run.agentHash ?? null,
         run.claudeCodeVersion ?? null,
         run.lastEventAt ?? null,
+        run.continuedFromRunId ?? null,
       );
   }
 
@@ -374,6 +379,29 @@ export class RunRepository {
       .prepare("SELECT * FROM runs WHERE resumed_from_run_id = ? ORDER BY created_at DESC LIMIT 1")
       .get(runId) as unknown as RunRow | undefined;
     return row ? rowToRun(row) : null;
+  }
+
+  /**
+   * The schedule's most recent ended run (not a gate run), whatever its outcome: what a schedule
+   * with `continue: true` continues. Null before its first run ended.
+   */
+  lastEndedRunOfSchedule(scheduleId: string): Run | null {
+    const row = this.db
+      .prepare(
+        `SELECT * FROM runs WHERE schedule_id = ? AND kind = 'run' AND status IN ('completed', 'failed', 'cancelled', 'timed_out')
+         ORDER BY created_at DESC LIMIT 1`,
+      )
+      .get(scheduleId) as unknown as RunRow | undefined;
+    return row ? rowToRun(row) : null;
+  }
+
+  /** The runs that continued `runId`'s session (run_agent resume_run_id, a schedule's continue), oldest first. */
+  continuedBy(runId: string): Run[] {
+    return (
+      this.db
+        .prepare("SELECT * FROM runs WHERE continued_from_run_id = ? ORDER BY created_at ASC")
+        .all(runId) as unknown as RunRow[]
+    ).map(rowToRun);
   }
 
   /** A resume that never started (spawn failure) drops its link, so the original can be resumed again. */
