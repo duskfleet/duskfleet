@@ -337,6 +337,17 @@ const MIGRATIONS: ReadonlyArray<{ version: number; sql: string; backfill?: (db: 
       ALTER TABLE schedules ADD COLUMN continue_session INTEGER NOT NULL DEFAULT 0;
     `,
   },
+  {
+    // The raw log as written (claude.max_log_bytes): size and SHA-256 of data/logs/<run_id>.jsonl,
+    // filled by RunManager when the run ends, and whether the writer stopped at the cap (1). NULL for
+    // older rows, for runs still going, and when the file could not be read.
+    version: 24,
+    sql: `
+      ALTER TABLE runs ADD COLUMN log_bytes INTEGER;
+      ALTER TABLE runs ADD COLUMN log_sha256 TEXT;
+      ALTER TABLE runs ADD COLUMN log_truncated INTEGER;
+    `,
+  },
 ];
 
 /**

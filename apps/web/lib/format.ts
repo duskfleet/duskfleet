@@ -187,6 +187,20 @@ export function tildeText(text: string, home: string): string {
     .join("~");
 }
 
+/** Bytes in binary units: "840 B", "12.4 KiB", "3.1 MiB", "1.2 GiB"; "–" when unknown. */
+export function fmtBytes(n: number | null | undefined): string {
+  if (n === null || n === undefined) return "–";
+  if (n < 1024) return `${n} B`;
+  const units = ["KiB", "MiB", "GiB"];
+  let v = n / 1024;
+  let i = 0;
+  while (v >= 1024 && i < units.length - 1) {
+    v /= 1024;
+    i += 1;
+  }
+  return `${v < 10 ? v.toFixed(1) : Math.round(v)} ${units[i]}`;
+}
+
 /** "1.2k", "840" */
 export function fmtCompact(n: number): string {
   if (n < 1000) return String(n);

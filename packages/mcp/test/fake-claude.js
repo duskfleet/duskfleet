@@ -536,6 +536,25 @@ if (resumeIdx >= 0) {
       message: { role: "user", content: [{ tool_use_id: "toolu_m1", type: "tool_result", content: "[]" }] },
     });
   }
+  if (prompt === "big-tool-result") {
+    // One 200 KiB tool_result (a large file read): the log caps (claude.max_event_bytes / max_log_bytes).
+    out({
+      type: "assistant",
+      message: {
+        model,
+        role: "assistant",
+        content: [{ type: "tool_use", id: "toolu_big", name: "Read", input: { file_path: "big.log" } }],
+        usage: { input_tokens: 10, output_tokens: 5 },
+      },
+    });
+    out({
+      type: "user",
+      message: {
+        role: "user",
+        content: [{ tool_use_id: "toolu_big", type: "tool_result", content: "x".repeat(200 * 1024) }],
+      },
+    });
+  }
   out({
     type: "assistant",
     message: {
@@ -604,6 +623,9 @@ if (resumeIdx >= 0) {
     });
     writeFileSync("hook.pid", String(hook.pid));
     process.exit(0);
+  } else if (prompt === "big-tool-result") {
+    // A pipe write is asynchronous on macOS: exit only once the 200 KiB line and the result are out.
+    process.stdout.write("", () => process.exit(0));
   } else {
     process.exit(isError || prompt === "prose-exit" ? 1 : 0);
   }

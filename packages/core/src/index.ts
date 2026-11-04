@@ -101,6 +101,17 @@ export {
   type ClaudeCodeExecutorOptions,
   resolveClaudeBinary,
 } from "./execution/claude-code.js";
+export {
+  CappedLogWriter,
+  capEventJson,
+  DEFAULT_MAX_EVENT_BYTES,
+  DEFAULT_MAX_LOG_BYTES,
+  LOG_TRUNCATED_LINE,
+  LOG_TRUNCATED_TYPE,
+  type LogMetadata,
+  logMetadata,
+  truncationMarker,
+} from "./execution/log-caps.js";
 export { mergeSubagent, needsRepair, sameSubagent, subagentsFromLog } from "./execution/log-replay.js";
 export { allowListedMcpPrefixes, mcpToolPrefix, missingMcpServers } from "./execution/mcp.js";
 export {

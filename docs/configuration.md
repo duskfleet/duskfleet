@@ -73,6 +73,8 @@ claude:
   default_timeout_minutes: 30
   default_max_budget_usd: 5
   env_passthrough: []           # variables every run (and command gate) gets beyond the default allow-list, e.g. [GH_TOKEN]
+  max_event_bytes: 65536        # cap of one stored run event; longer strings are cut with a marker (min 1024)
+  max_log_bytes: 52428800       # cap of data/logs/<run_id>.jsonl; past it the log ends with a duskfleet_log_truncated line (min 1024)
 scheduler:
   enabled: true                 # kill switch, re-read every tick
   tick_seconds: 30

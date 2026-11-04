@@ -12,6 +12,7 @@ import { notFound } from "next/navigation";
 import { AutoRefresh } from "@/components/AutoRefresh";
 import { CopyButton } from "@/components/CopyButton";
 import { Expandable } from "@/components/Expandable";
+import { LogFacts } from "@/components/LogFacts";
 import { Prose } from "@/components/Prose";
 import { StatusBadge } from "@/components/StatusBadge";
 import { adjacentRuns, agentSummary, cli, getRun, homeDir, projectLabel } from "@/lib/data";
@@ -467,6 +468,7 @@ export default async function RunPage({
                 <dd className="mono" title={run.logPath ?? undefined}>
                   {tildePath(run.logPath, home)}
                 </dd>
+                <LogFacts logBytes={run.logBytes} logSha256={run.logSha256} logTruncated={run.logTruncated} />
               </dl>
               <div>
                 <div className="muted" style={{ fontSize: 14, marginBottom: 6 }}>

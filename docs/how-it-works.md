@@ -80,6 +80,18 @@ they arrive and keeps the raw stream in `data/logs/<run_id>.jsonl`:
   past it is skipped and marked the same way. `patchTruncated` means the patch is incomplete
   (cut at 1 MB, or a git read failed or ran out of time). Diff and textconv drivers of the
   checkout never run.
+- the log's size and SHA-256 (`logBytes`, `logSha256`; `log_bytes`, `log_sha256` in the
+  database), taken from the file as written when the run ends, and `logTruncated`. `get_run`
+  and `run-info` return them; the run page shows them under "Technical details".
+
+Both stores are bounded. One `run_events` payload is at most `claude.max_event_bytes`
+(default 64 KiB): over it the stored JSON keeps its envelope (type, ids, tool name) and the
+longest strings are cut, each ending with `…[truncated N bytes]`, and the payload gets
+`truncated: true`; the raw JSONL line is always written in full. The raw log is at most
+`claude.max_log_bytes` (default 50 MiB): the line that would cross it is replaced by one final
+`{"type":"duskfleet_log_truncated","bytes_dropped_from_here":true}` line and nothing more is
+written to the file. The run keeps going, its events keep reaching the database (the source of
+truth), and the run is stored with `logTruncated: true`.
 
 `RunManager` is the only writer of a run's status, and every change goes through a checked
 transition. Each run records its owner process; orphan recovery closes a `running` row, or a
