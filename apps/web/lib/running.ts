@@ -12,6 +12,9 @@ export const ACTIVE_STATUSES: readonly RunStatus[] = ["running", "pending"];
 /** ACTIVE_STATUSES as a SQL condition on `runs.status`. */
 export const ACTIVE_SQL = `status IN (${ACTIVE_STATUSES.map((s) => `'${s}'`).join(",")})`;
 
+/** The nav's Runs badge (DS-30): real runs running now, every project; the Runs page's KPI counts the same. */
+export const RUNNING_COUNT_SQL = `SELECT COUNT(*) AS n FROM runs WHERE kind = 'run' AND ${ACTIVE_SQL}`;
+
 /** Whether a run counts as running now (ACTIVE_SQL in memory). */
 export function isActiveRun(run: { status: RunStatus }): boolean {
   return ACTIVE_STATUSES.includes(run.status);

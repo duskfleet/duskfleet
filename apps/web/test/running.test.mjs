@@ -1,7 +1,25 @@
 import assert from "node:assert/strict";
 import { DatabaseSync } from "node:sqlite";
 import { test } from "node:test";
-import { ACTIVE_SQL, isActiveRun } from "../lib/running.ts";
+import { ACTIVE_SQL, isActiveRun, RUNNING_COUNT_SQL } from "../lib/running.ts";
+
+test("RUNNING_COUNT_SQL (nav Runs badge): running and pending real runs, every project; gates and ended runs not", () => {
+  const db = new DatabaseSync(":memory:");
+  db.exec("CREATE TABLE runs (id TEXT, project_path TEXT, kind TEXT, status TEXT)");
+  const insert = db.prepare("INSERT INTO runs VALUES (?, ?, ?, ?)");
+  assert.equal(db.prepare(RUNNING_COUNT_SQL).get().n, 0);
+  for (const r of [
+    ["r1", "/a", "run", "running"],
+    ["r2", "/b", "run", "pending"],
+    ["r3", "/a", "gate", "running"],
+    ["r4", "/b", "run", "completed"],
+    ["r5", "/a", "run", "failed"],
+  ]) {
+    insert.run(...r);
+  }
+  assert.equal(db.prepare(RUNNING_COUNT_SQL).get().n, 2);
+  db.close();
+});
 
 test("isActiveRun: running and pending are running now, ended runs are not", () => {
   for (const status of ["running", "pending"]) assert.equal(isActiveRun({ status }), true, status);

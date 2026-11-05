@@ -231,6 +231,24 @@ code,
 .nav a.tab:focus-visible {
   border-radius: 999px;
 }
+/* DS-30: the Runs tab's running count, 6 px after the label inside the pill, same in every tab state */
+.nav a.tab.has-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.nav .nav-badge {
+  min-width: 18px;
+  padding: 0 6px;
+  border-radius: 999px;
+  background: var(--run);
+  color: var(--bg);
+  font-size: 11px;
+  line-height: 18px;
+  font-weight: 600;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
 .nav .meta {
   margin-left: auto;
   color: var(--muted);

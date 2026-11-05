@@ -14,21 +14,34 @@ const TABS: Array<{ href: string; label: string; match: (p: string) => boolean }
   { href: "/mcp", label: "MCP", match: (p) => p.startsWith("/mcp") },
 ];
 
-/** Top navigation with the current section marked (aria-current + style). */
-export function NavTabs() {
+/**
+ * Top navigation with the current section marked (aria-current + style). DS-30: the Runs tab
+ * carries a badge with the number of runs running now (`running`, read by the layout on every
+ * request); no badge, not a "0", when nothing runs.
+ */
+export function NavTabs({ running = 0 }: { running?: number }) {
   const pathname = usePathname() ?? "/";
   return (
     <>
       {TABS.map((t) => {
         const active = t.match(pathname);
+        const badge = t.label === "Runs" && running > 0;
         return (
           <Link
             key={t.href}
             href={t.href}
-            className={`tab ${active ? "active" : ""}`}
+            className={`tab ${active ? "active" : ""}${badge ? " has-badge" : ""}`}
             aria-current={active ? "page" : undefined}
           >
             {t.label}
+            {badge ? (
+              <>
+                <span className="nav-badge" aria-hidden="true">
+                  {running}
+                </span>
+                <span className="sr-only">, {running} running</span>
+              </>
+            ) : null}
           </Link>
         );
       })}
