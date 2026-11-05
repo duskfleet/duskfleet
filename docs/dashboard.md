@@ -51,7 +51,9 @@ to `1` on every platform. `bin/start.mjs` also drops the `- Network:` line of Ne
 the server answers on `127.0.0.1` only, so that address is not reachable from the network.
 
 Five views, plus the [trend](#trends) of the runs. The runs list and a running run's detail auto-refresh every 3 seconds (pause button
-in the nav); the other pages are static.
+in the nav); the other pages are static. On every page the nav's **Runs** tab shows a badge with the
+number of runs running now (every agent and project, the same definition as **Running now** below,
+no badge when nothing runs); it re-reads the count every 5 seconds and on every navigation.
 
 - **Runs** (the home page, `/`; `/runs` redirects there and keeps its query string): KPI cards (clean runs, needs review, spend) computed on the current project / agent
   filter; a Project and an Agent multi-select on the search line (repeated params,

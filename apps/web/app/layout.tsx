@@ -35,7 +35,8 @@ const geistMono = localFont({
   adjustFontFallback: false,
 });
 
-// The nav reads the scheduler lease and the running count (Runs badge) on every request (no prerendered shell with stale data).
+// The nav reads the scheduler lease and the running count (Runs badge) when the layout renders (no prerendered
+// shell with stale data). A client-side navigation keeps the layout, so NavTabs re-reads the count itself.
 export const dynamic = "force-dynamic";
 
 export const metadata: Metadata = {

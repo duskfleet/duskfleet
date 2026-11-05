@@ -2,6 +2,8 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { useEffect, useState } from "react";
+import { parseRunningCount, RUNNING_POLL_MS } from "@/lib/running";
 
 const TABS: Array<{ href: string; label: string; match: (p: string) => boolean }> = [
   {
@@ -16,11 +18,39 @@ const TABS: Array<{ href: string; label: string; match: (p: string) => boolean }
 
 /**
  * Top navigation with the current section marked (aria-current + style). DS-30: the Runs tab
- * carries a badge with the number of runs running now (`running`, read by the layout on every
- * request); no badge, not a "0", when nothing runs.
+ * carries a badge with the number of runs running now; no badge, not a "0", when nothing runs.
+ * `running` is the layout's count at its last render. The layout is not re-rendered on a
+ * client-side navigation, so while mounted the tabs re-read GET /api/running every
+ * RUNNING_POLL_MS and on every pathname change (skipped while the tab is hidden).
  */
-export function NavTabs({ running = 0 }: { running?: number }) {
+export function NavTabs({ running: initial = 0 }: { running?: number }) {
   const pathname = usePathname() ?? "/";
+  const [running, setRunning] = useState(initial);
+
+  // A layout re-render (full load, router.refresh() from AutoRefresh) brings a fresher count.
+  useEffect(() => setRunning(initial), [initial]);
+
+  // biome-ignore lint/correctness/useExhaustiveDependencies: pathname on purpose, re-read the count on every client-side navigation
+  useEffect(() => {
+    let alive = true;
+    const poll = async () => {
+      if (document.hidden) return;
+      try {
+        const res = await fetch("/api/running", { cache: "no-store" });
+        const n = res.ok ? parseRunningCount(await res.json()) : null;
+        if (alive && n !== null) setRunning(n);
+      } catch {
+        // Server gone (dev restart): keep the last count, the next tick retries.
+      }
+    };
+    void poll();
+    const id = setInterval(poll, RUNNING_POLL_MS);
+    return () => {
+      alive = false;
+      clearInterval(id);
+    };
+  }, [pathname]);
+
   return (
     <>
       {TABS.map((t) => {

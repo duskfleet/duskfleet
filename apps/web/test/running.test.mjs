@@ -1,7 +1,15 @@
 import assert from "node:assert/strict";
 import { DatabaseSync } from "node:sqlite";
 import { test } from "node:test";
-import { ACTIVE_SQL, isActiveRun, RUNNING_COUNT_SQL } from "../lib/running.ts";
+import { ACTIVE_SQL, isActiveRun, parseRunningCount, RUNNING_COUNT_SQL } from "../lib/running.ts";
+
+test("parseRunningCount: a GET /api/running body gives its count; anything else gives null (keep the last count)", () => {
+  assert.equal(parseRunningCount({ running: 0 }), 0);
+  assert.equal(parseRunningCount({ running: 3 }), 3);
+  for (const body of [null, undefined, "3", 3, {}, { running: "3" }, { running: -1 }, { running: 1.5 }]) {
+    assert.equal(parseRunningCount(body), null, JSON.stringify(body));
+  }
+});
 
 test("RUNNING_COUNT_SQL (nav Runs badge): running and pending real runs, every project; gates and ended runs not", () => {
   const db = new DatabaseSync(":memory:");

@@ -49,7 +49,7 @@ test("NavTabs: n running on another page, the Default Runs tab carries the badge
   const html = renderToStaticMarkup(<NavTabs running={2} />);
   assert.match(
     html,
-    /<a href="\/" class="tab  has-badge">Runs<span class="nav-badge" aria-hidden="true">2<\/span><span class="sr-only">, 2 running<\/span><\/a>/,
+    /<a href="\/" class="tab {2}has-badge">Runs<span class="nav-badge" aria-hidden="true">2<\/span><span class="sr-only">, 2 running<\/span><\/a>/,
   );
   assert.equal([...html.matchAll(/nav-badge/g)].length, 1, "only the Runs tab has a badge");
   assert.match(html, /<a href="\/agents" class="tab active" aria-current="page">Agents<\/a>/);
@@ -62,6 +62,11 @@ test("NavTabs: n running on /runs, the Runs tab is Active with the badge", () =>
     html,
     /<a href="\/" class="tab active has-badge" aria-current="page">Runs<span class="nav-badge" aria-hidden="true">12<\/span>/,
   );
+});
+
+test("NavTabs: before the first poll, the badge shows the layout's count", () => {
+  setPathname("/schedules");
+  assert.match(renderToStaticMarkup(<NavTabs running={1} />), /<span class="nav-badge" aria-hidden="true">1<\/span>/);
 });
 
 test("NavSettings: gear and label, active with aria-current only on /settings", () => {
