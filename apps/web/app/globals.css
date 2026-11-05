@@ -4489,13 +4489,27 @@ details.desc ul {
 .line-chart .chart-ends {
   min-width: 150px;
 }
-.chart-ends span {
+/* one label: the name shrinks with an ellipsis, the value never does; the line box is
+   END_LABEL_LINE in lib/trends.ts, the spacing of spreadLabels depends on it */
+.chart-ends > span {
   position: absolute;
   left: 0;
+  display: flex;
+  gap: 0.3em;
+  max-width: 100%;
   transform: translateY(-50%);
   white-space: nowrap;
+  line-height: 18px;
   font-family: var(--font-sans);
   letter-spacing: 0.01em;
+}
+.chart-ends .end-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.chart-ends .end-value {
+  flex: none;
 }
 .chart-ends span.tone-primary {
   color: var(--text);
@@ -4778,18 +4792,23 @@ details.desc ul {
   text-decoration-color: var(--border-strong);
 }
 /* DS-27: chart beside the ranked table, the table a little wider than /trends' */
+.cost-panel {
+  container: cost-panel / inline-size;
+}
 .cost-body {
   grid-template-columns: minmax(0, 1fr) 420px;
+}
+/* the table wraps below the chart before the chart column gets too narrow for its labels */
+@container cost-panel (max-width: 960px) {
+  .cost-body {
+    grid-template-columns: minmax(0, 1fr);
+  }
 }
 .cost-chart {
   min-width: 0;
 }
 .bar-chart .chart-ends.bar-ends {
-  min-width: 150px;
-}
-.chart-ends .end-name {
-  position: static;
-  transform: none;
+  width: 190px;
 }
 /* "others": the unticked rows folded into one outlined segment */
 .chart-bar.tone-others {
@@ -4853,7 +4872,8 @@ details.desc ul {
 .ct-rows li,
 .ct-total {
   display: grid;
-  grid-template-columns: 13px 10px minmax(0, 1fr) 54px 42px 36px 52px;
+  /* spent fits "$12345.67" in the bold total row too */
+  grid-template-columns: 13px 10px minmax(0, 1fr) 76px 42px 36px 52px;
   align-items: center;
   column-gap: 6px;
   padding: 0 2px;
@@ -4957,7 +4977,7 @@ details.desc ul {
   .ct-head,
   .ct-rows li,
   .ct-total {
-    grid-template-columns: 13px 10px minmax(0, 1fr) 54px 42px 36px;
+    grid-template-columns: 13px 10px minmax(0, 1fr) 76px 42px 36px;
   }
   .ct-avg {
     display: none;
@@ -4976,7 +4996,8 @@ details.desc ul {
   }
   /* the table names the rows: end labels keep the amount only */
   .bar-chart .chart-ends.bar-ends {
-    min-width: 3em;
+    width: auto;
+    min-width: 4.5em;
   }
   .bar-chart .chart-ends .end-name {
     display: none;
