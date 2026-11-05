@@ -62,6 +62,20 @@ export function runCostLabel(billingType: string | null | undefined): string {
   return billingType === "api" ? "Cost" : "API value";
 }
 
+/**
+ * How a finished run's `costUsd` is known (`runs.cost_status`, migration 25). There is no price
+ * table: `reported` = Claude Code's `total_cost_usd` on an API key (or on an unknown billing type),
+ * `estimated` = the same number on a subscription (reported, not charged), `unpriced` = no cost
+ * at all (no `result` line). Null while the run is pending or running: its cost is not settled.
+ */
+export const COST_STATUSES = ["reported", "estimated", "unpriced"] as const;
+export type CostStatus = (typeof COST_STATUSES)[number];
+
+export function costStatusOf(run: { costUsd: number | null; billingType: string | null | undefined }): CostStatus {
+  if (run.costUsd === null || run.costUsd === undefined) return "unpriced";
+  return run.billingType === "subscription" ? "estimated" : "reported";
+}
+
 /** A cost sum of the runs in view, split by billing type, with its wording (CLI `runs`, MCP `list_runs`). */
 export interface CostTotals extends CostSplit, CostLabels {
   runs: number;
