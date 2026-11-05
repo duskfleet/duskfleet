@@ -79,6 +79,21 @@ test("CostTable: columns spent, share, runs (linked) and avg/run, then the total
   );
 });
 
+test("CostTable: the total row's cells carry the body cells' classes, one cell per column", () => {
+  const html = render([row("alpha", { nameHref: null, runsHref: null })], {
+    total: { spent: "$1328.08", share: "100%", runs: "40", avg: "$0.25" },
+  });
+  const cells = (re: RegExp) => [...(html.match(re)?.[1] ?? "").matchAll(/<span class="([^"]*)"/g)].map((m) => m[1]);
+  const body = cells(/<li data-row="alpha">(.*?)<\/li>/).filter((c) => c?.startsWith("ct-"));
+  const total = cells(/<div class="ct-total">(.*?)<\/div>/).filter((c) => c?.startsWith("ct-"));
+  assert.deepEqual(total, ["ct-name", "ct-num", "ct-num", "ct-num ct-runs", "ct-num ct-avg"]);
+  assert.deepEqual(
+    total,
+    body.filter((c) => c !== "ct-swatch"),
+  );
+  assert.match(html, /<span class="ct-num">\$1328.08<\/span><span class="ct-num">100%<\/span>/);
+});
+
 test("CostTable: rows without a link target render plain text", () => {
   const html = render([row("opus 4.5", { nameHref: null, runsHref: null, title: "claude-opus-4-5" })]);
   assert.match(html, /<span class="ct-name" title="claude-opus-4-5">opus 4.5<\/span>/);

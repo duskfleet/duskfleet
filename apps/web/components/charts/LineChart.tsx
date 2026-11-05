@@ -1,4 +1,4 @@
-import { pointIndexes, spreadLabels } from "@/lib/trends";
+import { END_LABEL_GAP, pointIndexes, spreadLabels } from "@/lib/trends";
 
 /**
  * Line chart, server-rendered: the lines and the grid are one SVG stretched to the plot
@@ -36,7 +36,6 @@ export interface LineChartProps {
 
 /** A series with fewer points than this is drawn as dots, not a line. */
 const MIN_LINE_POINTS = 3;
-const LABEL_GAP = 15;
 
 export function LineChart({ ariaLabel, xTicks, buckets, y, series, height, band }: LineChartProps) {
   const x = (i: number) => (buckets <= 1 ? 50 : (i / (buckets - 1)) * 100);
@@ -52,7 +51,7 @@ export function LineChart({ ariaLabel, xTicks, buckets, y, series, height, band 
       if (last === undefined || !s.endLabel || s.hidden) return [];
       return [{ id: s.id, tone: s.tone, label: s.endLabel, top: (yPct(s.values[last] as number) / 100) * height }];
     }),
-    LABEL_GAP,
+    END_LABEL_GAP,
     height,
   );
 
@@ -122,8 +121,8 @@ export function LineChart({ ariaLabel, xTicks, buckets, y, series, height, band 
       <div className="chart-ends" style={{ height }} aria-hidden="true">
         {ends.map((e) => (
           <span key={e.id} className={`tone-${e.tone}`} data-agent={e.id} style={{ top: e.top }}>
-            <span className="end-name">{e.label.name} </span>
-            {e.label.value}
+            <span className="end-name">{e.label.name}</span>
+            <span className="end-value">{e.label.value}</span>
           </span>
         ))}
       </div>

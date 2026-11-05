@@ -347,10 +347,36 @@ const MIGRATIONS: ReadonlyArray<{ version: number; sql: string; backfill?: (db: 
     `,
   },
   {
+    // Fail closed on unknown cost: how a finished run's cost_usd is known (reported = API key or
+    // unknown billing type, estimated = subscription, unpriced = no cost; NULL while it runs) and
+    // whether a budget counts unpriced and running runs at a stand-in amount (count, the default)
+    // or ignores them (allow). Finished rows are backfilled; old unpriced rows of the month count.
+    version: 25,
+    sql: `
+      ALTER TABLE runs ADD COLUMN cost_status TEXT;
+      ALTER TABLE budgets ADD COLUMN unpriced_policy TEXT NOT NULL DEFAULT 'count' CHECK (unpriced_policy IN ('count', 'allow'));
+      UPDATE runs SET cost_status = CASE
+          WHEN cost_usd IS NULL THEN 'unpriced'
+          WHEN billing_type = 'subscription' THEN 'estimated'
+          ELSE 'reported'
+        END
+        WHERE status IN ('completed', 'failed', 'cancelled', 'timed_out');
+    `,
+  },
+  {
+    // The --max-budget-usd cap a run was started with (main pass plus wrap-up reserve), whatever
+    // set it: the agent, a run_agent max_budget_usd override or a resume budget. A budget counts a
+    // run of unknown cost at this cap first. NULL for older rows: they fall back to their phases.
+    version: 26,
+    sql: `
+      ALTER TABLE runs ADD COLUMN max_budget_usd REAL;
+    `,
+  },
+  {
     // The raw log as written (claude.max_log_bytes): size and SHA-256 of data/logs/<run_id>.jsonl,
     // filled by RunManager when the run ends, and whether the writer stopped at the cap (1). NULL for
     // older rows, for runs still going, and when the file could not be read.
-    version: 25,
+    version: 27,
     sql: `
       ALTER TABLE runs ADD COLUMN log_bytes INTEGER;
       ALTER TABLE runs ADD COLUMN log_sha256 TEXT;

@@ -1,6 +1,6 @@
 /**
  * Log caps (claude.max_event_bytes, claude.max_log_bytes) and the log metadata stored on the run
- * (log_bytes, log_sha256, log_truncated; migration 25). Fake claude, temp directories.
+ * (log_bytes, log_sha256, log_truncated; migration 27). Fake claude, temp directories.
  */
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
