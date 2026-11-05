@@ -2,8 +2,8 @@
 /**
  * Pack gate for the two published packages, `duskfleet` (packages/duskfleet) and
  * `@duskfleet/web` (apps/web). Runs `npm pack --dry-run --json` on both and fails when:
- *   - a tarball holds a file outside its allow-list, or test files, source maps, data/,
- *     .env*, node_modules or build caches;
+ *   - a tarball holds a file outside its allow-list, or test files, source maps, data/
+ *     (data/skills/ included), config/skills/, .env*, node_modules or build caches;
  *   - a published manifest lists @duskfleet/core in any dependency field read at install
  *     time (core is bundled, never published);
  *   - a `bin` entry is one npm would drop at publish time: a path with a `./` prefix, `..`,
@@ -55,6 +55,7 @@ const FORBIDDEN = [
   { re: /(^|\/)\.test-build\//, why: "compiled component tests" },
   { re: /\.map$/, why: "source map" },
   { re: /(^|\/)data\//, why: "runtime data" },
+  { re: /(^|\/)config\/skills\//, why: "skills of a checkout, never published" },
   { re: /(^|\/)\.env/, why: "environment file" },
   { re: /(^|\/)node_modules\//, why: "node_modules" },
   { re: /^\.next\/(cache|types)\//, why: "Next.js build cache" },

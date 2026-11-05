@@ -314,6 +314,10 @@ directory, and a skill whose files contain a home path or a secret-looking value
 as the agent file). Loading the config never checks them: a skill deleted later is skipped at run
 start with a note on the run's timeline, the run still starts.
 
+`config/skills/` is for the skills of *your* checkout that you want to commit; `data/skills/`
+is for private ones. The Duskfleet repository itself ships no skills: the ones it uses to
+develop itself stay private (git-ignored), and neither folder is part of the npm packages.
+
 The target project is never written. Each run gets a bundle,
 `data/skill-bundles/<id>/.claude/skills/<name>` (a symlink to the skill folder; a copy on
 Windows), passed with `--add-dir`. `<id>` is a hash of the skills' names and contents: an edited
