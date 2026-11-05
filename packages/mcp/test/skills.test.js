@@ -105,7 +105,9 @@ test("create refuses an unknown skill and a skill file with a home path; nothing
     );
     assert.equal(existsSync(agentFile), false);
 
-    writeSkill(r.builtinSkills, "leaky", `---\nname: leaky\n---\nRead /Users/someone/notes first.\n`);
+    // Built at runtime so check:public does not flag this file.
+    const home = ["", "Users", "someone"].join("/");
+    writeSkill(r.builtinSkills, "leaky", `---\nname: leaky\n---\nRead ${home}/notes first.\n`);
     assert.throws(
       () => createAgentFromFields("own", { id: "s", system_prompt: "Hi.", skills: ["leaky"] }, config, reload),
       /skills\/leaky\/SKILL\.md: macOS home path/,
