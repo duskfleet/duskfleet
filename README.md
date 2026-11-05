@@ -158,8 +158,8 @@ The child is Claude Code in your project; everything it does is recorded.
 ```mermaid
 flowchart LR
     subgraph entry ["1 · Entry points"]
-        chat["Chat host<br/>Claude Desktop or Claude Code<br/><code>run_agent</code> over MCP (stdio)"]
-        cli["CLI<br/><code>duskfleet run</code>"]
+        chat["Chat host<br/>Claude Desktop or Claude Code<br/>run_agent over MCP (stdio)"]
+        cli["CLI<br/>duskfleet run"]
         sched["Scheduler tick<br/>due cron (serve, or any lease holder)"]
     end
 
@@ -170,7 +170,7 @@ flowchart LR
     end
 
     subgraph child ["3 · Claude Code child"]
-        claude["<code>claude -p --output-format stream-json</code><br/>cwd = the target project<br/>no permission prompts, only what is allow-listed<br/><code>--strict-mcp-config</code> unless <code>inherit_mcp</code>"]
+        claude["claude -p --output-format stream-json<br/>cwd = the target project<br/>no permission prompts, only what is allow-listed<br/>--strict-mcp-config unless inherit_mcp"]
     end
 
     subgraph rec ["4 · What gets recorded"]
