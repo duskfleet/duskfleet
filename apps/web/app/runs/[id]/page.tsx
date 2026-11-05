@@ -5,6 +5,7 @@ import {
   type Run,
   type RunDiff,
   type RunEvent,
+  runLabel,
   wrapUpPhase,
 } from "@duskfleet/core";
 import Link from "next/link";
@@ -25,7 +26,6 @@ import {
   fmtOffset,
   fmtRelative,
   fmtTime,
-  runTitle,
   shortModel,
   tildePath,
   tildeText,
@@ -37,7 +37,7 @@ export const dynamic = "force-dynamic";
 export async function generateMetadata({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   const data = getRun(id);
-  return { title: data ? `${runTitle(data.run.prompt, 60)} · Duskfleet` : "Run not found · Duskfleet" };
+  return { title: data ? `${runLabel(data.run, 60)} · Duskfleet` : "Run not found · Duskfleet" };
 }
 
 /** Timeline entries shown before "show all N events" (denials, errors and the result are always shown). */
@@ -80,6 +80,7 @@ export default async function RunPage({
     `--project ${shellQuote(run.projectPath)}`,
     `--agent ${run.agentId}`,
     run.modelRequested ? `--model ${run.modelRequested}` : null,
+    run.title ? `--title ${shellQuote(run.title)}` : null,
     `-- ${shellQuote(run.prompt)}`,
   ]
     .filter(Boolean)
@@ -112,7 +113,7 @@ export default async function RunPage({
               <Link
                 href={`/runs/${prev.id}`}
                 className="chip-link"
-                title={`Previous run of ${run.agentId}: ${runTitle(prev.prompt, 60)}`}
+                title={`Previous run of ${run.agentId}: ${runLabel(prev, 60)}`}
               >
                 ← older
               </Link>
@@ -123,7 +124,7 @@ export default async function RunPage({
               <Link
                 href={`/runs/${next.id}`}
                 className="chip-link"
-                title={`Next run of ${run.agentId}: ${runTitle(next.prompt, 60)}`}
+                title={`Next run of ${run.agentId}: ${runLabel(next, 60)}`}
               >
                 newer →
               </Link>
@@ -132,7 +133,7 @@ export default async function RunPage({
             )}
           </span>
         </div>
-        <h1 title={run.prompt}>{runTitle(run.prompt, 110)}</h1>
+        <h1 title={run.prompt}>{runLabel(run, 110)}</h1>
         <div className="meta-row">
           <StatusBadge run={run} />
           <span className="sep">·</span>
@@ -205,7 +206,7 @@ export default async function RunPage({
             <span className="icon">↺</span>
             <div>
               <strong>Retry.</strong> This run resumed the session of{" "}
-              <Link href={`/runs/${resumedFrom.id}`}>{runTitle(resumedFrom.prompt, 60)}</Link> (
+              <Link href={`/runs/${resumedFrom.id}`}>{runLabel(resumedFrom, 60)}</Link> (
               {resumedFrom.status.replace("_", " ")}
               {resumedFrom.terminationReason ? `, ${resumedFrom.terminationReason}` : ""}), once: a second failure is
               final (<code>on_failure: resume_once</code>).
