@@ -13,7 +13,7 @@ export function registerBudgetTools(server: McpServer, ctx: ToolContext): void {
         "spentUsd (recorded cost of the scope's runs, gate runs included), the runs of unknown cost (unpricedRuns: ended without " +
         "a cost; runningRuns: not settled yet) and the standInUsd they count for, countedUsd (spentUsd + standInUsd), percent and " +
         "state: ok, warn (at or past warn_percent) or over (countedUsd reached amount_usd). Under unpriced_policy count (default) " +
-        "an unknown run counts as its agent's max_budget_usd, or as the whole remaining budget when the agent sets none. A spent " +
+        "an unknown run counts as the cap it ran with: its agent's max_budget_usd, else claude.default_max_budget_usd. A spent " +
         "hard_stop budget refuses new runs in its scope and pauses its schedules (skipped_budget); over only by running runs " +
         "(overByRunning) it refuses without pausing.",
       inputSchema: {},
@@ -54,8 +54,9 @@ export function registerBudgetTools(server: McpServer, ctx: ToolContext): void {
           .enum(UNPRICED_POLICIES)
           .optional()
           .describe(
-            "count (default, fail closed): a run with no recorded cost, or still running, counts as its agent's max_budget_usd, " +
-              "or as the whole remaining budget when the agent sets none. allow: only recorded costs count",
+            "count (default on a new budget, fail closed): a run with no recorded cost, or still running, counts as the cap it ran " +
+              "with (its agent's max_budget_usd, else claude.default_max_budget_usd). allow: only recorded costs count. Omitted " +
+              "on an existing budget = keep its policy",
           ),
       },
     },

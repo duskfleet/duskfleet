@@ -205,10 +205,11 @@ the run ended without a `result` line, e.g. a crash, a timeout or a cancel). The
 table. While a run is pending or running its `costStatus` is null.
 
 Under `unpriced_policy: count` (the default) a budget counts every run of its scope this month
-whose cost is unknown, an `unpriced` one or one still running, at a **stand-in**: the agent's
-`max_budget_usd` when it sets one, otherwise **the whole remaining budget** (without a per-run
-cap the worst case is unbounded, so a hard-stop budget refuses new runs). A running run is
-settled by its result. A run that never started (refused at spawn, a pending row swept as an
+whose cost is unknown, an `unpriced` one or one still running, at a **stand-in**: the cap it
+could spend, its worst case. For a finished run that is the `--max-budget-usd` its phases were
+launched with (main pass plus wrap-up); for a run still going, or one without recorded phases,
+the agent's `max_budget_usd`, otherwise `claude.default_max_budget_usd` (every run is launched
+with a cap). A running run is settled by its result. A run that never started (refused at spawn, a pending row swept as an
 orphan) could not spend anything and is not counted. A budget that is `over` only because of
 the stand-ins of runs still going (`overByRunning`) refuses new runs but pauses no schedule:
 it settles when those runs end.
@@ -218,7 +219,8 @@ type, `unpriced` where `cost_usd` is NULL), and the unpriced rows of the current
 count** after the upgrade: that is the point of failing closed. `duskfleet doctor` lists them
 per budget (`unpricedRuns`: run id, agent, stand-in) so a blocked budget is explainable; the
 escape hatch is `unpriced_policy: allow` on that budget
-(`npm run cli -- budgets set global --amount 200 --unpriced allow`).
+(`npm run cli -- budgets set global --amount 200 --unpriced allow`). Setting a budget again
+without `unpriced_policy` keeps the policy it has (`count` for a new budget).
 
 The dashboard's **Runs** page shows a banner for each budget at `warn` (amber) or `over`
 (coral when it stops runs); `list_budgets` and `duskfleet budgets` report `spentUsd` (recorded

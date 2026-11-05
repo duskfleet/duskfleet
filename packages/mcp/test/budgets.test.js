@@ -23,6 +23,7 @@ import {
   RunRepository,
   ScheduleRepository,
   Scheduler,
+  unknownCostRuns,
   utcMonthStart,
 } from "@duskfleet/core";
 
@@ -213,31 +214,80 @@ test("cost_status is settled with the run: reported / estimated by billing type,
   }
 });
 
-test("an unpriced run counts as its agent's max_budget_usd, or as the whole remaining budget; allow ignores it", async () => {
+test("set_budget without unpriced_policy keeps the stored policy; a new budget gets count", async () => {
   const t = setup();
   try {
+    t.runs.setBudget({ scope: "global", amountUsd: 1, unpricedPolicy: "allow" });
+    const kept = t.runs.setBudget({ scope: "global", amountUsd: 2 });
+    assert.equal(kept.amountUsd, 2);
+    assert.equal(kept.unpricedPolicy, "allow", "an update without the policy keeps allow");
+    assert.equal(t.runs.setBudget({ scope: "global", amountUsd: 2, unpricedPolicy: "count" }).unpricedPolicy, "count");
+    assert.equal(
+      t.runs.setBudget({ scope: "agent", scopeId: "coder", amountUsd: 1 }).unpricedPolicy,
+      "count",
+      "insert: count",
+    );
+  } finally {
+    await t.close();
+  }
+});
+
+test("the stand-in is the cap the run ran with, else the agent's max_budget_usd, else default_max_budget_usd", () => {
+  const source = {
+    list: () => [],
+    spentSince: () => 0,
+    unknownCostSince: () => [
+      { id: "a", agentId: "capped", kind: "unpriced", startedCapUsd: 0.3 },
+      { id: "b", agentId: "capped", kind: "running", startedCapUsd: null },
+      { id: "c", agentId: "other", kind: "running", startedCapUsd: null },
+      { id: "d", agentId: "gone", kind: "unpriced", startedCapUsd: null },
+    ],
+  };
+  const config = {
+    projects: new Map(),
+    agents: new Map([
+      ["capped", { maxBudgetUsd: 0.25 }],
+      ["other", {}],
+    ]),
+    claude: { defaultMaxBudgetUsd: 5 },
+  };
+  assert.deepEqual(
+    unknownCostRuns(source, config, { scope: "global", scopeId: null }).map((r) => [r.id, r.standInUsd]),
+    [
+      ["a", 0.3],
+      ["b", 0.25],
+      ["c", 5],
+      ["d", 5],
+    ],
+  );
+});
+
+test("an unpriced run counts as the cap it ran with; allow ignores it", async () => {
+  const t = setup();
+  try {
+    // capped: max_budget_usd 0.25 = main pass 0.12 + wrap-up reserve 0.13; a crash ran the main pass only.
     const capped = await t.run("capped", "crash");
     assert.equal(capped.costStatus, "unpriced");
     t.runs.setBudget({ scope: "project", scopeId: "side", amountUsd: 1 });
     let [s] = t.runs.budgetStatuses();
     assert.equal(s.spentUsd, 0);
     assert.equal(s.unpricedRuns, 1);
-    assert.equal(s.standInUsd, 0.25, "the agent's max_budget_usd stands in");
-    assert.equal(s.countedUsd, 0.25);
+    assert.equal(s.standInUsd, 0.12, "the main pass's --max-budget-usd stands in");
+    assert.equal(s.countedUsd, 0.12);
     assert.equal(s.state, "ok");
 
     const sched = t.scheduler.create({ name: "other hourly", agentId: "other", prompt: "ok", cron: "0 * * * *" });
-    await t.run("other", "crash"); // no max_budget_usd: the whole remaining budget
+    await t.run("other", "crash"); // no max_budget_usd: default_max_budget_usd 5, main pass 4.5
     [s] = t.runs.budgetStatuses();
     assert.equal(s.unpricedRuns, 2);
-    assert.equal(s.countedUsd, 1);
+    assert.equal(s.countedUsd, 4.62);
     assert.equal(s.state, "over");
     assert.equal(s.overByRunning, false);
     await assert.rejects(t.runs.startRun({ prompt: "ok", agentId: "other" }), (err) => {
       assert.ok(err instanceof BudgetError);
       assert.match(
         err.message,
-        /\$1 counted of \$1 this month, UTC: \$0 recorded plus \$1 standing in for 2 unpriced run/,
+        /\$4\.62 counted of \$1 this month, UTC: \$0 recorded plus \$4\.62 standing in for 2 unpriced run/,
       );
       assert.match(err.message, /or set unpriced_policy: allow on it/);
       return true;
@@ -249,8 +299,8 @@ test("an unpriced run counts as its agent's max_budget_usd, or as the whole rema
     assert.deepEqual(
       unpriced[0].runs.map((r) => [r.agentId, r.standInUsd]),
       [
-        ["capped", 0.25],
-        ["other", null],
+        ["capped", 0.12],
+        ["other", 4.5],
       ],
     );
 

@@ -645,7 +645,7 @@ async function main(): Promise<void> {
         agents: [...app.config.agents.keys()],
         scheduler,
         // Runs of this UTC month that ended without a cost, per budget: under unpriced_policy count
-        // each stands in at its agent's max_budget_usd (or the whole remaining budget).
+        // each stands in at the cap it ran with (max_budget_usd, else claude.default_max_budget_usd).
         unpricedRuns: app.runs.unpricedRunsByBudget().map(({ budget, runs }) => ({
           budget: budgetLabel(budget),
           budgetId: budget.id,
@@ -658,7 +658,7 @@ async function main(): Promise<void> {
           advice:
             budget.unpricedPolicy === "allow"
               ? `unpriced_policy is allow: these ${runs.length} run(s) do not count`
-              : `${runs.length} run(s) without a recorded cost count against the ${budgetLabel(budget)} budget (a missing max_budget_usd counts as the whole remaining budget); set unpriced_policy: allow on the budget to ignore them`,
+              : `${runs.length} run(s) without a recorded cost count against the ${budgetLabel(budget)} budget, each at the cap it ran with (max_budget_usd, else claude.default_max_budget_usd); set unpriced_policy: allow on the budget to ignore them`,
         })),
         // Rows whose owning process was gone, failed by this process's startup sweep: `running`
         // ones (orphans) and `pending` ones (the process died between the insert and the spawn).

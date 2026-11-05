@@ -199,12 +199,13 @@ export default async function RunsPage({ searchParams }: { searchParams: Promise
             <span className="icon">!</span>
             <div>
               <strong>
-                {label}: {fmtCost(b.spentUsd)} of {fmtCost(b.amountUsd)} {used} this month ({b.percent}%).
+                {label}: {fmtCost(b.countedUsd)} of {fmtCost(b.amountUsd)} {b.standInUsd > 0 ? "counted" : used} this
+                month ({b.percent}%).
               </strong>{" "}
               {words.basis === "mixed" && <>{fmtSplit(b.cost, "mixed")}. </>}
               {b.standInUsd > 0 && (
                 <>
-                  Counted {fmtCost(b.countedUsd)}: {fmtCost(b.standInUsd)} stands in for{" "}
+                  {fmtCost(b.spentUsd)} {used}, plus {fmtCost(b.standInUsd)} standing in for{" "}
                   {[
                     b.unpricedRuns ? `${b.unpricedRuns} run(s) without a recorded cost` : "",
                     b.runningRuns ? `${b.runningRuns} run(s) still going` : "",

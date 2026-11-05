@@ -10,7 +10,7 @@ All notable changes to Duskfleet are listed here. The format follows
 
 ### Changed
 
-- Budgets fail closed on unknown run cost: every finished run records `cost_status` (`reported`, `estimated` on a subscription, `unpriced` without a cost; migration 25), and under the new per-budget `unpriced_policy: count` (default) an unpriced or still running run counts as its agent's `max_budget_usd`, or as the whole remaining budget when the agent sets none. **Upgrade note:** existing finished runs are backfilled and the unpriced ones of the current month count at once, so a hard-stop budget may refuse runs right after the upgrade; `duskfleet doctor` lists them per budget, and `unpriced_policy: allow` (`budgets set ... --unpriced allow`, `set_budget`) ignores them ([#58](https://github.com/duskfleet/duskfleet/issues/58)).
+- Budgets fail closed on unknown run cost: every finished run records `cost_status` (`reported`, `estimated` on a subscription, `unpriced` without a cost; migration 25), and under the new per-budget `unpriced_policy: count` (default) an unpriced or still running run counts as the cap it ran with (its agent's `max_budget_usd`, else `claude.default_max_budget_usd`); `set_budget` without `unpriced_policy` keeps a budget's stored policy. **Upgrade note:** existing finished runs are backfilled and the unpriced ones of the current month count at once, so a hard-stop budget may refuse runs right after the upgrade; `duskfleet doctor` lists them per budget, and `unpriced_policy: allow` (`budgets set ... --unpriced allow`, `set_budget`) ignores them ([#58](https://github.com/duskfleet/duskfleet/issues/58)).
 
 ### Fixed
 

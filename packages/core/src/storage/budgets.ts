@@ -5,7 +5,13 @@
 
 import { randomUUID } from "node:crypto";
 import type { DatabaseSync } from "node:sqlite";
-import type { Budget, BudgetInput, BudgetScope, UnknownCostRow } from "../orchestration/budget.js";
+import {
+  type Budget,
+  type BudgetScope,
+  DEFAULT_UNPRICED_POLICY,
+  type UnknownCostRow,
+  type ValidBudgetInput,
+} from "../orchestration/budget.js";
 
 interface BudgetRow {
   id: string;
@@ -33,6 +39,28 @@ function rowToBudget(r: BudgetRow): Budget {
   };
 }
 
+/**
+ * The --max-budget-usd the run's phases were launched with, summed (main plus wrap-up): the cap
+ * the run really had. Null when no phase is recorded yet (a run still going) or one has no budget.
+ */
+function phaseBudgetTotal(json: string | null): number | null {
+  if (!json) return null;
+  let phases: unknown;
+  try {
+    phases = JSON.parse(json);
+  } catch {
+    return null;
+  }
+  if (!Array.isArray(phases) || phases.length === 0) return null;
+  let total = 0;
+  for (const p of phases) {
+    const usd = (p as { budgetUsd?: unknown } | null)?.budgetUsd;
+    if (typeof usd !== "number" || !Number.isFinite(usd) || usd <= 0) return null;
+    total += usd;
+  }
+  return total;
+}
+
 export class BudgetRepository {
   constructor(private readonly db: DatabaseSync) {}
 
@@ -58,8 +86,11 @@ export class BudgetRepository {
     return row ? rowToBudget(row) : null;
   }
 
-  /** Create the budget of a scope, or replace the one it has (one budget per scope). Input already validated. */
-  upsert(input: Required<BudgetInput>): Budget {
+  /**
+   * Create the budget of a scope, or replace the one it has (one budget per scope). Input already
+   * validated. An unset unpricedPolicy keeps the stored one on update and is `count` on insert.
+   */
+  upsert(input: ValidBudgetInput): Budget {
     const now = new Date().toISOString();
     const existing = this.find(input.scope, input.scopeId);
     if (existing) {
@@ -67,7 +98,14 @@ export class BudgetRepository {
         .prepare(
           "UPDATE budgets SET amount_usd = ?, warn_percent = ?, hard_stop = ?, unpriced_policy = ?, updated_at = ? WHERE id = ?",
         )
-        .run(input.amountUsd, input.warnPercent, input.hardStop ? 1 : 0, input.unpricedPolicy, now, existing.id);
+        .run(
+          input.amountUsd,
+          input.warnPercent,
+          input.hardStop ? 1 : 0,
+          input.unpricedPolicy ?? existing.unpricedPolicy,
+          now,
+          existing.id,
+        );
       return this.get(existing.id)!;
     }
     const id = randomUUID();
@@ -82,7 +120,7 @@ export class BudgetRepository {
         input.amountUsd,
         input.warnPercent,
         input.hardStop ? 1 : 0,
-        input.unpricedPolicy,
+        input.unpricedPolicy ?? DEFAULT_UNPRICED_POLICY,
         now,
         now,
       );
@@ -128,8 +166,8 @@ export class BudgetRepository {
   ): UnknownCostRow[] {
     const unknown =
       "(status IN ('pending', 'running') OR (cost_status = 'unpriced' AND started_at IS NOT NULL)) AND created_at >= ?";
-    const select = "SELECT id, agent_id, status FROM runs WHERE";
-    let rows: Array<{ id: string; agent_id: string; status: string }>;
+    const select = "SELECT id, agent_id, status, phases_json FROM runs WHERE";
+    let rows: Array<{ id: string; agent_id: string; status: string; phases_json: string | null }>;
     if (b.scope === "global") {
       rows = this.db.prepare(`${select} ${unknown} ORDER BY created_at`).all(sinceIso) as typeof rows;
     } else if (b.scope === "agent") {
@@ -141,11 +179,16 @@ export class BudgetRepository {
         .prepare(`${select} (project_id = ? OR project_path = ?) AND ${unknown} ORDER BY created_at`)
         .all(b.scopeId, projectPath, sinceIso) as typeof rows;
     }
-    return rows.map((r) => ({
-      id: r.id,
-      agentId: r.agent_id,
-      kind: r.status === "pending" || r.status === "running" ? "running" : "unpriced",
-    }));
+    return rows.map((r) => {
+      const running = r.status === "pending" || r.status === "running";
+      // A run still going may have a wrap-up phase ahead: its recorded phases are not its whole cap.
+      return {
+        id: r.id,
+        agentId: r.agent_id,
+        kind: running ? "running" : "unpriced",
+        startedCapUsd: running ? null : phaseBudgetTotal(r.phases_json),
+      };
+    });
   }
 
   /** Enabled schedules, with what decides their scope (agent and stored project). */
