@@ -196,6 +196,28 @@ in the nav); the other pages are static.
   `claude.allow_bypass_permissions`, `env_passthrough`) stay hand edits of the file. The header
   shows when the file last changed and whether that was a hand edit.
 
+## Attention
+
+`/attention`, the first tab of the nav, lists everything that needs a human, grouped by kind
+in a fixed order. Empty sections are hidden:
+
+1. **Login and quota errors**: one item per cause (`auth_required`, `provider_quota`, a
+   `claude` binary not found), with the runs it failed folded in. "How to fix" opens the fix
+   line in place (the same text as the CLI's hint, core's `FAILURE_FIXES`).
+2. **Failed runs**: failed, timed-out and orphaned runs, one item per agent with a count.
+3. **Needs review**: completed runs with a stored [review reason](#needs-review), one item per agent.
+4. **Schedules paused or in error**: auto-paused schedules (`paused_reason`) and schedules whose
+   last firing errored. A schedule paused by hand is not listed.
+5. **Budget warnings**: monthly budgets at or past `warn_percent`; a spent hard stop is coral.
+6. **Repeated skipped busy**: a schedule whose last 3 or more firings were all `skipped_busy`.
+
+The page is a pure view: nothing is stored and nothing can be dismissed. An item leaves when its
+cause is fixed: the agent ends a clean run, or its schedule is paused by hand (run items); a later
+run ends without the login code; the schedule is resumed or fires again; the spend drops below
+the warning or the month changes. Run and schedule items older than 48 hours are dropped too.
+The tab's badge counts items, not runs. It is coral when a login or quota error or a spent hard
+stop is present, amber otherwise, and absent at 0.
+
 ## Trends
 
 `/trends` (the **Clean runs** card of the Runs page) shows how the share of clean runs moves
