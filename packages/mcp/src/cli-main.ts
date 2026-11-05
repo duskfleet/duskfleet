@@ -853,10 +853,11 @@ async function main(): Promise<void> {
       const diff = app.runs.diff(id); // same field as get_run
       const costLabel = runCostLabel(run.billingType); // same field as get_run
       const label = runLabel(run); // same field as get_run
+      const artifacts = app.runs.artifacts(id).map(({ kind, value, source }) => ({ kind, value, source })); // same field as get_run
       print(
         values.events
-          ? { ...run, label, costLabel, diff, subagents, events: app.runs.events(id) }
-          : { ...run, label, costLabel, diff, subagents },
+          ? { ...run, label, costLabel, diff, artifacts, subagents, events: app.runs.events(id) }
+          : { ...run, label, costLabel, diff, artifacts, subagents },
       );
       return done();
     }

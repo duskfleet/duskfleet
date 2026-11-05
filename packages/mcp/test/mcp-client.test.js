@@ -96,6 +96,7 @@ test("MCP client can run an agent and inspect the run", async () => {
     assert.equal(run.resultText, "Done: created hello.txt");
     assert.equal(run.costUsd, 0.0123);
     assert.ok(Array.isArray(run.events) && run.events.some((e) => e.type === "tool_use"));
+    assert.deepEqual(run.artifacts, [], "no git activity, no artifact");
 
     const waited = parse(
       await client.callTool({
@@ -120,6 +121,20 @@ test("MCP client can run an agent and inspect the run", async () => {
     const listed = list.runs.reduce((sum, r) => sum + (r.costUsd ?? 0), 0);
     assert.ok(Math.abs(list.cost.apiUsd + list.cost.subscriptionUsd - listed) < 1e-9);
     assert.equal(list.cost.heading, list.cost.apiUsd > 0 ? "Spent" : "Usage (API value)");
+
+    const gitRun = parse(
+      await client.callTool({
+        name: "run_agent",
+        arguments: { prompt: "git-pr", project_path: project, wait_seconds: 10 },
+      }),
+    );
+    assert.equal(gitRun.status, "completed");
+    const withArtifacts = parse(await client.callTool({ name: "get_run", arguments: { run_id: gitRun.id } }));
+    assert.deepEqual(
+      withArtifacts.artifacts.map((a) => `${a.kind} ${a.source}`),
+      ["branch tool_result", "commit tool_result", "pr tool_result"],
+    );
+    assert.equal(withArtifacts.artifacts[2].value, "https://github.com/example/demo/pull/8");
 
     const bad = await client.callTool({
       name: "run_agent",

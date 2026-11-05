@@ -80,6 +80,25 @@ they arrive and keeps the raw stream in `data/logs/<run_id>.jsonl`:
   past it is skipped and marked the same way. `patchTruncated` means the patch is incomplete
   (cut at 1 MB, or a git read failed or ran out of time). Diff and textconv drivers of the
   checkout never run.
+- what the run produced in git / GitHub, one `run_artifacts` row each (`kind`, `value`,
+  `source`), read when the run ends from the main session's successful Bash calls (a failed or
+  rejected call, and subagents' calls, do not count) and from its final text: `pr`, a
+  `https://github.com/<owner>/<repo>/pull/<n>` URL printed by `gh pr create`, or written in the
+  final text of a run that created a PR (a `gh pr create` that is the whole command or printed
+  a PR URL: one behind `|| echo exists` that printed none does not count; a run that only
+  mentions a PR, such as a review, records none); `branch`, the branch of `git push` (a delete
+  such as `git push origin :old` is not one), `git checkout -b`, `git switch -c`,
+  `gh pr create --head` and of a push report line (`a -> a`, so `git add -A && git commit -m x
+  && git push -u origin HEAD` records the pushed branch; not read when the command also runs
+  `git fetch`, `pull`, `clone`, `remote` or `submodule`, which print such lines too); `commit`,
+  a full 40-character SHA: the first one printed by `git rev-parse HEAD` when it is the
+  command's only `git` call and runs in the project directory (a `cd`, `pushd`, `git -C`,
+  `--git-dir` or `--work-tree` pointing elsewhere is another checkout), or the new SHA of a push report line (rare, since `git push` abbreviates its SHAs
+  by default), never a short SHA, never from prose, and never the checkout's HEAD from before
+  the run. Redirections, shell comments and here-document bodies (`<<EOF` ... `EOF`) in the
+  command are not read as arguments or commands. `source` is `tool_result` or
+  `result_text`; the same value is recorded once. `get_run` and `run-info` return them as
+  `artifacts`. Nothing is fetched from GitHub: a PR closed later is still listed.
 
 `RunManager` is the only writer of a run's status, and every change goes through a checked
 transition. Each run records its owner process; orphan recovery closes a `running` row, or a

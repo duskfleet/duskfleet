@@ -267,7 +267,8 @@ probe cancels the run, removes its temporary directory and exits 130 without a r
 Each run writes a raw event log to `data/logs/<run_id>.jsonl` and a structured row to SQLite.
 In a git checkout it also writes the patch of what it changed to `data/logs/<run_id>.diff`;
 `run-info` shows the summary as `diff` (base commit, files with lines added / deleted), the
-same field as `get_run` ([how it works](how-it-works.md#what-gets-recorded)).
+same field as `get_run`, and the PRs, branches and commits the run produced as `artifacts`
+([how it works](how-it-works.md#what-gets-recorded)).
 
 ## Firing an agent from a script or a git hook
 

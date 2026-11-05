@@ -27,6 +27,14 @@ import {
 } from "../execution/types.js";
 import { captureRunDiff, headSha } from "../git/diff.js";
 import {
+  type ArtifactFinding,
+  artifactsFromBash,
+  artifactsFromResultText,
+  createsPr,
+  type RunArtifact,
+  uniqueArtifacts,
+} from "../observability/artifacts.js";
+import {
   continueRefusal,
   isBudgetExhausted,
   isResumable,
@@ -159,6 +167,10 @@ interface ActiveRun {
   lastEventWriteMs: number;
   /** Why the row could not be marked `running` after the spawn (the child was then stopped); null when it was. */
   startError: string | null;
+  /** PRs, branches and commits read from the main session's Bash output so far (both passes). */
+  artifacts: ArtifactFinding[];
+  /** The main session ran a successful `gh pr create`: only then do PR URLs of the final text count. */
+  prCreated: boolean;
   /** The run whose session the main pass resumes (a continuation); cleared once it fell back to a fresh session. */
   continuedFromRunId: string | null;
 }
@@ -364,6 +376,11 @@ export class RunManager {
   /** What the run changed in its git checkout (the `diff` event), or null. A pure read. */
   diff(runId: string) {
     return this.runs.diff(runId);
+  }
+
+  /** PRs, branches and commits the run produced (`run_artifacts`). A pure read. */
+  artifacts(runId: string): RunArtifact[] {
+    return this.runs.listArtifacts(runId);
   }
 
   /** Subagent invocations recorded for a run (see RunAgent). A pure read. */
@@ -633,6 +650,8 @@ export class RunManager {
       gitBase,
       lastEventWriteMs: 0,
       startError: null,
+      artifacts: [],
+      prCreated: false,
       continuedFromRunId: continued?.id ?? null,
     });
     // Listen for the end before anything else can throw: a child nobody listens to runs to its
@@ -1160,6 +1179,7 @@ export class RunManager {
         return;
       }
       if (active?.gitBase) this.recordDiff(runId, active.projectPath, active.gitBase);
+      this.recordArtifacts(runId, active, result.resultText);
       // A run whose start failed after the spawn (see startRun) ends failed with that reason
       // whatever the child did: it was stopped by Duskfleet, not cancelled by anyone. Keyed on
       // startError, not on the row: the lock can hit after the row was already stored running.
@@ -1229,6 +1249,27 @@ export class RunManager {
       const message = err instanceof Error ? err.message : String(err);
       log.warn("diff capture failed", { runId, err: message });
       this.runs.addEvent(runId, "note", { message: `git diff of the run could not be recorded: ${message}` });
+    }
+  }
+
+  /**
+   * The `run_artifacts` rows: PRs, branches and commits from the Bash output, then PR URLs of the
+   * final text when the run created a PR. A commit equal to the checkout's HEAD before the spawn
+   * existed already: not produced. Written before the final status, like the diff; a failure is a
+   * note, never a lost result.
+   */
+  private recordArtifacts(runId: string, active: ActiveRun | undefined, resultText: string | null): void {
+    try {
+      const base = active?.gitBase ?? null;
+      const findings = uniqueArtifacts([
+        ...(active?.artifacts ?? []),
+        ...artifactsFromResultText(resultText, active?.prCreated ?? false),
+      ]).filter((f) => !(f.kind === "commit" && f.value === base));
+      if (findings.length) this.runs.addArtifacts(runId, findings);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      log.warn("artifact recording failed", { runId, err: message });
+      this.runs.addEvent(runId, "note", { message: `run artifacts could not be recorded: ${message}` });
     }
   }
 
@@ -1346,6 +1387,16 @@ export class RunManager {
           { name: event.name, summary: summarizeToolInput(event.name, event.input) },
           event.agentId,
         );
+        break;
+      }
+      case "bash_result": {
+        // Only the main session's calls count, as for the run's model and last text.
+        // A failed or rejected call produced nothing, whatever its arguments say.
+        if (event.agentId !== null || event.isError) break;
+        const active = this.active.get(runId);
+        if (!active) break;
+        active.artifacts.push(...artifactsFromBash(event.command, event.output, active.projectPath));
+        if (createsPr(event.command, event.output)) active.prCreated = true;
         break;
       }
       case "subagent_start": {

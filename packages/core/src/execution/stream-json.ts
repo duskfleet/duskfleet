@@ -84,6 +84,8 @@ export interface StreamState {
   background: Set<string>;
   /** Subagents whose endedAt is the wall clock at parse time (the closing line had no timestamp). */
   wallClockEnd: Set<string>;
+  /** Bash calls waiting for their tool_result: tool_use id → command. */
+  bashCalls: Map<string, string>;
 }
 
 interface AgentCallInput {
@@ -111,6 +113,7 @@ export function createStreamState(): StreamState {
     measured: new Set(),
     background: new Set(),
     wallClockEnd: new Set(),
+    bashCalls: new Map(),
   };
 }
 
@@ -251,6 +254,10 @@ export function ingestLine(state: StreamState, line: string): ExecutionEvent[] {
           const name = str(block["name"]) ?? "unknown";
           const id = str(block["id"]);
           if (id) state.toolUseOwner.set(id, agentId);
+          if (id && name === "Bash" && isObject(block["input"])) {
+            const command = str(block["input"]["command"]);
+            if (command) state.bashCalls.set(id, command);
+          }
           // The Agent call's input is the authoritative brief: subagent_type, description, prompt.
           if (id && (name === "Agent" || name === "Task") && isObject(block["input"])) {
             const input = block["input"];
@@ -295,6 +302,18 @@ export function ingestLine(state: StreamState, line: string): ExecutionEvent[] {
           // The hand-back: a tool_result for the Agent call that spawned a subagent closes it.
           const toolUseId = str(block["tool_use_id"]);
           if (!toolUseId) continue;
+          const command = state.bashCalls.get(toolUseId);
+          if (command !== undefined) {
+            state.bashCalls.delete(toolUseId);
+            events.push({
+              type: "bash_result",
+              command,
+              output: toolResultText(block["content"]),
+              isError: block["is_error"] === true,
+              agentId: state.toolUseOwner.get(toolUseId) ?? null,
+            });
+            continue;
+          }
           const handBack = isObject(msg["tool_use_result"]) ? msg["tool_use_result"] : null;
           let record = subagentByParent(state, toolUseId);
           // No task_started and no nested lines (older CLI, or a stream without them): the

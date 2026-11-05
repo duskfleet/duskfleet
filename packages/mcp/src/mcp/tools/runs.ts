@@ -126,7 +126,8 @@ export function registerRunTools(server: McpServer, ctx: ToolContext): void {
       description:
         "Fetch a run by id: status, timings, Claude session id, model, tokens, cost, tool calls, errors, " +
         "the command to resume the session and the subagents it delegated to (one entry per Agent call: type, brief, " +
-        "report, tools, model, tokens), and `diff`: what the run changed in a git checkout (files, lines added / deleted, path of the patch). Set include_output to get the full final message, full subagent briefs and reports, and the event timeline.",
+        "report, tools, model, tokens), `diff`: what the run changed in a git checkout (files, lines added / deleted, path of the patch), and `artifacts`: " +
+        "the PRs, branches and commits it produced ({kind: pr | branch | commit, value, source: tool_result | result_text}). Set include_output to get the full final message, full subagent briefs and reports, and the event timeline.",
       inputSchema: {
         run_id: z.string().describe("Run id returned by run_agent or list_runs"),
         include_output: z.boolean().optional().describe("Include the full final message and the event timeline"),
@@ -143,10 +144,12 @@ export function registerRunTools(server: McpServer, ctx: ToolContext): void {
       const continuedByRunIds = ctx.runs.continuedBy(run_id).map((r) => r.id);
       /** What the run changed in its git checkout (files, line counts, patch path), or null. */
       const diff = ctx.runs.diff(run_id);
+      /** PRs, branches and commits the run produced (run_artifacts). */
+      const artifacts = ctx.runs.artifacts(run_id).map(({ kind, value, source }) => ({ kind, value, source }));
       return jsonResult(
         include_output
-          ? { ...view, resumedByRunId, continuedByRunIds, diff, subagents, events: ctx.runs.events(run_id) }
-          : { ...view, resumedByRunId, continuedByRunIds, diff, subagents },
+          ? { ...view, resumedByRunId, continuedByRunIds, diff, artifacts, subagents, events: ctx.runs.events(run_id) }
+          : { ...view, resumedByRunId, continuedByRunIds, diff, artifacts, subagents },
       );
     },
   );
