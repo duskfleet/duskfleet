@@ -159,16 +159,42 @@ export function prepareSkillBundle(config: SkillDirs, names: readonly string[]):
       if (process.platform === "win32") cpSync(s.dir, target, { recursive: true });
       else symlinkSync(s.dir, target, "dir");
     }
-    rmSync(dir, { recursive: true, force: true });
-    try {
-      renameSync(tmp, dir);
-    } catch (err) {
-      rmSync(tmp, { recursive: true, force: true });
-      // Another process renamed the same bundle into place first: that one is as good as ours.
-      if (!bundleComplete(dir, skills)) throw err;
-    }
+    installBundle(tmp, dir, skills);
   }
   return { id, dir, skills, missing };
+}
+
+/**
+ * Renames the freshly built `tmp` into `dir` without ever deleting a bundle another process may
+ * have just installed (and passed to a run with --add-dir): rename first; only when `dir` is
+ * taken by an incomplete bundle is that one moved aside under a unique name, then the rename is
+ * retried once. A complete `dir` (a concurrent run built the same bundle) is as good as ours.
+ */
+function installBundle(tmp: string, dir: string, skills: ResolvedSkill[]): void {
+  try {
+    renameSync(tmp, dir);
+    return;
+  } catch (err) {
+    if (bundleComplete(dir, skills) || !existsSync(dir)) {
+      rmSync(tmp, { recursive: true, force: true });
+      if (bundleComplete(dir, skills)) return;
+      throw err;
+    }
+  }
+  const aside = `${dir}.stale.${process.pid}.${Date.now()}`;
+  try {
+    renameSync(dir, aside);
+  } catch {
+    // Another process moved it aside first; the retry below decides.
+  }
+  try {
+    renameSync(tmp, dir);
+  } catch (err) {
+    rmSync(tmp, { recursive: true, force: true });
+    if (!bundleComplete(dir, skills)) throw err;
+  } finally {
+    rmSync(aside, { recursive: true, force: true });
+  }
 }
 
 function bundleComplete(dir: string, skills: ResolvedSkill[]): boolean {

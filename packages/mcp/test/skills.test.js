@@ -15,6 +15,7 @@ import "./helpers.js"; // before @duskfleet/core: drops an inherited CLAUDE_BIN
 
 import {
   agentToSpec,
+  assertAgentWritable,
   assertSkillsAvailable,
   ClaudeCodeExecutor,
   createAgentFromFields,
@@ -155,6 +156,48 @@ test("prepareSkillBundle: content-addressed, reused while unchanged, new id afte
     const partial = prepareSkillBundle(config, ["greet", "gone"]);
     assert.deepEqual(partial.missing, ["gone"]);
     assert.equal(prepareSkillBundle(config, ["gone"]), null);
+  } finally {
+    rmSync(r.root, { recursive: true, force: true });
+  }
+});
+
+test("prepareSkillBundle replaces an incomplete bundle in place and leaves no stale copy", () => {
+  const r = makeRoot();
+  try {
+    writeSkill(r.builtinSkills, "greet");
+    writeSkill(r.builtinSkills, "lint");
+    const config = loadConfig(r.configDir);
+    const a = prepareSkillBundle(config, ["greet", "lint"]);
+    // A half-built bundle under the final name (only one of the two skills).
+    rmSync(path.join(a.dir, ".claude", "skills", "lint"), { recursive: true, force: true });
+    const b = prepareSkillBundle(config, ["greet", "lint"]);
+    assert.equal(b.id, a.id);
+    assert.ok(existsSync(path.join(b.dir, ".claude", "skills", "lint", "SKILL.md")));
+    assert.ok(existsSync(path.join(b.dir, ".claude", "skills", "greet", "SKILL.md")));
+    assert.deepEqual(readdirSync(path.join(r.dataDir, "skill-bundles")), [a.id], "no temporary or stale directory");
+  } finally {
+    rmSync(r.root, { recursive: true, force: true });
+  }
+});
+
+test("update re-checks only the skills new against the stored spec", () => {
+  const r = makeRoot();
+  try {
+    writeSkill(r.builtinSkills, "greet");
+    const config = loadConfig(r.configDir);
+    const reload = () => loadConfig(r.configDir);
+    const agent = createAgentFromFields("own", { id: "u", system_prompt: "Hi.", skills: ["greet"] }, config, reload);
+    rmSync(path.join(r.builtinSkills, "greet"), { recursive: true, force: true });
+    const stored = agentToSpec(agent);
+    // An unrelated change (a new model) on an agent whose declared skill was deleted since.
+    assert.doesNotThrow(() => assertAgentWritable("own", { ...stored, model: "haiku" }, reload(), stored.skills));
+    // A newly added name is still checked.
+    assert.throws(
+      () => assertAgentWritable("own", { ...stored, skills: ["greet", "nope"] }, reload(), stored.skills),
+      /unknown skill "nope"/,
+    );
+    // Create has no stored skills: every name is checked.
+    assert.throws(() => assertAgentWritable("own", stored, reload()), /unknown skill "greet"/);
   } finally {
     rmSync(r.root, { recursive: true, force: true });
   }

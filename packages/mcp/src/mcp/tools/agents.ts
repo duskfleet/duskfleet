@@ -381,12 +381,13 @@ export function registerAgentTools(server: McpServer, ctx: ToolContext): void {
             changes.claude_agent ?? existing.claudeAgent,
           );
         const cfgNow = ctx.config;
-        const merged: AgentSpec = { ...agentToSpec(existing) };
+        const stored = agentToSpec(existing);
+        const merged: AgentSpec = { ...stored };
         for (const [k, v] of Object.entries(changes)) if (v !== undefined) (merged as Record<string, unknown>)[k] = v;
         for (const k of clear ?? []) delete (merged as Record<string, unknown>)[k];
         const spec = assertAgentSpecClean(agentSpecSchema.parse(merged));
         const kind = requestedKind ?? agentKind(spec);
-        assertAgentWritable(kind, spec, cfgNow);
+        assertAgentWritable(kind, spec, cfgNow, stored.skills ?? []);
         const fresh = writeAgentAndVerify(cfgNow, spec, () => ctx.config);
         return jsonResult({ updated: true, kind, agent: presentAgent(fresh, ctx.config) });
       } catch (err) {
