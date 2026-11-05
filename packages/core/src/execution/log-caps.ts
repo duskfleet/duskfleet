@@ -35,8 +35,9 @@ export function truncationMarker(droppedBytes: number): string {
  * The JSON stored for one event, at most `maxBytes` long. Under the cap: `JSON.stringify(payload)`.
  * Over it: the envelope stays (keys, numbers, short strings such as type, ids and tool names) and
  * the longest strings are cut, each ending with `truncationMarker`, until it fits; the payload
- * gets `truncated: true`. A payload that is not an object, or that has no string long enough to
- * cut, is stored as `{ truncated: true, bytes, preview }`.
+ * gets `truncated: true`. When cutting strings is not enough, the largest nested arrays and objects
+ * become `{ truncated: true, bytes }` stubs, so the scalar keys survive. A payload that is not an
+ * object, or whose scalars alone pass the cap, is stored as `{ truncated: true, bytes, preview }`.
  */
 export function capEventJson(payload: unknown, maxBytes: number): string {
   const json = JSON.stringify(payload);
@@ -58,6 +59,18 @@ export function capEventJson(payload: unknown, maxBytes: number): string {
       const kept = cutChars(value, Math.floor((value.length * target) / encoded));
       if (kept.length >= value.length) break;
       leaf.holder[leaf.key] = kept + truncationMarker(utf8Bytes(value) - utf8Bytes(kept));
+    }
+    // No long string left to cut (a big array of short paths, say): stub the largest arrays and
+    // objects so the scalar envelope keys (type, filesChanged, name) survive.
+    const stubs = new WeakSet<object>();
+    for (let i = 0; i < 256; i++) {
+      const out = JSON.stringify(copy);
+      if (utf8Bytes(out) <= maxBytes) return out;
+      const big = largestContainer(copy, stubs);
+      if (!big) break;
+      const stub = { truncated: true, bytes: big.bytes };
+      stubs.add(stub);
+      big.holder[big.key] = stub;
     }
   }
   const bytes = utf8Bytes(json);
@@ -104,11 +117,32 @@ function longestString(root: Holder): { holder: Record<string | number, unknown>
   return best;
 }
 
+/** The largest array or object below the root (by JSON bytes), stubs excluded, with what holds it. */
+function largestContainer(
+  root: Holder,
+  stubs: WeakSet<object>,
+): { holder: Record<string | number, unknown>; key: string | number; bytes: number } | null {
+  let best: { holder: Record<string | number, unknown>; key: string | number; bytes: number } | null = null;
+  const visit = (node: Holder) => {
+    const entries: Array<[string | number, unknown]> = Array.isArray(node)
+      ? node.map((v, i) => [i, v])
+      : Object.entries(node);
+    for (const [key, value] of entries) {
+      if (typeof value !== "object" || value === null || stubs.has(value)) continue;
+      const bytes = utf8Bytes(JSON.stringify(value));
+      if (!best || bytes > best.bytes) best = { holder: node as Record<string | number, unknown>, key, bytes };
+      visit(value as Holder);
+    }
+  };
+  visit(root);
+  return best;
+}
+
 /**
  * Append-only writer of a run's raw log that stops at `maxBytes`. The line that would cross the
  * cap is replaced by `LOG_TRUNCATED_LINE` and nothing more is written; `truncated` says so. A file
- * that is already at its cap when opened (an earlier pass of the same run filled it) is not written
- * again, and gets the marker only if it does not end with it yet.
+ * that already ends with the marker when opened (an earlier pass of the same run stopped, at any
+ * size) is not written again; one at or over its cap without the marker gets it once.
  */
 export class CappedLogWriter {
   private readonly stream: WriteStream;
@@ -124,9 +158,13 @@ export class CappedLogWriter {
     this.written = existsSync(path) ? statSync(path).size : 0;
     this.stream = createWriteStream(path, { flags: "a" });
     this.stream.on("error", onError);
-    if (this.written >= maxBytes) {
+    // The writer stops at the line that would cross the cap, so a capped file can end with the
+    // marker below the cap: the marker alone says the log is closed.
+    if (this.written > 0 && endsWithMarker(path, this.written)) {
       this.stopped = true;
-      if (!endsWithMarker(path, this.written)) this.stream.write(LOG_TRUNCATED_LINE);
+    } else if (this.written >= maxBytes) {
+      this.stopped = true;
+      this.stream.write(LOG_TRUNCATED_LINE);
     }
   }
 
@@ -162,7 +200,8 @@ export class CappedLogWriter {
 }
 
 function endsWithMarker(file: string, size: number): boolean {
-  const len = Math.min(size, LOG_TRUNCATED_LINE.length);
+  const len = LOG_TRUNCATED_LINE.length;
+  if (size < len) return false;
   const buf = Buffer.alloc(len);
   const fd = openSync(file, "r");
   try {
@@ -170,7 +209,7 @@ function endsWithMarker(file: string, size: number): boolean {
   } finally {
     closeSync(fd);
   }
-  return buf.toString("utf8") === LOG_TRUNCATED_LINE.slice(-len);
+  return buf.toString("utf8") === LOG_TRUNCATED_LINE;
 }
 
 export interface LogMetadata {

@@ -114,6 +114,19 @@ test("capEventJson: a non-object payload over the cap becomes { truncated, bytes
   assert.match(stored.preview, /…\[truncated \d+ bytes\]$/);
 });
 
+test("capEventJson: an over-cap payload of short strings keeps its envelope, the big array stubbed", () => {
+  const changedFiles = Array.from({ length: 2000 }, (_, i) => `src/file-${i}.ts`);
+  const payload = { type: "diff", name: "git", filesChanged: 2000, changedFiles };
+  const json = capEventJson(payload, 4096);
+  assert.ok(Buffer.byteLength(json) <= 4096);
+  const stored = JSON.parse(json);
+  assert.equal(stored.type, "diff");
+  assert.equal(stored.name, "git");
+  assert.equal(stored.filesChanged, 2000);
+  assert.equal(stored.truncated, true);
+  assert.deepEqual(stored.changedFiles, { truncated: true, bytes: Buffer.byteLength(JSON.stringify(changedFiles)) });
+});
+
 test("RunRepository.addEvent stores an oversized payload capped at max_event_bytes", async () => {
   const app = makeApp("  max_event_bytes: 65536\n");
   try {
@@ -204,6 +217,29 @@ test("CappedLogWriter: a file already at its cap is not written again, and keeps
     await second.end();
     assert.equal(statSync(file).size, size, "nothing appended");
     assert.equal(readFileSync(file, "utf8").split(LOG_TRUNCATED_LINE).length, 2);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("CappedLogWriter: a reopened log that ends with the marker below its cap is not appended to", async () => {
+  const dir = mkdtempSync(path.join(tmpdir(), "duskfleet-logwriter-"));
+  try {
+    const file = path.join(dir, "logs", "run.jsonl");
+    const first = new CappedLogWriter(file, 1000, () => {});
+    first.write(`${"a".repeat(899)}\n`);
+    first.write(`${"b".repeat(299)}\n`);
+    assert.equal(first.truncated, true);
+    await first.end();
+    const size = statSync(file).size;
+    assert.ok(size < 1000, "the marker ends the file below the cap");
+
+    const second = new CappedLogWriter(file, 1000, () => {});
+    assert.equal(second.truncated, true);
+    second.write("more\n");
+    await second.end();
+    assert.equal(statSync(file).size, size, "nothing appended after the marker");
+    assert.ok(readFileSync(file, "utf8").endsWith(LOG_TRUNCATED_LINE));
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

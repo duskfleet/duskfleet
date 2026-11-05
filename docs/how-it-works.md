@@ -86,7 +86,8 @@ they arrive and keeps the raw stream in `data/logs/<run_id>.jsonl`:
 
 Both stores are bounded. One `run_events` payload is at most `claude.max_event_bytes`
 (default 64 KiB): over it the stored JSON keeps its envelope (type, ids, tool name) and the
-longest strings are cut, each ending with `…[truncated N bytes]`, and the payload gets
+longest strings are cut, each ending with `…[truncated N bytes]` (when that is not enough, the
+largest nested arrays and objects become `{ truncated, bytes }` stubs), and the payload gets
 `truncated: true`; the raw JSONL line is always written in full. The raw log is at most
 `claude.max_log_bytes` (default 50 MiB): the line that would cross it is replaced by one final
 `{"type":"duskfleet_log_truncated","bytes_dropped_from_here":true}` line and nothing more is
