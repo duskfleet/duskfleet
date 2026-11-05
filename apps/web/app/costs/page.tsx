@@ -104,6 +104,7 @@ export default async function CostsPage({ searchParams }: { searchParams: Promis
   };
   const runsHref = (key: string): string | null => {
     if (by === "agent") return `/?agent=${encodeURIComponent(key)}`;
+    if (by === "model") return `/?model=${encodeURIComponent(key)}`;
     const id = by === "project" ? projectId(key) : undefined;
     return id ? `/?project=${encodeURIComponent(id)}` : null;
   };

@@ -56,8 +56,9 @@ in the nav); the other pages are static.
 - **Runs** (the home page, `/`; `/runs` redirects there and keeps its query string): KPI cards (clean runs, needs review, spend) computed on the current project / agent
   filter; a Project and an Agent multi-select on the search line (repeated params,
   `?project=a&project=b&agent=x`: any of the projects AND any of the agents; a single `?agent=`
-  still works; each select's × drops its filter), prompt search (`?q=`), `?schedule=` and
-  `?limit=` (load older).
+  still works; each select's × drops its filter), prompt search (`?q=`), `?schedule=`,
+  `?model=` (the model a run counts under on [Costs](#costs), which links it; like `?q=` it
+  looks through the newest 200 runs of the scope) and `?limit=` (load older).
   **Running now** counts the real runs not ended yet, `running` or `pending` (being spawned),
   and the Running list above Recent shows the same rows. The Agents page uses the same
   definition for its running state, so both pages agree (the Agents tile counts agents, an agent
@@ -246,8 +247,8 @@ their start time, as budgets do.
 - **Ranked table**: one row per agent, project or model of the period (the split control in the
   table head, `?by=agent` by default, `project` or `model`; a run that mixed models counts under
   the one it asked for), ranked by spend: spent, share of the period total, finished runs and
-  average per run, with a find field and a total row. Agent names open the agent, project names
-  and runs counts open the Runs page filtered on them.
+  average per run, with a find field and a total row. Agent names open the agent, project and
+  model names and runs counts open the Runs page filtered on them (`?project=`, `?model=`).
 - **Spend per day / week / month**: stacked bars of the real runs' `cost_usd`. The ticked rows of
   the table are the segments, bottom to top in rank order, the first in the accent colour and
   the others faint; the unticked rows fold into one outlined "others" segment on top. Ticks are
