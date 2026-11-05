@@ -189,9 +189,10 @@ npm workspaces, one `config/` and one SQLite database shared by three deliverabl
   scope's schedules and the tick is `skipped_budget`; nothing resumes them automatically.
   Unknown costs fail closed (migration 25): `runs.cost_status` (reported / estimated / unpriced,
   set at the terminal transition, `costStatusOf`), and under `budgets.unpriced_policy: count` an
-  unpriced or running run counts as the cap it ran with (its phases' budgets plus the main phase's
-  `reserveUsd` when no wrap-up was recorded, else the agent's `max_budget_usd`, else
-  `claude.default_max_budget_usd`). Unknown = `cost_usd IS NULL` (not `cost_status`, not
+  unpriced or running run counts as the cap it started with (`runs.max_budget_usd`, migration 26,
+  set by `startRun` from the budget plan, overrides and resume budgets included; older rows: their
+  phases' budgets plus the main phase's `reserveUsd` when no wrap-up was recorded, else the agent's
+  `max_budget_usd`, else `claude.default_max_budget_usd`). Unknown = `cost_usd IS NULL` (not `cost_status`, not
   `started_at`); only a spawn the executor refused is closed with cost 0. Over only by running runs (`overByRunning`) refuses without pausing schedules.
 - **Subagents are rows, not prose** (`run_agents`, migration 5): the parser folds Claude Code's
   `task_started` / `task_notification` lines and the `agent_id` of nested messages into one

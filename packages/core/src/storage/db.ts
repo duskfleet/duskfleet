@@ -363,6 +363,15 @@ const MIGRATIONS: ReadonlyArray<{ version: number; sql: string; backfill?: (db: 
         WHERE status IN ('completed', 'failed', 'cancelled', 'timed_out');
     `,
   },
+  {
+    // The --max-budget-usd cap a run was started with (main pass plus wrap-up reserve), whatever
+    // set it: the agent, a run_agent max_budget_usd override or a resume budget. A budget counts a
+    // run of unknown cost at this cap first. NULL for older rows: they fall back to their phases.
+    version: 26,
+    sql: `
+      ALTER TABLE runs ADD COLUMN max_budget_usd REAL;
+    `,
+  },
 ];
 
 /**

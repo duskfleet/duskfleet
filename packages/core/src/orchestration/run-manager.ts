@@ -557,6 +557,8 @@ export class RunManager {
       resumedFromRunId: resume?.fromRun.id ?? null,
       kind,
       billingType: null,
+      // The whole cap this run may spend (main pass plus reserve): a budget's stand-in while its cost is unknown.
+      maxBudgetUsd: budget.total,
       agentHash,
       claudeCodeVersion: null,
       lastEventAt: null,

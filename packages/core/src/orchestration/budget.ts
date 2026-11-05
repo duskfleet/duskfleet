@@ -53,8 +53,9 @@ export type ValidBudgetInput = Required<Omit<BudgetInput, "unpricedPolicy">> & {
 /**
  * A run of the scope this month whose cost is not known: `unpriced` (it started and ended
  * without a cost, cost_status) or `running` (pending or running: not settled yet). `standInUsd`
- * is what it counts for under `unpriced_policy: count`: the cap it ran with (its phases'
- * --max-budget-usd, plus the reserve when no wrap-up was recorded), else the agent's max_budget_usd, else claude.default_max_budget_usd: every
+ * is what it counts for under `unpriced_policy: count`: the cap it was started with
+ * (runs.max_budget_usd; older rows: their phases' --max-budget-usd, plus the reserve when no
+ * wrap-up was recorded), else the agent's max_budget_usd, else claude.default_max_budget_usd: every
  * run is launched with a cap, so that is its worst case.
  */
 export interface UnknownCostRun {
@@ -157,7 +158,10 @@ export interface UnknownCostRow {
   id: string;
   agentId: string;
   kind: "unpriced" | "running";
-  /** Sum of the --max-budget-usd its phases ran with; null while it runs or when not recorded. */
+  /**
+   * The cap the run was started with (runs.max_budget_usd, migration 26); for older rows the sum
+   * of the --max-budget-usd its phases ran with. Null when neither is recorded.
+   */
   startedCapUsd: number | null;
 }
 
@@ -173,9 +177,10 @@ export interface BudgetSource {
 }
 
 /**
- * The runs of unknown cost a budget counts this month, each with its stand-in: the cap it ran
- * with when its phases recorded one, else what a run of the agent is capped at now (its
- * max_budget_usd, else claude.default_max_budget_usd, also for an agent that is gone).
+ * The runs of unknown cost a budget counts this month, each with its stand-in: the cap it was
+ * started with (stored on the row, running or ended; older rows: their phases), else what a run
+ * of the agent is capped at now (its max_budget_usd, else claude.default_max_budget_usd, also
+ * for an agent that is gone).
  */
 export function unknownCostRuns(
   source: BudgetSource,

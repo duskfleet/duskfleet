@@ -206,10 +206,13 @@ table. While a run is pending or running its `costStatus` is null.
 
 Under `unpriced_policy: count` (the default) a budget counts every run of its scope this month
 whose cost is unknown, an `unpriced` one or one still running, at a **stand-in**: the cap it
-could spend, its worst case. For a finished run that is the whole cap it was launched with: the
+could spend, its worst case. That is the whole cap the run was started with, stored on the row
+(migration 26): main pass plus wrap-up reserve, whatever set it (the agent's `max_budget_usd`,
+a `run_agent` `max_budget_usd` override, the resume budget of `resume_once`), for a run still
+going and a finished one alike. A row from before that migration falls back to the
 `--max-budget-usd` of its phases plus the wrap-up reserve when no wrap-up pass was recorded (it
-may have died in one). For a run still going, or one without recorded phases, it is the agent's
-`max_budget_usd`, otherwise `claude.default_max_budget_usd` (every run is launched with a cap).
+may have died in one); without recorded phases, to the agent's `max_budget_usd`, otherwise
+`claude.default_max_budget_usd` (every run is launched with a cap).
 A running run is settled by its result. Any finished run without a cost counts, whether or not
 it got as far as `started_at` (a pending row swept as an orphan may have spawned its child) and
 whatever its `costStatus` (a run closed by a process still on an older build has none). The one

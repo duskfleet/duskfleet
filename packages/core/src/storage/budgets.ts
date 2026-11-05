@@ -178,8 +178,14 @@ export class BudgetRepository {
     projectPath: string | null = null,
   ): UnknownCostRow[] {
     const unknown = "(status IN ('pending', 'running') OR cost_usd IS NULL) AND created_at >= ?";
-    const select = "SELECT id, agent_id, status, phases_json FROM runs WHERE";
-    let rows: Array<{ id: string; agent_id: string; status: string; phases_json: string | null }>;
+    const select = "SELECT id, agent_id, status, phases_json, max_budget_usd FROM runs WHERE";
+    let rows: Array<{
+      id: string;
+      agent_id: string;
+      status: string;
+      phases_json: string | null;
+      max_budget_usd: number | null;
+    }>;
     if (b.scope === "global") {
       rows = this.db.prepare(`${select} ${unknown} ORDER BY created_at`).all(sinceIso) as typeof rows;
     } else if (b.scope === "agent") {
@@ -193,12 +199,19 @@ export class BudgetRepository {
     }
     return rows.map((r) => {
       const running = r.status === "pending" || r.status === "running";
-      // A run still going may have a wrap-up phase ahead: its recorded phases are not its whole cap.
+      // The cap stored at start (migration 26) is exact, whatever set it (agent, run_agent
+      // override, resume budget). Older rows fall back to their phases; a run still going may
+      // have a wrap-up phase ahead, so its recorded phases are not its whole cap.
+      const startedCapUsd = positiveUsd(r.max_budget_usd)
+        ? r.max_budget_usd
+        : running
+          ? null
+          : phaseBudgetTotal(r.phases_json);
       return {
         id: r.id,
         agentId: r.agent_id,
         kind: running ? "running" : "unpriced",
-        startedCapUsd: running ? null : phaseBudgetTotal(r.phases_json),
+        startedCapUsd,
       };
     });
   }

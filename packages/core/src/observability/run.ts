@@ -160,6 +160,13 @@ export interface Run {
    */
   costStatus?: CostStatus | null;
   /**
+   * The whole --max-budget-usd cap the run was started with (main pass plus wrap-up reserve;
+   * migration 26): the agent's max_budget_usd, a run_agent override or a resume budget, else
+   * claude.default_max_budget_usd. What a budget counts the run for while its cost is unknown.
+   * Null for rows written before migration 26.
+   */
+  maxBudgetUsd?: number | null;
+  /**
    * Eval bundle (migration 19), with `modelUsed`: what exactly ran, so runs compare like with like.
    * `agentHash` is `agentDefinitionHash` at start time (spec + project agent file of a link);
    * `claudeCodeVersion` is the `claude_code_version` of the init line, null until it arrives.

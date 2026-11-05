@@ -347,6 +347,38 @@ test("a running run counts at its stand-in: refused while it runs, without pausi
   }
 });
 
+test("the cap a run was started with is stored and wins over the agent's: running, ended, or swept with no phases", async () => {
+  const t = setup();
+  try {
+    t.runs.setBudget({ scope: "project", scopeId: "side", amountUsd: 100 });
+    // capped has max_budget_usd 0.25; run_agent max_budget_usd 20 overrides it for this run.
+    const going = await t.runs.startRun({ prompt: "hang", agentId: "capped", maxBudgetUsd: 20 });
+    assert.equal(new RunRepository(t.db).get(going.id).maxBudgetUsd, 20, "stored at start");
+    let [s] = t.runs.budgetStatuses();
+    assert.equal(s.runningRuns, 1);
+    assert.equal(s.standInUsd, 20, "running: the started cap, not the agent's 0.25");
+    t.runs.cancelRun(going.id);
+    await t.runs.waitForRun(going.id, 15_000);
+    [s] = t.runs.budgetStatuses();
+    assert.equal(s.unpricedRuns, 1);
+    assert.equal(s.standInUsd, 20, "ended unpriced: still the started cap");
+    // An orphan sweep can leave a failed run with no phases: the stored cap still applies.
+    t.db.prepare("UPDATE runs SET phases_json = '[]' WHERE id = ?").run(going.id);
+    [s] = t.runs.budgetStatuses();
+    assert.equal(s.standInUsd, 20, "no phases: the started cap");
+    // A row from before migration 26 (no stored cap) falls back to the agent's cap.
+    t.db.prepare("UPDATE runs SET max_budget_usd = NULL WHERE id = ?").run(going.id);
+    [s] = t.runs.budgetStatuses();
+    assert.equal(s.standInUsd, 0.25, "no stored cap, no phases: the agent's max_budget_usd");
+
+    // A plain run stores the whole cap: main pass plus the wrap-up reserve.
+    const plain = await t.run("capped");
+    assert.equal(plain.maxBudgetUsd, 0.25);
+  } finally {
+    await t.close();
+  }
+});
+
 test("unknown cost = no cost_usd: an older build's NULL cost_status and a NULL started_at count; a refused spawn does not", async () => {
   const t = setup();
   try {
@@ -393,7 +425,7 @@ test("migration 25 backfills cost_status of finished runs; old unpriced rows of 
     t.db.prepare("UPDATE runs SET billing_type = 'subscription' WHERE id = ?").run(priced.id);
     // Back to schema 24, as an upgraded installation would be.
     t.db.exec(
-      "ALTER TABLE runs DROP COLUMN cost_status; ALTER TABLE budgets DROP COLUMN unpriced_policy; DELETE FROM schema_migrations WHERE version = 25;",
+      "ALTER TABLE runs DROP COLUMN max_budget_usd; ALTER TABLE runs DROP COLUMN cost_status; ALTER TABLE budgets DROP COLUMN unpriced_policy; DELETE FROM schema_migrations WHERE version IN (25, 26);",
     );
     const dataDir = path.dirname(t.db.prepare("PRAGMA database_list").get().file);
     const db = openDatabase(dataDir);

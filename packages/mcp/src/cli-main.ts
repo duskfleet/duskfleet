@@ -645,7 +645,7 @@ async function main(): Promise<void> {
         agents: [...app.config.agents.keys()],
         scheduler,
         // Runs of this UTC month that ended without a cost, per budget: under unpriced_policy count
-        // each stands in at the cap it ran with (max_budget_usd, else claude.default_max_budget_usd).
+        // each stands in at the cap it started with (runs.max_budget_usd, else the agent's or the default cap).
         unpricedRuns: app.runs.unpricedRunsByBudget().map(({ budget, runs }) => ({
           budget: budgetLabel(budget),
           budgetId: budget.id,
