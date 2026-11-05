@@ -212,7 +212,7 @@ login and spends nothing: the tests use the fake binary. In order:
 
 | Step | Command | Fails when |
 |------|---------|------------|
-| Public-repo hygiene | `npm run check:public` | A versioned file contains a home path, the committing machine's user or host name, or the index holds a symlink. Placeholders `<you>`, `you`, `me` are fine. |
+| Public-repo hygiene | `npm run check:public` | A versioned file contains a home path, the committing machine's user or host name, a reference to the private notes directory, or the index holds a symlink. Placeholders `<you>`, `you`, `me` are fine. |
 | Lint + format | `npm run lint` (`biome ci .`; `npm run lint:fix` repairs) | A Biome lint error or an unformatted file. Warnings (`noNonNullAssertion`, `noExplicitAny`, …) do not block. In `packages/core` an import of the MCP SDK, React or Next.js is an error. |
 | Build | `npm run build` | `tsc` errors in core or mcp |
 | Docs sync | `npm run check:docs` (after the build: it reads `packages/mcp/dist/tools.json`) | An MCP tool the server registers has no row in `docs/mcp-server.md`, a `ScheduleOutcome` value is not listed there, a `docs/*.md` page is not linked from `README.md`, or the README's tool count or its "MCP tools" badge is stale. |
@@ -257,28 +257,14 @@ Components never import a stub. To test a new component:
 
 ## Issue and review flow by agents
 
-This repository's issues and PRs are planned, implemented and reviewed by Duskfleet agents through `flow:` labels, with a PR gate and a project board mirror;
-roles, label state machine, schedules and example agent files: [How Duskfleet builds itself](self-hosting-development.md).
-Only Dependabot patch and minor bumps approved by the reviewer merge on their own (the PR gate approves them and turns on
-GitHub auto-merge); every other PR, majors included, waits for the owner's merge ([The PR gate](self-hosting-development.md#the-pr-gate)).
-
-## Traffic snapshots
-
-GitHub keeps a repository's traffic (views, clones, referrers, popular paths) for 14 days only.
-`node scripts/traffic-snapshot.mjs [--repo <owner/name>] [--out <dir>]` reads the four
-traffic endpoints through the local `gh` login (`gh api`, no token in the repo or in `config/`)
-and writes them into one file, `data/traffic/<owner>/<name>/<YYYY-MM-DD>.json` (UTC date,
-git-ignored; `--out` replaces `data/traffic`). `--repo` defaults to `duskfleet/duskfleet`, so
-the website repository is `--repo duskfleet/duskfleet-website`. Every day keeps its own file; a
-second run on the same day overwrites that day's file, since the later answer covers the same
-window plus the hours since. The traffic API needs push access: without a `gh` login, with an
-invalid token or with a read-only one the script exits 1 with a message naming the cause.
-
-Run it at least once every 14 days. A weekly Duskfleet schedule does it, for example cron
-`0 9 * * 1` (Mondays 09:00) on an agent whose prompt runs the script once per repository and
-whose `allowed_tools` are `Bash(node scripts/traffic-snapshot.mjs:*)` and `Bash(gh api:*)`
-(permission mode `dontAsk`, a small budget, `model: haiku`). The owner creates the schedule;
-nothing in the repo runs it.
+This repository's issues and PRs are planned, implemented and reviewed by scheduled Duskfleet
+agents through `flow:` labels, with `scripts/pr-gate.mjs` keeping the labels true to the merge
+state and `scripts/project-sync.mjs` mirroring them to a project board. The pattern, with the
+labels, an example agent and schedule: [Run a development loop with agents](guides/agent-development-loop.md).
+Only Dependabot patch and minor bumps approved by the reviewer merge on their own (the gate
+approves them and turns on GitHub auto-merge); every other PR waits for a human merge.
+`scripts/traffic-snapshot.mjs` saves the repository's GitHub traffic (kept 14 days by GitHub)
+under the git-ignored `data/traffic/`; its header documents the flags.
 
 ## Security model
 

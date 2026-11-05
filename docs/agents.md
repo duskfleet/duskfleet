@@ -341,8 +341,8 @@ Two things to get right with a link:
   agent is denied the tools that exist. Listing both prefixes keeps the file usable from
   both.
 
-A worked example of links and own agents together: [How Duskfleet builds itself](self-hosting-development.md)
-describes the agents that develop this repository, with sanitised copies of their files.
+A worked example of links and own agents together, on schedules:
+[Run a development loop with agents](guides/agent-development-loop.md).
 
 ## MCP servers inside runs
 
