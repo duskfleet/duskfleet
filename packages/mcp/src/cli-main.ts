@@ -48,6 +48,7 @@ import {
   type RunStatus,
   resolveConfigDir,
   runCostLabel,
+  runLabel,
   setDefaultLogLevel,
   subagentView,
   summarizeRun,
@@ -669,6 +670,7 @@ async function main(): Promise<void> {
           "project-id": { type: "string" },
           agent: { type: "string", short: "a" },
           model: { type: "string", short: "m" },
+          title: { type: "string" },
           "no-wait": { type: "boolean", default: false },
           json: { type: "boolean", default: false },
           first: { type: "boolean", default: false },
@@ -676,7 +678,14 @@ async function main(): Promise<void> {
       });
       if (values.first) {
         // The guided first run of init, again: fixed agent, model and prompt (first-run.ts).
-        if (positionals.length || values.agent || values.model || values["project-id"] || values["no-wait"]) {
+        if (
+          positionals.length ||
+          values.agent ||
+          values.model ||
+          values.title !== undefined ||
+          values["project-id"] ||
+          values["no-wait"]
+        ) {
           throw new Error("run --first takes only --project <absolute path>; agent, model and prompt are fixed");
         }
         const app = await open();
@@ -701,6 +710,7 @@ async function main(): Promise<void> {
       if (values["project-id"]) input.projectId = values["project-id"];
       if (values.agent) input.agentId = values.agent;
       if (values.model) input.model = values.model;
+      if (values.title !== undefined) input.title = values.title;
 
       let run = await app.runs.startRun(input);
       process.stderr.write(`run ${run.id} started (session ${run.claudeSessionId})\nlog: ${run.logPath}\n`);
@@ -842,11 +852,12 @@ async function main(): Promise<void> {
       const subagents = app.runs.agents(id).map((s) => subagentView(s)); // same names as get_run
       const diff = app.runs.diff(id); // same field as get_run
       const costLabel = runCostLabel(run.billingType); // same field as get_run
+      const label = runLabel(run); // same field as get_run
       const artifacts = app.runs.artifacts(id).map(({ kind, value, source }) => ({ kind, value, source })); // same field as get_run
       print(
         values.events
-          ? { ...run, costLabel, diff, artifacts, subagents, events: app.runs.events(id) }
-          : { ...run, costLabel, diff, artifacts, subagents },
+          ? { ...run, label, costLabel, diff, artifacts, subagents, events: app.runs.events(id) }
+          : { ...run, label, costLabel, diff, artifacts, subagents },
       );
       return done();
     }

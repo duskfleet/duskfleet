@@ -338,9 +338,18 @@ const MIGRATIONS: ReadonlyArray<{ version: number; sql: string; backfill?: (db: 
     `,
   },
   {
+    // Run titles (run_agent title, run --title, a schedule's title stamped on every fire): what the
+    // run is for, shown instead of the truncated first prompt line (runLabel). NULL = no title.
+    version: 24,
+    sql: `
+      ALTER TABLE runs ADD COLUMN title TEXT;
+      ALTER TABLE schedules ADD COLUMN title TEXT;
+    `,
+  },
+  {
     // What a run produced in git / GitHub (observability/artifacts.ts): a PR URL, a branch, a
     // 40-char commit SHA, read from the main session's Bash output or its final text when it ends.
-    version: 24,
+    version: 25,
     sql: `
       CREATE TABLE IF NOT EXISTS run_artifacts (
         id         INTEGER PRIMARY KEY AUTOINCREMENT,

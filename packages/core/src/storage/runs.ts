@@ -66,6 +66,7 @@ interface RunRow {
   claude_code_version: string | null;
   last_event_at: string | null;
   continued_from_run_id: string | null;
+  title: string | null;
 }
 
 function rowToRun(r: RunRow): Run {
@@ -75,6 +76,7 @@ function rowToRun(r: RunRow): Run {
     projectPath: r.project_path,
     projectId: r.project_id,
     prompt: r.prompt,
+    title: r.title ?? null,
     modelRequested: r.model_requested,
     modelUsed: r.model_used,
     status: r.status as RunStatus,
@@ -318,8 +320,8 @@ export class RunRepository {
            cache_read_tokens, cache_creation_tokens, cost_usd, permission_denials, denied_tools_json, mcp_json, human_intervention,
            context_exhausted, retries, log_path, raw_result_json, schedule_id, owner, phases_json, review_reasons_json, resumed_from_run_id, kind,
            usage_by_model_json, billing_type, error_code, error_family, error_detail_json, agent_hash, claude_code_version,
-           last_event_at, continued_from_run_id)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+           last_event_at, continued_from_run_id, title)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         run.id,
@@ -371,6 +373,7 @@ export class RunRepository {
         run.claudeCodeVersion ?? null,
         run.lastEventAt ?? null,
         run.continuedFromRunId ?? null,
+        run.title ?? null,
       );
   }
 
