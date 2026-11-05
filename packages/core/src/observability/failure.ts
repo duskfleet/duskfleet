@@ -144,7 +144,7 @@ export function classifyFailure(input: FailureInput): FailureClassification | nu
   }
   // "Rate limit reached" is a 429 (transient), not the account's usage limit. No bare "quota":
   // a 429 rate_limit_error message can mention one and is still transient.
-  if (/usage limit|hit your (?:\w+ )?limit|(?<!rate )limit reached|out of extra usage/i.test(err)) {
+  if (/usage limit|hit your (?:[\w-]+ )?limit|(?<!rate )limit reached|out of extra usage/i.test(err)) {
     const at = parseResetTime(err, input.endedAt);
     return make("provider_quota", at ? { retryNotBefore: at } : null);
   }

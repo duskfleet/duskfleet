@@ -70,6 +70,12 @@ test("provider_quota with retryNotBefore from the reset time", () => {
   // 10:00Z is 11:00 in London (BST): 3pm London = 14:00Z the same day.
   assert.equal(r?.detail?.retryNotBefore, "2026-10-21T14:00:00.000Z");
   assert.deepEqual(failed("5-hour limit reached"), { code: "provider_quota", family: "limit", detail: null });
+  // The subscription's rolling windows name the window with a hyphen: "5-hour", "7-day".
+  const five = failed("You've hit your 5-hour limit · resets 3:40pm (Europe/London)");
+  assert.equal(five?.code, "provider_quota");
+  assert.equal(five?.detail?.retryNotBefore, "2026-10-21T14:40:00.000Z");
+  assert.equal(failed("You've hit your 7-day limit")?.code, "provider_quota");
+  assert.equal(failed("You've hit your session limit · resets 8pm (Europe/London)")?.code, "provider_quota");
 });
 
 test("transient_upstream for 429 / 503 / 529 / overloaded", () => {
