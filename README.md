@@ -152,14 +152,60 @@ permission denial is "needs review", never green ([Needs review](docs/dashboard.
 
 ## How it works
 
-<picture>
-  <source media="(max-width: 767px) and (prefers-color-scheme: dark)" srcset="docs/assets/how-a-run-works-mobile-dark.png">
-  <source media="(max-width: 767px)" srcset="docs/assets/how-a-run-works-mobile-light.png">
-  <source media="(prefers-color-scheme: dark)" srcset="docs/assets/how-a-run-works-dark.png">
-  <img alt="How a run works" src="docs/assets/how-a-run-works-light.png" width="100%">
-</picture>
+Every run starts as a call to `RunManager.startRun`, from a chat, the CLI or a cron schedule.
+The child is Claude Code in your project; everything it does is recorded.
 
-On a phone? Open the stacked version ([dark](docs/assets/how-a-run-works-mobile-dark.png) / [light](docs/assets/how-a-run-works-mobile-light.png)).
+```mermaid
+flowchart LR
+    subgraph entry ["1 · Entry points"]
+        chat["Chat host<br/>Claude Desktop or Claude Code<br/><code>run_agent</code> over MCP (stdio)"]
+        cli["CLI<br/><code>duskfleet run</code>"]
+        sched["Scheduler tick<br/>due cron (serve, or any lease holder)"]
+    end
+
+    subgraph rm ["2 · RunManager"]
+        guards{"Concurrency guards<br/>one run per project,<br/>one per agent"}
+        busy["Busy? Refused, never queued.<br/>A schedule keeps one pending fire."]
+        row["Run row recorded<br/>(pending)"]
+    end
+
+    subgraph child ["3 · Claude Code child"]
+        claude["<code>claude -p --output-format stream-json</code><br/>cwd = the target project<br/>no permission prompts, only what is allow-listed<br/><code>--strict-mcp-config</code> unless <code>inherit_mcp</code>"]
+    end
+
+    subgraph rec ["4 · What gets recorded"]
+        parser["stream-json parser"]
+        db[("SQLite<br/>runs: status, timings, tokens, cost,<br/>tool calls, denials, termination reason<br/>run_agents: one row per subagent")]
+        logs["data/logs/<br/>&lt;run_id&gt;.jsonl raw stream<br/>&lt;run_id&gt;.diff checkout patch"]
+    end
+
+    chat --> guards
+    cli --> guards
+    sched --> guards
+    guards -- busy --> busy
+    guards -- pass --> row
+    row -- spawns --> claude
+    claude -- "stdout: JSON events" --> parser
+    parser --> db
+    parser --> logs
+    db -. "read only (WAL)" .-> web["Dashboard"]
+```
+
+```mermaid
+stateDiagram-v2
+    direction LR
+    [*] --> pending : startRun, guards pass
+    pending --> running : claude spawned
+    pending --> failed : spawn error / orphaned
+    running --> completed : result event
+    running --> cancelled : cancel_run
+    running --> failed : error / non-zero exit / orphaned
+    completed --> needs_review : permission denial, timeout, empty run
+    note right of needs_review
+        Shown amber on the dashboard,
+        never plain green.
+    end note
+```
 
 You describe *what should happen* in `config/` (agents, projects) and in schedules. Duskfleet
 runs `claude -p` unattended with a target project as working directory, owns the unattended
