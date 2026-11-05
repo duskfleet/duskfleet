@@ -156,6 +156,7 @@ Every run starts as a call to `RunManager.startRun`, from a chat, the CLI or a c
 The child is Claude Code in your project; everything it does is recorded.
 
 ```mermaid
+%%{init: {"flowchart": {"wrappingWidth": 420}}}%%
 flowchart TB
     subgraph entry ["1 · Entry points"]
         chat["Chat host<br/>run_agent over MCP"]
