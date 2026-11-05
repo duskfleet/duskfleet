@@ -573,7 +573,7 @@ if (resumeIdx >= 0) {
       "Exit code 1\nTo github.com:example/demo.git\n ! [rejected]        rejected/branch -> rejected/branch (fetch first)\nerror: failed to push some refs",
       true,
     );
-    bash("toolu_g2", "git -C /work/demo rev-parse HEAD", "0123456789abcdef0123456789abcdef01234567");
+    bash("toolu_g2", "git rev-parse HEAD", "0123456789abcdef0123456789abcdef01234567");
     bash(
       "toolu_g3",
       "gh pr create --head issue/7-fix-login --base main --title 'Fix login (#7)' --body-file tmp/7-body.md",

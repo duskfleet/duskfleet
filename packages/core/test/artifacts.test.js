@@ -97,9 +97,16 @@ test("PR URLs: gh pr create output and the final text, not other commands", () =
 
 test("final-text PR URLs count only for a run that ran gh pr create", () => {
   assert.deepEqual(artifactsFromResultText("Reviewed https://github.com/o/r/pull/12: changes.", false), []);
-  assert.equal(createsPr("cd /w && GH_PAGER= gh pr create --fill"), true);
-  assert.equal(createsPr("gh pr view 12"), false);
-  assert.equal(createsPr("echo 'gh pr create'"), false);
+  assert.equal(createsPr("GH_PAGER= gh pr create --fill", ""), true);
+  assert.equal(createsPr("cd /w && gh pr create --fill", "https://github.com/o/r/pull/12\n"), true);
+  assert.equal(createsPr("gh pr view 12", "https://github.com/o/r/pull/12"), false);
+  assert.equal(createsPr("echo 'gh pr create'", ""), false);
+});
+
+test("gh pr create behind || that printed no PR URL created none", () => {
+  assert.equal(createsPr("gh pr create --fill || echo exists", "a pull request already exists\nexists\n"), false);
+  assert.equal(createsPr("cd /w && gh pr create --fill", null), false);
+  assert.equal(createsPr("gh pr create --fill || echo exists", "https://github.com/o/r/pull/4\n"), true);
 });
 
 test("git push :branch deletes it: no branch", () => {
@@ -107,7 +114,7 @@ test("git push :branch deletes it: no branch", () => {
   assert.deepEqual(kv(artifactsFromBash("git push origin +:old-feature keep", "")), ["branch:keep"]);
 });
 
-test("push report lines are read only when the push is the one git call", () => {
+test("push report lines are not read next to a git call that prints ref lines", () => {
   const fetchOut = "From github.com:o/r\n * [new branch]      x -> origin/x";
   assert.deepEqual(kv(artifactsFromBash("git push origin feat && git fetch", fetchOut)), ["branch:feat"]);
   const pushOut = "To github.com:o/r.git\n * [new branch]      feat -> feat";
@@ -152,7 +159,30 @@ test("here-document bodies are not commands", () => {
 test("rev-parse HEAD: only as the one git call, only its first SHA", () => {
   assert.deepEqual(kv(artifactsFromBash("git rev-parse HEAD && git rev-parse origin/main", `${SHA}\n${SHA2}\n`)), []);
   assert.deepEqual(kv(artifactsFromBash("git rev-parse HEAD; git log --format=%H -2", `${SHA}\n${SHA2}\n`)), []);
-  assert.deepEqual(kv(artifactsFromBash("cd /w && git rev-parse HEAD", `${SHA}\n${SHA2}\n`)), [`commit:${SHA}`]);
+  assert.deepEqual(kv(artifactsFromBash("cd /w && git rev-parse HEAD", `${SHA}\n${SHA2}\n`, "/w")), [`commit:${SHA}`]);
+});
+
+test("rev-parse HEAD of another checkout is not a commit of the run", () => {
+  const out = `${SHA}\n`;
+  assert.deepEqual(kv(artifactsFromBash("git -C /other rev-parse HEAD", out, "/w")), []);
+  assert.deepEqual(kv(artifactsFromBash("cd ../other && git rev-parse HEAD", out, "/w")), []);
+  assert.deepEqual(kv(artifactsFromBash("pushd /other; git rev-parse HEAD", out, "/w")), []);
+  assert.deepEqual(kv(artifactsFromBash("git --git-dir=/other/.git rev-parse HEAD", out, "/w")), []);
+  assert.deepEqual(kv(artifactsFromBash("git --work-tree /other rev-parse HEAD", out, "/w")), []);
+  assert.deepEqual(kv(artifactsFromBash("git -C /w/ rev-parse HEAD", out, "/w")), [`commit:${SHA}`]);
+  assert.deepEqual(kv(artifactsFromBash("git -C /w rev-parse HEAD", out)), [], "no cwd known: any -C is elsewhere");
+});
+
+test("commit-then-push in one call keeps the pushed branch", () => {
+  const pushOut =
+    "To github.com:o/r.git\n * [new branch]      feat/x -> feat/x\nbranch 'feat/x' set up to track 'origin/feat/x'.";
+  assert.deepEqual(
+    kv(artifactsFromBash("git add -A && git commit -m x && git push -u origin HEAD", `[feat/x abc1234] x\n${pushOut}`)),
+    ["branch:feat/x"],
+  );
+  // a pull next to the push prints its own ref lines: none read
+  const pullOut = "From github.com:o/r\n * [new branch]      y -> origin/y";
+  assert.deepEqual(kv(artifactsFromBash("git pull && git push -u origin HEAD", pullOut)), []);
 });
 
 test("uniqueArtifacts keeps the first finding of each kind and value", () => {

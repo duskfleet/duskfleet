@@ -1395,8 +1395,8 @@ export class RunManager {
         if (event.agentId !== null || event.isError) break;
         const active = this.active.get(runId);
         if (!active) break;
-        active.artifacts.push(...artifactsFromBash(event.command, event.output));
-        if (createsPr(event.command)) active.prCreated = true;
+        active.artifacts.push(...artifactsFromBash(event.command, event.output, active.projectPath));
+        if (createsPr(event.command, event.output)) active.prCreated = true;
         break;
       }
       case "subagent_start": {

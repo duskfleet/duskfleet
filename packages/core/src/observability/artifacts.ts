@@ -6,13 +6,16 @@
  *
  * What counts (issue #382), from successful calls only (`is_error` false):
  * - `pr`: a `https://github.com/<owner>/<repo>/pull/<n>` URL in the output of a `gh pr create`
- *   call, or in the final text of a run that ran `gh pr create` (a run that only mentions a PR,
- *   a reviewer for instance, produced none);
+ *   call, or in the final text of a run that created a PR (`createsPr`: a `gh pr create` that is
+ *   the whole command or printed a PR URL; a run that only mentions a PR, a reviewer for
+ *   instance, produced none);
  * - `branch`: the branch of `git push` (not a delete), `git checkout -b`, `git switch -c` and
  *   `gh pr create --head`, and the destination of a push output line (`<old>..<new> a -> a`)
- *   when the command holds that one `git` call;
+ *   unless the command also runs a `git` call that prints such lines itself (fetch, pull, clone,
+ *   remote, submodule);
  * - `commit`: a full 40-hex SHA, the first one printed by `git rev-parse HEAD` when that is the
- *   command's one `git` call, or the new SHA of a push output line (rare: `git push` abbreviates
+ *   command's one `git` call and it runs in the run's checkout (no `cd`, `pushd`, `-C`,
+ *   `--git-dir` or `--work-tree` pointing elsewhere), or the new SHA of a push output line (rare: `git push` abbreviates
  *   its SHAs unless the abbreviation length is configured to 40). Never from prose, never from a
  *   short SHA. `RunManager` drops the checkout's HEAD before the spawn.
  *
@@ -47,8 +50,19 @@ const PUSH_VALUE_OPTIONS = new Set(["-o", "--push-option", "--receive-pack", "--
 /** Global `git` options that take a value as the next token (`git -C <dir> push`). */
 const GIT_VALUE_OPTIONS = new Set(["-C", "-c", "--git-dir", "--work-tree", "--namespace"]);
 
-/** What one main-session Bash call produced: its command and the text of its tool_result. */
-export function artifactsFromBash(command: string, output: string | null): ArtifactFinding[] {
+/** `git` subcommands that print `a -> b` ref lines of their own, like a push report. */
+const REF_LINE_SUBCOMMANDS = new Set(["fetch", "pull", "clone", "remote", "submodule"]);
+
+/**
+ * What one main-session Bash call produced: its command and the text of its tool_result.
+ * `cwd` is the run's project directory: a `git rev-parse HEAD` run elsewhere (`git -C <dir>`,
+ * `--git-dir`, `--work-tree`, a `cd` / `pushd`) is another checkout's HEAD unless `<dir>` is `cwd`.
+ */
+export function artifactsFromBash(
+  command: string,
+  output: string | null,
+  cwd: string | null = null,
+): ArtifactFinding[] {
   const found: ArtifactFinding[] = [];
   const add = (kind: ArtifactKind, value: string | null) => {
     if (value) found.push({ kind, value, source: "tool_result" });
@@ -57,9 +71,11 @@ export function artifactsFromBash(command: string, output: string | null): Artif
   let push = false;
   let revParseHead = false;
   const commands = shellSegments(command).map(dropAssignments);
-  // Push report lines are only read when the push is the command's one git call: with a
-  // `git fetch` next to it, `* [new branch] x -> origin/x` would be the fetch's.
-  const gitCalls = commands.filter((w) => w[0] === "git").length;
+  const gitCalls = commands.filter((w) => w[0] === "git");
+  // Push report lines are not read when another git call can print `a -> b` lines too: with a
+  // `git fetch` next to the push, `* [new branch] x -> origin/x` would be the fetch's.
+  const refLines = gitCalls.some((w) => REF_LINE_SUBCOMMANDS.has(gitSubcommand(w.slice(1))[0] ?? ""));
+  const elsewhere = commands.some((w) => runsElsewhere(w, cwd));
   for (const words of commands) {
     if (words[0] === "gh" && words[1] === "pr" && words[2] === "create") {
       prCreate = true;
@@ -69,15 +85,21 @@ export function artifactsFromBash(command: string, output: string | null): Artif
     if (words[0] !== "git") continue;
     const [sub, ...args] = gitSubcommand(words.slice(1));
     if (sub === "push") {
-      push = gitCalls === 1;
+      push = !refLines;
       for (const b of pushedBranches(args)) add("branch", b);
     } else if (sub === "checkout") {
       add("branch", branchName(optionValue(args, ["-b", "-B"])));
     } else if (sub === "switch") {
       add("branch", branchName(optionValue(args, ["-c", "-C", "--create", "--force-create"])));
-    } else if (sub === "rev-parse" && gitCalls === 1 && args.filter((a) => !a.startsWith("-")).join(" ") === "HEAD") {
-      // Only as the command's one git call, and only its first SHA line: with another git call
-      // (`git rev-parse origin/main`, `git log --format=%H`) the other SHAs are not the run's.
+    } else if (
+      sub === "rev-parse" &&
+      gitCalls.length === 1 &&
+      !elsewhere &&
+      args.filter((a) => !a.startsWith("-")).join(" ") === "HEAD"
+    ) {
+      // Only as the command's one git call, in the run's checkout, and only its first SHA line:
+      // with another git call (`git rev-parse origin/main`, `git log --format=%H`) the other SHAs
+      // are not the run's, and another directory's HEAD is another checkout's.
       revParseHead = true;
     }
   }
@@ -109,11 +131,33 @@ export function artifactsFromResultText(text: string | null, prCreated: boolean)
   return (text.match(PR_URL) ?? []).map((value) => ({ kind: "pr", value, source: "result_text" }));
 }
 
-/** The command line runs `gh pr create`. */
-export function createsPr(command: string): boolean {
-  return shellSegments(command)
-    .map(dropAssignments)
-    .some((w) => w[0] === "gh" && w[1] === "pr" && w[2] === "create");
+/**
+ * A successful call created a PR: it runs `gh pr create` and either that is the whole command
+ * or its output holds a PR URL. A create behind `|| echo exists` can exit 0 without a PR.
+ */
+export function createsPr(command: string, output: string | null): boolean {
+  const commands = shellSegments(command).map(dropAssignments);
+  const creates = commands.filter((w) => w[0] === "gh" && w[1] === "pr" && w[2] === "create");
+  if (!creates.length) return false;
+  if (commands.length === 1) return true;
+  return output?.match(PR_URL) != null;
+}
+
+/** `cd` / `pushd`, or a `git` call with `-C` / `--git-dir` / `--work-tree`, pointing away from `cwd`. */
+function runsElsewhere(words: string[], cwd: string | null): boolean {
+  const same = (dir: string | undefined) =>
+    dir !== undefined && (dir === "." || (cwd !== null && dir.replace(/\/+$/, "") === cwd.replace(/\/+$/, "")));
+  if (words[0] === "cd" || words[0] === "pushd") return !same(words[1]);
+  if (words[0] !== "git") return false;
+  for (let i = 1; i < words.length && words[i]!.startsWith("-"); i++) {
+    const w = words[i]!;
+    if (w === "-C") {
+      if (!same(words[i + 1])) return true;
+    } else if (w === "--git-dir" || w === "--work-tree" || w.startsWith("--git-dir=") || w.startsWith("--work-tree="))
+      return true;
+    if (GIT_VALUE_OPTIONS.has(w)) i++;
+  }
+  return false;
 }
 
 /** One finding per (kind, value), the first one kept: tool output comes before the final text. */
