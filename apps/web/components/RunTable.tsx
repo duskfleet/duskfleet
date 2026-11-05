@@ -1,4 +1,4 @@
-import { costLabels, runSilence, wrapUpPhase } from "@duskfleet/core";
+import { costLabels, runLabel, runSilence, wrapUpPhase } from "@duskfleet/core";
 import Link from "next/link";
 import type { RunWithProject } from "@/lib/data";
 import {
@@ -10,7 +10,6 @@ import {
   fmtInt,
   fmtRelative,
   fmtTime,
-  runTitle,
   shortModel,
 } from "@/lib/format";
 import { RunRow } from "./RunRow";
@@ -36,8 +35,8 @@ function RunColumns() {
 }
 
 /**
- * One row per run, the whole row a link. The short title (first line of the
- * prompt) is the identity of a run; agent, project and model are secondary.
+ * One row per run, the whole row a link. The label (core's `runLabel`: the run's
+ * title, else the first line of the prompt) is the identity of a run; agent, project and model are secondary.
  * Counters that only matter when debugging (turns, tool calls, tokens) live on
  * the detail page. Columns marked col-* collapse on narrow screens.
  *
@@ -114,7 +113,7 @@ export function RunTable({
                     <StatusBadge run={r} />
                   </div>
                   <div className="prompt" title={r.prompt}>
-                    <Link href={href}>{runTitle(r.prompt)}</Link>
+                    <Link href={href}>{runLabel(r)}</Link>
                   </div>
                   <div className="where">
                     <Link href={`/?agent=${encodeURIComponent(r.agentId)}`}>{r.agentId}</Link>
