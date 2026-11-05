@@ -5,7 +5,18 @@
  * bundle id stored on the run, and notes for a skill gone since or shadowed by the project.
  */
 import assert from "node:assert/strict";
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  lstatSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { test } from "node:test";
@@ -175,6 +186,49 @@ test("prepareSkillBundle replaces an incomplete bundle in place and leaves no st
     assert.ok(existsSync(path.join(b.dir, ".claude", "skills", "lint", "SKILL.md")));
     assert.ok(existsSync(path.join(b.dir, ".claude", "skills", "greet", "SKILL.md")));
     assert.deepEqual(readdirSync(path.join(r.dataDir, "skill-bundles")), [a.id], "no temporary or stale directory");
+  } finally {
+    rmSync(r.root, { recursive: true, force: true });
+  }
+});
+
+test("a bundle is a copy: editing the source later never changes what a recorded id serves", () => {
+  const r = makeRoot();
+  try {
+    writeSkill(r.builtinSkills, "greet");
+    mkdirSync(path.join(r.builtinSkills, "greet", "refs"));
+    writeFileSync(path.join(r.builtinSkills, "greet", "refs", "notes.md"), "Notes.\n");
+    const config = loadConfig(r.configDir);
+    const a = prepareSkillBundle(config, ["greet"]);
+    const bundled = path.join(a.dir, ".claude", "skills", "greet");
+    assert.equal(lstatSync(bundled).isSymbolicLink(), false, "no link to the live folder");
+    assert.equal(readFileSync(path.join(bundled, "refs", "notes.md"), "utf8"), "Notes.\n");
+    writeFileSync(path.join(r.builtinSkills, "greet", "SKILL.md"), "---\nname: greet\n---\nSay bye.\n");
+    assert.match(readFileSync(path.join(bundled, "SKILL.md"), "utf8"), /Say hi\./, "the bundle keeps the hashed text");
+    assert.notEqual(prepareSkillBundle(config, ["greet"]).id, a.id);
+  } finally {
+    rmSync(r.root, { recursive: true, force: true });
+  }
+});
+
+test("symlinks in a skill folder fail closed: a linked SKILL.md does not resolve, a linked file refuses the create", () => {
+  const r = makeRoot();
+  try {
+    const outside = path.join(r.root, "outside.md");
+    writeFileSync(outside, "---\nname: linked\n---\nHi.\n");
+    mkdirSync(path.join(r.builtinSkills, "linked"), { recursive: true });
+    symlinkSync(outside, path.join(r.builtinSkills, "linked", "SKILL.md"));
+    writeSkill(r.builtinSkills, "greet");
+    symlinkSync(outside, path.join(r.builtinSkills, "greet", "extra.md"));
+    const config = loadConfig(r.configDir);
+    assert.equal(resolveSkill(config, "linked"), null);
+    assert.throws(() => assertSkillsAvailable(["linked"], config), /unknown skill "linked"/);
+    assert.throws(
+      () => assertSkillsAvailable(["greet"], config),
+      /must not contain symlinks.*skills\/greet\/extra\.md/,
+    );
+    // At run start the link is neither hashed nor copied.
+    const b = prepareSkillBundle(config, ["greet"]);
+    assert.equal(existsSync(path.join(b.dir, ".claude", "skills", "greet", "extra.md")), false);
   } finally {
     rmSync(r.root, { recursive: true, force: true });
   }

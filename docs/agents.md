@@ -319,11 +319,16 @@ is for private ones. The Duskfleet repository itself ships no skills: the ones i
 develop itself stay private (git-ignored), and neither folder is part of the npm packages.
 
 The target project is never written. Each run gets a bundle,
-`data/skill-bundles/<id>/.claude/skills/<name>` (a symlink to the skill folder; a copy on
-Windows), passed with `--add-dir`. `<id>` is a hash of the skills' names and contents: an edited
-skill gives the next run a new bundle, and the run records the id it got (`skillsBundle` in
-`get_run` / `list_runs`) so you can tell which skills were available. Old bundles stay in
-`data/skill-bundles/`; deleting the directory is safe, it is rebuilt when needed.
+`data/skill-bundles/<id>/.claude/skills/<name>` (a copy of the skill's files, never a link to
+the live folder), passed with `--add-dir`. `<id>` is a hash of the skills' names and contents: an
+edited skill gives the next run a new bundle while a running one keeps what it started with, and
+the run records the id it got (`skillsBundle` in `get_run` / `list_runs`) so you can tell which
+skills were available. Old bundles stay in `data/skill-bundles/`; deleting the directory is safe,
+it is rebuilt when needed.
+
+Symlinks inside a skill folder are refused: `create_agent` / `update_agent` reject a skill that
+contains one, and a `SKILL.md` that is a symlink is not found. The skill folder itself may be a
+symlink.
 
 The project's own `.claude/skills/` need nothing from here: the run's working directory is the
 project, so Claude Code loads them anyway. When a project skill and a bundled one share a name,

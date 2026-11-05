@@ -7,23 +7,28 @@
  * The target project's own `.claude/skills/` needs nothing from here (the run's cwd is the project).
  *
  * Delivery: a content-addressed bundle `<data_dir>/skill-bundles/<id>/.claude/skills/<name>`, each
- * entry a symlink (a copy on Windows) to the source folder, passed to the run with `--add-dir
- * <bundle>`. Claude Code lists skills from an added directory that *contains* `.claude/skills/`,
- * not from the skills folder itself (verified 2026-11-04, Claude Code 2.1.318). The project is
- * never written. `<id>` hashes the sorted (name, content digest) list, so an edited skill gives
- * the next run a new bundle and the run row (`runs.skills_bundle`) names what was available.
+ * entry a copy of the files that were hashed (never a link to the live folder, so the bundle is
+ * immutable and matches its id even when the source is edited mid-run), passed to the run with
+ * `--add-dir <bundle>`. Claude Code lists skills from an added directory that *contains*
+ * `.claude/skills/`, not from the skills folder itself (verified 2026-11-04, Claude Code 2.1.318).
+ * The project is never written. `<id>` hashes the sorted (name, content digest) list, so an edited
+ * skill gives the next run a new bundle and the run row (`runs.skills_bundle`) names what it had.
+ *
+ * Symlinks inside a skill folder fail closed: a symlinked SKILL.md does not resolve, and any other
+ * symlinked entry refuses the create / update (it would escape the lint and the digest); at run
+ * start such an entry is neither hashed nor copied.
  */
 import { createHash } from "node:crypto";
 import {
-  cpSync,
+  copyFileSync,
   existsSync,
+  lstatSync,
   mkdirSync,
   readdirSync,
   readFileSync,
   renameSync,
   rmSync,
   statSync,
-  symlinkSync,
 } from "node:fs";
 import { homedir } from "node:os";
 import path from "node:path";
@@ -55,7 +60,7 @@ export function resolveSkill(config: SkillDirs, name: string): ResolvedSkill | n
   const dirs = skillSearchDirs(config);
   for (const source of ["user", "builtin"] as const) {
     const dir = path.join(dirs[source], name);
-    if (isFile(path.join(dir, "SKILL.md"))) return { name, dir, source };
+    if (isRegularFile(path.join(dir, "SKILL.md"))) return { name, dir, source };
   }
   return null;
 }
@@ -67,12 +72,14 @@ export function resolveSkill(config: SkillDirs, name: string): ResolvedSkill | n
 export function assertSkillsAvailable(names: readonly string[], config: SkillDirs, home: string = homedir()): void {
   const missing: string[] = [];
   const problems: AgentLintProblem[] = [];
+  const links: string[] = [];
   for (const name of names) {
     const skill = resolveSkill(config, name);
     if (!skill) {
       missing.push(name);
       continue;
     }
+    for (const rel of skillLinks(skill.dir)) links.push(`skills/${name}/${rel.split(path.sep).join("/")}`);
     for (const rel of skillFiles(skill.dir)) {
       const text = readFileSync(path.join(skill.dir, rel), "utf8");
       problems.push(...lintText(`skills/${name}/${rel.split(path.sep).join("/")}`, text, home));
@@ -84,6 +91,11 @@ export function assertSkillsAvailable(names: readonly string[], config: SkillDir
       `unknown skill${missing.length > 1 ? "s" : ""} ${missing.map((n) => `"${n}"`).join(", ")}: no <name>/SKILL.md in ${dirs.user} or ${dirs.builtin}`,
     );
   }
+  if (links.length) {
+    throw new Error(
+      `skill folders must not contain symlinks (they would escape the public-repo check and the bundle hash): ${links.join(", ")}. Copy the file into the skill folder instead.`,
+    );
+  }
   if (problems.length) {
     const list = problems.map((p) => `${p.field}: ${p.why} (${p.excerpt})`).join("; ");
     throw new Error(
@@ -92,16 +104,33 @@ export function assertSkillsAvailable(names: readonly string[], config: SkillDir
   }
 }
 
-/** Relative paths of the files under a skill folder, sorted, dot-entries included, symlinks not followed out. */
+/**
+ * Relative paths of the regular files under a skill folder, sorted, dot-entries included. Symlinks
+ * are never followed: these are exactly the files linted, hashed and copied into a bundle.
+ */
 function skillFiles(dir: string, rel = ""): string[] {
   const out: string[] = [];
-  const here = path.join(dir, rel);
-  for (const entry of readdirSync(here, { withFileTypes: true }).sort((a, b) => (a.name < b.name ? -1 : 1))) {
+  for (const entry of sortedEntries(dir, rel)) {
     const child = path.join(rel, entry.name);
     if (entry.isDirectory()) out.push(...skillFiles(dir, child));
     else if (entry.isFile()) out.push(child);
   }
   return out;
+}
+
+/** Relative paths of the symlinks under a skill folder (refused on create / update). */
+function skillLinks(dir: string, rel = ""): string[] {
+  const out: string[] = [];
+  for (const entry of sortedEntries(dir, rel)) {
+    const child = path.join(rel, entry.name);
+    if (entry.isDirectory()) out.push(...skillLinks(dir, child));
+    else if (entry.isSymbolicLink()) out.push(child);
+  }
+  return out;
+}
+
+function sortedEntries(dir: string, rel: string) {
+  return readdirSync(path.join(dir, rel), { withFileTypes: true }).sort((a, b) => (a.name < b.name ? -1 : 1));
 }
 
 /** sha256 over every file of a skill folder (relative path + content). */
@@ -146,6 +175,8 @@ export function prepareSkillBundle(config: SkillDirs, names: readonly string[]):
   }
   if (!skills.length) return null;
   const h = createHash("sha256");
+  // Bundle format: 2 = copied files (1 linked to the live folders); a new format never reuses an old bundle.
+  h.update("bundle-format 2\n");
   for (const s of skills) h.update(`${s.name}\0${skillDigest(s.dir)}\n`);
   const id = h.digest("hex").slice(0, 16);
   const root = path.join(config.dataDir, "skill-bundles");
@@ -156,8 +187,10 @@ export function prepareSkillBundle(config: SkillDirs, names: readonly string[]):
     mkdirSync(skillsDir, { recursive: true });
     for (const s of skills) {
       const target = path.join(skillsDir, s.name);
-      if (process.platform === "win32") cpSync(s.dir, target, { recursive: true });
-      else symlinkSync(s.dir, target, "dir");
+      for (const rel of skillFiles(s.dir)) {
+        mkdirSync(path.dirname(path.join(target, rel)), { recursive: true });
+        copyFileSync(path.join(s.dir, rel), path.join(target, rel));
+      }
     }
     installBundle(tmp, dir, skills);
   }
@@ -209,6 +242,15 @@ export function skillsShadowedByProject(projectPath: string, names: readonly str
 function isFile(p: string): boolean {
   try {
     return statSync(p).isFile();
+  } catch {
+    return false;
+  }
+}
+
+/** A file that is not a symlink (the skill folder itself may be one; its SKILL.md may not). */
+function isRegularFile(p: string): boolean {
+  try {
+    return lstatSync(p).isFile();
   } catch {
     return false;
   }
