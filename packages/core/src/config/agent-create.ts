@@ -14,6 +14,7 @@ import {
   writeAgentFile,
 } from "./agent-files.js";
 import { assertAgentSpecClean } from "./agent-lint.js";
+import { assertSkillsAvailable } from "./skills.js";
 import type { AgentDefinition, DuskFleetConfig } from "./types.js";
 
 /** Validate what the loader would reject, *before* a file lands on disk and breaks every later config load. */
@@ -25,10 +26,23 @@ export function assertSpecLoadable(spec: AgentSpec, config: DuskFleetConfig): vo
   }
 }
 
-/** The kind combination (`assertAgentKind`) and the wrap-up reserve cap, against the current config. */
-export function assertAgentWritable(kind: AgentKind, spec: AgentSpec, config: DuskFleetConfig): void {
+/**
+ * The kind combination (`assertAgentKind`), the wrap-up reserve cap and the declared skills (each
+ * one found in data/skills or config/skills, its files clean), against the current config.
+ * `storedSkills` (update only) are the names the agent file already declares: they are not
+ * re-checked, so a skill deleted since the agent was written (tolerated by the loader and at run
+ * start) does not make an unrelated update fail. Only the names new against the stored spec are.
+ */
+export function assertAgentWritable(
+  kind: AgentKind,
+  spec: AgentSpec,
+  config: DuskFleetConfig,
+  storedSkills: readonly string[] = [],
+): void {
   assertAgentKind(kind, spec, (id) => config.projects.get(id)?.path ?? null);
   assertWrapUpReserve(spec, config.claude.defaultMaxBudgetUsd);
+  const added = (spec.skills ?? []).filter((name) => !storedSkills.includes(name));
+  if (added.length) assertSkillsAvailable(added, config);
 }
 
 /**

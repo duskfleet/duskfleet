@@ -368,7 +368,7 @@ run. Null when the failure matches no code, and for runs recorded before it exis
 | `auth_required` | `setup` | "Not logged in", "Please run /login", invalid API key, expired OAuth token; `errorDetail.loginUrl` when the message gives a URL |
 | `model_not_found` | `setup` | "issue with the selected model", a model that does not exist, `not_found_error` on a model |
 | `max_turns_exhausted` | `limit` | result subtype or terminal reason `max_turns` (`error_max_turns`) |
-| `provider_quota` | `limit` | usage limit reached / "hit your limit"; `errorDetail.retryNotBefore` (ISO) from `limit reached\|<epoch>`, "resets at <ISO>" or "resets 3pm (Europe/London)" |
+| `provider_quota` | `limit` | usage limit reached / "hit your limit" / "hit your 5-hour limit"; `errorDetail.retryNotBefore` (ISO) from `limit reached\|<epoch>`, "resets at <ISO>" or "resets 3pm (Europe/London)" |
 | `transient_upstream` | `transient` | API errors 429, 503, 529, `overloaded`, `rate_limit_error`: a later retry may work |
 | `refusal` | `refusal` | `stop_reason: refusal`, the one code a completed (exit 0) run can carry |
 

@@ -2,8 +2,12 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import type { AttentionBadge as Badge } from "@/lib/attention";
+import { AttentionBadge } from "./AttentionBadge";
 
 const TABS: Array<{ href: string; label: string; match: (p: string) => boolean }> = [
+  // DS-28: Attention first at every width; the tab stays at 0, only its badge goes
+  { href: "/attention", label: "Attention", match: (p) => p.startsWith("/attention") },
   {
     href: "/",
     label: "Runs",
@@ -14,8 +18,8 @@ const TABS: Array<{ href: string; label: string; match: (p: string) => boolean }
   { href: "/mcp", label: "MCP", match: (p) => p.startsWith("/mcp") },
 ];
 
-/** Top navigation with the current section marked (aria-current + style). */
-export function NavTabs() {
+/** Top navigation with the current section marked (aria-current + style); `attention` = the Attention tab's badge. */
+export function NavTabs({ attention = null }: { attention?: Badge | null }) {
   const pathname = usePathname() ?? "/";
   return (
     <>
@@ -29,6 +33,7 @@ export function NavTabs() {
             aria-current={active ? "page" : undefined}
           >
             {t.label}
+            {t.href === "/attention" && <AttentionBadge badge={attention} />}
           </Link>
         );
       })}
