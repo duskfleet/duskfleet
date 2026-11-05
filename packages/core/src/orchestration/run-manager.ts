@@ -11,6 +11,7 @@ import { loadConfig } from "../config/loader.js";
 import { prepareSkillBundle, skillsShadowedByProject } from "../config/skills.js";
 import type { AgentDefinition, DuskFleetConfig, ProjectDefinition } from "../config/types.js";
 import { mergeEnvPassthrough } from "../execution/child-env.js";
+import { type LogMetadata, logMetadata } from "../execution/log-caps.js";
 import { mergeSubagent, needsRepair, sameSubagent, subagentsFromLog } from "../execution/log-replay.js";
 import { allowListedMcpPrefixes, mcpToolPrefix } from "../execution/mcp.js";
 import { mergeUsageByModel } from "../execution/stream-json.js";
@@ -231,7 +232,13 @@ export class RunManager {
     options: RunManagerOptions = {},
   ) {
     this._config = config;
+    this.syncEventCap();
     this.owner = options.owner ?? processIdentity();
+  }
+
+  /** claude.max_event_bytes follows the config (a test may build the manager without a repository). */
+  private syncEventCap(): void {
+    if (this.runs) this.runs.maxEventBytes = this._config.claude.maxEventBytes;
   }
 
   /** Current configuration. Call reloadConfig() first when freshness matters. */
@@ -250,6 +257,7 @@ export class RunManager {
   reloadConfig(): DuskFleetConfig {
     try {
       this._config = loadConfig(this._config.configDir);
+      this.syncEventCap();
       this._configReloadError = null;
     } catch (err) {
       this._configReloadError = err instanceof Error ? err.message : String(err);
@@ -482,6 +490,7 @@ export class RunManager {
       timeoutMs: timeoutMinutes * 60_000,
       maxBudgetUsd: budget.main,
       logPath,
+      maxLogBytes: this.config.claude.maxLogBytes,
     };
     if (resume || continued) request.resumeSessionId = sessionId;
     if (model) request.model = model;
@@ -1231,6 +1240,8 @@ export class RunManager {
       const error = neverRan
         ? `run could not be marked running after the spawn (${active?.startError ?? "unknown reason"}); the process was stopped${result.error ? `: ${result.error}` : ""}`
         : result.error;
+      // The log as written: every pass has ended and closed its writer by now (`done` settles after `end()`).
+      const logMeta = this.readLogMetadata(runId, current.logPath);
       this.transition(current, outcome, {
         endedAt: result.endedAt,
         durationMs: result.durationMs,
@@ -1258,6 +1269,9 @@ export class RunManager {
         errorDetail: result.failure?.detail ?? null,
         rawResultJson: result.rawResult === null ? null : JSON.stringify(result.rawResult),
         phases,
+        logBytes: logMeta?.bytes ?? null,
+        logSha256: logMeta?.sha256 ?? null,
+        logTruncated: logMeta ? result.logTruncated === true : null,
       });
       if (neverRan && current.resumedFromRunId) {
         // Nothing ran: give the claim back so the one retry is not used up (as for a spawn failure).
@@ -1275,6 +1289,18 @@ export class RunManager {
       });
     } catch (err) {
       log.error("failed to record run completion", { runId, err: err instanceof Error ? err.message : String(err) });
+    }
+  }
+
+  /** Size and SHA-256 of the run's log (log-caps.ts); null without a file. A read failure is a note, never a lost result. */
+  private readLogMetadata(runId: string, logPath: string | null): LogMetadata | null {
+    try {
+      return logMetadata(logPath);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      log.warn("log metadata could not be read", { runId, err: message });
+      this.runs.addEvent(runId, "note", { message: `log size and hash could not be read: ${message}` });
+      return null;
     }
   }
 
@@ -1544,5 +1570,7 @@ export function mergeResults(main: ExecutionResult, wrapUp: ExecutionResult): Ex
     // A run cancelled during its wrap-up is stored as cancelled: no failure code, as for any cancel.
     failure: wrapUp.outcome === "cancelled" ? null : (main.failure ?? wrapUp.failure),
     subagents: [...main.subagents, ...wrapUp.subagents],
+    // Both passes append to the same file: it is truncated once either stopped at the cap.
+    logTruncated: main.logTruncated === true || wrapUp.logTruncated === true,
   };
 }

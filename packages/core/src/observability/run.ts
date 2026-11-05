@@ -181,8 +181,16 @@ export interface Run {
    */
   lastEventAt?: string | null;
   /**
+   * The raw log as written (migration 27), filled by `RunManager` when the run ends: size in bytes,
+   * SHA-256 (hex) of the file, and whether the writer stopped at `claude.max_log_bytes`. Null while
+   * the run is going, for older rows, and when there was no file to read.
+   */
+  logBytes?: number | null;
+  logSha256?: string | null;
+  logTruncated?: boolean | null;
+  /**
    * Id of the skills bundle the run got (`data/skill-bundles/<id>`, passed with --add-dir;
-   * migration 27): a content hash of the agent's `skills:` that resolved at start. Null when the
+   * migration 28): a content hash of the agent's `skills:` that resolved at start. Null when the
    * agent declares none, and for older rows.
    */
   skillsBundle?: string | null;
