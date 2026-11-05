@@ -362,6 +362,56 @@ export function listProjects() {
   return [...config().projects.values()];
 }
 
+/** One registered project for /projects: its bound agents, its newest real run and this UTC month's runs and spend. */
+export interface ProjectSummary {
+  id: string;
+  path: string;
+  /** Ids of the agents bound to it (`project: <id>`), alphabetical. */
+  agents: string[];
+  lastRun: Pick<Run, "id" | "status" | "reviewReasons" | "createdAt"> | null;
+  /** Real runs started this UTC month (gates left out, as the Runs list counts them). */
+  monthRuns: number;
+  /** Spend this UTC month, gates included, as budgets count it. */
+  monthCostUsd: number;
+}
+
+/**
+ * Every registered project, alphabetical. Runs match by registry id or by folder (older rows
+ * were recorded without `project_id`), the same match as the budgets' project scope.
+ */
+export function projectSummaries(): ProjectSummary[] {
+  const { db, runs } = services();
+  const cfg = config();
+  const monthStart = utcMonthStart(new Date());
+  const lastStmt = db.prepare(
+    `SELECT id FROM runs WHERE kind = 'run' AND (project_id = ? OR project_path = ?) ORDER BY created_at DESC LIMIT 1`,
+  );
+  const monthStmt = db.prepare(
+    `SELECT COALESCE(SUM(kind = 'run'), 0) AS runs, COALESCE(SUM(cost_usd), 0) AS cost
+     FROM runs WHERE created_at >= ? AND (project_id = ? OR project_path = ?)`,
+  );
+  return [...cfg.projects.values()]
+    .sort((a, b) => a.id.localeCompare(b.id))
+    .map((p) => {
+      const last = lastStmt.get(p.id, p.path) as { id: string } | undefined;
+      const run = last ? runs.get(last.id) : null;
+      const month = monthStmt.get(monthStart, p.id, p.path) as { runs: number; cost: number };
+      return {
+        id: p.id,
+        path: p.path,
+        agents: [...cfg.agents.values()]
+          .filter((a) => a.project === p.id)
+          .map((a) => a.id)
+          .sort((a, b) => a.localeCompare(b)),
+        lastRun: run
+          ? { id: run.id, status: run.status, reviewReasons: run.reviewReasons, createdAt: run.createdAt }
+          : null,
+        monthRuns: month.runs,
+        monthCostUsd: month.cost,
+      };
+    });
+}
+
 export function getRun(id: string) {
   const { runs } = services();
   const run = runs.get(id);
