@@ -70,6 +70,11 @@ npm workspaces, one `config/` and one SQLite database shared by three deliverabl
 - `data/`: `duskfleet.db`, `logs/<run_id>.jsonl` and `agents/*.md` (user agents written by
   `create_agent` or the CLI's `agents create`; same id as a builtin overrides it). Git-ignored runtime state. Code must
   never write into `config/agents`; agent file I/O lives in `core/src/config/agent-files.ts`.
+- Skills (`skills:` in agent frontmatter, `core/src/config/skills.ts`): `data/skills/<name>/`
+  (private, git-ignored) wins over `config/skills/<name>/` (committable skills of a *user's own*
+  checkout). The skills this repo uses to develop itself never go into `config/skills/`: they
+  stay private, in the git-ignored `data/skills/` (today `.claude/skills/`), same rule as our
+  agents. Neither folder is ever shipped in the npm packages.
 - `playground/`: ignored scratch directory for a local run target when trying things out.
   Not part of the repo; register it in the private `data/projects.yaml` if needed.
 - `notes/`: private, never committed (`.gitignore`): daily journal (`notes/journal/daily/`),
