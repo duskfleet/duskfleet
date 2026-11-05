@@ -201,7 +201,8 @@ it runs (below), so parallel runs cannot overshoot a budget their stand-ins alre
 Every finished run records how its cost is known, `costStatus` (`cost_status`, migration 25):
 `reported` (Claude Code's `total_cost_usd` on an API key, or an unknown billing type),
 `estimated` (the same number on a subscription: reported, not charged) or `unpriced` (no cost:
-the run ended without a `result` line, e.g. a crash, a timeout or a cancel). There is no price
+the run ended without a `result` line, e.g. a crash, a timeout or a cancel; a run with a wrap-up
+pass is `unpriced` when either pass has no cost, never a partial sum). There is no price
 table. While a run is pending or running its `costStatus` is null.
 
 Under `unpriced_policy: count` (the default) a budget counts every run of its scope this month

@@ -1505,7 +1505,9 @@ export function mergeResults(main: ExecutionResult, wrapUp: ExecutionResult): Ex
     toolCalls: main.toolCalls + wrapUp.toolCalls,
     usage,
     usageByModel,
-    costUsd: addNullable(main.costUsd, wrapUp.costUsd),
+    // Unknown if either pass is unknown: a partial sum would be classed "reported" and
+    // undercount the run in a budget, which must fail closed (#58).
+    costUsd: main.costUsd === null || wrapUp.costUsd === null ? null : main.costUsd + wrapUp.costUsd,
     permissionDenials: main.permissionDenials + wrapUp.permissionDenials,
     deniedTools: [...main.deniedTools, ...wrapUp.deniedTools],
     contextExhausted: main.contextExhausted || wrapUp.contextExhausted,
