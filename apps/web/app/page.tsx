@@ -13,7 +13,7 @@ import {
   overview,
   type RunsFilter,
 } from "@/lib/data";
-import { fmtClock, fmtCost, fmtDayClock, fmtInt, fmtPct, fmtSplit } from "@/lib/format";
+import { fmtClock, fmtCost, fmtDayClock, fmtInt, fmtPct, fmtSplit, shortModel } from "@/lib/format";
 import { isActiveRun } from "@/lib/running";
 
 export const dynamic = "force-dynamic";
@@ -23,6 +23,7 @@ type Search = {
   project?: string | string[];
   schedule?: string;
   q?: string;
+  model?: string | string[];
   outcome?: string;
   reason?: string;
   limit?: string;
@@ -66,6 +67,8 @@ export default async function RunsPage({ searchParams }: { searchParams: Promise
   // Unknown values are ignored rather than filtering everything out.
   const projectIds = many(sp.project).filter((id) => projects.some((p) => p.id === id));
   const agentIds = many(sp.agent);
+  // Models as /costs' By model table names them (its rows link here).
+  const models = many(sp.model);
   const projectPaths = projectIds.map((id) => projects.find((p) => p.id === id)?.path ?? id);
   const outcome = isOutcome(one(sp.outcome)) ? (one(sp.outcome) as RunOutcome) : undefined;
   const reason = isReason(one(sp.reason)) ? (one(sp.reason) as ReviewReason) : undefined;
@@ -74,15 +77,34 @@ export default async function RunsPage({ searchParams }: { searchParams: Promise
   if (projectPaths.length) filter.projectPaths = projectPaths;
   if (schedule) filter.scheduleId = schedule;
   if (q) filter.q = q;
+  if (models.length) filter.models = models;
   if (outcome) filter.outcome = outcome;
   if (reason) filter.reason = reason;
-  const filtered = Boolean(agentIds.length || projectIds.length || schedule || q || outcome || reason);
+  const filtered = Boolean(agentIds.length || projectIds.length || schedule || q || models.length || outcome || reason);
 
-  type Next = { agent?: string[]; project?: string[]; q?: string; outcome?: string; reason?: string; limit?: string };
+  type Next = {
+    agent?: string[];
+    project?: string[];
+    q?: string;
+    model?: string[];
+    outcome?: string;
+    reason?: string;
+    limit?: string;
+  };
   const qs = (next: Next) => {
     const p = new URLSearchParams();
-    const merged = { agent: agentIds, project: projectIds, schedule, q, outcome, reason, limit: undefined, ...next };
-    for (const k of ["agent", "project", "schedule", "q", "outcome", "reason", "limit"] as const) {
+    const merged = {
+      agent: agentIds,
+      project: projectIds,
+      schedule,
+      q,
+      model: models,
+      outcome,
+      reason,
+      limit: undefined,
+      ...next,
+    };
+    for (const k of ["agent", "project", "schedule", "q", "model", "outcome", "reason", "limit"] as const) {
       const v = merged[k];
       for (const x of Array.isArray(v) ? v : [v]) if (x) p.append(k, x);
     }
@@ -127,6 +149,7 @@ export default async function RunsPage({ searchParams }: { searchParams: Promise
     agentNames,
     scheduleName ? `schedule "${scheduleName}"` : null,
     q ? `"${q}"` : null,
+    models.length ? `model ${models.map(shortModel).join(", ")}` : null,
     outcome ? OUTCOME_LABELS[outcome] : null,
     reason ? REVIEW_REASON_LABELS[reason] : null,
   ]
@@ -139,10 +162,10 @@ export default async function RunsPage({ searchParams }: { searchParams: Promise
     failed: o.failed,
   };
   const reasonCount = reason ? (o.reviewReasons.find((r) => r.reason === reason)?.count ?? 0) : 0;
-  // The size of the filtered set, when the KPIs know it exactly. In-memory filters (schedule, q)
-  // and a reason combined with another outcome than needs_review count what they found instead.
+  // The size of the filtered set, when the KPIs know it exactly. In-memory filters (schedule, q,
+  // model) and a reason combined with another outcome than needs_review count what they found instead.
   const exactTotal =
-    schedule || q
+    schedule || q || models.length
       ? null
       : reason
         ? !outcome || outcome === "needs_review"
@@ -256,6 +279,9 @@ export default async function RunsPage({ searchParams }: { searchParams: Promise
               <input key={`p-${id}`} type="hidden" name="project" value={id} />
             ))}
             {schedule && <input type="hidden" name="schedule" value={schedule} />}
+            {models.map((m) => (
+              <input key={`m-${m}`} type="hidden" name="model" value={m} />
+            ))}
             {outcome && <input type="hidden" name="outcome" value={outcome} />}
             {reason && <input type="hidden" name="reason" value={reason} />}
             <input
