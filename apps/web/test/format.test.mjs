@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { fmtSplit, runTitle, shortModel, shortPath, tildePath, tildeText } from "../lib/format.ts";
+import { fmtBytes, fmtSplit, runTitle, shortModel, shortPath, tildePath, tildeText } from "../lib/format.ts";
 import { badgeVerdict } from "../lib/status.ts";
 
 test("runTitle takes the first non-empty line and strips markdown markers", () => {
@@ -104,4 +104,14 @@ test("fmtSplit shows the side the basis names, and both apart when mixed", () =>
   assert.equal(fmtSplit(split, "api"), "$1.50");
   assert.equal(fmtSplit(split, "subscription"), "$12.00");
   assert.equal(fmtSplit(split, "mixed"), "$1.50 billed · $12.00 API value");
+});
+
+test("fmtBytes uses binary units, one decimal below 10, a dash when unknown", () => {
+  assert.equal(fmtBytes(null), "–");
+  assert.equal(fmtBytes(0), "0 B");
+  assert.equal(fmtBytes(1023), "1023 B");
+  assert.equal(fmtBytes(1536), "1.5 KiB");
+  assert.equal(fmtBytes(65536), "64 KiB");
+  assert.equal(fmtBytes(50 * 1024 * 1024), "50 MiB");
+  assert.equal(fmtBytes(3 * 1024 ** 3), "3.0 GiB");
 });

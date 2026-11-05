@@ -1594,6 +1594,18 @@ pre.block.bad {
 .kv dd.mono {
   font-size: 14px;
 }
+/* A value with a badge or a Copy button beside it, kept on the row's line height. */
+.kv dd.kv-inline {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.kv dd.kv-inline .copy-btn {
+  padding: 0 8px;
+  font-size: 13px;
+  line-height: 19px;
+}
 
 details.tech {
   background: var(--panel);

@@ -1,4 +1,5 @@
 import type { DatabaseSync } from "node:sqlite";
+import { capEventJson, DEFAULT_MAX_EVENT_BYTES } from "../execution/log-caps.js";
 import type { DeniedTool, RunMcpInfo, SubagentRecord, SubagentStatus, UsageByModel } from "../execution/types.js";
 import type { RunDiff } from "../git/diff.js";
 import { COST_STATUSES, type CostStatus } from "../observability/billing.js";
@@ -69,6 +70,9 @@ interface RunRow {
   continued_from_run_id: string | null;
   title: string | null;
   max_budget_usd: number | null;
+  log_bytes?: number | null;
+  log_sha256?: string | null;
+  log_truncated?: number | null;
 }
 
 function rowToRun(r: RunRow): Run {
@@ -125,6 +129,9 @@ function rowToRun(r: RunRow): Run {
     claudeCodeVersion: r.claude_code_version ?? null,
     lastEventAt: r.last_event_at ?? null,
     continuedFromRunId: r.continued_from_run_id ?? null,
+    logBytes: r.log_bytes ?? null,
+    logSha256: r.log_sha256 ?? null,
+    logTruncated: r.log_truncated === null || r.log_truncated === undefined ? null : r.log_truncated === 1,
   };
 }
 
@@ -237,6 +244,9 @@ export type RunPatch = Partial<
     | "claudeCodeVersion"
     | "lastEventAt"
     | "continuedFromRunId"
+    | "logBytes"
+    | "logSha256"
+    | "logTruncated"
   >
 >;
 
@@ -278,6 +288,9 @@ const PATCH_COLUMNS: Record<keyof RunPatch, string> = {
   claudeCodeVersion: "claude_code_version",
   lastEventAt: "last_event_at",
   continuedFromRunId: "continued_from_run_id",
+  logBytes: "log_bytes",
+  logSha256: "log_sha256",
+  logTruncated: "log_truncated",
 };
 
 /**
@@ -531,10 +544,22 @@ export class RunRepository {
     ).map(rowToSummary);
   }
 
+  /**
+   * Cap of one stored payload (`claude.max_event_bytes`); `RunManager` keeps it in step with the
+   * config. Over it the payload is cut by `capEventJson` (envelope kept, `truncated: true`).
+   * The `diff` event is exempt: `diff()` reads it back as a typed `RunDiff`, and it is already
+   * bounded (DIFF_MAX_FILES entries, the patch itself lives in a file).
+   */
+  maxEventBytes = DEFAULT_MAX_EVENT_BYTES;
+
   addEvent(runId: string, type: RunEvent["type"], payload: unknown, agentId: string | null = null): void {
+    let stored: string | null = null;
+    if (payload !== undefined) {
+      stored = type === "diff" ? JSON.stringify(payload) : capEventJson(payload, this.maxEventBytes);
+    }
     this.db
       .prepare("INSERT INTO run_events (run_id, ts, type, payload, agent_id) VALUES (?, ?, ?, ?, ?)")
-      .run(runId, new Date().toISOString(), type, payload === undefined ? null : JSON.stringify(payload), agentId);
+      .run(runId, new Date().toISOString(), type, stored, agentId);
   }
 
   events(runId: string, limit = 200): RunEvent[] {

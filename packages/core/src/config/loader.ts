@@ -4,6 +4,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { parse as parseYaml } from "yaml";
 import { z } from "zod";
+import { DEFAULT_MAX_EVENT_BYTES, DEFAULT_MAX_LOG_BYTES } from "../execution/log-caps.js";
 import { DEFAULT_NOOP_PATTERN, parseNoopPattern } from "../scheduler/idle.js";
 import { logger } from "../util/log.js";
 import {
@@ -111,6 +112,8 @@ const globalSchema = z.object({
       default_timeout_minutes: z.number().positive().default(30),
       default_max_budget_usd: z.number().positive().default(5),
       env_passthrough: envPassthroughSchema.default([]),
+      max_event_bytes: z.number().int().min(1024).default(DEFAULT_MAX_EVENT_BYTES),
+      max_log_bytes: z.number().int().min(1024).default(DEFAULT_MAX_LOG_BYTES),
     })
     .prefault({}),
   scheduler: z
@@ -241,6 +244,8 @@ export function loadConfig(configDir: string): DuskFleetConfig {
       defaultTimeoutMinutes: g.claude.default_timeout_minutes,
       defaultMaxBudgetUsd: g.claude.default_max_budget_usd,
       envPassthrough: g.claude.env_passthrough,
+      maxEventBytes: g.claude.max_event_bytes,
+      maxLogBytes: g.claude.max_log_bytes,
     },
     scheduler: {
       enabled: g.scheduler.enabled,

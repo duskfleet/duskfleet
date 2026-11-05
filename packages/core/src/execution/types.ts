@@ -46,6 +46,8 @@ export interface ExecutionRequest {
   timeoutMs?: number;
   /** Absolute path of the file that receives every raw event line. */
   logPath?: string;
+  /** Cap of the log file in bytes (`claude.max_log_bytes`); default `DEFAULT_MAX_LOG_BYTES`. */
+  maxLogBytes?: number;
 }
 
 /**
@@ -190,6 +192,8 @@ export interface ExecutionResult {
   rawResult: unknown;
   /** Subagent invocations observed in the stream, in start order. */
   subagents: SubagentRecord[];
+  /** The log writer stopped at `maxLogBytes` (the log ends with the `duskfleet_log_truncated` line). */
+  logTruncated?: boolean;
 }
 
 export interface ExecutionHandle {

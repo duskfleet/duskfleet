@@ -126,7 +126,7 @@ export function registerRunTools(server: McpServer, ctx: ToolContext): void {
       description:
         "Fetch a run by id: status, timings, Claude session id, model, tokens, cost, tool calls, errors, " +
         "the command to resume the session and the subagents it delegated to (one entry per Agent call: type, brief, " +
-        "report, tools, model, tokens), and `diff`: what the run changed in a git checkout (files, lines added / deleted, path of the patch). Set include_output to get the full final message, full subagent briefs and reports, and the event timeline.",
+        "report, tools, model, tokens), and `diff`: what the run changed in a git checkout (files, lines added / deleted, path of the patch), and the raw log's logBytes, logSha256 and logTruncated (set when the run ends). Set include_output to get the full final message, full subagent briefs and reports, and the event timeline.",
       inputSchema: {
         run_id: z.string().describe("Run id returned by run_agent or list_runs"),
         include_output: z.boolean().optional().describe("Include the full final message and the event timeline"),
