@@ -124,7 +124,7 @@ service once. The service needs a global install, not npx's temporary cache:
 `npm i -g duskfleet`, then `duskfleet install-service`
 ([Schedules](docs/schedules.md#who-ticks)).
 
-From here to a schedule that fires on its own, step by step in five minutes:
+From here to a schedule that fires on its own, step by step in about ten minutes:
 [Your first scheduled run](docs/quickstart.md).
 
 ## From source
@@ -243,7 +243,7 @@ start.
 
 | Page | Contents |
 |---|---|
-| [Your first scheduled run](docs/quickstart.md) | Five minutes from `npx duskfleet init` to a scheduled haiku run on the dashboard and the service that keeps it firing |
+| [Your first scheduled run](docs/quickstart.md) | About ten minutes from `npx duskfleet init` to a scheduled haiku run on the dashboard and the service that keeps it firing |
 | [How it works](docs/how-it-works.md) | A run end to end, with diagrams: entry points, RunManager, the Claude Code child, what gets recorded, run lifecycle |
 | [Configuration](docs/configuration.md) | `duskfleet.yaml`, projects registry, concurrency limits, environment variables |
 | [Agents](docs/agents.md) | The two agent kinds (own, link), frontmatter, permission modes in unattended runs, project binding, MCP servers inside runs |
