@@ -156,6 +156,7 @@ Every run starts as a call to `RunManager.startRun`, from a chat, the CLI or a c
 The child is Claude Code in your project; everything it does is recorded.
 
 ```mermaid
+%%{init: {"flowchart": {"wrappingWidth": 320}}}%%
 flowchart TB
     subgraph entry ["1 · Entry points"]
         chat["Chat host<br/>Claude Desktop or Claude Code<br/>run_agent over MCP (stdio)"]
@@ -170,13 +171,13 @@ flowchart TB
     end
 
     subgraph child ["3 · Claude Code child"]
-        claude["claude -p --output-format stream-json, cwd = the target project<br/>no permission prompts: only what the agent allow-lists<br/>--strict-mcp-config unless the agent sets inherit_mcp"]
+        claude["claude -p --output-format stream-json<br/>cwd = the target project<br/>no permission prompts: only what the agent allow-lists<br/>no MCP servers unless the agent opts in"]
     end
 
     subgraph rec ["4 · What gets recorded"]
         parser["stream-json parser"]
         db[("SQLite<br/>runs: status, timings, tokens, cost, tool calls, denials, termination reason<br/>run_agents: one row per subagent")]
-        logs["data/logs/<br/>&lt;run_id&gt;.jsonl: the raw stream<br/>&lt;run_id&gt;.diff: the patch"]
+        logs["data/logs/<br/>run_id.jsonl: the raw stream<br/>run_id.diff: the patch"]
     end
 
     chat --> guards
