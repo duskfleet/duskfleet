@@ -206,18 +206,18 @@ A run moves through these states; the transitions below are the only ones allowe
 
 ```mermaid
 stateDiagram-v2
+    direction LR
     [*] --> pending : startRun, guards pass
     pending --> running : claude spawned
     pending --> failed : spawn error / orphaned
     running --> completed : result event
     running --> cancelled : cancel_run
     running --> failed : error / non-zero exit / orphaned
-    completed --> needs_review : permission denial, timeout, empty run
-    note right of needs_review
-        Shown amber on the dashboard,
-        never plain green.
-    end note
+    completed --> needs_review : denial, timeout, empty run
 ```
+
+"Needs review" is not a status but how the dashboard shows a completed run that hit a permission
+denial, a timeout, an exhausted budget or did nothing: amber, never plain green.
 
 You describe *what should happen* in `config/` (agents, projects) and in schedules. Duskfleet
 runs `claude -p` unattended with a target project as working directory, owns the unattended
