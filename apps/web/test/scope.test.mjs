@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { listScoped, scopeList } from "../lib/scope.ts";
+import { costModel, listScoped, scopeList } from "../lib/scope.ts";
 
 const run = (id, agentId, projectPath, createdAt) => ({ id, agentId, projectPath, createdAt });
 const RUNS = [
@@ -41,6 +41,15 @@ test("listScoped with one pair returns core's list as is", () => {
     ["r5", "r2"],
   );
   assert.deepEqual(calls, [[undefined, "/p"]]);
+});
+
+test("costModel: the model a run counts under on /costs' By model table", () => {
+  const m = (modelUsed, modelRequested) => costModel({ modelUsed, modelRequested }, "mixed");
+  assert.equal(m("claude-haiku-4-5", "haiku"), "claude-haiku-4-5");
+  assert.equal(m("mixed", "sonnet"), "sonnet");
+  assert.equal(m(null, "opus"), "opus");
+  assert.equal(m("mixed", null), "default");
+  assert.equal(m(null, null), "default");
 });
 
 test("two project ids on one path list each run once", () => {
