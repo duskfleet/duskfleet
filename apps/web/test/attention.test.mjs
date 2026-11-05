@@ -185,10 +185,19 @@ test("budgets: at the warning amber, a spent hard stop coral (and the badge cora
 });
 
 test("skipped busy: three or more in a row count, with the streak; a fire in between breaks it", () => {
-  const busy = (k) => Array.from({ length: k }, (_, i) => ({ firedAt: ago(30 * (i + 1)), outcome: "skipped_busy" }));
+  // Newest first, as defer_busy writes them: a deferred row precedes each skipped_busy one.
+  const busy = (k) =>
+    Array.from({ length: k }, (_, i) => [
+      { firedAt: ago(60 * i + 10), outcome: "skipped_busy" },
+      { firedAt: ago(60 * i + 40), outcome: "deferred" },
+    ]).flat();
   let s = sections({ schedules: [schedule({ firings: [...busy(6), { firedAt: ago(500), outcome: "started" }] })] });
   assert.deepEqual(kinds(s), ["busy"]);
   assert.equal(s[0].items[0].badge, "Skipped busy ×6");
+  assert.equal(s[0].items[0].at, ago(10));
+  s = sections({ schedules: [schedule({ firings: [{ firedAt: ago(5), outcome: "deferred" }, ...busy(3)] })] });
+  assert.equal(s[0].items[0].badge, "Skipped busy ×3");
+  assert.equal(s[0].items[0].at, ago(10));
   s = sections({ schedules: [schedule({ firings: [{ firedAt: ago(5), outcome: "started" }, ...busy(5)] })] });
   assert.deepEqual(s, []);
   s = sections({ schedules: [schedule({ firings: busy(2) })] });

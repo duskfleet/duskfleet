@@ -1017,7 +1017,10 @@ export function firingTotals(days = 7): { started: number; skippedBusy: number }
 
 /** Most runs the attention window reads (48 h of a busy fleet stays far below it). */
 const ATTENTION_RUN_LIMIT = 500;
-/** Firings read per schedule for the busy streak: a longer streak shows as this many. */
+/**
+ * Firings read per schedule for the busy streak. Under `scheduler.defer_busy` each
+ * `skipped_busy` row comes with a `deferred` one, so a streak counts up to about half of this.
+ */
 const ATTENTION_FIRINGS = 20;
 
 /**

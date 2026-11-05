@@ -209,7 +209,8 @@ in a fixed order. Empty sections are hidden:
 4. **Schedules paused or in error**: auto-paused schedules (`paused_reason`) and schedules whose
    last firing errored. A schedule paused by hand is not listed.
 5. **Budget warnings**: monthly budgets at or past `warn_percent`; a spent hard stop is coral.
-6. **Repeated skipped busy**: a schedule whose last 3 or more firings were all `skipped_busy`.
+6. **Repeated skipped busy**: a schedule whose last 3 or more firings were all `skipped_busy`
+   (the `deferred` rows `scheduler.defer_busy` writes in between do not break the streak).
 
 The page is a pure view: nothing is stored and nothing can be dismissed. An item leaves when its
 cause is fixed: the agent ends a clean run, or its schedule is paused by hand (run items); a later

@@ -21,7 +21,10 @@ import {
 
 /** Items older than this are absent (owner decision on #69: 48 hours, not 7 days). */
 export const ATTENTION_WINDOW_MS = 48 * 3600_000;
-/** A schedule whose last firings in a row were all `skipped_busy`, at least this many times. */
+/**
+ * A schedule whose last firings in a row were all `skipped_busy`, at least this many times
+ * (`deferred` rows in between do not break the streak: they precede each `skipped_busy`).
+ */
 export const BUSY_STREAK_MIN = 3;
 
 /** Fixed order of the sections; empty ones are hidden. */
@@ -389,9 +392,16 @@ function busyItems(schedules: AttentionSchedule[], since: number): BusyItem[] {
   const items: BusyItem[] = [];
   for (const s of schedules) {
     if (!s.enabled) continue;
+    // Under scheduler.defer_busy a busy tick writes a `deferred` row and the `skipped_busy`
+    // row only comes when that deferral expires: skip deferred rows, stop at anything else.
     let streak = 0;
-    while (streak < s.firings.length && s.firings[streak]!.outcome === "skipped_busy") streak++;
-    const last = s.firings[0];
+    let last: AttentionSchedule["firings"][number] | undefined;
+    for (const f of s.firings) {
+      if (f.outcome === "deferred") continue;
+      if (f.outcome !== "skipped_busy") break;
+      last ??= f;
+      streak++;
+    }
     if (streak < BUSY_STREAK_MIN || !last || Date.parse(last.firedAt) < since) continue;
     items.push({
       kind: "busy",
