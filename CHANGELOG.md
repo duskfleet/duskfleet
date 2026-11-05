@@ -8,8 +8,55 @@ All notable changes to Duskfleet are listed here. The format follows
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-11-05
+
+Five schema migrations (23 to 27) run on the first open of an existing database; nothing to do by hand. See the upgrade note under Changed for monthly budgets.
+
+### Added
+
+#### Runs and agents
+
+- Continue a previous run's session: `run_agent { resume_run_id }` and a schedule's `continue: true` send a new prompt into the Claude session of an ended run (`continued_from_run_id`, migration 23); a session that cannot be continued starts fresh with a note, never a skipped tick ([#384](https://github.com/duskfleet/duskfleet/pull/384)).
+- Optional `title` on runs and schedules (migration 24): `run_agent`, `create_schedule`, `run --title`; every list shows a run under its title, else its first prompt line ([#391](https://github.com/duskfleet/duskfleet/pull/391), [#395](https://github.com/duskfleet/duskfleet/pull/395)).
+- Log caps: `claude.max_event_bytes` (64 KiB per stored event, the envelope kept) and `claude.max_log_bytes` (50 MiB per raw `.jsonl`), with `log_bytes`, `log_sha256` and `log_truncated` on the run (migration 27) ([#393](https://github.com/duskfleet/duskfleet/pull/393)).
+- Evals foundation: the `evals.details` schema and one scoring rule (hard checks first, then rubric dimensions), evaluators that never touch `runs` ([#375](https://github.com/duskfleet/duskfleet/pull/375)); an LLM judge as a second read-only Claude Code run on a PASS/FAIL rubric ([#378](https://github.com/duskfleet/duskfleet/pull/378)).
+- Smoke test for builtin agents: every `config/agents/*.md` must load with an explicit unattended envelope ([#376](https://github.com/duskfleet/duskfleet/pull/376)).
+
+#### Schedules
+
+- A busy fire is deferred instead of lost: `scheduler.defer_busy` (default on) keeps one pending fire per schedule, retried every tick until it starts or the next cron occurrence comes ([#224](https://github.com/duskfleet/duskfleet/pull/224)).
+- `scheduler.auto_pause` on/off switch, in the file and in Settings ([#323](https://github.com/duskfleet/duskfleet/pull/323)).
+- One schedule per agent: a second schedule is refused on create or agent change; `doctor` lists the duplicates an older database holds ([#322](https://github.com/duskfleet/duskfleet/pull/322)).
+- `install-service` on macOS runs `serve` under `caffeinate` (`--keep-awake`, default; holds on AC power only), and `doctor` reports it: a sleeping Mac skipped every scheduled run ([#380](https://github.com/duskfleet/duskfleet/pull/380)).
+
+#### CLI
+
+- Guided first run at the end of `init`, and `run --first` ([#324](https://github.com/duskfleet/duskfleet/pull/324)).
+- `init` without a Claude login writes the config, prints the fix and exits 0 ([#363](https://github.com/duskfleet/duskfleet/pull/363)).
+- Per-command `--help`; an unknown command or a missing argument is named, exit 2 ([#365](https://github.com/duskfleet/duskfleet/pull/365)).
+- `run --project` accepts a relative path, resolved from the shell directory ([#367](https://github.com/duskfleet/duskfleet/pull/367)).
+- A failed `run` prints its cause and the fix first; the full JSON only with `--json` ([#361](https://github.com/duskfleet/duskfleet/pull/361)).
+
+#### Dashboard
+
+- Agents as table rows per project with KPI tiles, filters and sort, and a new agent detail page ([#316](https://github.com/duskfleet/duskfleet/pull/316)); card layout from tablet width ([#330](https://github.com/duskfleet/duskfleet/pull/330)); sorted by id, status column fits the needs-review pill ([#333](https://github.com/duskfleet/duskfleet/pull/333), [#335](https://github.com/duskfleet/duskfleet/pull/335)); Run now says when a fire is already requested ([#337](https://github.com/duskfleet/duskfleet/pull/337)).
+- Costs page in the Trends style: ranked table with ticks and the split in the table head ([#373](https://github.com/duskfleet/duskfleet/pull/373)); a By model row opens Runs filtered by that model, `?model=` ([#390](https://github.com/duskfleet/duskfleet/pull/390)).
+- Clean-rate chart with many agents: ranked table plus the selected lines, at most six drawn ([#315](https://github.com/duskfleet/duskfleet/pull/315)).
+- Schedule cards with the actions in the header and the message as a strip ([#334](https://github.com/duskfleet/duskfleet/pull/334)); Running and Recent runs on one shared column grid ([#336](https://github.com/duskfleet/duskfleet/pull/336)).
+- Copy-paste commands and the MCP setup rendered for the install in use (checkout, global or npx); the wrap-up reserve explained on the run page ([#358](https://github.com/duskfleet/duskfleet/pull/358)).
+- Measured WCAG AA contrast of the tokens and badges in both modes, kept by a test ([#388](https://github.com/duskfleet/duskfleet/pull/388)); render tests for the components ([#356](https://github.com/duskfleet/duskfleet/pull/356)).
+
+#### Docs
+
+- Guide: run Claude Code on a schedule on your own machine, and what Duskfleet adds ([#263](https://github.com/duskfleet/duskfleet/pull/263)).
+- README written around `npx duskfleet`: quick start, Before / after, Commands table, FAQ, hero images and the "How a run works" diagram assets ([#357](https://github.com/duskfleet/duskfleet/pull/357), [#369](https://github.com/duskfleet/duskfleet/pull/369), [#370](https://github.com/duskfleet/duskfleet/pull/370), [#346](https://github.com/duskfleet/duskfleet/pull/346), [#360](https://github.com/duskfleet/duskfleet/pull/360), [#398](https://github.com/duskfleet/duskfleet/pull/398)).
+
 ### Changed
 
+- CLI quiet by default (`warn`), migrations reported in one line, `--verbose` brings `info` back and `DUSKFLEET_LOG_LEVEL` wins; `serve` and the MCP server keep `info` ([#366](https://github.com/duskfleet/duskfleet/pull/366)).
+- `/runs` redirects to the run list; the dashboard no longer claims to be read-only where it edits schedules ([#364](https://github.com/duskfleet/duskfleet/pull/364)).
+- Costs page without the Budget warning tile ([#342](https://github.com/duskfleet/duskfleet/pull/342)); Runs page without the "Spend by model moved" line ([#341](https://github.com/duskfleet/duskfleet/pull/341)).
+- Publishing: unattended `npm publish` with a bypass-2FA token until the registry accepts this repository's OIDC token, the exchange logged verbose ([#314](https://github.com/duskfleet/duskfleet/pull/314), [#318](https://github.com/duskfleet/duskfleet/pull/318)).
 - Budgets fail closed on unknown run cost: every finished run records `cost_status` (`reported`, `estimated` on a subscription, `unpriced` without a cost; migration 25), and under the new per-budget `unpriced_policy: count` (default) an unpriced or still running run counts as the whole cap it started with (wrap-up reserve included, stored on the run by migration 26 so a `run_agent` `max_budget_usd` override or a resume budget counts as such; else its agent's `max_budget_usd`, else `claude.default_max_budget_usd`), including runs closed without `cost_status` by an older build and runs without `started_at`; only a spawn refused before launching anything is recorded at cost 0; `set_budget` without `unpriced_policy` keeps a budget's stored policy. **Upgrade note:** existing finished runs are backfilled and the unpriced ones of the current month count at once, so a hard-stop budget may refuse runs right after the upgrade; `duskfleet doctor` lists them per budget, and `unpriced_policy: allow` (`budgets set ... --unpriced allow`, `set_budget`) ignores them ([#58](https://github.com/duskfleet/duskfleet/issues/58)).
 
 ### Fixed
@@ -19,7 +66,9 @@ All notable changes to Duskfleet are listed here. The format follows
   the result: the end listener was attached after the failing write, and the orphan sweep leaves
   a live owner's rows alone. The listener now comes first, the child is stopped and the row ends
   `failed` with the reason. The database is opened with a 5 s busy timeout, so writes from
-  `serve`, MCP servers, the CLI and the dashboard wait for each other instead of failing.
+  `serve`, MCP servers, the CLI and the dashboard wait for each other instead of failing ([#381](https://github.com/duskfleet/duskfleet/pull/381)).
+- A `pending` run whose owner is gone is swept like a `running` orphan, and "running now" has one definition everywhere ([#329](https://github.com/duskfleet/duskfleet/pull/329)).
+- Costs page charts: end labels a line box apart, long names truncate instead of pushing the value out, total row aligned ([#394](https://github.com/duskfleet/duskfleet/pull/394)).
 
 ## [0.1.0] - 2026-10-31
 
@@ -100,5 +149,6 @@ localhost dashboard.
 - An allow-listed MCP server that a run did not use no longer counts as missing ([#165](https://github.com/duskfleet/duskfleet/pull/165)).
 - The published packages had `bin` paths with a `./` prefix, which npm 11 drops at publish time, so `npx duskfleet` would have had no executable; the pack gate now refuses such entries and `publish --dry-run` fails when npm auto-corrects the manifest ([#278](https://github.com/duskfleet/duskfleet/pull/278)); the publish job itself now runs that check before each `npm publish`, so a tag cut before the fix cannot ship without its executables ([#312](https://github.com/duskfleet/duskfleet/pull/312)).
 
-[Unreleased]: https://github.com/duskfleet/duskfleet/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/duskfleet/duskfleet/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/duskfleet/duskfleet/releases/tag/v0.2.0
 [0.1.0]: https://github.com/duskfleet/duskfleet/releases/tag/v0.1.0
