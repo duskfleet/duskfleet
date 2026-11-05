@@ -10,7 +10,7 @@ All notable changes to Duskfleet are listed here. The format follows
 
 ## [0.2.0] - 2026-11-05
 
-Five schema migrations (23 to 27) run on the first open of an existing database; nothing to do by hand. See the upgrade note under Changed for monthly budgets.
+Six schema migrations (22 to 27) run on the first open of an existing database; nothing to do by hand. See the upgrade note under Changed for monthly budgets.
 
 ### Added
 
@@ -24,7 +24,7 @@ Five schema migrations (23 to 27) run on the first open of an existing database;
 
 #### Schedules
 
-- A busy fire is deferred instead of lost: `scheduler.defer_busy` (default on) keeps one pending fire per schedule, retried every tick until it starts or the next cron occurrence comes ([#224](https://github.com/duskfleet/duskfleet/pull/224)).
+- A busy fire is deferred instead of lost: `scheduler.defer_busy` (default on) keeps one pending fire per schedule (migration 22), retried every tick until it starts or the next cron occurrence comes ([#224](https://github.com/duskfleet/duskfleet/pull/224)).
 - `scheduler.auto_pause` on/off switch, in the file and in Settings ([#323](https://github.com/duskfleet/duskfleet/pull/323)).
 - One schedule per agent: a second schedule is refused on create or agent change; `doctor` lists the duplicates an older database holds ([#322](https://github.com/duskfleet/duskfleet/pull/322)).
 - `install-service` on macOS runs `serve` under `caffeinate` (`--keep-awake`, default; holds on AC power only), and `doctor` reports it: a sleeping Mac skipped every scheduled run ([#380](https://github.com/duskfleet/duskfleet/pull/380)).
@@ -49,7 +49,7 @@ Five schema migrations (23 to 27) run on the first open of an existing database;
 #### Docs
 
 - Guide: run Claude Code on a schedule on your own machine, and what Duskfleet adds ([#263](https://github.com/duskfleet/duskfleet/pull/263)).
-- README written around `npx duskfleet`: quick start, Before / after, Commands table, FAQ, hero images and the "How a run works" diagram assets ([#357](https://github.com/duskfleet/duskfleet/pull/357), [#369](https://github.com/duskfleet/duskfleet/pull/369), [#370](https://github.com/duskfleet/duskfleet/pull/370), [#346](https://github.com/duskfleet/duskfleet/pull/346), [#360](https://github.com/duskfleet/duskfleet/pull/360), [#398](https://github.com/duskfleet/duskfleet/pull/398)).
+- README written around `npx duskfleet`: quick start, Before / after, Commands table, FAQ, hero images and the "How a run works" diagram, wide and phone, dark and light ([#357](https://github.com/duskfleet/duskfleet/pull/357), [#369](https://github.com/duskfleet/duskfleet/pull/369), [#370](https://github.com/duskfleet/duskfleet/pull/370), [#346](https://github.com/duskfleet/duskfleet/pull/346), [#360](https://github.com/duskfleet/duskfleet/pull/360), [#398](https://github.com/duskfleet/duskfleet/pull/398), [#402](https://github.com/duskfleet/duskfleet/pull/402)).
 
 ### Changed
 
