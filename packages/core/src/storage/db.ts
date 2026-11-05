@@ -337,6 +337,15 @@ const MIGRATIONS: ReadonlyArray<{ version: number; sql: string; backfill?: (db: 
       ALTER TABLE schedules ADD COLUMN continue_session INTEGER NOT NULL DEFAULT 0;
     `,
   },
+  {
+    // Run titles (run_agent title, run --title, a schedule's title stamped on every fire): what the
+    // run is for, shown instead of the truncated first prompt line (runLabel). NULL = no title.
+    version: 24,
+    sql: `
+      ALTER TABLE runs ADD COLUMN title TEXT;
+      ALTER TABLE schedules ADD COLUMN title TEXT;
+    `,
+  },
 ];
 
 /**

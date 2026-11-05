@@ -6,6 +6,7 @@ import {
   MAX_SCHEDULER_PAUSE_MINUTES,
   ON_FAILURE_POLICIES,
   parseCron,
+  RUN_TITLE_MAX,
   type Schedule,
   type ScheduleGate,
   type ScheduleRunState,
@@ -121,6 +122,12 @@ const scheduleFields = {
     .describe(
       "Default false. true: every fire continues the Claude session of the schedule's last ended run (whatever its outcome) with the schedule's prompt. A cancelled or context-exhausted last run, or one whose agent, project path or agent definition changed, gets a fresh session plus a note, never a skipped tick. on_failure: resume_once wins when it applies",
     ),
+  title: z
+    .string()
+    .optional()
+    .describe(
+      `Title stamped on every run this schedule fires, e.g. 'nightly review' (at most ${RUN_TITLE_MAX} characters, trimmed); runs are listed under it instead of the first prompt line. Empty = none (on update: removes it)`,
+    ),
   noop_pattern: z
     .string()
     .min(1)
@@ -192,6 +199,7 @@ export function registerScheduleTools(server: McpServer, ctx: ToolContext): void
         if (args.on_failure !== undefined) input.onFailure = args.on_failure;
         if (args.resume_budget_usd !== undefined) input.resumeBudgetUsd = args.resume_budget_usd;
         if (args.continue !== undefined) input.continueSession = args.continue;
+        if (args.title !== undefined) input.title = args.title;
         if (args.noop_pattern !== undefined) input.noopPattern = args.noop_pattern;
         if (args.gate !== undefined) input.gate = toGate(args.gate);
         if (args.concurrency_policy !== undefined) input.concurrencyPolicy = args.concurrency_policy;
@@ -224,6 +232,7 @@ export function registerScheduleTools(server: McpServer, ctx: ToolContext): void
         on_failure: scheduleFields.on_failure,
         resume_budget_usd: scheduleFields.resume_budget_usd,
         continue: scheduleFields.continue,
+        title: scheduleFields.title,
         noop_pattern: scheduleFields.noop_pattern,
         clear_noop_pattern: z
           .boolean()
@@ -253,6 +262,7 @@ export function registerScheduleTools(server: McpServer, ctx: ToolContext): void
         if (args.on_failure !== undefined) patch.onFailure = args.on_failure;
         if (args.resume_budget_usd !== undefined) patch.resumeBudgetUsd = args.resume_budget_usd;
         if (args.continue !== undefined) patch.continueSession = args.continue;
+        if (args.title !== undefined) patch.title = args.title;
         if (args.noop_pattern !== undefined) patch.noopPattern = args.noop_pattern;
         else if (args.clear_noop_pattern) patch.noopPattern = null;
         if (args.gate !== undefined) patch.gate = toGate(args.gate);

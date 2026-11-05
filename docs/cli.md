@@ -14,6 +14,7 @@ npx duskfleet doctor --probe                             # plus one real hello r
 npx duskfleet run --project ~/Documents/Projects/my-app -- "Add a README section describing the build"
 npx duskfleet run --project my-app --agent my-reviewer --model sonnet -- "Review src/ for obvious bugs"   # registered id or path (--project-id is the explicit form)
 npx duskfleet run --no-wait --project /path -- "..."     # return immediately (see the note below)
+npx duskfleet run --project my-app --title "fix #381" -- "..."   # list the run under a title instead of the first prompt line (max 120 chars)
 npx duskfleet run --project . --agent fixer -- "..."     # relative path: resolved from the shell's directory
 npx duskfleet run --first [--project /path]              # the guided first run of init again (haiku, costs cents)
 npx duskfleet runs --status completed --limit 10
@@ -198,7 +199,8 @@ uses for its advice. A permission denial names the denied tools.
 On stdout, the run record as JSON for scripts (exit 0 for `completed` or, with `--no-wait`,
 `running`; 1 otherwise). It leaves out `command.argv` (the full spawned command line, system
 prompt included) and `rawResultJson`; `run --json` prints the full record, the same as
-`run-info <run_id>`.
+`run-info <run_id>`. `title` is what `--title` gave (null without it); `runs` and `run-info` also
+print `label`, the title or else the first prompt line, the same label the MCP tools return.
 
 ## agents create
 
