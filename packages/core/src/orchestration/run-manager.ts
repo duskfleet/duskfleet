@@ -8,6 +8,7 @@ import { randomUUID } from "node:crypto";
 import path from "node:path";
 import { agentDefinitionHash, listProjectAgents, projectAgentDefinitionHash } from "../config/agent-files.js";
 import { loadConfig } from "../config/loader.js";
+import { prepareSkillBundle, skillsShadowedByProject } from "../config/skills.js";
 import type { AgentDefinition, DuskFleetConfig, ProjectDefinition } from "../config/types.js";
 import { mergeEnvPassthrough } from "../execution/child-env.js";
 import { type LogMetadata, logMetadata } from "../execution/log-caps.js";
@@ -514,6 +515,28 @@ export class RunManager {
       request.claudeAgent = agent.claudeAgent;
     }
     const addDirs = [...new Set([...(project?.addDirs ?? []), ...(agent.addDirs ?? [])])];
+    // Declared skills: a content-addressed bundle under data/skill-bundles/, one more --add-dir.
+    // A skill deleted since the agent was written is skipped with a note, never a refused run.
+    const skillNotes: string[] = [];
+    const bundle = agent.skills?.length ? prepareSkillBundle(this.config, agent.skills) : null;
+    if (agent.skills?.length) {
+      const missing = bundle ? bundle.missing : [...new Set(agent.skills)].sort();
+      if (missing.length)
+        skillNotes.push(
+          `skill${missing.length > 1 ? "s" : ""} ${missing.join(", ")} not found in data/skills or config/skills; the run starts without ${missing.length > 1 ? "them" : "it"}`,
+        );
+    }
+    if (bundle) {
+      addDirs.push(bundle.dir);
+      const shadowed = skillsShadowedByProject(
+        projectPath,
+        bundle.skills.map((s) => s.name),
+      );
+      if (shadowed.length)
+        skillNotes.push(
+          `the project defines .claude/skills/ ${shadowed.join(", ")} too; Claude Code uses the project's ${shadowed.length > 1 ? "copies" : "copy"}, not the bundled one`,
+        );
+    }
     if (addDirs.length) request.addDirs = addDirs;
     const envPassthrough = mergeEnvPassthrough(this.config.claude.envPassthrough, agent.envPassthrough);
     if (envPassthrough.length) request.envPassthrough = envPassthrough;
@@ -572,6 +595,7 @@ export class RunManager {
       claudeCodeVersion: null,
       lastEventAt: null,
       continuedFromRunId: continued?.id ?? null,
+      skillsBundle: bundle?.id ?? null,
     };
 
     // Insert first so that events emitted by the executor always find the row. For a resume the
@@ -589,6 +613,12 @@ export class RunManager {
       throw err;
     }
     this.runs.addEvent(runId, "status_change", { from: null, to: "pending" });
+    if (bundle)
+      this.runs.addEvent(runId, "note", {
+        message: `skills ${bundle.skills.map((s) => s.name).join(", ")} available from bundle ${bundle.id}`,
+        skillsBundle: bundle.id,
+      });
+    for (const message of skillNotes) this.runs.addEvent(runId, "note", { message });
     if (resume) {
       this.runs.addEvent(runId, "note", {
         message: `resumes run ${resume.fromRun.id} (${resume.fromRun.status}, ${resume.fromRun.terminationReason ?? "no termination reason"}) with a ${budget.total} USD budget`,

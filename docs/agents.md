@@ -73,6 +73,7 @@ permission_mode: acceptEdits      # acceptEdits | dontAsk | auto | manual  (plan
 # max_daily_runs: 24              # runs of this agent per UTC day (whole number >= 1); default no cap
 # max_daily_cost_usd: 10          # spend of this agent per UTC day; default no cap
 # env_passthrough: ["GH_TOKEN"]   # variables its runs get beyond the default allow-list (see "Environment of a run")
+# skills: [review-checklist]      # Duskfleet skills in data/skills/ or config/skills/ (see "Skills")
 timeout_minutes: 30
 max_budget_usd: 5
 # wrap_up_reserve_usd: 0.5     # part of max_budget_usd kept for the wrap-up pass; default 10%, min $0.50, 0 = off
@@ -293,6 +294,45 @@ env_passthrough: ["GH_TOKEN"]     # exact names or PREFIX_*
 `claude.env_passthrough` in `config/duskfleet.yaml` does the same for every agent; the two lists
 are merged. `GH_TOKEN` is the one most agents need (for `gh`). Anything passed is readable by the
 agent, so list only what it may use.
+
+## Skills
+
+`skills:` gives an agent's runs Claude Code skills that Duskfleet owns, by name:
+
+```markdown
+---
+id: reviewer
+skills: [review-checklist, release-notes]
+---
+```
+
+A name is a folder holding a `SKILL.md` (the Claude Code skill format), looked up in two places,
+the way agents are: `data/skills/<name>/` (private, git-ignored) wins over `config/skills/<name>/`
+(committable). Names are lowercase letters, digits and `-`; paths, URLs and git refs are not
+accepted. `create_agent` and `update_agent` refuse a name found in neither
+directory, and a skill whose files contain a home path or a secret-looking value (the same check
+as the agent file). Loading the config never checks them: a skill deleted later is skipped at run
+start with a note on the run's timeline, the run still starts.
+
+`config/skills/` is for the skills of *your* checkout that you want to commit; `data/skills/`
+is for private ones. The Duskfleet repository itself ships no skills: the ones it uses to
+develop itself stay private (git-ignored), and neither folder is part of the npm packages.
+
+The target project is never written. Each run gets a bundle,
+`data/skill-bundles/<id>/.claude/skills/<name>` (a copy of the skill's files, never a link to
+the live folder), passed with `--add-dir`. `<id>` is a hash of the skills' names and contents: an
+edited skill gives the next run a new bundle while a running one keeps what it started with, and
+the run records the id it got (`skillsBundle` in `get_run` / `list_runs`) so you can tell which
+skills were available. Old bundles stay in `data/skill-bundles/`; deleting the directory is safe,
+it is rebuilt when needed.
+
+Symlinks inside a skill folder are refused: `create_agent` / `update_agent` reject a skill that
+contains one, and a `SKILL.md` that is a symlink is not found. The skill folder itself may be a
+symlink.
+
+The project's own `.claude/skills/` need nothing from here: the run's working directory is the
+project, so Claude Code loads them anyway. When a project skill and a bundled one share a name,
+Claude Code uses the project's, and the run gets a note saying so.
 
 ## Grouping agents by project
 
