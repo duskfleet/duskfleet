@@ -156,7 +156,6 @@ Every run starts as a call to `RunManager.startRun`, from a chat, the CLI or a c
 The child is Claude Code in your project; everything it does is recorded.
 
 ```mermaid
-%%{init: {"flowchart": {"wrappingWidth": 400, "nodeSpacing": 25, "rankSpacing": 28}}}%%
 flowchart TB
     subgraph entry ["1 · Entry points"]
         chat["Chat host<br/>run_agent over MCP"]
@@ -165,17 +164,14 @@ flowchart TB
     end
 
     subgraph rm ["2 · RunManager"]
-        guards["Concurrency guards<br/>one run per project, one per agent"]
-        busy["Busy: refused, never queued"]
-        row["Run row recorded (pending)"]
+        guards["Concurrency guards: busy is refused, never queued<br/>pass: run row recorded (pending)"]
     end
 
     subgraph child ["3 · Claude Code child"]
         claude["claude -p --output-format stream-json<br/>in the target project, allow-lists only, no prompts"]
     end
 
-    subgraph rec ["4 · What gets recorded"]
-        parser["stream-json parser"]
+    subgraph rec ["4 · What gets recorded, from the stream-json events"]
         db[("SQLite<br/>runs, run_agents")]
         logs["data/logs/<br/>raw stream, patch"]
     end
@@ -183,12 +179,9 @@ flowchart TB
     chat --> guards
     cli --> guards
     sched --> guards
-    guards -- busy --> busy
-    guards -- pass --> row
-    row -- spawns --> claude
-    claude -- "stdout: JSON events" --> parser
-    parser --> db
-    parser --> logs
+    guards --> claude
+    claude --> db
+    claude --> logs
 ```
 
 Whatever the entry point, the request lands in `RunManager`, the only thing that creates runs and
