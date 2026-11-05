@@ -11,8 +11,12 @@
  * - `branch`: the branch of `git push` (not a delete), `git checkout -b`, `git switch -c` and
  *   `gh pr create --head`, and the destination of a push output line (`<old>..<new> a -> a`)
  *   when the command holds that one `git` call;
- * - `commit`: a full 40-hex SHA printed by `git rev-parse HEAD` or by a push output line. Never
- *   from prose, never from a short SHA. `RunManager` drops the checkout's HEAD before the spawn.
+ * - `commit`: a full 40-hex SHA, the first one printed by `git rev-parse HEAD` when that is the
+ *   command's one `git` call, or the new SHA of a push output line (rare: `git push` abbreviates
+ *   its SHAs unless the abbreviation length is configured to 40). Never from prose, never from a
+ *   short SHA. `RunManager` drops the checkout's HEAD before the spawn.
+ *
+ * Here-document bodies are not commands: a body line such as `git push origin x` counts for nothing.
  */
 
 export type ArtifactKind = "pr" | "branch" | "commit";
@@ -71,7 +75,9 @@ export function artifactsFromBash(command: string, output: string | null): Artif
       add("branch", branchName(optionValue(args, ["-b", "-B"])));
     } else if (sub === "switch") {
       add("branch", branchName(optionValue(args, ["-c", "-C", "--create", "--force-create"])));
-    } else if (sub === "rev-parse" && args.filter((a) => !a.startsWith("-")).join(" ") === "HEAD") {
+    } else if (sub === "rev-parse" && gitCalls === 1 && args.filter((a) => !a.startsWith("-")).join(" ") === "HEAD") {
+      // Only as the command's one git call, and only its first SHA line: with another git call
+      // (`git rev-parse origin/main`, `git log --format=%H`) the other SHAs are not the run's.
       revParseHead = true;
     }
   }
@@ -79,7 +85,10 @@ export function artifactsFromBash(command: string, output: string | null): Artif
     if (prCreate) for (const url of output.match(PR_URL) ?? []) add("pr", url);
     for (const raw of output.split("\n")) {
       const line = raw.trim();
-      if (revParseHead && FULL_SHA.test(line)) add("commit", line);
+      if (revParseHead && FULL_SHA.test(line)) {
+        add("commit", line);
+        revParseHead = false;
+      }
       if (!push) continue;
       const m = PUSH_LINE.exec(raw);
       if (!m) continue;
@@ -180,7 +189,8 @@ function dropAssignments(tokens: string[]): string[] {
 /**
  * A shell command line as simple commands (split on `;`, `&`, `|`, newlines and parentheses),
  * each a list of words with quotes and backslashes removed. Redirections (`> out`, `2>&1`,
- * `&> log`) and comments (an unquoted `#` starting a word, to the end of the line) are dropped.
+ * `&> log`) and comments (an unquoted `#` starting a word, to the end of the line) are dropped,
+ * and so are here-document bodies (`<<EOF`, `<<-'EOF'`, up to the delimiter line).
  * Not a shell: enough to read the arguments of `git` and `gh` calls as an agent writes them.
  */
 export function shellSegments(command: string): string[][] {
@@ -218,6 +228,41 @@ export function shellSegments(command: string): string[][] {
     dropNext = true;
     return i - 1;
   };
+  /** Here-documents opened on the current line, body skipped at its end: `[delimiter, strip tabs]`. */
+  let heredocs: [string, boolean][] = [];
+  /** At `command[i]`, the first char after `<<` (not `<<<`): read the delimiter word, quotes removed. */
+  const heredoc = (i: number): number => {
+    const strip = command[i] === "-";
+    if (strip) i++;
+    while (command[i] === " " || command[i] === "\t") i++;
+    let word = "";
+    let q: string | null = null;
+    for (; i < command.length; i++) {
+      const c = command[i]!;
+      if (q) {
+        if (c === q) q = null;
+        else word += c;
+      } else if (c === "'" || c === '"') q = c;
+      else if (c === "\\" && i + 1 < command.length) word += command[++i];
+      else if (" \t\n;&|()<>".includes(c)) break;
+      else word += c;
+    }
+    if (word) heredocs.push([word, strip]);
+    return i - 1;
+  };
+  /** At the newline `command[i]` that ends a line with here-documents: the index of the last body line's newline. */
+  const skipHeredocBodies = (i: number): number => {
+    for (const [delimiter, strip] of heredocs) {
+      while (i < command.length) {
+        const end = command.indexOf("\n", i + 1);
+        const line = command.slice(i + 1, end === -1 ? command.length : end);
+        i = end === -1 ? command.length : end;
+        if ((strip ? line.replace(/^\t+/, "") : line) === delimiter) break;
+      }
+    }
+    heredocs = [];
+    return i;
+  };
   for (let i = 0; i < command.length; i++) {
     const c = command[i]!;
     if (quote) {
@@ -243,13 +288,16 @@ export function shellSegments(command: string): string[][] {
         cur = "";
         inToken = false;
       } else endToken();
-      i = redirect(i + 1);
+      if (c === "<" && command[i + 1] === "<" && command[i + 2] !== "<") i = heredoc(i + 2);
+      else i = redirect(i + 1);
     } else if (c === "&" && command[i + 1] === ">") {
       endToken();
       i = redirect(i + 2);
     } else if (c === " " || c === "\t") endToken();
-    else if ("\n;&|()".includes(c)) endSegment();
-    else {
+    else if ("\n;&|()".includes(c)) {
+      endSegment();
+      if (c === "\n" && heredocs.length) i = skipHeredocBodies(i);
+    } else {
       cur += c;
       inToken = true;
     }

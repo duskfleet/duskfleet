@@ -125,6 +125,36 @@ test("redirections and comments are not arguments", () => {
   ]);
 });
 
+test("here-document bodies are not commands", () => {
+  const cmd =
+    "gh pr create --head feat --body-file - <<'EOF'\nWhat it does\ngit push origin notes\nIt's done.\nEOF\ngit push origin feat";
+  assert.deepEqual(shellSegments(cmd), [
+    ["gh", "pr", "create", "--head", "feat", "--body-file", "-"],
+    ["git", "push", "origin", "feat"],
+  ]);
+  const pushOut = "To github.com:o/r.git\n * [new branch]      feat -> feat";
+  assert.deepEqual(kv(artifactsFromBash(cmd, `https://github.com/o/r/pull/9\n${pushOut}`)), [
+    "branch:feat",
+    "branch:feat",
+    "pr:https://github.com/o/r/pull/9",
+    "branch:feat",
+  ]);
+  // `<<-` strips leading tabs from the delimiter line; two here-documents on one line.
+  assert.deepEqual(shellSegments('cat <<-A <<"B" | wc\n\tgit push x y\n\tA\ngit push z w\nB\necho ok'), [
+    ["cat"],
+    ["wc"],
+    ["echo", "ok"],
+  ]);
+  // `<<<` is a here-string: one word, no body.
+  assert.deepEqual(shellSegments("wc <<< 'git push o b'\ngit push o c"), [["wc"], ["git", "push", "o", "c"]]);
+});
+
+test("rev-parse HEAD: only as the one git call, only its first SHA", () => {
+  assert.deepEqual(kv(artifactsFromBash("git rev-parse HEAD && git rev-parse origin/main", `${SHA}\n${SHA2}\n`)), []);
+  assert.deepEqual(kv(artifactsFromBash("git rev-parse HEAD; git log --format=%H -2", `${SHA}\n${SHA2}\n`)), []);
+  assert.deepEqual(kv(artifactsFromBash("cd /w && git rev-parse HEAD", `${SHA}\n${SHA2}\n`)), [`commit:${SHA}`]);
+});
+
 test("uniqueArtifacts keeps the first finding of each kind and value", () => {
   const all = uniqueArtifacts([
     ...artifactsFromBash("gh pr create --head b", "https://github.com/o/r/pull/3"),

@@ -88,9 +88,11 @@ they arrive and keeps the raw stream in `data/logs/<run_id>.jsonl`:
   records none); `branch`, the branch of `git push` (a delete such as `git push origin :old`
   is not one), `git checkout -b`, `git switch -c`, `gh pr create --head` and of a push report
   line (`a -> a`, read only when the command holds no other `git` call); `commit`, a full
-  40-character SHA printed by `git rev-parse HEAD` or by a push report line, never a short SHA,
-  never from prose, and never the checkout's HEAD from before the run. Redirections and shell
-  comments in the command are not read as arguments. `source` is `tool_result` or
+  40-character SHA: the first one printed by `git rev-parse HEAD` when it is the command's only
+  `git` call, or the new SHA of a push report line (rare, since `git push` abbreviates its SHAs
+  by default), never a short SHA, never from prose, and never the checkout's HEAD from before
+  the run. Redirections, shell comments and here-document bodies (`<<EOF` ... `EOF`) in the
+  command are not read as arguments or commands. `source` is `tool_result` or
   `result_text`; the same value is recorded once. `get_run` and `run-info` return them as
   `artifacts`. Nothing is fetched from GitHub: a PR closed later is still listed.
 
