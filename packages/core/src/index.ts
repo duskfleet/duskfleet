@@ -27,9 +27,16 @@ export {
   type ProjectAgentInfo,
   projectAgentDefinitionHash,
   renderAgentMarkdown,
+  skillsSchema,
   writeAgentFile,
 } from "./config/agent-files.js";
-export { type AgentLintProblem, assertAgentSpecClean, collapseHome, lintAgentSpec } from "./config/agent-lint.js";
+export {
+  type AgentLintProblem,
+  assertAgentSpecClean,
+  collapseHome,
+  lintAgentSpec,
+  lintText,
+} from "./config/agent-lint.js";
 export {
   EDITABLE_GLOBAL_KEYS,
   type EditableGlobalKey,
@@ -84,6 +91,17 @@ export {
   type UserProjectEntry,
   upsertUserProject,
 } from "./config/project-files.js";
+export {
+  assertSkillsAvailable,
+  prepareSkillBundle,
+  type ResolvedSkill,
+  resolveSkill,
+  SKILL_NAME_PATTERN,
+  type SkillBundle,
+  type SkillSource,
+  skillSearchDirs,
+  skillsShadowedByProject,
+} from "./config/skills.js";
 export * from "./config/types.js";
 export * from "./evals/llm-judge.js";
 export * from "./evals/score.js";

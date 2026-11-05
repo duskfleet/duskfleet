@@ -66,6 +66,7 @@ interface RunRow {
   last_event_at: string | null;
   continued_from_run_id: string | null;
   title: string | null;
+  skills_bundle: string | null;
 }
 
 function rowToRun(r: RunRow): Run {
@@ -118,6 +119,7 @@ function rowToRun(r: RunRow): Run {
     claudeCodeVersion: r.claude_code_version ?? null,
     lastEventAt: r.last_event_at ?? null,
     continuedFromRunId: r.continued_from_run_id ?? null,
+    skillsBundle: r.skills_bundle ?? null,
   };
 }
 
@@ -319,8 +321,8 @@ export class RunRepository {
            cache_read_tokens, cache_creation_tokens, cost_usd, permission_denials, denied_tools_json, mcp_json, human_intervention,
            context_exhausted, retries, log_path, raw_result_json, schedule_id, owner, phases_json, review_reasons_json, resumed_from_run_id, kind,
            usage_by_model_json, billing_type, error_code, error_family, error_detail_json, agent_hash, claude_code_version,
-           last_event_at, continued_from_run_id, title)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+           last_event_at, continued_from_run_id, title, skills_bundle)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         run.id,
@@ -373,6 +375,7 @@ export class RunRepository {
         run.lastEventAt ?? null,
         run.continuedFromRunId ?? null,
         run.title ?? null,
+        run.skillsBundle ?? null,
       );
   }
 

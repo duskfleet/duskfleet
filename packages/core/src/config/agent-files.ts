@@ -17,6 +17,7 @@ import path from "node:path";
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 import { z } from "zod";
 import { ENV_PASSTHROUGH_PATTERN } from "../execution/child-env.js";
+import { SKILL_NAME_MESSAGE, SKILL_NAME_PATTERN } from "./skills.js";
 import { type AgentDefinition, EFFORT_LEVELS, ON_FAILURE_POLICIES, PERMISSION_MODES } from "./types.js";
 
 export const AGENT_ID_PATTERN = /^[a-z0-9][a-z0-9-_]*$/;
@@ -45,6 +46,9 @@ export const envPassthroughSchema = z.array(
     .regex(ENV_PASSTHROUGH_PATTERN, "env_passthrough entries are variable names or PREFIX_* (letters, digits, _)"),
 );
 
+/** `skills:` (agent frontmatter): names of Duskfleet skills, resolved in data/skills then config/skills. */
+export const skillsSchema = z.array(z.string().regex(SKILL_NAME_PATTERN, SKILL_NAME_MESSAGE));
+
 /** Everything an agent file can contain, flattened (frontmatter + body). */
 export const agentSpecSchema = z.object({
   id: z.string().regex(AGENT_ID_PATTERN, "agent id must be lowercase letters, digits, - or _"),
@@ -69,6 +73,7 @@ export const agentSpecSchema = z.object({
   max_daily_runs: maxDailyRunsSchema.optional(),
   max_daily_cost_usd: maxDailyCostUsdSchema.optional(),
   env_passthrough: envPassthroughSchema.optional(),
+  skills: skillsSchema.optional(),
   system_prompt: z.string().default(""),
 });
 export type AgentSpec = z.infer<typeof agentSpecSchema>;
@@ -128,6 +133,7 @@ export function agentToSpec(a: AgentDefinition): AgentSpec {
   if (a.maxDailyRuns !== undefined) spec.max_daily_runs = a.maxDailyRuns;
   if (a.maxDailyCostUsd !== undefined) spec.max_daily_cost_usd = a.maxDailyCostUsd;
   if (a.envPassthrough !== undefined) spec.env_passthrough = a.envPassthrough;
+  if (a.skills !== undefined) spec.skills = a.skills;
   return spec;
 }
 

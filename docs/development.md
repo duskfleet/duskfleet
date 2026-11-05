@@ -334,7 +334,7 @@ local run-data handling, and recommended configuration.
   | `--max-budget-usd <amount>` | Hard cost cap per run |
   | `--effort <level>` | Optional per-agent effort |
   | `--strict-mcp-config` | Isolate the child from user-level MCP servers (default on, configurable) |
-  | `--add-dir <dir>` | `add_dirs`: extra directories the run may touch |
+  | `--add-dir <dir>` | `add_dirs`: extra directories the run may touch. Also delivers `skills:`: Claude Code 2.1.318 lists the skills in `<dir>/.claude/skills/` of an added directory (verified 2026-11-04 with `--setting-sources project,local`; passing the `.claude/skills` folder itself lists nothing), so the run gets the bundle directory that contains `.claude/skills/` |
   | `--setting-sources <list>` | Restrict which settings files the child loads (`claude.setting_sources`) |
   | `-r, --resume <id>` | Passed instead of `--session-id` when a pass continues a session: the wrap-up pass after a budget exhaustion and a `resume_once` retry; also surfaced as the "resume this run" command |
 

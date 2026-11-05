@@ -38,6 +38,7 @@
  *   "mcp-missing-once" -> like "ok", but the first spawn's init lists no claude.ai connector
  *                 (only the project's "duskfleet" server); later spawns list Figma
  *   "mcp-missing" -> like "ok", every spawn's init lists no claude.ai connector
+ *   "add-dirs" -> like "ok", result text is `add-dirs <JSON array of every --add-dir received>`
  *
  * With `--resume <id>` (the wrap-up pass) the prompt is Duskfleet's fixed text, so the
  * behaviour comes from FAKE_CLAUDE_RESUME instead: unset = a short successful pass that
@@ -75,6 +76,8 @@ const modelIdx = args.indexOf("--model");
 const model = modelIdx >= 0 ? args[modelIdx + 1] : "claude-haiku-4-5-20251001";
 const budgetIdx = args.indexOf("--max-budget-usd");
 const maxBudget = budgetIdx >= 0 ? Number(args[budgetIdx + 1]) : 5;
+/** Every --add-dir value, in order, for the "add-dirs" prompt (skills bundles). */
+const addDirsSeen = args.flatMap((a, i) => (a === "--add-dir" && args[i + 1] !== undefined ? [args[i + 1]] : []));
 
 if (args[0] === "--version") {
   if (process.env.FAKE_CLAUDE_MODE === "no-version") {
@@ -577,7 +580,9 @@ if (resumeIdx >= 0) {
                 ? "Found SL-9 in Ready, so this is not NO_WORK"
                 : prompt === "prose-exit"
                   ? "The 503 retry test now passes; the not logged in banner is fixed."
-                  : "Done: created hello.txt";
+                  : prompt === "add-dirs"
+                    ? `add-dirs ${JSON.stringify(addDirsSeen)}`
+                    : "Done: created hello.txt";
   out({
     type: "result",
     subtype: isError ? "error_during_execution" : "success",
