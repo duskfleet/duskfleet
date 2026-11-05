@@ -1405,6 +1405,33 @@ test("mergeResults: a wrap-up cancel drops the failure code, otherwise main's wi
   assert.deepEqual(mergeResults(pass({}), pass({ failure: overloaded })).failure, overloaded);
 });
 
+test("mergeResults: the cost is unknown when either pass's cost is unknown, never a partial sum", () => {
+  const pass = (costUsd) => ({
+    outcome: "completed",
+    model: "claude-haiku-5-5",
+    startedAt: "2026-10-20T10:00:00.000Z",
+    endedAt: "2026-10-20T10:01:00.000Z",
+    resultText: null,
+    numTurns: 1,
+    toolCalls: 0,
+    usage: { inputTokens: 1, outputTokens: null, cacheReadTokens: null, cacheCreationTokens: null },
+    usageByModel: null,
+    costUsd,
+    permissionDenials: 0,
+    deniedTools: [],
+    contextExhausted: false,
+    failure: null,
+    subagents: [],
+  });
+
+  assert.equal(mergeResults(pass(null), pass(0.4)).costUsd, null);
+  assert.equal(mergeResults(pass(0.4), pass(null)).costUsd, null);
+  assert.equal(mergeResults(pass(null), pass(null)).costUsd, null);
+  assert.equal(mergeResults(pass(0.25), pass(0.5)).costUsd, 0.75);
+  // Tokens still sum what is known.
+  assert.equal(mergeResults(pass(null), pass(0.4)).usage.inputTokens, 2);
+});
+
 test("context exhaustion is detected from structured signals, not from prose", () => {
   const base = {
     isError: false,

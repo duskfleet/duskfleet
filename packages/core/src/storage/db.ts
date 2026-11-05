@@ -347,10 +347,36 @@ const MIGRATIONS: ReadonlyArray<{ version: number; sql: string; backfill?: (db: 
     `,
   },
   {
+    // Fail closed on unknown cost: how a finished run's cost_usd is known (reported = API key or
+    // unknown billing type, estimated = subscription, unpriced = no cost; NULL while it runs) and
+    // whether a budget counts unpriced and running runs at a stand-in amount (count, the default)
+    // or ignores them (allow). Finished rows are backfilled; old unpriced rows of the month count.
+    version: 25,
+    sql: `
+      ALTER TABLE runs ADD COLUMN cost_status TEXT;
+      ALTER TABLE budgets ADD COLUMN unpriced_policy TEXT NOT NULL DEFAULT 'count' CHECK (unpriced_policy IN ('count', 'allow'));
+      UPDATE runs SET cost_status = CASE
+          WHEN cost_usd IS NULL THEN 'unpriced'
+          WHEN billing_type = 'subscription' THEN 'estimated'
+          ELSE 'reported'
+        END
+        WHERE status IN ('completed', 'failed', 'cancelled', 'timed_out');
+    `,
+  },
+  {
+    // The --max-budget-usd cap a run was started with (main pass plus wrap-up reserve), whatever
+    // set it: the agent, a run_agent max_budget_usd override or a resume budget. A budget counts a
+    // run of unknown cost at this cap first. NULL for older rows: they fall back to their phases.
+    version: 26,
+    sql: `
+      ALTER TABLE runs ADD COLUMN max_budget_usd REAL;
+    `,
+  },
+  {
     // Skills an agent declares (`skills:`, issue #48): the id of the content-addressed bundle under
     // data/skill-bundles/ the run got with --add-dir, so get_run shows which skills were available.
     // NULL = the agent declares none (or none of them resolved).
-    version: 25,
+    version: 27,
     sql: `
       ALTER TABLE runs ADD COLUMN skills_bundle TEXT;
     `,
