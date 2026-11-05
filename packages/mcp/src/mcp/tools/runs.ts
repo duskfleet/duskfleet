@@ -1,9 +1,11 @@
 import {
   costTotals,
   RUN_STATUSES,
+  RUN_TITLE_MAX,
   type Run,
   type RunAgent,
   runCostLabel,
+  runLabel,
   subagentView,
   summarizeRun,
 } from "@duskfleet/core";
@@ -20,6 +22,8 @@ function presentRun(run: Run, includeOutput: boolean) {
     ...rest,
     /** What costUsd is: "Cost" (billed on an API key) or "API value" (subscription, not billed). */
     costLabel: runCostLabel(run.billingType),
+    /** What to list the run under: its title, else the first prompt line. */
+    label: runLabel(run),
     resumeCommand: run.claudeSessionId ? `claude --resume ${run.claudeSessionId}` : null,
     resultText: includeOutput
       ? resultText
@@ -52,6 +56,12 @@ export function registerRunTools(server: McpServer, ctx: ToolContext): void {
         "(same agent, project and agent definition; otherwise a fresh session and a note in the run's events).",
       inputSchema: {
         prompt: z.string().min(1).describe("The task for the agent"),
+        title: z
+          .string()
+          .optional()
+          .describe(
+            `What the run is for, e.g. 'fix #381' (at most ${RUN_TITLE_MAX} characters, trimmed; empty = none). Runs are listed under it instead of the first prompt line`,
+          ),
         project_path: z
           .string()
           .optional()
@@ -94,6 +104,7 @@ export function registerRunTools(server: McpServer, ctx: ToolContext): void {
         if (args.project_id !== undefined) input.projectId = args.project_id;
         if (args.agent_id !== undefined) input.agentId = args.agent_id;
         if (args.model !== undefined) input.model = args.model;
+        if (args.title !== undefined) input.title = args.title;
         let run =
           args.resume_run_id !== undefined
             ? await ctx.runs.continueRun({ ...input, runId: args.resume_run_id })

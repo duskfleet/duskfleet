@@ -338,10 +338,19 @@ const MIGRATIONS: ReadonlyArray<{ version: number; sql: string; backfill?: (db: 
     `,
   },
   {
+    // Run titles (run_agent title, run --title, a schedule's title stamped on every fire): what the
+    // run is for, shown instead of the truncated first prompt line (runLabel). NULL = no title.
+    version: 24,
+    sql: `
+      ALTER TABLE runs ADD COLUMN title TEXT;
+      ALTER TABLE schedules ADD COLUMN title TEXT;
+    `,
+  },
+  {
     // The raw log as written (claude.max_log_bytes): size and SHA-256 of data/logs/<run_id>.jsonl,
     // filled by RunManager when the run ends, and whether the writer stopped at the cap (1). NULL for
     // older rows, for runs still going, and when the file could not be read.
-    version: 24,
+    version: 25,
     sql: `
       ALTER TABLE runs ADD COLUMN log_bytes INTEGER;
       ALTER TABLE runs ADD COLUMN log_sha256 TEXT;

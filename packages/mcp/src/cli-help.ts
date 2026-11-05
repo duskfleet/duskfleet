@@ -51,12 +51,15 @@ export const COMMAND_HELP: Readonly<Record<string, CommandHelp>> = {
     doc: `${DOCS}/configuration.md`,
   },
   run: {
-    usage: ['duskfleet run --project <id or path> [--agent <id>] [--model <m>] [--no-wait] -- "<prompt>"'],
+    usage: [
+      'duskfleet run --project <id or path> [--agent <id>] [--model <m>] [--title <text>] [--no-wait] -- "<prompt>"',
+    ],
     options: [
       "-p, --project <id or path>   registered project id or absolute path",
       "--project-id <id>            the explicit form of a registered id",
       "-a, --agent <id>             the agent to run (default: default_agent)",
       "-m, --model <m>              override the agent's model",
+      "--title <text>               what the run is for, listed instead of the first prompt line (max 120)",
       "--no-wait                    print the run id and exit (the run is not recorded once the CLI exits)",
     ],
     example: 'duskfleet run --project my-app --agent fixer --model haiku -- "Fix the failing test"',

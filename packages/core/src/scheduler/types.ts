@@ -160,6 +160,11 @@ export interface Schedule {
    * plus a note (never a skipped tick). `on_failure: resume_once` wins when it applies.
    */
   continueSession: boolean;
+  /**
+   * Title stamped on every run this schedule fires (migration 24), so its runs do not all list
+   * under the same first prompt line; null = none (runs fall back to `runLabel`).
+   */
+  title: string | null;
   /** Marker in a run's final message that means "nothing to do" (idle-cost stats); null = `scheduler.noop_pattern`. */
   noopPattern: string | null;
   /** Checked before every fresh run; null = no gate. */
@@ -203,6 +208,8 @@ export interface ScheduleInput {
   resumeBudgetUsd?: number | null;
   /** Default false. */
   continueSession?: boolean;
+  /** Stamped on every run it fires; trimmed, empty = none, at most RUN_TITLE_MAX characters. */
+  title?: string | null;
   noopPattern?: string | null;
   gate?: ScheduleGate | null;
   concurrencyPolicy?: ConcurrencyPolicy;

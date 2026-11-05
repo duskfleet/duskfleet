@@ -7,7 +7,7 @@ const SHA_SHOWN = 12;
 /**
  * Rows of the run page's Technical details list (`<dl className="kv">`): the raw log's size,
  * SHA-256 and whether the writer stopped at `claude.max_log_bytes`. All three are filled when
- * the run ends; a running run and rows older than migration 24 show "–".
+ * the run ends; a running run and rows older than migration 25 show "–".
  */
 export function LogFacts({
   logBytes,
