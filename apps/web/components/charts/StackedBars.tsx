@@ -4,7 +4,7 @@
  * from the tones in globals.css (.chart-*), never from here.
  */
 
-import { spreadLabels } from "@/lib/trends";
+import { END_LABEL_GAP, spreadLabels } from "@/lib/trends";
 
 /** "others": the unticked rows of /costs folded into one outlined segment. */
 export type BarTone = "ok" | "warn" | "muted" | "accent" | "faint" | "others";
@@ -54,8 +54,6 @@ export interface StackedBarsProps {
 
 /** Share of a bar slot left empty between two bars. */
 const SLOT_GAP = 0.2;
-/** Minimum distance between two end labels, px (one line of text). */
-const END_GAP = 18;
 
 export function StackedBars({
   ariaLabel,
@@ -85,7 +83,7 @@ export function StackedBars({
   }
   const placed = spreadLabels(
     (ends ?? []).map((e) => ({ ...e, top: (yPct(mids.get(e.key) ?? 0) / 100) * height })),
-    END_GAP,
+    END_LABEL_GAP,
     height,
   );
   const rowOf = new Map(stacks.map((s) => [s.key, s.row ?? null]));
@@ -165,8 +163,8 @@ export function StackedBars({
               data-row={row ?? undefined}
               style={{ top: e.top }}
             >
-              <span className="end-name">{e.name} </span>
-              {e.value}
+              <span className="end-name">{e.name}</span>
+              <span className="end-value">{e.value}</span>
             </span>
           );
         })}

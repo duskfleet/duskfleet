@@ -116,6 +116,15 @@ test("RunTable: a clean row, badge, title link, agent and project, model, durati
   assert.deepEqual(flags(html), []);
 });
 
+test("RunTable: a titled run is listed under its title, the full prompt in the tooltip", () => {
+  const html = renderToStaticMarkup(<RunTable runs={[run({ title: "Nightly triage" })]} emptyText="" ended />);
+  assert.match(
+    html,
+    /<div class="prompt" title="Fix the agents table\n\nmore detail"><a href="\/runs\/r1">Nightly triage<\/a><\/div>/,
+  );
+  assert.doesNotMatch(html, />Fix the agents table</);
+});
+
 test("RunTable: a running row, no cost yet, now in the ended table, the elapsed time so far", () => {
   const startedAt = new Date(Date.now() - 30_000).toISOString();
   const r = run({ status: "running", startedAt, endedAt: null, durationMs: null, costUsd: null });

@@ -57,7 +57,7 @@ import {
 } from "@duskfleet/core";
 import { cliCommand, detectInstall, type Install, usableMcpEntry } from "./cli";
 import { ACTIVE_SQL, ACTIVE_STATUSES } from "./running";
-import { listScoped, scopeList } from "./scope";
+import { costModel, listScoped, scopeList } from "./scope";
 import { mergeSeries } from "./trends";
 
 interface Services {
@@ -230,6 +230,8 @@ export interface RunsFilter {
   scheduleId?: string;
   /** Case-insensitive substring of the prompt (in memory). */
   q?: string;
+  /** Any of these models, as /costs' By model table counts them (`costModel`, in memory). */
+  models?: string[];
   /** How the run ended (stored review verdict, in SQL); real runs only, like the overview counts. */
   outcome?: RunOutcome;
   /** Only runs with this stored review reason (in SQL); real runs only. */
@@ -256,14 +258,14 @@ function projectLabeller(): (run: Run) => string {
 
 export function listRuns(filter: RunsFilter = {}): RunWithProject[] {
   const { runs } = services();
-  const inMemory = Boolean(filter.scheduleId || filter.q);
+  const inMemory = Boolean(filter.scheduleId || filter.q || filter.models?.length);
   const limit = filter.limit ?? 50;
   const f: ListRunsFilter = { limit: inMemory ? 200 : limit };
   if (filter.status) f.status = filter.status;
   if (filter.outcome) f.outcome = filter.outcome;
   if (filter.reason) f.reason = filter.reason;
-  // The outcome KPIs count real runs only: a gate run must not show up under them.
-  if (filter.outcome || filter.reason) f.kind = "run";
+  // The outcome KPIs and the By model counts are real runs only: a gate run must not show up under them.
+  if (filter.outcome || filter.reason || filter.models?.length) f.kind = "run";
   // Core filters on one agent and one project: a multi-select asks once per (agent, project) pair.
   let list: Run[] = listScoped(
     scopeList(filter.agentId, filter.agentIds),
@@ -279,7 +281,14 @@ export function listRuns(filter: RunsFilter = {}): RunWithProject[] {
   if (filter.scheduleId) list = list.filter((r) => r.scheduleId === filter.scheduleId);
   if (filter.q) {
     const q = filter.q.toLowerCase();
-    list = list.filter((r) => r.prompt.toLowerCase().includes(q) || r.id.startsWith(q));
+    // the title is what the row shows (runLabel), so a search finds it too
+    list = list.filter(
+      (r) => r.prompt.toLowerCase().includes(q) || (r.title ?? "").toLowerCase().includes(q) || r.id.startsWith(q),
+    );
+  }
+  if (filter.models?.length) {
+    const models = new Set(filter.models);
+    list = list.filter((r) => models.has(costModel(r, MIXED_MODEL)));
   }
   if (inMemory) list = list.slice(0, limit);
   const label = projectLabeller();
@@ -329,22 +338,22 @@ export function homeDir(): string {
 
 /** Neighbours of a run among the same agent's runs, for Previous / Next navigation. */
 export function adjacentRuns(run: Run): {
-  prev: Pick<Run, "id" | "prompt" | "createdAt"> | null;
-  next: Pick<Run, "id" | "prompt" | "createdAt"> | null;
+  prev: Pick<Run, "id" | "title" | "prompt" | "createdAt"> | null;
+  next: Pick<Run, "id" | "title" | "prompt" | "createdAt"> | null;
 } {
   const { db } = services();
   const pick = (sql: string) => {
     const r = db.prepare(sql).get(run.agentId, run.createdAt) as
-      | { id: string; prompt: string; created_at: string }
+      | { id: string; title: string | null; prompt: string; created_at: string }
       | undefined;
-    return r ? { id: r.id, prompt: r.prompt, createdAt: r.created_at } : null;
+    return r ? { id: r.id, title: r.title ?? null, prompt: r.prompt, createdAt: r.created_at } : null;
   };
   return {
     prev: pick(
-      "SELECT id, prompt, created_at FROM runs WHERE agent_id = ? AND created_at < ? ORDER BY created_at DESC LIMIT 1",
+      "SELECT id, title, prompt, created_at FROM runs WHERE agent_id = ? AND created_at < ? ORDER BY created_at DESC LIMIT 1",
     ),
     next: pick(
-      "SELECT id, prompt, created_at FROM runs WHERE agent_id = ? AND created_at > ? ORDER BY created_at ASC LIMIT 1",
+      "SELECT id, title, prompt, created_at FROM runs WHERE agent_id = ? AND created_at > ? ORDER BY created_at ASC LIMIT 1",
     ),
   };
 }

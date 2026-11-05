@@ -8,7 +8,7 @@
  */
 import { type ChildProcess, execFile, spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { createWriteStream, existsSync, mkdirSync, type WriteStream } from "node:fs";
+import { existsSync } from "node:fs";
 import { homedir } from "node:os";
 import path from "node:path";
 import { createInterface } from "node:readline";
@@ -16,6 +16,7 @@ import { classifyFailure } from "../observability/failure.js";
 import type { BillingType, RecordedCommand } from "../observability/run.js";
 import { logger } from "../util/log.js";
 import { childEnv } from "./child-env.js";
+import { CappedLogWriter, DEFAULT_MAX_LOG_BYTES } from "./log-caps.js";
 import { missingMcpServers } from "./mcp.js";
 import { effectivePath } from "./search-path.js";
 import { createStreamState, ingestLine, isSessionNotFound, looksLikeContextExhaustion } from "./stream-json.js";
@@ -148,12 +149,13 @@ export class ClaudeCodeExecutor implements Executor {
     let closed = false; // stdio closed and the process exited: nothing left to signal
     let child: ChildProcess | null = null; // the process running now (a restart replaces it)
     let restartInfo: { missing: string[]; mounted: string[] } | null = null;
-    let logStream: WriteStream | null = null;
+    let logStream: CappedLogWriter | null = null;
 
     if (req.logPath) {
-      mkdirSync(path.dirname(req.logPath), { recursive: true });
-      logStream = createWriteStream(req.logPath, { flags: "a" });
-      logStream.on("error", (err) => log.warn("log file write failed", { path: req.logPath, err: err.message }));
+      // Stops at claude.max_log_bytes with a final marker line; the events keep flowing to the DB.
+      logStream = new CappedLogWriter(req.logPath, req.maxLogBytes ?? DEFAULT_MAX_LOG_BYTES, (err) =>
+        log.warn("log file write failed", { path: req.logPath, err: err.message }),
+      );
       // Lines starting with # are not stream-json (see #stderr below); this one marks where a resumed pass begins.
       if (req.resumeSessionId) logStream.write(`#resume ${req.resumeSessionId} ${startedAt.toISOString()}\n`);
     }
@@ -336,8 +338,8 @@ export class ClaudeCodeExecutor implements Executor {
     try {
       first = attempt(req.sessionId, argv, required.length > 0);
     } catch (err) {
-      logStream?.end();
-      return { command, pid: null, billingType, cancel: () => {}, done: Promise.resolve(spawnFailed(err)) };
+      const ended = logStream?.end() ?? Promise.resolve();
+      return { command, pid: null, billingType, cancel: () => {}, done: ended.then(() => spawnFailed(err)) };
     }
 
     if (req.timeoutMs && req.timeoutMs > 0) {
@@ -377,9 +379,11 @@ export class ClaudeCodeExecutor implements Executor {
         });
         return second.done.then((r) => (r === RESTART ? spawnFailed("restart offered twice") : r));
       })
+      .then((result) => (logStream?.truncated ? { ...result, logTruncated: true } : result))
       .finally(() => {
         if (timeoutTimer) clearTimeout(timeoutTimer);
-        logStream?.end();
+        // Settle only once the log is on disk: RunManager hashes it when the run ends.
+        return logStream?.end();
       });
 
     return {

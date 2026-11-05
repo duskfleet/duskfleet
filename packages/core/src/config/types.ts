@@ -123,6 +123,16 @@ export interface ClaudeConfig {
    * of the default allow-list (`DEFAULT_ENV_ALLOW`). Everything else is dropped. Default none.
    */
   envPassthrough: string[];
+  /**
+   * Cap of one `run_events` payload in bytes (`claude.max_event_bytes`, default 64 KiB). Over it the
+   * stored JSON keeps its envelope and the longest strings are cut with a marker; the JSONL line stays whole.
+   */
+  maxEventBytes: number;
+  /**
+   * Cap of a run's raw JSONL log in bytes (`claude.max_log_bytes`, default 50 MiB). Past it the log
+   * ends with one `duskfleet_log_truncated` line and the run sets `log_truncated`; `run_events` keeps going.
+   */
+  maxLogBytes: number;
 }
 
 export interface SchedulerConfig {

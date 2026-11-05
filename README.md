@@ -156,15 +156,14 @@ permission denial is "needs review", never green ([Needs review](docs/dashboard.
 
 ## How it works
 
-```
-Claude Desktop / Claude Cowork / Claude Code
-        │  MCP (stdio)
-        ▼
-  Duskfleet MCP server ──▶ Orchestration ──▶ Claude Code CLI ──▶ your local project
-        │
-        ▼
-  SQLite (runs, events, schedules)  +  data/logs/<run_id>.jsonl
-```
+<picture>
+  <source media="(max-width: 767px) and (prefers-color-scheme: dark)" srcset="docs/assets/how-a-run-works-mobile-dark.png">
+  <source media="(max-width: 767px)" srcset="docs/assets/how-a-run-works-mobile-light.png">
+  <source media="(prefers-color-scheme: dark)" srcset="docs/assets/how-a-run-works-dark.png">
+  <img alt="How a run works" src="docs/assets/how-a-run-works-light.png" width="100%">
+</picture>
+
+On a phone? Open the stacked version ([dark](docs/assets/how-a-run-works-mobile-dark.png) / [light](docs/assets/how-a-run-works-mobile-light.png)).
 
 You describe *what should happen* in `config/` (agents, projects) and in schedules. Duskfleet
 runs `claude -p` unattended with a target project as working directory, owns the unattended

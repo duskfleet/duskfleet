@@ -4,7 +4,7 @@
  */
 
 import type { DeniedTool, RunMcpInfo, SubagentRecord, UsageByModel } from "../execution/types.js";
-import { runCostLabel } from "./billing.js";
+import { type CostStatus, runCostLabel } from "./billing.js";
 import {
   CLAUDE_NOT_FOUND_FIX,
   type FailureCode,
@@ -45,6 +45,11 @@ export interface RunPhase {
   terminationReason: string | null;
   /** The --max-budget-usd this phase was launched with. */
   budgetUsd: number | null;
+  /**
+   * Main phase only: the wrap-up reserve held back from the run's budget (0 when it has none).
+   * budgetUsd + reserveUsd is the run's whole cap, also when the wrap-up never got recorded.
+   */
+  reserveUsd?: number;
   costUsd: number | null;
   numTurns: number | null;
   toolCalls: number;
@@ -148,6 +153,20 @@ export interface Run {
    */
   billingType: BillingType | null;
   /**
+   * How `costUsd` is known (migration 25, `costStatusOf`): `reported` (API key), `estimated`
+   * (subscription: reported, not charged) or `unpriced` (no cost). Set by `RunManager` at the
+   * terminal transition, null while pending or running. Budgets count an unpriced run at a
+   * stand-in amount unless the budget sets `unpriced_policy: allow`.
+   */
+  costStatus?: CostStatus | null;
+  /**
+   * The whole --max-budget-usd cap the run was started with (main pass plus wrap-up reserve;
+   * migration 26): the agent's max_budget_usd, a run_agent override or a resume budget, else
+   * claude.default_max_budget_usd. What a budget counts the run for while its cost is unknown.
+   * Null for rows written before migration 26.
+   */
+  maxBudgetUsd?: number | null;
+  /**
    * Eval bundle (migration 19), with `modelUsed`: what exactly ran, so runs compare like with like.
    * `agentHash` is `agentDefinitionHash` at start time (spec + project agent file of a link);
    * `claudeCodeVersion` is the `claude_code_version` of the init line, null until it arrives.
@@ -161,6 +180,14 @@ export interface Run {
    * older rows. Read through `runSilence`.
    */
   lastEventAt?: string | null;
+  /**
+   * The raw log as written (migration 27), filled by `RunManager` when the run ends: size in bytes,
+   * SHA-256 (hex) of the file, and whether the writer stopped at `claude.max_log_bytes`. Null while
+   * the run is going, for older rows, and when there was no file to read.
+   */
+  logBytes?: number | null;
+  logSha256?: string | null;
+  logTruncated?: boolean | null;
 }
 
 /** Longest accepted run / schedule title, in characters (after trimming). */
@@ -446,6 +473,8 @@ export function summarizeRun(run: Run) {
     billingType: run.billingType,
     /** What costUsd is: "Cost" (billed on an API key) or "API value" (subscription or unknown). */
     costLabel: runCostLabel(run.billingType),
+    /** reported | estimated | unpriced once the run ended; null while it runs. */
+    costStatus: run.costStatus ?? null,
     numTurns: run.numTurns,
     toolCalls: run.toolCalls,
     deniedTools: run.deniedTools,

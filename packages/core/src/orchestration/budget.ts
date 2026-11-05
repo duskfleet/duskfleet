@@ -11,6 +11,14 @@ export type BudgetScope = (typeof BUDGET_SCOPES)[number];
 
 export const DEFAULT_WARN_PERCENT = 80;
 
+/**
+ * What a budget does with runs whose cost is unknown (migration 25): `count` (default, fail
+ * closed) counts each unpriced or still running run at a stand-in amount, `allow` ignores them.
+ */
+export const UNPRICED_POLICIES = ["count", "allow"] as const;
+export type UnpricedPolicy = (typeof UNPRICED_POLICIES)[number];
+export const DEFAULT_UNPRICED_POLICY: UnpricedPolicy = "count";
+
 export interface Budget {
   id: string;
   scope: BudgetScope;
@@ -21,6 +29,8 @@ export interface Budget {
   warnPercent: number;
   /** Reaching amountUsd refuses new runs in the scope and pauses its schedules. False = warn only. */
   hardStop: boolean;
+  /** How runs of unknown cost count against amountUsd (`count` | `allow`). */
+  unpricedPolicy: UnpricedPolicy;
   createdAt: string;
   updatedAt: string;
 }
@@ -31,18 +41,54 @@ export interface BudgetInput {
   amountUsd: number;
   warnPercent?: number;
   hardStop?: boolean;
+  unpricedPolicy?: UnpricedPolicy;
 }
 
-/** `ok` below warn_percent, `warn` from warn_percent, `over` once the spend reaches amount_usd. */
+/**
+ * A validated BudgetInput (validateBudgetInput). unpricedPolicy stays optional: unset keeps the
+ * stored policy when the budget exists, and is `count` on insert (BudgetRepository.upsert).
+ */
+export type ValidBudgetInput = Required<Omit<BudgetInput, "unpricedPolicy">> & { unpricedPolicy?: UnpricedPolicy };
+
+/**
+ * A run of the scope this month whose cost is not known: `unpriced` (it started and ended
+ * without a cost, cost_status) or `running` (pending or running: not settled yet). `standInUsd`
+ * is what it counts for under `unpriced_policy: count`: the cap it was started with
+ * (runs.max_budget_usd; older rows: their phases' --max-budget-usd, plus the reserve when no
+ * wrap-up was recorded), else the agent's max_budget_usd, else claude.default_max_budget_usd: every
+ * run is launched with a cap, so that is its worst case.
+ */
+export interface UnknownCostRun {
+  id: string;
+  agentId: string;
+  kind: "unpriced" | "running";
+  standInUsd: number;
+}
+
+/** `ok` below warn_percent, `warn` from warn_percent, `over` once the counted spend reaches amount_usd. */
 export type BudgetState = "ok" | "warn" | "over";
 
 export interface BudgetStatus extends Budget {
   /** First instant of the current UTC month: what spentUsd is counted from. */
   periodStart: string;
+  /** Recorded cost (reported or estimated) of the scope's runs this month. */
   spentUsd: number;
-  /** spentUsd / amountUsd * 100, rounded to one decimal. */
+  /** Runs of the month that ended without a cost (cost_status unpriced). */
+  unpricedRuns: number;
+  /** Runs pending or running now: their cost is not settled. */
+  runningRuns: number;
+  /** What the unpriced and running runs count for (0 under `unpriced_policy: allow`). */
+  standInUsd: number;
+  /** spentUsd + standInUsd: what percent and state compare with amountUsd. */
+  countedUsd: number;
+  /** countedUsd / amountUsd * 100, rounded to one decimal. */
   percent: number;
   state: BudgetState;
+  /**
+   * Over only because of the running runs' stand-ins: the hard stop refuses new runs but does
+   * not pause schedules, the state settles when those runs end.
+   */
+  overByRunning: boolean;
 }
 
 /**
@@ -64,36 +110,112 @@ export function utcNextMonthStart(now: Date): string {
   return new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 1)).toISOString();
 }
 
-export function budgetStatus(budget: Budget, spentUsd: number, periodStart: string): BudgetStatus {
-  const percent = Math.round((spentUsd / budget.amountUsd) * 1000) / 10;
-  const state: BudgetState = spentUsd >= budget.amountUsd ? "over" : percent >= budget.warnPercent ? "warn" : "ok";
-  return { ...budget, periodStart, spentUsd: Math.round(spentUsd * 10_000) / 10_000, percent, state };
+const roundUsd = (n: number) => Math.round(n * 10_000) / 10_000;
+
+/** Spend plus the stand-ins of the runs of unknown cost: each counts as its standInUsd. */
+function countWithStandIns(spentUsd: number, runs: readonly UnknownCostRun[]): number {
+  return runs.reduce((sum, r) => sum + r.standInUsd, spentUsd);
+}
+
+/**
+ * A budget's state this month. Under `unpriced_policy: count` the runs of unknown cost (unpriced
+ * or still running) count at their stand-in amount: fail closed on the worst known case. Under
+ * `allow` only the recorded spend counts.
+ */
+export function budgetStatus(
+  budget: Budget,
+  spentUsd: number,
+  periodStart: string,
+  unknown: readonly UnknownCostRun[] = [],
+): BudgetStatus {
+  const counting = budget.unpricedPolicy !== "allow";
+  const countedUsd = counting ? countWithStandIns(spentUsd, unknown) : spentUsd;
+  const settledUsd = counting
+    ? countWithStandIns(
+        spentUsd,
+        unknown.filter((r) => r.kind === "unpriced"),
+      )
+    : spentUsd;
+  const percent = Math.round((countedUsd / budget.amountUsd) * 1000) / 10;
+  const over = countedUsd >= budget.amountUsd;
+  const state: BudgetState = over ? "over" : percent >= budget.warnPercent ? "warn" : "ok";
+  return {
+    ...budget,
+    periodStart,
+    spentUsd: roundUsd(spentUsd),
+    unpricedRuns: unknown.filter((r) => r.kind === "unpriced").length,
+    runningRuns: unknown.filter((r) => r.kind === "running").length,
+    standInUsd: roundUsd(countedUsd - spentUsd),
+    countedUsd: roundUsd(countedUsd),
+    percent,
+    state,
+    overByRunning: over && settledUsd < budget.amountUsd,
+  };
+}
+
+/** A run of unknown cost as the repository reads it, before its stand-in is resolved. */
+export interface UnknownCostRow {
+  id: string;
+  agentId: string;
+  kind: "unpriced" | "running";
+  /**
+   * The cap the run was started with (runs.max_budget_usd, migration 26); for older rows the sum
+   * of the --max-budget-usd its phases ran with. Null when neither is recorded.
+   */
+  startedCapUsd: number | null;
 }
 
 /** What computing a budget's state reads: the rows and the spend of a scope (BudgetRepository). */
 export interface BudgetSource {
   list(): Budget[];
   spentSince(b: Pick<Budget, "scope" | "scopeId">, sinceIso: string, projectPath?: string | null): number;
+  unknownCostSince(
+    b: Pick<Budget, "scope" | "scopeId">,
+    sinceIso: string,
+    projectPath?: string | null,
+  ): UnknownCostRow[];
 }
+
+/**
+ * The runs of unknown cost a budget counts this month, each with its stand-in: the cap it was
+ * started with (stored on the row, running or ended; older rows: their phases), else what a run
+ * of the agent is capped at now (its max_budget_usd, else claude.default_max_budget_usd, also
+ * for an agent that is gone).
+ */
+export function unknownCostRuns(
+  source: BudgetSource,
+  config: BudgetConfig,
+  b: Pick<Budget, "scope" | "scopeId">,
+  now: Date = new Date(),
+): UnknownCostRun[] {
+  const projectPath = b.scope === "project" ? (config.projects.get(b.scopeId ?? "")?.path ?? null) : null;
+  return source.unknownCostSince(b, utcMonthStart(now), projectPath).map((r) => ({
+    id: r.id,
+    agentId: r.agentId,
+    kind: r.kind,
+    standInUsd: r.startedCapUsd ?? config.agents.get(r.agentId)?.maxBudgetUsd ?? config.claude.defaultMaxBudgetUsd,
+  }));
+}
+
+/** What the budget readers need of the config: scope ids, and the per-run caps for the stand-ins. */
+export type BudgetConfig = Pick<DuskFleetConfig, "projects" | "agents"> & {
+  claude: Pick<DuskFleetConfig["claude"], "defaultMaxBudgetUsd">;
+};
 
 /** One budget with this month's spend; a project budget also counts runs started with the project's path. */
 export function budgetStatusOf(
   source: BudgetSource,
-  config: Pick<DuskFleetConfig, "projects">,
+  config: BudgetConfig,
   b: Budget,
   now: Date = new Date(),
 ): BudgetStatus {
   const since = utcMonthStart(now);
   const projectPath = b.scope === "project" ? (config.projects.get(b.scopeId ?? "")?.path ?? null) : null;
-  return budgetStatus(b, source.spentSince(b, since, projectPath), since);
+  return budgetStatus(b, source.spentSince(b, since, projectPath), since, unknownCostRuns(source, config, b, now));
 }
 
 /** Every budget with this month's spend and state: what list_budgets, the CLI and the dashboard show. */
-export function budgetStatuses(
-  source: BudgetSource,
-  config: Pick<DuskFleetConfig, "projects">,
-  now: Date = new Date(),
-): BudgetStatus[] {
+export function budgetStatuses(source: BudgetSource, config: BudgetConfig, now: Date = new Date()): BudgetStatus[] {
   return source.list().map((b) => budgetStatusOf(source, config, b, now));
 }
 
@@ -125,21 +247,39 @@ export function budgetRefusal(s: BudgetStatus, pausedSchedules: string[], now: D
   const paused = pausedSchedules.length
     ? ` Paused ${pausedSchedules.length} schedule(s) of that scope: ${pausedSchedules.join(", ")}.`
     : "";
+  const unknown = [
+    s.unpricedRuns ? `${s.unpricedRuns} unpriced run(s)` : "",
+    s.runningRuns ? `${s.runningRuns} running run(s)` : "",
+  ]
+    .filter(Boolean)
+    .join(" and ");
+  const counted =
+    s.standInUsd > 0
+      ? `$${s.countedUsd} counted of $${s.amountUsd} this month, UTC: $${s.spentUsd} recorded plus $${s.standInUsd} standing in for ${unknown} (unpriced_policy: count)`
+      : `$${s.spentUsd} of $${s.amountUsd} this month, UTC`;
+  if (s.overByRunning) {
+    return (
+      `budget: the ${budgetLabel(s)} budget is spent counting the runs still going (${counted}); ` +
+      `hard_stop refuses new runs until they end and their cost is known.`
+    );
+  }
   return (
-    `budget: the ${budgetLabel(s)} budget is spent ($${s.spentUsd} of $${s.amountUsd} this month, UTC); ` +
-    `hard_stop refuses new runs until ${utcNextMonthStart(now).slice(0, 10)} or until the budget is raised.${paused}`
+    `budget: the ${budgetLabel(s)} budget is spent (${counted}); ` +
+    `hard_stop refuses new runs until ${utcNextMonthStart(now).slice(0, 10)} or until the budget is raised` +
+    `${s.unpricedRuns ? " (or set unpriced_policy: allow on it)" : ""}.${paused}`
   );
 }
 
 /**
  * Validates a budget before it is written: shared by MCP, CLI and tests. The scope id must name
  * a configured agent / project (global takes none), the amount is > 0, warn_percent a whole
- * number 1-100. Returns the normalised input.
+ * number 1-100, unpriced_policy count or allow. Returns the normalised input; an unset
+ * unpriced_policy stays unset so an update keeps the stored one (`count` on insert).
  */
 export function validateBudgetInput(
   config: Pick<DuskFleetConfig, "agents" | "projects">,
   input: BudgetInput,
-): Required<BudgetInput> {
+): ValidBudgetInput {
   if (!(BUDGET_SCOPES as readonly string[]).includes(input.scope)) {
     throw new Error(`scope must be one of ${BUDGET_SCOPES.join(", ")}`);
   }
@@ -160,5 +300,17 @@ export function validateBudgetInput(
   if (!Number.isInteger(warnPercent) || warnPercent < 1 || warnPercent > 100) {
     throw new Error("warn_percent must be a whole number from 1 to 100");
   }
-  return { scope: input.scope, scopeId, amountUsd: input.amountUsd, warnPercent, hardStop: input.hardStop ?? true };
+  const unpricedPolicy = input.unpricedPolicy;
+  if (unpricedPolicy !== undefined && !(UNPRICED_POLICIES as readonly string[]).includes(unpricedPolicy)) {
+    throw new Error(`unpriced_policy must be one of ${UNPRICED_POLICIES.join(", ")}`);
+  }
+  const valid: ValidBudgetInput = {
+    scope: input.scope,
+    scopeId,
+    amountUsd: input.amountUsd,
+    warnPercent,
+    hardStop: input.hardStop ?? true,
+  };
+  if (unpricedPolicy !== undefined) valid.unpricedPolicy = unpricedPolicy;
+  return valid;
 }

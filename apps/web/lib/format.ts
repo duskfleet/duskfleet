@@ -1,4 +1,4 @@
-import type { CostBasis, CostSplit } from "@duskfleet/core";
+import { type CostBasis, type CostSplit, runLabel } from "@duskfleet/core";
 
 /**
  * How the wrap-up reserve is sized (core's `budgetPlan`, docs/agents.md "Budget reserve and
@@ -150,24 +150,12 @@ export function shortPath(p: string): string {
 }
 
 /**
- * Short identity of a run: the first non-empty line of the prompt, markdown
- * markers stripped, cut at a word boundary around `max` characters. The full
- * prompt stays available in the detail page's Prompt panel and in `title`s.
+ * A prompt's first non-empty line, markdown markers stripped, cut at a word boundary
+ * around `max` characters: core's `runLabel` without a title. Runs are listed under
+ * `runLabel(run)` (their title first); this is for a bare prompt (a schedule's).
  */
 export function runTitle(prompt: string, max = 80): string {
-  const line = prompt
-    .split("\n")
-    .map((l) => l.trim())
-    .find((l) => l.length > 0);
-  if (!line) return "(empty prompt)";
-  const clean = line
-    .replace(/^#+\s*/, "")
-    .replace(/\*\*/g, "")
-    .replace(/^[-*]\s+/, "");
-  if (clean.length <= max) return clean;
-  const cut = clean.slice(0, max);
-  const sp = cut.lastIndexOf(" ");
-  return (sp > max * 0.6 ? cut.slice(0, sp) : cut).replace(/[\s,;:.]+$/, "") + "…";
+  return runLabel({ title: null, prompt }, max);
 }
 
 /** "/Users/me/Documents/x" → "~/Documents/x" for display; the full value belongs in Copy buttons. */
@@ -185,6 +173,20 @@ export function tildeText(text: string, home: string): string {
     .join("~/")
     .split(home)
     .join("~");
+}
+
+/** Bytes in binary units: "840 B", "12.4 KiB", "3.1 MiB", "1.2 GiB"; "–" when unknown. */
+export function fmtBytes(n: number | null | undefined): string {
+  if (n === null || n === undefined) return "–";
+  if (n < 1024) return `${n} B`;
+  const units = ["KiB", "MiB", "GiB"];
+  let v = n / 1024;
+  let i = 0;
+  while (v >= 1024 && i < units.length - 1) {
+    v /= 1024;
+    i += 1;
+  }
+  return `${v < 10 ? v.toFixed(1) : Math.round(v)} ${units[i]}`;
 }
 
 /** "1.2k", "840" */
