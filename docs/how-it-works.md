@@ -81,12 +81,16 @@ they arrive and keeps the raw stream in `data/logs/<run_id>.jsonl`:
   (cut at 1 MB, or a git read failed or ran out of time). Diff and textconv drivers of the
   checkout never run.
 - what the run produced in git / GitHub, one `run_artifacts` row each (`kind`, `value`,
-  `source`), read when the run ends from the main session's Bash calls (subagents' calls do not
-  count) and from its final text: `pr`, a `https://github.com/<owner>/<repo>/pull/<n>` URL printed
-  by `gh pr create` or written in the final text; `branch`, the branch of `git push`,
-  `git checkout -b`, `git switch -c`, `gh pr create --head` and of a push report line
-  (`a -> a`); `commit`, a full 40-character SHA printed by `git rev-parse HEAD` or by a push
-  report line, never a short SHA and never from prose. `source` is `tool_result` or
+  `source`), read when the run ends from the main session's successful Bash calls (a failed or
+  rejected call, and subagents' calls, do not count) and from its final text: `pr`, a
+  `https://github.com/<owner>/<repo>/pull/<n>` URL printed by `gh pr create`, or written in the
+  final text of a run that ran `gh pr create` (a run that only mentions a PR, such as a review,
+  records none); `branch`, the branch of `git push` (a delete such as `git push origin :old`
+  is not one), `git checkout -b`, `git switch -c`, `gh pr create --head` and of a push report
+  line (`a -> a`, read only when the command holds no other `git` call); `commit`, a full
+  40-character SHA printed by `git rev-parse HEAD` or by a push report line, never a short SHA,
+  never from prose, and never the checkout's HEAD from before the run. Redirections and shell
+  comments in the command are not read as arguments. `source` is `tool_result` or
   `result_text`; the same value is recorded once. `get_run` and `run-info` return them as
   `artifacts`. Nothing is fetched from GitHub: a PR closed later is still listed.
 

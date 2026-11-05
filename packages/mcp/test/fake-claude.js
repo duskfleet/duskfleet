@@ -542,7 +542,7 @@ if (resumeIdx >= 0) {
   if (prompt === "git-pr") {
     // A developer run's tail: push the branch, read HEAD, open the PR (run artifacts). Bash
     // tool_results carry stdout + stderr as one string; git push writes its report on stderr.
-    const bash = (id, command, output) => {
+    const bash = (id, command, output, isError = false) => {
       out({
         type: "assistant",
         message: {
@@ -556,7 +556,7 @@ if (resumeIdx >= 0) {
         type: "user",
         message: {
           role: "user",
-          content: [{ tool_use_id: id, type: "tool_result", content: output, is_error: false }],
+          content: [{ tool_use_id: id, type: "tool_result", content: output, is_error: isError }],
         },
         tool_use_result: { stdout: output, stderr: "", interrupted: false, isImage: false },
       });
@@ -565,6 +565,13 @@ if (resumeIdx >= 0) {
       "toolu_g1",
       "git -C /work/demo push -u origin issue/7-fix-login",
       "remote: \nremote: Create a pull request for 'issue/7-fix-login' on GitHub by visiting:\nremote:      https://github.com/example/demo/pull/new/issue/7-fix-login\nremote: \nTo github.com:example/demo.git\n * [new branch]      issue/7-fix-login -> issue/7-fix-login\nbranch 'issue/7-fix-login' set up to track 'origin/issue/7-fix-login'.",
+    );
+    // A rejected push (is_error): its branch is not an artifact.
+    bash(
+      "toolu_g0",
+      "git -C /work/demo push origin rejected/branch",
+      "Exit code 1\nTo github.com:example/demo.git\n ! [rejected]        rejected/branch -> rejected/branch (fetch first)\nerror: failed to push some refs",
+      true,
     );
     bash("toolu_g2", "git -C /work/demo rev-parse HEAD", "0123456789abcdef0123456789abcdef01234567");
     bash(

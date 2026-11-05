@@ -4,13 +4,15 @@
  * calls with their output and the run's final text, and stores the findings in `run_artifacts`
  * before the terminal transition.
  *
- * What counts (issue #382):
+ * What counts (issue #382), from successful calls only (`is_error` false):
  * - `pr`: a `https://github.com/<owner>/<repo>/pull/<n>` URL in the output of a `gh pr create`
- *   call, or anywhere in the final text;
- * - `branch`: the branch of `git push`, `git checkout -b`, `git switch -c` and
- *   `gh pr create --head`, and the destination of a push output line (`<old>..<new> a -> a`);
+ *   call, or in the final text of a run that ran `gh pr create` (a run that only mentions a PR,
+ *   a reviewer for instance, produced none);
+ * - `branch`: the branch of `git push` (not a delete), `git checkout -b`, `git switch -c` and
+ *   `gh pr create --head`, and the destination of a push output line (`<old>..<new> a -> a`)
+ *   when the command holds that one `git` call;
  * - `commit`: a full 40-hex SHA printed by `git rev-parse HEAD` or by a push output line. Never
- *   from prose, never from a short SHA.
+ *   from prose, never from a short SHA. `RunManager` drops the checkout's HEAD before the spawn.
  */
 
 export type ArtifactKind = "pr" | "branch" | "commit";
@@ -50,8 +52,11 @@ export function artifactsFromBash(command: string, output: string | null): Artif
   let prCreate = false;
   let push = false;
   let revParseHead = false;
-  for (const tokens of shellSegments(command)) {
-    const words = dropAssignments(tokens);
+  const commands = shellSegments(command).map(dropAssignments);
+  // Push report lines are only read when the push is the command's one git call: with a
+  // `git fetch` next to it, `* [new branch] x -> origin/x` would be the fetch's.
+  const gitCalls = commands.filter((w) => w[0] === "git").length;
+  for (const words of commands) {
     if (words[0] === "gh" && words[1] === "pr" && words[2] === "create") {
       prCreate = true;
       add("branch", branchName(optionValue(words.slice(3), ["--head", "-H"])?.split(":").pop() ?? null));
@@ -60,7 +65,7 @@ export function artifactsFromBash(command: string, output: string | null): Artif
     if (words[0] !== "git") continue;
     const [sub, ...args] = gitSubcommand(words.slice(1));
     if (sub === "push") {
-      push = true;
+      push = gitCalls === 1;
       for (const b of pushedBranches(args)) add("branch", b);
     } else if (sub === "checkout") {
       add("branch", branchName(optionValue(args, ["-b", "-B"])));
@@ -85,10 +90,21 @@ export function artifactsFromBash(command: string, output: string | null): Artif
   return found;
 }
 
-/** PR URLs in the run's final text. Branches and commits are never read from prose. */
-export function artifactsFromResultText(text: string | null): ArtifactFinding[] {
-  if (!text) return [];
+/**
+ * PR URLs in the run's final text, only when the run itself ran `gh pr create` (`prCreated`):
+ * otherwise a URL there is a PR the run talked about, not one it produced. Branches and commits
+ * are never read from prose.
+ */
+export function artifactsFromResultText(text: string | null, prCreated: boolean): ArtifactFinding[] {
+  if (!text || !prCreated) return [];
   return (text.match(PR_URL) ?? []).map((value) => ({ kind: "pr", value, source: "result_text" }));
+}
+
+/** The command line runs `gh pr create`. */
+export function createsPr(command: string): boolean {
+  return shellSegments(command)
+    .map(dropAssignments)
+    .some((w) => w[0] === "gh" && w[1] === "pr" && w[2] === "create");
 }
 
 /** One finding per (kind, value), the first one kept: tool output comes before the final text. */
@@ -122,7 +138,10 @@ function pushedBranches(args: string[]): string[] {
   }
   const out: string[] = [];
   for (const spec of positional.slice(1)) {
-    const dst = spec.replace(/^\+/, "").split(":").pop() ?? "";
+    const bare = spec.replace(/^\+/, "");
+    // `:old-feature` deletes old-feature on the remote.
+    if (bare.startsWith(":")) continue;
+    const dst = bare.split(":").pop() ?? "";
     if (dst.startsWith("refs/tags/")) continue;
     const name = branchName(stripHeads(dst));
     if (name) out.push(name);
@@ -160,8 +179,9 @@ function dropAssignments(tokens: string[]): string[] {
 
 /**
  * A shell command line as simple commands (split on `;`, `&`, `|`, newlines and parentheses),
- * each a list of words with quotes and backslashes removed. Not a shell: enough to read the
- * arguments of `git` and `gh` calls as an agent writes them.
+ * each a list of words with quotes and backslashes removed. Redirections (`> out`, `2>&1`,
+ * `&> log`) and comments (an unquoted `#` starting a word, to the end of the line) are dropped.
+ * Not a shell: enough to read the arguments of `git` and `gh` calls as an agent writes them.
  */
 export function shellSegments(command: string): string[][] {
   const segments: string[][] = [];
@@ -169,15 +189,34 @@ export function shellSegments(command: string): string[][] {
   let cur = "";
   let inToken = false;
   let quote: string | null = null;
+  /** The next word is a redirection target, not an argument. */
+  let dropNext = false;
   const endToken = () => {
-    if (inToken) tokens.push(cur);
+    if (inToken) {
+      if (dropNext) dropNext = false;
+      else tokens.push(cur);
+    }
     cur = "";
     inToken = false;
   };
   const endSegment = () => {
     endToken();
+    dropNext = false;
     if (tokens.length) segments.push(tokens);
     tokens = [];
+  };
+  /** At `command[i]`, the first char after `>`, `<` or `&>`: skip the operator's tail and maybe its target. */
+  const redirect = (i: number): number => {
+    while (i < command.length && ">|<".includes(command[i]!)) i++;
+    if (command[i] === "&") {
+      // `>&2`, `<&0`, `>&-`: a descriptor, no word follows.
+      let j = i + 1;
+      while (j < command.length && /[0-9-]/.test(command[j]!)) j++;
+      if (j > i + 1) return j - 1;
+      i++;
+    }
+    dropNext = true;
+    return i - 1;
   };
   for (let i = 0; i < command.length; i++) {
     const c = command[i]!;
@@ -196,6 +235,18 @@ export function shellSegments(command: string): string[][] {
         cur += next;
         inToken = true;
       }
+    } else if (c === "#" && !inToken) {
+      while (i + 1 < command.length && command[i + 1] !== "\n") i++;
+    } else if (c === ">" || c === "<") {
+      // `2>`: the digits before the operator are its descriptor, not a word.
+      if (/^\d+$/.test(cur)) {
+        cur = "";
+        inToken = false;
+      } else endToken();
+      i = redirect(i + 1);
+    } else if (c === "&" && command[i + 1] === ">") {
+      endToken();
+      i = redirect(i + 2);
     } else if (c === " " || c === "\t") endToken();
     else if ("\n;&|()".includes(c)) endSegment();
     else {

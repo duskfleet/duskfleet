@@ -10,6 +10,7 @@ import {
   artifactsFromBash,
   artifactsFromResultText,
   createStreamState,
+  createsPr,
   ingestLine,
   shellSegments,
   uniqueArtifacts,
@@ -86,17 +87,49 @@ test("commit only from git rev-parse HEAD output, full SHA only", () => {
 
 test("PR URLs: gh pr create output and the final text, not other commands", () => {
   assert.deepEqual(kv(artifactsFromBash("gh pr view 12 --json url", '{"url":"https://github.com/o/r/pull/12"}')), []);
-  const fromText = artifactsFromResultText("Opened https://github.com/o/r/pull/12. Commit deadbee, see #12.");
-  assert.deepEqual(fromText, [{ kind: "pr", value: "https://github.com/o/r/pull/12", source: "result_text" }]);
-  assert.deepEqual(artifactsFromResultText("Fixed in abc1234 and cafe; nothing else."), []);
-  assert.deepEqual(artifactsFromResultText(null), []);
+  const text = "Opened https://github.com/o/r/pull/12. Commit deadbee, see #12.";
+  assert.deepEqual(artifactsFromResultText(text, true), [
+    { kind: "pr", value: "https://github.com/o/r/pull/12", source: "result_text" },
+  ]);
+  assert.deepEqual(artifactsFromResultText("Fixed in abc1234 and cafe; nothing else.", true), []);
+  assert.deepEqual(artifactsFromResultText(null, true), []);
+});
+
+test("final-text PR URLs count only for a run that ran gh pr create", () => {
+  assert.deepEqual(artifactsFromResultText("Reviewed https://github.com/o/r/pull/12: changes.", false), []);
+  assert.equal(createsPr("cd /w && GH_PAGER= gh pr create --fill"), true);
+  assert.equal(createsPr("gh pr view 12"), false);
+  assert.equal(createsPr("echo 'gh pr create'"), false);
+});
+
+test("git push :branch deletes it: no branch", () => {
+  assert.deepEqual(kv(artifactsFromBash("git push origin :old-feature", "")), []);
+  assert.deepEqual(kv(artifactsFromBash("git push origin +:old-feature keep", "")), ["branch:keep"]);
+});
+
+test("push report lines are read only when the push is the one git call", () => {
+  const fetchOut = "From github.com:o/r\n * [new branch]      x -> origin/x";
+  assert.deepEqual(kv(artifactsFromBash("git push origin feat && git fetch", fetchOut)), ["branch:feat"]);
+  const pushOut = "To github.com:o/r.git\n * [new branch]      feat -> feat";
+  assert.deepEqual(kv(artifactsFromBash("cd /w && git push origin feat", pushOut)), ["branch:feat", "branch:feat"]);
+});
+
+test("redirections and comments are not arguments", () => {
+  assert.deepEqual(kv(artifactsFromBash("git push origin feat > out.txt", "")), ["branch:feat"]);
+  assert.deepEqual(kv(artifactsFromBash("git push origin feat 2>&1 | tail -5", "")), ["branch:feat"]);
+  assert.deepEqual(kv(artifactsFromBash("git push origin feat &>log 2>>err", "")), ["branch:feat"]);
+  assert.deepEqual(kv(artifactsFromBash("git push origin feat # then other", "")), ["branch:feat"]);
+  assert.deepEqual(shellSegments("git push origin a#b >&2\n# note\necho '#x' >\"f g\""), [
+    ["git", "push", "origin", "a#b"],
+    ["echo", "#x"],
+  ]);
 });
 
 test("uniqueArtifacts keeps the first finding of each kind and value", () => {
   const all = uniqueArtifacts([
     ...artifactsFromBash("gh pr create --head b", "https://github.com/o/r/pull/3"),
     ...artifactsFromBash("git push origin b", ""),
-    ...artifactsFromResultText("PR: https://github.com/o/r/pull/3"),
+    ...artifactsFromResultText("PR: https://github.com/o/r/pull/3", true),
   ]);
   assert.deepEqual(
     all.map((f) => `${f.kind}:${f.value}:${f.source}`),
@@ -114,6 +147,14 @@ test("the parser emits bash_result with the command, and the subagent that ran i
     { type: "user", message: { content: [{ type: "tool_result", tool_use_id: "t1", content: `${SHA}\n` }] } },
     {
       type: "assistant",
+      message: { content: [{ type: "tool_use", id: "t4", name: "Bash", input: { command: "git push origin x" } }] },
+    },
+    {
+      type: "user",
+      message: { content: [{ type: "tool_result", tool_use_id: "t4", content: "rejected", is_error: true }] },
+    },
+    {
+      type: "assistant",
       agent_id: "a1",
       parent_tool_use_id: "t_agent",
       message: { content: [{ type: "tool_use", id: "t2", name: "Bash", input: { command: "git push" } }] },
@@ -129,8 +170,9 @@ test("the parser emits bash_result with the command, and the subagent that ran i
   ];
   const results = lines.flatMap((o) => ingestLine(state, JSON.stringify(o))).filter((e) => e.type === "bash_result");
   assert.deepEqual(results, [
-    { type: "bash_result", command: "git rev-parse HEAD", output: `${SHA}\n`, agentId: null },
-    { type: "bash_result", command: "git push", output: "done", agentId: "a1" },
+    { type: "bash_result", command: "git rev-parse HEAD", output: `${SHA}\n`, isError: false, agentId: null },
+    { type: "bash_result", command: "git push origin x", output: "rejected", isError: true, agentId: null },
+    { type: "bash_result", command: "git push", output: "done", isError: false, agentId: "a1" },
   ]);
   assert.equal(state.bashCalls.size, 0, "answered calls are forgotten");
 });

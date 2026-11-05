@@ -309,6 +309,7 @@ export function ingestLine(state: StreamState, line: string): ExecutionEvent[] {
               type: "bash_result",
               command,
               output: toolResultText(block["content"]),
+              isError: block["is_error"] === true,
               agentId: state.toolUseOwner.get(toolUseId) ?? null,
             });
             continue;
