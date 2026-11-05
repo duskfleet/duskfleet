@@ -213,7 +213,6 @@ stateDiagram-v2
     running --> completed : result event
     running --> cancelled : cancel_run
     running --> failed : error / non-zero exit / orphaned
-    completed --> needs_review : denial, timeout, empty run
 ```
 
 "Needs review" is not a status but how the dashboard shows a completed run that hit a permission
