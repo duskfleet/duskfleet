@@ -152,14 +152,67 @@ permission denial is "needs review", never green ([Needs review](docs/dashboard.
 
 ## How it works
 
-<picture>
-  <source media="(max-width: 767px) and (prefers-color-scheme: dark)" srcset="docs/assets/how-a-run-works-mobile-dark.png">
-  <source media="(max-width: 767px)" srcset="docs/assets/how-a-run-works-mobile-light.png">
-  <source media="(prefers-color-scheme: dark)" srcset="docs/assets/how-a-run-works-dark.png">
-  <img alt="How a run works" src="docs/assets/how-a-run-works-light.png" width="100%">
-</picture>
+Every run starts as a call to `RunManager.startRun`, from a chat, the CLI or a cron schedule.
+The child is Claude Code in your project; everything it does is recorded.
 
-On a phone? Open the stacked version ([dark](docs/assets/how-a-run-works-mobile-dark.png) / [light](docs/assets/how-a-run-works-mobile-light.png)).
+```mermaid
+%%{init: {"flowchart": {"wrappingWidth": 420}}}%%
+flowchart TB
+    subgraph entry ["1 · Entry points"]
+        chat["Chat host<br/>run_agent over MCP"]
+        cli["CLI<br/>duskfleet run"]
+        sched["Scheduler tick<br/>due cron"]
+    end
+
+    subgraph rm ["2 · RunManager"]
+        guards["Concurrency guards: busy is refused, never queued<br/>pass: run row recorded (pending)"]
+    end
+
+    subgraph child ["3 · Claude Code child"]
+        claude["claude -p --output-format stream-json<br/>in the target project, allow-lists only, no prompts"]
+    end
+
+    subgraph rec ["4 · What gets recorded, from the stream-json events"]
+        db[("SQLite<br/>runs, run_agents")]
+        logs["data/logs/<br/>raw stream, patch"]
+    end
+
+    chat --> guards
+    cli --> guards
+    sched --> guards
+    guards --> claude
+    claude --> db
+    claude --> logs
+```
+
+Whatever the entry point, the request lands in `RunManager`, the only thing that creates runs and
+changes their status. Its concurrency guards run first (one run per project directory and one per
+agent by default): a busy guard refuses, nothing is ever queued, and a schedule keeps that tick as its
+one pending fire until the next cron occurrence. When the guards pass the run row is recorded and the
+executor spawns Claude Code in the target project with the agent's allow-lists, model and budget, no
+permission prompts and no MCP servers unless the agent opts in. Every JSON event the child prints is
+parsed as it arrives: the row in SQLite holds status, timings, tokens, cost, tool calls, permission
+denials and the termination reason, one `run_agents` row per subagent, while the raw stream and the
+patch of what changed land in `data/logs/`. The dashboard only reads that database.
+
+A run moves through these states; the transitions below are the only ones allowed:
+
+```mermaid
+stateDiagram-v2
+    direction LR
+    [*] --> pending : startRun, guards pass
+    pending --> running : claude spawned
+    pending --> failed : spawn error / orphaned
+    running --> completed : result event
+    running --> cancelled : cancel_run
+    running --> failed : error / non-zero exit / orphaned
+    completed --> [*]
+    cancelled --> [*]
+    failed --> [*]
+```
+
+"Needs review" is not a status but how the dashboard shows a completed run that hit a permission
+denial, a timeout, an exhausted budget or did nothing: amber, never plain green.
 
 You describe *what should happen* in `config/` (agents, projects) and in schedules. Duskfleet
 runs `claude -p` unattended with a target project as working directory, owns the unattended
