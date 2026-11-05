@@ -279,7 +279,10 @@ export function listRuns(filter: RunsFilter = {}): RunWithProject[] {
   if (filter.scheduleId) list = list.filter((r) => r.scheduleId === filter.scheduleId);
   if (filter.q) {
     const q = filter.q.toLowerCase();
-    list = list.filter((r) => r.prompt.toLowerCase().includes(q) || r.id.startsWith(q));
+    // the title is what the row shows (runLabel), so a search finds it too
+    list = list.filter(
+      (r) => r.prompt.toLowerCase().includes(q) || (r.title ?? "").toLowerCase().includes(q) || r.id.startsWith(q),
+    );
   }
   if (inMemory) list = list.slice(0, limit);
   const label = projectLabeller();
@@ -329,22 +332,22 @@ export function homeDir(): string {
 
 /** Neighbours of a run among the same agent's runs, for Previous / Next navigation. */
 export function adjacentRuns(run: Run): {
-  prev: Pick<Run, "id" | "prompt" | "createdAt"> | null;
-  next: Pick<Run, "id" | "prompt" | "createdAt"> | null;
+  prev: Pick<Run, "id" | "title" | "prompt" | "createdAt"> | null;
+  next: Pick<Run, "id" | "title" | "prompt" | "createdAt"> | null;
 } {
   const { db } = services();
   const pick = (sql: string) => {
     const r = db.prepare(sql).get(run.agentId, run.createdAt) as
-      | { id: string; prompt: string; created_at: string }
+      | { id: string; title: string | null; prompt: string; created_at: string }
       | undefined;
-    return r ? { id: r.id, prompt: r.prompt, createdAt: r.created_at } : null;
+    return r ? { id: r.id, title: r.title ?? null, prompt: r.prompt, createdAt: r.created_at } : null;
   };
   return {
     prev: pick(
-      "SELECT id, prompt, created_at FROM runs WHERE agent_id = ? AND created_at < ? ORDER BY created_at DESC LIMIT 1",
+      "SELECT id, title, prompt, created_at FROM runs WHERE agent_id = ? AND created_at < ? ORDER BY created_at DESC LIMIT 1",
     ),
     next: pick(
-      "SELECT id, prompt, created_at FROM runs WHERE agent_id = ? AND created_at > ? ORDER BY created_at ASC LIMIT 1",
+      "SELECT id, title, prompt, created_at FROM runs WHERE agent_id = ? AND created_at > ? ORDER BY created_at ASC LIMIT 1",
     ),
   };
 }
