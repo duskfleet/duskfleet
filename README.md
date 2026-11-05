@@ -159,25 +159,25 @@ The child is Claude Code in your project; everything it does is recorded.
 %%{init: {"flowchart": {"wrappingWidth": 320}}}%%
 flowchart TB
     subgraph entry ["1 · Entry points"]
-        chat["Chat host<br/>Claude Desktop or Claude Code<br/>run_agent over MCP (stdio)"]
+        chat["Chat host<br/>run_agent over MCP"]
         cli["CLI<br/>duskfleet run"]
-        sched["Scheduler tick<br/>due cron (serve, or any lease holder)"]
+        sched["Scheduler tick<br/>due cron"]
     end
 
     subgraph rm ["2 · RunManager"]
-        guards{"Concurrency guards<br/>one run per project,<br/>one per agent"}
-        busy["Busy? Refused, never queued.<br/>A schedule keeps one pending fire."]
-        row["Run row recorded<br/>(pending)"]
+        guards["Concurrency guards<br/>one run per project, one per agent"]
+        busy["Busy: refused, never queued"]
+        row["Run row recorded (pending)"]
     end
 
     subgraph child ["3 · Claude Code child"]
-        claude["claude -p --output-format stream-json<br/>cwd = the target project<br/>no permission prompts: only what the agent allow-lists<br/>no MCP servers unless the agent opts in"]
+        claude["claude -p --output-format stream-json<br/>in the target project, allow-lists only, no prompts"]
     end
 
     subgraph rec ["4 · What gets recorded"]
         parser["stream-json parser"]
-        db[("SQLite<br/>runs: status, timings, tokens, cost, tool calls, denials, termination reason<br/>run_agents: one row per subagent")]
-        logs["data/logs/<br/>run_id.jsonl: the raw stream<br/>run_id.diff: the patch"]
+        db[("SQLite<br/>runs, run_agents")]
+        logs["data/logs/<br/>raw stream, patch"]
     end
 
     chat --> guards
@@ -189,7 +189,6 @@ flowchart TB
     claude -- "stdout: JSON events" --> parser
     parser --> db
     parser --> logs
-    db -. "read only (WAL)" .-> web["Dashboard"]
 ```
 
 Whatever the entry point, the request lands in `RunManager`, the only thing that creates runs and
