@@ -194,7 +194,6 @@ flowchart TB
 
 ```mermaid
 stateDiagram-v2
-    direction LR
     [*] --> pending : startRun, guards pass
     pending --> running : claude spawned
     pending --> failed : spawn error / orphaned
