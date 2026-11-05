@@ -74,7 +74,7 @@ function setup() {
     db.close();
     rmSync(root, { recursive: true, force: true });
   };
-  return { db, runs, repo, scheduler, run, close };
+  return { config, db, runs, repo, scheduler, run, close };
 }
 
 test("set_budget validation: scope ids must exist, amount > 0, warn_percent 1-100; one budget per scope", async () => {
@@ -265,29 +265,34 @@ test("the stand-in is the cap the run ran with, else the agent's max_budget_usd,
 test("an unpriced run counts as the cap it ran with; allow ignores it", async () => {
   const t = setup();
   try {
-    // capped: max_budget_usd 0.25 = main pass 0.12 + wrap-up reserve 0.13; a crash ran the main pass only.
+    // capped: max_budget_usd 0.25 = main pass 0.12 + wrap-up reserve 0.13; a crash recorded the
+    // main pass only, so the reserve is added back: the run may have died in its wrap-up.
     const capped = await t.run("capped", "crash");
     assert.equal(capped.costStatus, "unpriced");
+    assert.deepEqual(
+      capped.phases.map((p) => [p.phase, p.budgetUsd, p.reserveUsd]),
+      [["main", 0.12, 0.13]],
+    );
     t.runs.setBudget({ scope: "project", scopeId: "side", amountUsd: 1 });
     let [s] = t.runs.budgetStatuses();
     assert.equal(s.spentUsd, 0);
     assert.equal(s.unpricedRuns, 1);
-    assert.equal(s.standInUsd, 0.12, "the main pass's --max-budget-usd stands in");
-    assert.equal(s.countedUsd, 0.12);
+    assert.equal(s.standInUsd, 0.25, "main pass plus reserve: the whole cap");
+    assert.equal(s.countedUsd, 0.25);
     assert.equal(s.state, "ok");
 
     const sched = t.scheduler.create({ name: "other hourly", agentId: "other", prompt: "ok", cron: "0 * * * *" });
-    await t.run("other", "crash"); // no max_budget_usd: default_max_budget_usd 5, main pass 4.5
+    await t.run("other", "crash"); // no max_budget_usd: default_max_budget_usd 5 (main pass 4.5 + reserve 0.5)
     [s] = t.runs.budgetStatuses();
     assert.equal(s.unpricedRuns, 2);
-    assert.equal(s.countedUsd, 4.62);
+    assert.equal(s.countedUsd, 5.25);
     assert.equal(s.state, "over");
     assert.equal(s.overByRunning, false);
     await assert.rejects(t.runs.startRun({ prompt: "ok", agentId: "other" }), (err) => {
       assert.ok(err instanceof BudgetError);
       assert.match(
         err.message,
-        /\$4\.62 counted of \$1 this month, UTC: \$0 recorded plus \$4\.62 standing in for 2 unpriced run/,
+        /\$5\.25 counted of \$1 this month, UTC: \$0 recorded plus \$5\.25 standing in for 2 unpriced run/,
       );
       assert.match(err.message, /or set unpriced_policy: allow on it/);
       return true;
@@ -299,8 +304,8 @@ test("an unpriced run counts as the cap it ran with; allow ignores it", async ()
     assert.deepEqual(
       unpriced[0].runs.map((r) => [r.agentId, r.standInUsd]),
       [
-        ["capped", 0.12],
-        ["other", 4.5],
+        ["capped", 0.25],
+        ["other", 5],
       ],
     );
 
@@ -337,6 +342,44 @@ test("a running run counts at its stand-in: refused while it runs, without pausi
     [s] = t.runs.budgetStatuses();
     assert.equal(s.runningRuns, 0);
     assert.equal(s.unpricedRuns, 1, "cancelled without a result: unpriced");
+  } finally {
+    await t.close();
+  }
+});
+
+test("unknown cost = no cost_usd: an older build's NULL cost_status and a NULL started_at count; a refused spawn does not", async () => {
+  const t = setup();
+  try {
+    const oldBuild = await t.run("other", "crash");
+    const noStart = await t.run("other", "crash");
+    const pricedOldBuild = await t.run("other");
+    // A process still on the old build closes runs without cost_status; a failed write to running
+    // leaves a spawned run without started_at.
+    t.db.prepare("UPDATE runs SET cost_status = NULL WHERE id IN (?, ?)").run(oldBuild.id, pricedOldBuild.id);
+    t.db.prepare("UPDATE runs SET started_at = NULL WHERE id = ?").run(noStart.id);
+
+    const rows = new RunRepository(t.db);
+    const refusing = new RunManager(t.config, rows, {
+      binary: "refusing-claude",
+      execute() {
+        throw new Error("refused before spawning");
+      },
+    });
+    await assert.rejects(refusing.startRun({ prompt: "ok", agentId: "other" }), /refused before spawning/);
+    const refused = rows.list({ agentId: "other" }).filter((r) => r.error === "refused before spawning");
+    assert.equal(refused.length, 1);
+    assert.equal(refused[0].status, "failed");
+    assert.equal(refused[0].costUsd, 0, "nothing launched: cost 0");
+    assert.notEqual(refused[0].costStatus, "unpriced");
+    refusing.shutdown();
+
+    assert.deepEqual(
+      rows.budgets
+        .unknownCostSince({ scope: "global", scopeId: null }, utcMonthStart(new Date()))
+        .map((r) => r.id)
+        .sort(),
+      [oldBuild.id, noStart.id].sort(),
+    );
   } finally {
     await t.close();
   }

@@ -604,7 +604,9 @@ export class RunManager {
     } catch (err) {
       // e.g. bypassPermissions requested while disabled, or binary missing
       const message = err instanceof Error ? err.message : String(err);
-      this.transition(run, "failed", { endedAt: new Date().toISOString(), error: message });
+      // Nothing was launched, so the cost is known: 0. Budgets count every other run without a
+      // cost at a stand-in (storage/budgets.ts unknownCostSince), started_at or not.
+      this.transition(run, "failed", { endedAt: new Date().toISOString(), error: message, costUsd: 0 });
       if (resume) {
         // Nothing ran: give the claim back so the one retry is not used up by a spawn failure.
         this.runs.releaseResumeClaim(runId);
@@ -1041,7 +1043,9 @@ export class RunManager {
       return;
     }
     const budgetUsd = active.phase === "main" ? (active.request.maxBudgetUsd ?? null) : active.reserveUsd;
-    active.phases.push(phaseOf(active.phase, result, budgetUsd));
+    const phase = phaseOf(active.phase, result, budgetUsd);
+    if (active.phase === "main") phase.reserveUsd = active.reserveUsd;
+    active.phases.push(phase);
     const runOpen = !isTerminal(this.runs.get(runId)?.status ?? "failed");
     if (
       active.phase === "main" &&

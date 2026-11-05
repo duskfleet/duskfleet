@@ -54,7 +54,7 @@ export type ValidBudgetInput = Required<Omit<BudgetInput, "unpricedPolicy">> & {
  * A run of the scope this month whose cost is not known: `unpriced` (it started and ended
  * without a cost, cost_status) or `running` (pending or running: not settled yet). `standInUsd`
  * is what it counts for under `unpriced_policy: count`: the cap it ran with (its phases'
- * --max-budget-usd), else the agent's max_budget_usd, else claude.default_max_budget_usd: every
+ * --max-budget-usd, plus the reserve when no wrap-up was recorded), else the agent's max_budget_usd, else claude.default_max_budget_usd: every
  * run is launched with a cap, so that is its worst case.
  */
 export interface UnknownCostRun {

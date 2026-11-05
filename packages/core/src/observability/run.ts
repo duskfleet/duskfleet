@@ -45,6 +45,11 @@ export interface RunPhase {
   terminationReason: string | null;
   /** The --max-budget-usd this phase was launched with. */
   budgetUsd: number | null;
+  /**
+   * Main phase only: the wrap-up reserve held back from the run's budget (0 when it has none).
+   * budgetUsd + reserveUsd is the run's whole cap, also when the wrap-up never got recorded.
+   */
+  reserveUsd?: number;
   costUsd: number | null;
   numTurns: number | null;
   toolCalls: number;

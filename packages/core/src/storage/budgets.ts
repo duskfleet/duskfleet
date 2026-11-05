@@ -39,9 +39,14 @@ function rowToBudget(r: BudgetRow): Budget {
   };
 }
 
+const positiveUsd = (v: unknown): v is number => typeof v === "number" && Number.isFinite(v) && v > 0;
+
 /**
- * The --max-budget-usd the run's phases were launched with, summed (main plus wrap-up): the cap
- * the run really had. Null when no phase is recorded yet (a run still going) or one has no budget.
+ * The cap the run really had: the --max-budget-usd its phases were launched with, summed (main
+ * plus wrap-up). When no wrap-up phase is recorded, the main phase's reserve is added back: the
+ * run may have died in a wrap-up pass that never got written (the main pass alone runs on the cap
+ * minus the reserve). Null when no phase is recorded (a run still going, or swept as an orphan),
+ * when one has no budget, or when a main phase without a wrap-up predates the recorded reserve.
  */
 function phaseBudgetTotal(json: string | null): number | null {
   if (!json) return null;
@@ -53,12 +58,18 @@ function phaseBudgetTotal(json: string | null): number | null {
   }
   if (!Array.isArray(phases) || phases.length === 0) return null;
   let total = 0;
-  for (const p of phases) {
-    const usd = (p as { budgetUsd?: unknown } | null)?.budgetUsd;
-    if (typeof usd !== "number" || !Number.isFinite(usd) || usd <= 0) return null;
+  let wrapUp = false;
+  let reserve: number | null = null;
+  for (const p of phases as Array<{ phase?: unknown; budgetUsd?: unknown; reserveUsd?: unknown } | null>) {
+    const usd = p?.budgetUsd;
+    if (!p || !positiveUsd(usd)) return null;
     total += usd;
+    if (p.phase === "wrap_up") wrapUp = true;
+    else if (typeof p.reserveUsd === "number" && Number.isFinite(p.reserveUsd) && p.reserveUsd >= 0)
+      reserve = p.reserveUsd;
   }
-  return total;
+  if (wrapUp) return total;
+  return reserve === null ? null : total + reserve;
 }
 
 export class BudgetRepository {
@@ -155,17 +166,18 @@ export class BudgetRepository {
 
   /**
    * Runs of a scope created since `sinceIso` whose cost is not known: pending or running (not
-   * settled), or ended `unpriced` after they started. A run that never started (spawn refused,
-   * an orphan swept while pending) could not spend anything and is left out. Same scope rule as
-   * spentSince.
+   * settled), or ended without a cost. Keyed on cost_usd, not on cost_status, so that a run
+   * closed by a process on an older build (cost_status left NULL) counts too, and not on
+   * started_at, which a spawned child can lack (the write to running failed, an orphan swept
+   * while pending). A run that provably launched nothing (the executor refused before spawning)
+   * is closed with cost 0 by RunManager and is not in this set. Same scope rule as spentSince.
    */
   unknownCostSince(
     b: Pick<Budget, "scope" | "scopeId">,
     sinceIso: string,
     projectPath: string | null = null,
   ): UnknownCostRow[] {
-    const unknown =
-      "(status IN ('pending', 'running') OR (cost_status = 'unpriced' AND started_at IS NOT NULL)) AND created_at >= ?";
+    const unknown = "(status IN ('pending', 'running') OR cost_usd IS NULL) AND created_at >= ?";
     const select = "SELECT id, agent_id, status, phases_json FROM runs WHERE";
     let rows: Array<{ id: string; agent_id: string; status: string; phases_json: string | null }>;
     if (b.scope === "global") {

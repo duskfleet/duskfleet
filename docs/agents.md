@@ -206,11 +206,15 @@ table. While a run is pending or running its `costStatus` is null.
 
 Under `unpriced_policy: count` (the default) a budget counts every run of its scope this month
 whose cost is unknown, an `unpriced` one or one still running, at a **stand-in**: the cap it
-could spend, its worst case. For a finished run that is the `--max-budget-usd` its phases were
-launched with (main pass plus wrap-up); for a run still going, or one without recorded phases,
-the agent's `max_budget_usd`, otherwise `claude.default_max_budget_usd` (every run is launched
-with a cap). A running run is settled by its result. A run that never started (refused at spawn, a pending row swept as an
-orphan) could not spend anything and is not counted. A budget that is `over` only because of
+could spend, its worst case. For a finished run that is the whole cap it was launched with: the
+`--max-budget-usd` of its phases plus the wrap-up reserve when no wrap-up pass was recorded (it
+may have died in one). For a run still going, or one without recorded phases, it is the agent's
+`max_budget_usd`, otherwise `claude.default_max_budget_usd` (every run is launched with a cap).
+A running run is settled by its result. Any finished run without a cost counts, whether or not
+it got as far as `started_at` (a pending row swept as an orphan may have spawned its child) and
+whatever its `costStatus` (a run closed by a process still on an older build has none). The one
+exception is a run the executor refused before spawning anything: it is recorded with a cost of
+0 and is not counted. A budget that is `over` only because of
 the stand-ins of runs still going (`overByRunning`) refuses new runs but pauses no schedule:
 it settles when those runs end.
 
