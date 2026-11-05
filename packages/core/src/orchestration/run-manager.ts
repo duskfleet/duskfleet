@@ -26,6 +26,7 @@ import {
   type UsageByModel,
 } from "../execution/types.js";
 import { captureRunDiff, headSha } from "../git/diff.js";
+import { costStatusOf } from "../observability/billing.js";
 import {
   continueRefusal,
   isBudgetExhausted,
@@ -54,6 +55,8 @@ import {
   budgetRefusal,
   budgetStatuses,
   budgetStatusOf,
+  type UnknownCostRun,
+  unknownCostRuns,
   validateBudgetInput,
 } from "./budget.js";
 import { BusyError } from "./busy.js";
@@ -294,6 +297,7 @@ export class RunManager {
       const won = this.runs.updateIfStatus(run.id, run.status, {
         ...patch,
         reviewReasons: reviewReasons({ ...run, ...patch }),
+        costStatus: costStatusOf(run),
       });
       if (!won) continue;
       this.runs.addEvent(run.id, "status_change", { from: run.status, to: "failed" });
@@ -553,6 +557,8 @@ export class RunManager {
       resumedFromRunId: resume?.fromRun.id ?? null,
       kind,
       billingType: null,
+      // The whole cap this run may spend (main pass plus reserve): a budget's stand-in while its cost is unknown.
+      maxBudgetUsd: budget.total,
       agentHash,
       claudeCodeVersion: null,
       lastEventAt: null,
@@ -600,7 +606,9 @@ export class RunManager {
     } catch (err) {
       // e.g. bypassPermissions requested while disabled, or binary missing
       const message = err instanceof Error ? err.message : String(err);
-      this.transition(run, "failed", { endedAt: new Date().toISOString(), error: message });
+      // Nothing was launched, so the cost is known: 0. Budgets count every other run without a
+      // cost at a stand-in (storage/budgets.ts unknownCostSince), started_at or not.
+      this.transition(run, "failed", { endedAt: new Date().toISOString(), error: message, costUsd: 0 });
       if (resume) {
         // Nothing ran: give the claim back so the one retry is not used up by a spawn failure.
         this.runs.releaseResumeClaim(runId);
@@ -856,6 +864,20 @@ export class RunManager {
     return budgetStatuses(this.runs.budgets, this.config, now);
   }
 
+  /**
+   * The unpriced runs of this month per budget (ended without a cost, each with its stand-in), for
+   * the budgets that have some: what `doctor` lists so a budget blocked by them is explainable.
+   */
+  unpricedRunsByBudget(now: Date = new Date()): Array<{ budget: BudgetStatus; runs: UnknownCostRun[] }> {
+    this.reloadConfig();
+    const out: Array<{ budget: BudgetStatus; runs: UnknownCostRun[] }> = [];
+    for (const budget of budgetStatuses(this.runs.budgets, this.config, now)) {
+      const runs = unknownCostRuns(this.runs.budgets, this.config, budget, now).filter((r) => r.kind === "unpriced");
+      if (runs.length) out.push({ budget, runs });
+    }
+    return out;
+  }
+
   /** Create the budget of a scope or replace the one it has (validated first: unknown agent / project, amount, warn_percent). */
   setBudget(input: BudgetInput): BudgetStatus {
     this.reloadConfig();
@@ -950,7 +972,8 @@ export class RunManager {
   /**
    * The budgets that cover a run of `agent` on this project (global, the agent's, the
    * project's): why one more run is refused (the first spent hard-stop budget), or null. A
-   * refusal pauses every enabled schedule of that scope; a budget past warn_percent is logged.
+   * refusal pauses every enabled schedule of that scope, unless the budget is over only by the
+   * stand-ins of runs still going (`overByRunning`); a budget past warn_percent is logged.
    */
   private budgetError(agent: AgentDefinition, projectId: string | null, projectPath: string): string | null {
     const budgets = this.runs.budgets.list();
@@ -965,8 +988,16 @@ export class RunManager {
       if (!covers) continue;
       const status = budgetStatusOf(this.runs.budgets, this.config, b, now);
       if (status.state === "over" && b.hardStop) {
-        const paused = this.pauseSchedulesOf(b);
-        log.warn("budget spent; run refused", { budget: budgetLabel(b), spentUsd: status.spentUsd, paused });
+        // Over only by the stand-ins of runs still going: refuse, but nothing to pause (it settles when they end).
+        const paused = status.overByRunning ? [] : this.pauseSchedulesOf(b);
+        log.warn("budget spent; run refused", {
+          budget: budgetLabel(b),
+          spentUsd: status.spentUsd,
+          countedUsd: status.countedUsd,
+          unpricedRuns: status.unpricedRuns,
+          runningRuns: status.runningRuns,
+          paused,
+        });
         return budgetRefusal(status, paused, now);
       }
       if (status.state !== "ok") {
@@ -1014,7 +1045,9 @@ export class RunManager {
       return;
     }
     const budgetUsd = active.phase === "main" ? (active.request.maxBudgetUsd ?? null) : active.reserveUsd;
-    active.phases.push(phaseOf(active.phase, result, budgetUsd));
+    const phase = phaseOf(active.phase, result, budgetUsd);
+    if (active.phase === "main") phase.reserveUsd = active.reserveUsd;
+    active.phases.push(phase);
     const runOpen = !isTerminal(this.runs.get(runId)?.status ?? "failed");
     if (
       active.phase === "main" &&
@@ -1304,7 +1337,12 @@ export class RunManager {
     assertTransition(run.status, to);
     const next = { ...patch, status: to };
     // The one place the needs-review rule runs: on the run as it will be stored, once terminal.
-    if (isTerminal(to)) next.reviewReasons = reviewReasons({ ...run, ...defined(patch), status: to });
+    if (isTerminal(to)) {
+      const ended = { ...run, ...defined(patch), status: to };
+      next.reviewReasons = reviewReasons(ended);
+      // How the cost is known, settled with the run (budgets count an unpriced one at a stand-in).
+      next.costStatus = costStatusOf(ended);
+    }
     this.runs.update(run.id, next);
     this.runs.addEvent(run.id, "status_change", { from: run.status, to });
     run.status = to;
@@ -1467,7 +1505,9 @@ export function mergeResults(main: ExecutionResult, wrapUp: ExecutionResult): Ex
     toolCalls: main.toolCalls + wrapUp.toolCalls,
     usage,
     usageByModel,
-    costUsd: addNullable(main.costUsd, wrapUp.costUsd),
+    // Unknown if either pass is unknown: a partial sum would be classed "reported" and
+    // undercount the run in a budget, which must fail closed (#58).
+    costUsd: main.costUsd === null || wrapUp.costUsd === null ? null : main.costUsd + wrapUp.costUsd,
     permissionDenials: main.permissionDenials + wrapUp.permissionDenials,
     deniedTools: [...main.deniedTools, ...wrapUp.deniedTools],
     contextExhausted: main.contextExhausted || wrapUp.contextExhausted,
