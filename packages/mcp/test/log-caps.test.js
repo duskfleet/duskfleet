@@ -144,6 +144,40 @@ test("RunRepository.addEvent stores an oversized payload capped at max_event_byt
   }
 });
 
+test("RunRepository.addEvent stores the diff event uncapped, so diff() keeps changedFiles an array", async () => {
+  const app = makeApp("  max_event_bytes: 1024\n");
+  try {
+    const started = await app.runs.startRun({ prompt: "ok", projectPath: app.project });
+    await app.runs.waitForRun(started.id, 10_000);
+    const changedFiles = Array.from({ length: 40 }, (_, i) => ({
+      path: `src/some/module-${i}.ts`,
+      status: "modified",
+      additions: 1,
+      deletions: 0,
+    }));
+    const diff = {
+      base: "a".repeat(40),
+      head: null,
+      additions: 40,
+      deletions: 0,
+      totalsPartial: false,
+      filesChanged: 40,
+      changedFiles,
+      filesTruncated: false,
+      patchPath: null,
+      patchBytes: 0,
+      patchTruncated: false,
+    };
+    app.repo.addEvent(started.id, "diff", diff);
+    assert.ok(Buffer.byteLength(JSON.stringify(diff)) > 1024);
+    const stored = app.repo.diff(started.id);
+    assert.ok(Array.isArray(stored.changedFiles));
+    assert.deepEqual(stored, diff);
+  } finally {
+    await app.cleanup();
+  }
+});
+
 test("a 200 KiB tool_result: the JSONL line is whole, no stored event passes the cap, size and sha256 recorded", async () => {
   const app = makeApp();
   try {

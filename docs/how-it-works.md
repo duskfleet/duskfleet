@@ -88,7 +88,8 @@ Both stores are bounded. One `run_events` payload is at most `claude.max_event_b
 (default 64 KiB): over it the stored JSON keeps its envelope (type, ids, tool name) and the
 longest strings are cut, each ending with `…[truncated N bytes]` (when that is not enough, the
 largest nested arrays and objects become `{ truncated, bytes }` stubs), and the payload gets
-`truncated: true`; the raw JSONL line is always written in full. The raw log is at most
+`truncated: true`; the raw JSONL line is always written in full. The `diff` event is exempt:
+it is already bounded (at most 200 files listed, the patch in its own file). The raw log is at most
 `claude.max_log_bytes` (default 50 MiB): the line that would cross it is replaced by one final
 `{"type":"duskfleet_log_truncated","bytes_dropped_from_here":true}` line and nothing more is
 written to the file. The run keeps going, its events keep reaching the database (the source of

@@ -536,19 +536,19 @@ export class RunRepository {
   /**
    * Cap of one stored payload (`claude.max_event_bytes`); `RunManager` keeps it in step with the
    * config. Over it the payload is cut by `capEventJson` (envelope kept, `truncated: true`).
+   * The `diff` event is exempt: `diff()` reads it back as a typed `RunDiff`, and it is already
+   * bounded (DIFF_MAX_FILES entries, the patch itself lives in a file).
    */
   maxEventBytes = DEFAULT_MAX_EVENT_BYTES;
 
   addEvent(runId: string, type: RunEvent["type"], payload: unknown, agentId: string | null = null): void {
+    let stored: string | null = null;
+    if (payload !== undefined) {
+      stored = type === "diff" ? JSON.stringify(payload) : capEventJson(payload, this.maxEventBytes);
+    }
     this.db
       .prepare("INSERT INTO run_events (run_id, ts, type, payload, agent_id) VALUES (?, ?, ?, ?, ?)")
-      .run(
-        runId,
-        new Date().toISOString(),
-        type,
-        payload === undefined ? null : capEventJson(payload, this.maxEventBytes),
-        agentId,
-      );
+      .run(runId, new Date().toISOString(), type, stored, agentId);
   }
 
   events(runId: string, limit = 200): RunEvent[] {
