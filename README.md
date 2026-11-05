@@ -192,6 +192,18 @@ flowchart TB
     db -. "read only (WAL)" .-> web["Dashboard"]
 ```
 
+Whatever the entry point, the request lands in `RunManager`, the only thing that creates runs and
+changes their status. Its concurrency guards run first (one run per project directory and one per
+agent by default): a busy guard refuses, nothing is ever queued, and a schedule keeps that tick as its
+one pending fire until the next cron occurrence. When the guards pass the run row is recorded and the
+executor spawns Claude Code in the target project with the agent's allow-lists, model and budget, no
+permission prompts and no MCP servers unless the agent opts in. Every JSON event the child prints is
+parsed as it arrives: the row in SQLite holds status, timings, tokens, cost, tool calls, permission
+denials and the termination reason, one `run_agents` row per subagent, while the raw stream and the
+patch of what changed land in `data/logs/`. The dashboard only reads that database.
+
+A run moves through these states; the transitions below are the only ones allowed:
+
 ```mermaid
 stateDiagram-v2
     [*] --> pending : startRun, guards pass
