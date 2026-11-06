@@ -17,6 +17,10 @@
  *    skip too, recorded as `skipped_daily_cap`.
  *  - A spent hard-stop budget (global / agent / project, UTC month) is `skipped_budget`; the
  *    refusal pauses every schedule of that scope (RunManager), so they stay off until resumed.
+ *  - A scheduled fire while the last run on this host hit the usage limit and its reset time
+ *    (`retryNotBefore`) is still ahead is `skipped_quota`, before auto-pause and any gate; a run on
+ *    this host that completed after it lifts the skip. Usage-limit runs with a reset time do not
+ *    count in the auto-pause streak either; every other failure does.
  *  - Only one process ticks: the SQLite lease (see ScheduleRepository) is renewed
  *    every tick and expires after 3 ticks without renewal. The `serve` role takes
  *    it from any other holder (`mcp`, `cli`, role-less) on its first tick: the
@@ -396,6 +400,18 @@ export class Scheduler {
     if (!s.enabled && !manual) {
       this.repo.recordFiring(s.id, "skipped_disabled", null, null, nextAt());
       return { outcome: "skipped_disabled", runId: null, error: null };
+    }
+    // The account is on its usage limit until a known time: a run now would fail in seconds and
+    // count as needs review. Skip this tick (not deferred: the next one after the reset fires).
+    // A manual fire is the caller's explicit choice and is not held back.
+    if (!manual) {
+      const resetAt = this.runs.quotaResetAt(this.now());
+      if (resetAt) {
+        const message = `usage limit until ${resetAt}`;
+        this.repo.recordFiring(s.id, "skipped_quota", null, message, nextAt());
+        log.info("schedule skipped: usage limit", { schedule: s.name, resetAt });
+        return { outcome: "skipped_quota", runId: null, error: message };
+      }
     }
     if (!manual && this.runs.config.scheduler.autoPause) {
       const reason = autoPauseReason(this.repo, s, this.runs.config.scheduler.autoPauseAfter);

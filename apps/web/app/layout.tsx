@@ -7,7 +7,7 @@ import "./globals.css";
 import { NavSettings, NavTabs } from "@/components/NavTabs";
 import { ThemeSwitch } from "@/components/ThemeSwitch";
 import { attentionBadge } from "@/lib/attention";
-import { attention, schedulerEnabled, schedulerLease } from "@/lib/data";
+import { attention, runningCount, schedulerEnabled, schedulerLease } from "@/lib/data";
 import { THEME_INIT_SCRIPT } from "@/lib/theme";
 
 // Self-hosted by next/font; globals.css maps these to --font-display/-sans/-mono.
@@ -36,7 +36,8 @@ const geistMono = localFont({
   adjustFontFallback: false,
 });
 
-// The nav reads the scheduler lease on every request (no prerendered shell with stale data).
+// The nav reads the scheduler lease and the running count (Runs badge) when the layout renders (no prerendered
+// shell with stale data). A client-side navigation keeps the layout, so NavTabs re-reads the count itself.
 export const dynamic = "force-dynamic";
 
 export const metadata: Metadata = {
@@ -100,7 +101,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
                 dusk<span className="fleet">fleet</span>
               </span>
             </Link>
-            <NavTabs attention={attentionBadge(attention())} />
+            <NavTabs running={runningCount()} attention={attentionBadge(attention())} />
             <span className="meta">
               <Link href="/schedules" className="scheduler" title={scheduler.title}>
                 scheduler: {scheduler.label}

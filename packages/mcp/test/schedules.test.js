@@ -1093,6 +1093,140 @@ test("auto-pause: three real empty runs (empty_run) pause as 'completed with 0 t
   }
 });
 
+/** Turn an ended run into a usage-limit failure (provider_quota, family limit), with an optional reset time. */
+function markQuota(db, runId, retryNotBefore = null) {
+  db.prepare(
+    "UPDATE runs SET status = 'failed', error_code = 'provider_quota', error_family = 'limit', error_detail_json = ?, tool_calls = 0, review_reasons_json = '[\"failed\",\"nonzero_exit\"]' WHERE id = ?",
+  ).run(retryNotBefore ? JSON.stringify({ retryNotBefore }) : null, runId);
+}
+
+test("auto-pause: usage-limit runs with a reset time neither break nor extend the streak, at the end or in the middle", async () => {
+  const { root, configDir } = makeRoot();
+  writeFileSync(
+    path.join(configDir, "duskfleet.yaml"),
+    `data_dir: ../data\ndefault_agent: coder\nscheduler:\n  auto_pause_after: 3\nclaude:\n  binary: "${fakeBinary}"\n  default_timeout_minutes: 0.05\n`,
+  );
+  const t = makeScheduler(configDir);
+  // A reset time already past: the run is one skipped_quota covers, yet the next tick fires.
+  const passed = () => new Date(Date.now() - 1000).toISOString();
+  try {
+    const s = t.scheduler.create({ name: "outage", agentId: "coder", prompt: "denied", cron: "* * * * *" });
+    // Five usage-limit failures in a row: no streak at all, the next tick fires.
+    for (let i = 0; i < 5; i++) markQuota(t.db, (await t.fireAndWait(s.id)).id, passed());
+    assert.equal(t.repo.get(s.id).enabled, true);
+    assert.equal(t.repo.get(s.id).lastOutcome, "started");
+    assert.equal(t.runs.listRuns({}).length, 5);
+
+    // Two needs-review runs, then a limit run at the end: only two count, so the tick fires.
+    await t.fireAndWait(s.id);
+    await t.fireAndWait(s.id);
+    markQuota(t.db, (await t.fireAndWait(s.id)).id, passed());
+    const fourth = await t.fireAndWait(s.id);
+    assert.equal(t.repo.get(s.id).lastOutcome, "started");
+    assert.deepEqual(fourth.reviewReasons, ["permission_denied"]);
+
+    // Now the limit run sits in the middle of three needs-review runs: the streak is complete.
+    t.due(s.id);
+    await t.tickAll();
+    const paused = t.repo.get(s.id);
+    assert.equal(paused.lastOutcome, "auto_paused");
+    assert.match(paused.pausedReason, /3 needed review/);
+    assert.equal(t.runs.listRuns({}).length, 9, "no tenth run");
+  } finally {
+    await t.close(root);
+  }
+});
+
+test("auto-pause: quota runs without a reset time and max_turns runs still count, since no skip covers them", async () => {
+  const { root, configDir } = makeRoot();
+  writeFileSync(
+    path.join(configDir, "duskfleet.yaml"),
+    `data_dir: ../data\ndefault_agent: coder\nscheduler:\n  auto_pause_after: 3\nclaude:\n  binary: "${fakeBinary}"\n  default_timeout_minutes: 0.05\n`,
+  );
+  const t = makeScheduler(configDir);
+  try {
+    const s = t.scheduler.create({ name: "doomed", agentId: "coder", prompt: "denied", cron: "* * * * *" });
+    markQuota(t.db, (await t.fireAndWait(s.id)).id);
+    assert.equal(t.runs.quotaResetAt(), null, "no reset time: nothing to skip until");
+    const turns = await t.fireAndWait(s.id);
+    t.db
+      .prepare(
+        "UPDATE runs SET status = 'failed', error_code = 'max_turns_exhausted', error_family = 'limit', tool_calls = 3, review_reasons_json = '[\"failed\"]' WHERE id = ?",
+      )
+      .run(turns.id);
+    markQuota(t.db, (await t.fireAndWait(s.id)).id);
+    t.due(s.id);
+    await t.tickAll();
+    const paused = t.repo.get(s.id);
+    assert.equal(paused.lastOutcome, "auto_paused");
+    assert.equal(t.runs.listRuns({}).length, 3, "no fourth run");
+  } finally {
+    await t.close(root);
+  }
+});
+
+test("usage limit: a scheduled tick before retryNotBefore of this host's last provider_quota run is skipped_quota, no run row", async () => {
+  const { root, configDir } = makeRoot();
+  const t = makeScheduler(configDir);
+  try {
+    const s = t.scheduler.create({ name: "limited", agentId: "coder", prompt: "error", cron: "* * * * *" });
+    const first = await t.fireAndWait(s.id);
+    const reset = new Date(Date.now() + 3600_000).toISOString();
+    markQuota(t.db, first.id, reset);
+    assert.equal(t.runs.quotaResetAt(), reset);
+
+    t.due(s.id);
+    await t.tickAll();
+    const skipped = t.repo.get(s.id);
+    assert.equal(skipped.lastOutcome, "skipped_quota");
+    assert.equal(skipped.lastError, `usage limit until ${reset}`);
+    assert.ok(skipped.nextRunAt, "next_run_at moves on: the next tick tries again");
+    assert.equal(skipped.enabled, true);
+    assert.equal(t.runs.listRuns({}).length, 1, "no run row");
+    assert.equal(t.scheduler.firings(s.id, 1)[0].outcome, "skipped_quota");
+
+    // A manual fire is not held back.
+    assert.equal((await t.scheduler.fireNow(s.id)).outcome, "started");
+    assert.equal(t.runs.listRuns({}).length, 2);
+    await t.runs.waitForRun(t.repo.get(s.id).lastRunId, 15_000);
+    // The manual run started a newer row; its own failure is not a quota one, but the last
+    // provider_quota run still decides.
+    assert.equal(t.runs.quotaResetAt(), reset);
+    const manualId = t.repo.get(s.id).lastRunId;
+    const { owner } = t.db.prepare("SELECT owner FROM runs WHERE id = ?").get(first.id);
+
+    // A newer quota run of another host neither hides this host's (host filtered in SQL) nor counts.
+    markQuota(t.db, manualId, new Date(Date.now() + 7200_000).toISOString());
+    t.db.prepare("UPDATE runs SET owner = 'serve@another-host:1' WHERE id = ?").run(manualId);
+    assert.equal(t.runs.quotaResetAt(), reset);
+
+    // A run on this host that completed after the quota run: the limit lifted early.
+    t.db
+      .prepare(
+        "UPDATE runs SET status = 'completed', error_code = NULL, error_family = NULL, error_detail_json = NULL, owner = ? WHERE id = ?",
+      )
+      .run(owner, manualId);
+    assert.equal(t.runs.quotaResetAt(), null);
+    t.db.prepare("UPDATE runs SET status = 'failed', owner = 'serve@another-host:1' WHERE id = ?").run(manualId);
+    assert.equal(t.runs.quotaResetAt(), reset);
+
+    // Another host's quota run says nothing about this one.
+    t.db.prepare("UPDATE runs SET owner = 'serve@another-host:1' WHERE id = ?").run(first.id);
+    assert.equal(t.runs.quotaResetAt(), null);
+    t.db.prepare("UPDATE runs SET owner = ? WHERE id = ?").run(owner, first.id);
+
+    // Past the reset time the tick fires as usual.
+    markQuota(t.db, first.id, new Date(Date.now() - 1000).toISOString());
+    assert.equal(t.runs.quotaResetAt(), null);
+    t.due(s.id);
+    await t.tickAll();
+    assert.equal(t.repo.get(s.id).lastOutcome, "started");
+    assert.equal(t.runs.listRuns({}).length, 3);
+  } finally {
+    await t.close(root);
+  }
+});
+
 test("auto-pause switch: scheduler.auto_pause false fires a streak of needs-review runs; true (re-read next tick) pauses it", async () => {
   const { root, configDir } = makeRoot();
   const yaml = (on) =>

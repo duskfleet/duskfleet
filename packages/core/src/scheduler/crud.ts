@@ -317,7 +317,9 @@ export function updateSchedule(
  * The reason to auto-pause a schedule before its next scheduled fire, or null to fire: its last
  * `limit` ended runs (created after its previous auto-pause) all completed with 0 tool calls or
  * ended needs review. Fewer ended runs than `limit`, or `limit` 0, never pauses. A cancelled or
- * clean run breaks the streak.
+ * clean run breaks the streak. A usage-limit failure with a known reset time (`provider_quota`
+ * with `retryNotBefore`, the ones `skipped_quota` covers) is not the agent's fault:
+ * `recentEndedRuns` leaves it out, so it neither breaks nor extends the streak.
  */
 export function autoPauseReason(
   repo: Pick<ScheduleRepository, "recentEndedRuns">,

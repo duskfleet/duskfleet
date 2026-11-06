@@ -57,7 +57,7 @@ import {
 } from "@duskfleet/core";
 import { ATTENTION_WINDOW_MS, type AttentionSection, attentionSections } from "./attention";
 import { cliCommand, detectInstall, type Install, usableMcpEntry } from "./cli";
-import { ACTIVE_SQL, ACTIVE_STATUSES } from "./running";
+import { ACTIVE_SQL, ACTIVE_STATUSES, RUNNING_COUNT_SQL } from "./running";
 import { costModel, listScoped, scopeList } from "./scope";
 import { mergeSeries } from "./trends";
 
@@ -307,6 +307,12 @@ export function activeRuns(filter: Omit<RunsFilter, "status"> = {}): RunWithProj
     .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
     .slice(0, limit);
 }
+
+/** How many runs are running now, across every project: the nav's Runs badge (same count as the Runs page's KPI). */
+export function runningCount(): number {
+  return (services().db.prepare(RUNNING_COUNT_SQL).get() as { n: number }).n;
+}
+
 const BUCKET_SQL: Record<RunBucket, string> = {
   running: `(${ACTIVE_SQL})`,
   review: `(NOT ${ACTIVE_SQL} AND ${NEEDS_REVIEW_SQL})`,

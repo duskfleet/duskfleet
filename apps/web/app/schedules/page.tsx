@@ -45,6 +45,7 @@ type Verdict =
   | "busy"
   | "capped"
   | "budget"
+  | "quota"
   | "gate"
   | "skipped"
   | "paused"
@@ -60,6 +61,7 @@ const VERDICT_LABEL: Record<Verdict, string> = {
   busy: "skipped busy",
   capped: "skipped, daily cap",
   budget: "skipped, monthly budget spent",
+  quota: "skipped, usage limit",
   gate: "skipped by the gate",
   skipped: "skipped, scheduler off",
   paused: "auto-paused",
@@ -72,6 +74,7 @@ function verdictOf(outcome: ScheduleOutcome, run: RunSummary | null): Verdict {
   if (outcome === "skipped_busy") return "busy";
   if (outcome === "skipped_daily_cap") return "capped";
   if (outcome === "skipped_budget") return "budget";
+  if (outcome === "skipped_quota") return "quota";
   if (outcome === "skipped_gate") return "gate";
   if (outcome === "skipped_disabled") return "skipped";
   if (outcome === "auto_paused") return "paused";
@@ -670,6 +673,12 @@ function cardMessage(
     return { tone: "muted", text: "paused · nothing fires until Resume" };
   }
   if (s.lastOutcome === "error" && s.lastError) return { tone: "bad", text: s.lastError };
+  if (last?.outcome === "skipped_quota") {
+    // Core writes "usage limit until <ISO>": show the reset as a local clock time.
+    const at = /until (\S+)$/.exec(last.error ?? "")?.[1];
+    const ok = at !== undefined && Number.isFinite(Date.parse(at));
+    return { tone: "warn", text: ok ? `usage limit until ${clock(at)}` : (last.error ?? "usage limit") };
+  }
   if (last?.outcome === "skipped_gate") {
     let n = 0;
     while (n < firings.length && firings[n]!.outcome === "skipped_gate") n++;
