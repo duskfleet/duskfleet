@@ -1,8 +1,10 @@
 # Schedules (cron)
 
 Schedules live in the database and are managed over MCP (`create_schedule`, `update_schedule`,
-`delete_schedule`, `run_schedule_now`, `list_schedules`) or read on the dashboard's **Schedules**
-page and with `duskfleet schedules` on the CLI. A schedule is: agent, prompt, 5-field cron,
+`delete_schedule`, `run_schedule_now`, `list_schedules`). Creating one is MCP only. The
+dashboard's **Schedules** page pauses and resumes, edits the cron and time zone, deletes and
+runs now; the CLI lists them (`duskfleet schedules`) and fires one
+(`duskfleet schedules run-now <id or name>`). A schedule is: agent, prompt, 5-field cron,
 IANA time zone (default `Europe/London`), optional project (not needed when the agent is bound
 to one) and model override.
 

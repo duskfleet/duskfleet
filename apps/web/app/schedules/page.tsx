@@ -9,6 +9,7 @@ import {
 import Link from "next/link";
 import { CopyButton } from "@/components/CopyButton";
 import { ScheduleActions } from "@/components/ScheduleActions";
+import { SchedulesNote } from "@/components/SchedulesNote";
 import { cliCommand, installServiceCommand } from "@/lib/cli";
 import {
   firingTotals,
@@ -116,9 +117,7 @@ export default function SchedulesPage() {
         <h1>
           Schedules <span className="count">{schedules.length}</span>
         </h1>
-        <span className="note">
-          Created and edited over MCP (<code>create_schedule</code>) or the CLI.
-        </span>
+        <SchedulesNote runNowCmd={cliCommand(inst, "schedules run-now <id or name>")} />
       </div>
 
       {mcpOnly && (
