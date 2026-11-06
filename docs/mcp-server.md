@@ -132,7 +132,7 @@ Outcomes of a schedule tick (`lastOutcome` in `list_schedules`; details in [sche
 | `skipped_busy` | the agent or the project already had a run and the trigger is lost (a deferred fire that reached the next occurrence, a manual fire, or `scheduler.defer_busy: false`); never queued |
 | `skipped_daily_cap` | the agent (or its gate agent) reached `max_daily_runs` / `max_daily_cost_usd` for the UTC day |
 | `skipped_budget` | a hard-stop monthly budget covering the run (global, agent or project) is spent; the schedules of that scope were paused |
-| `skipped_quota` | the last run on this host hit the account's usage limit (`provider_quota`) and its reset time is still ahead; the next tick after the reset fires as usual |
+| `skipped_quota` | the last run on this host hit the account's usage limit (`provider_quota`) and its reset time is still ahead, with no completed run on this host since; the next tick after the reset fires as usual |
 | `skipped_gate` | the schedule's [gate](schedules.md#gates-skip-cheaply-when-there-is-no-work) said there is no work; the reason is the firing's error text |
 | `skipped_disabled` | the schedule was paused when its tick came |
 | `auto_paused` | its last `scheduler.auto_pause_after` runs were all empty or needs review: [paused](schedules.md#auto-pause) instead of fired |

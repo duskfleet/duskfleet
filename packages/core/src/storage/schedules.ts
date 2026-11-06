@@ -454,16 +454,19 @@ export class ScheduleRepository {
   /**
    * The last `limit` ended real runs (kind 'run'; gate runs are not the schedule's work) the
    * schedule started, newest first, created after `sinceIso` when given. Running runs are left
-   * out: they have not ended yet. So are runs that failed on the account or the provider (error
-   * family `limit` or `transient`, e.g. a usage-limit outage): not the agent's fault, they neither
-   * break nor extend the auto-pause streak.
+   * out: they have not ended yet. So are the usage-limit failures the scheduler skips ticks for
+   * (error_code `provider_quota` with a known reset time, `skipped_quota`): not the agent's fault,
+   * they neither break nor extend the auto-pause streak. Every other failure counts, a quota run
+   * without a reset time and `max_turns_exhausted` included: nothing else stops those from
+   * starting a doomed run on every tick, so auto-pause must still be able to.
    */
   recentEndedRuns(scheduleId: string, sinceIso: string | null, limit: number): EndedRunFacts[] {
     const rows = this.db
       .prepare(
         `SELECT id, status = 'completed' AND COALESCE(tool_calls, 0) = 0 AS empty, ${NEEDS_REVIEW_SQL} AS needs_review
          FROM runs WHERE schedule_id = ? AND kind = 'run' AND status IN ('completed', 'failed', 'cancelled', 'timed_out')
-           AND COALESCE(error_family, '') NOT IN ('limit', 'transient')
+           AND NOT (COALESCE(error_code, '') = 'provider_quota'
+             AND CASE WHEN json_valid(error_detail_json) THEN json_extract(error_detail_json, '$.retryNotBefore') END IS NOT NULL)
            AND (? IS NULL OR created_at > ?)
          ORDER BY created_at DESC, rowid DESC LIMIT ?`,
       )

@@ -18,9 +18,9 @@
  *  - A spent hard-stop budget (global / agent / project, UTC month) is `skipped_budget`; the
  *    refusal pauses every schedule of that scope (RunManager), so they stay off until resumed.
  *  - A scheduled fire while the last run on this host hit the usage limit and its reset time
- *    (`retryNotBefore`) is still ahead is `skipped_quota`, before auto-pause and any gate. Runs
- *    that failed on the account or provider (error family limit / transient) do not count in the
- *    auto-pause streak either.
+ *    (`retryNotBefore`) is still ahead is `skipped_quota`, before auto-pause and any gate; a run on
+ *    this host that completed after it lifts the skip. Usage-limit runs with a reset time do not
+ *    count in the auto-pause streak either; every other failure does.
  *  - Only one process ticks: the SQLite lease (see ScheduleRepository) is renewed
  *    every tick and expires after 3 ticks without renewal. The `serve` role takes
  *    it from any other holder (`mcp`, `cli`, role-less) on its first tick: the

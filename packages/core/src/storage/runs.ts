@@ -425,13 +425,24 @@ export class RunRepository {
     return row ? rowToRun(row) : null;
   }
 
-  /** The newest runs that failed on the provider's usage limit (error_code provider_quota), newest first. */
-  recentQuotaRuns(limit: number): Run[] {
-    return (
-      this.db
-        .prepare("SELECT * FROM runs WHERE error_code = 'provider_quota' ORDER BY created_at DESC, rowid DESC LIMIT ?")
-        .all(limit) as unknown as RunRow[]
-    ).map(rowToRun);
+  /**
+   * The newest run owned by a process on `host` that says something about the account's usage
+   * limit: one that failed on it (error_code provider_quota) or one that completed (the limit had
+   * lifted by then). Other failures prove nothing either way and are skipped. The host is matched
+   * in SQL on the owner `role@host:pid` (as `parseHolder` reads it), so other hosts' runs sharing
+   * the DB cannot hide this one's. NULL owners (older builds) never match.
+   */
+  lastQuotaSignalOnHost(host: string): Run | null {
+    const row = this.db
+      .prepare(
+        `SELECT * FROM runs
+         WHERE owner IS NOT NULL
+           AND substr(owner, instr(owner, '@') + 1, length(?) + 1) = ? || ':'
+           AND (status = 'completed' OR error_code = 'provider_quota')
+         ORDER BY created_at DESC, rowid DESC LIMIT 1`,
+      )
+      .get(host, host) as unknown as RunRow | undefined;
+    return row ? rowToRun(row) : null;
   }
 
   /** The runs that continued `runId`'s session (run_agent resume_run_id, a schedule's continue), oldest first. */

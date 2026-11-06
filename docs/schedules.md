@@ -315,10 +315,12 @@ counted). When every one of them either completed with 0 tool calls or ended
 empty, how many needed review, the last run's id) is stored as `pausedReason`. It shows in
 `list_schedules` and `duskfleet schedules`, and as an **auto-paused** badge on the
 **Schedules** page. A cancelled or clean run breaks the streak; a run still going is not
-counted yet. A run that failed on the account or the provider (`errorFamily` `limit` or
-`transient`, for example the subscription's 5-hour usage limit) is not the agent's fault: it is
-left out, so it neither breaks nor extends the streak, and an outage of the whole account does
-not pause every schedule.
+counted yet. A run that failed on the subscription's usage limit with a known reset time
+(`errorCode` `provider_quota` with `retryNotBefore`) is not the agent's fault: it is left out, so
+it neither breaks nor extends the streak, and an outage of the whole account does not pause
+every schedule (the ticks until the reset are `skipped_quota` instead). Every other failure
+counts, a usage-limit failure without a reset time and `max_turns_exhausted` included: nothing
+else would stop those from starting a run on every tick.
 
 Resume it as any paused schedule (`update_schedule` with `enabled: true`, or **Resume** on the
 dashboard): the reason is cleared, and only runs created after the pause count towards the
