@@ -231,13 +231,14 @@ code,
 .nav a.tab:focus-visible {
   border-radius: 999px;
 }
-/* DS-30: the Runs tab's running count, 6 px after the label inside the pill, same in every tab state */
+/* DS-30: the Runs tab's running count, 6 px after the label inside the pill, same in every tab state.
+   Its own class: .nav-badge is the Attention tab's badge (DS-28), styled differently. */
 .nav a.tab.has-badge {
   display: inline-flex;
   align-items: center;
   gap: 6px;
 }
-.nav .nav-badge {
+.nav .run-badge {
   min-width: 18px;
   padding: 0 6px;
   border-radius: 999px;
@@ -1943,6 +1944,136 @@ h2 .h2-id {
 }
 .ar-links a + a {
   margin-left: 10px;
+}
+
+/* ---- projects page (DS-30) ----------------------------------------------- */
+/* table chrome as Agent/Row: panel, border, radius 12, header row on panel-2 */
+.project-table {
+  width: 100%;
+  table-layout: fixed;
+  border-collapse: separate;
+  border-spacing: 0;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  box-shadow: var(--shadow);
+  overflow: hidden;
+  font-size: 14px;
+  line-height: 21px;
+}
+.project-table th {
+  background: var(--panel-2);
+  color: var(--muted);
+  font-weight: 500;
+  text-align: left;
+  padding: 8px;
+  border-bottom: 1px solid var(--border);
+}
+.project-table td {
+  padding: 12px 8px;
+  border-bottom: 1px solid var(--border);
+  vertical-align: middle;
+  min-width: 0;
+}
+.project-table tr > :first-child {
+  padding-left: 16px;
+}
+.project-table tr > :last-child {
+  padding-right: 16px;
+}
+.project-table tbody tr:last-child > td {
+  border-bottom: 0;
+}
+.project-table .c-agents {
+  width: 36%;
+}
+.project-table .c-last {
+  width: 206px;
+}
+.project-table .c-num {
+  width: 146px;
+}
+.project-table .c-links {
+  width: 72px;
+}
+.pr-name {
+  color: var(--text);
+  font-size: 15px;
+  line-height: 22.5px;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.pr-path {
+  display: block;
+  color: var(--muted);
+  font-size: 13px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.pr-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  min-width: 0;
+}
+.pr-chips a.ac-tag:hover {
+  text-decoration: none;
+  border-color: var(--border-strong);
+}
+.pr-last {
+  white-space: nowrap;
+}
+.pr-ago {
+  color: var(--muted);
+  margin-left: 8px;
+}
+.pr-num {
+  font-variant-numeric: tabular-nums;
+}
+.pr-links {
+  text-align: right;
+  white-space: nowrap;
+}
+/* Project/LastRun, state none: no run on the project yet */
+.badge.none {
+  color: var(--muted);
+  background: var(--panel-2);
+}
+.projects-empty {
+  padding: 24px 26px;
+}
+.projects-empty h3 {
+  font-family: var(--font-display);
+  font-size: 18px;
+  line-height: 26px;
+  font-weight: 600;
+  margin: 0 0 10px;
+}
+.projects-empty p {
+  color: var(--muted);
+  margin: 0 0 12px;
+  max-width: 76ch;
+}
+.projects-sample {
+  display: inline-block;
+  background: var(--panel-2);
+  font-size: 13px;
+  margin-bottom: 12px;
+}
+.projects-empty > a {
+  display: block;
+  width: fit-content;
+}
+@media (max-width: 720px) {
+  .project-table .c-agents,
+  .project-table .pr-agents,
+  .project-table .c-num,
+  .project-table .pr-num {
+    display: none;
+  }
 }
 
 /* Agent/Spark: 6 px bars, 3 px gap, max 26 px; past days faint at 70 %, today run (live) or faint */
@@ -5052,5 +5183,292 @@ details.desc ul {
   }
   .agent-table .at-all {
     display: inline;
+  }
+}
+
+/* ---- /attention (DS-28, Direction B: sections by kind) -------------------- */
+/* Nav/AttentionBadge: the status tint on a --panel underlay, so the count keeps 4.5:1 on the active tab */
+.nav a.tab .nav-badge {
+  display: inline-block;
+  margin-left: 8px;
+  min-width: 31px;
+  padding: 0 8px;
+  border-radius: 999px;
+  border: 1px solid currentColor;
+  font-size: 14px;
+  line-height: 20px;
+  font-weight: 600;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+.nav-badge.warn {
+  color: var(--warn);
+  background: linear-gradient(var(--warn-bg), var(--warn-bg)), var(--panel);
+}
+.nav-badge.bad {
+  color: var(--bad-ink);
+  background: linear-gradient(var(--bad-bg), var(--bad-bg)), var(--panel);
+}
+.att-head {
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+}
+.att-note {
+  margin: 0;
+  color: var(--muted);
+  font-size: 15px;
+  line-height: 22px;
+}
+/* kind chip: outline and ink of the tone on its tint */
+.att-chip {
+  display: inline-block;
+  padding: 1px 8px;
+  border-radius: 999px;
+  border: 1px solid var(--border-strong);
+  background: var(--panel-2);
+  color: var(--muted);
+  font-size: 14px;
+  line-height: 20px;
+  font-weight: 500;
+  white-space: nowrap;
+}
+.att-chip.bad {
+  border-color: var(--bad);
+  background: var(--bad-bg);
+  color: var(--bad-ink);
+}
+.att-chip.warn {
+  border-color: var(--warn);
+  background: var(--warn-bg);
+  color: var(--warn);
+}
+.att-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 24px;
+}
+.att-section {
+  margin-bottom: 24px;
+}
+.att-section .att-h2 {
+  margin: 0 0 10px;
+  color: var(--text);
+  text-transform: none;
+  letter-spacing: 0.01em;
+  gap: 8px;
+}
+.att-table {
+  width: 100%;
+  border-collapse: separate;
+  border-spacing: 0;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  overflow: hidden;
+  box-shadow: var(--shadow);
+  font-size: 15px;
+  line-height: 20px;
+}
+.att-table th,
+.att-table td {
+  padding: 12px 8px;
+  text-align: left;
+  vertical-align: middle;
+  border-bottom: 1px solid var(--border);
+}
+.att-table th:first-child,
+.att-table td:first-child {
+  padding-left: 16px;
+}
+.att-table th:last-child,
+.att-table td:last-child {
+  padding-right: 16px;
+}
+.att-table thead th {
+  background: var(--panel-2);
+  color: var(--muted);
+  font-size: 14px;
+  line-height: 16px;
+  font-weight: 500;
+  padding-top: 9px;
+  padding-bottom: 9px;
+}
+.att-table tbody tr:last-child td {
+  border-bottom: none;
+}
+.att-table .num {
+  text-align: right;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+.att-table .c-badge {
+  width: 150px;
+}
+.att-table .c-act {
+  width: 140px;
+  text-align: right;
+  white-space: nowrap;
+}
+.att-table .c-meta,
+.att-table .c-when {
+  color: var(--muted);
+  white-space: nowrap;
+}
+.att-table .c-when {
+  font-family: var(--font-mono);
+  letter-spacing: 0;
+}
+.att-title {
+  font-family: var(--font-mono);
+  font-size: 14px;
+  line-height: 18px;
+  letter-spacing: 0;
+  color: var(--text);
+}
+.att-detail {
+  margin-top: 3px;
+  color: var(--muted);
+}
+.att-narrow {
+  display: none;
+}
+.att-row.tint-bad td {
+  background: var(--bad-tint);
+}
+.att-link,
+.att-fix summary {
+  color: var(--accent);
+  font-weight: 500;
+}
+.att-fix summary {
+  cursor: pointer;
+  list-style: none;
+}
+.att-fix summary::-webkit-details-marker {
+  display: none;
+}
+.att-fix summary:hover {
+  text-decoration: underline;
+}
+/* "How to fix" opens the fix row under its row, in place: no navigation */
+.att-fix-row {
+  display: none;
+}
+.att-row:has(details[open]) + .att-fix-row {
+  display: table-row;
+}
+.att-row:has(details[open]) td {
+  border-bottom: none;
+}
+.att-fix-row td {
+  background: var(--bad-tint);
+}
+.att-fix-box {
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px 12px;
+  color: var(--text);
+}
+.att-fix-label {
+  font-weight: 600;
+  margin-right: 6px;
+}
+.att-empty {
+  text-align: center;
+  padding: 44px 18px;
+}
+.att-empty-title {
+  margin: 0 0 8px;
+  font-family: var(--font-display);
+  font-size: 18px;
+  line-height: 26px;
+  font-weight: 600;
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+}
+.att-ok-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--ok);
+}
+.att-empty-text {
+  margin: 0 0 10px;
+  color: var(--muted);
+  font-size: 14px;
+  line-height: 21px;
+}
+/* 390: each row becomes a stacked card (badge + time, title, detail, link); the whole card is the target */
+@media (max-width: 600px) {
+  .att-table,
+  .att-table tbody {
+    display: block;
+    background: none;
+    border: none;
+    box-shadow: none;
+    border-radius: 0;
+    overflow: visible;
+  }
+  .att-table thead {
+    display: none;
+  }
+  .att-table tr.att-row {
+    position: relative;
+    display: grid;
+    grid-template-columns: 1fr auto;
+    grid-template-areas: "badge when" "main main" "act act";
+    gap: 6px 8px;
+    padding: 12px;
+    margin-bottom: 8px;
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+  }
+  .att-table tr.att-row.tint-bad {
+    background: var(--bad-tint);
+  }
+  .att-table td,
+  .att-table td:first-child,
+  .att-table td:last-child {
+    padding: 0;
+    border: none;
+    background: none;
+    width: auto;
+  }
+  .att-table .c-badge {
+    grid-area: badge;
+  }
+  .att-table .c-when {
+    grid-area: when;
+  }
+  .att-table .c-main {
+    grid-area: main;
+  }
+  .att-table .c-act {
+    grid-area: act;
+    text-align: left;
+  }
+  .att-table .c-meta {
+    display: none;
+  }
+  .att-narrow {
+    display: inline;
+  }
+  .att-table .att-link::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    border-radius: 12px;
+  }
+  .att-row:has(details[open]) + .att-fix-row {
+    display: block;
+    margin: -4px 0 8px;
+  }
+  .att-fix-row td {
+    display: block;
   }
 }

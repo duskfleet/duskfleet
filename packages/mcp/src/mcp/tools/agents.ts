@@ -20,6 +20,7 @@ import {
   ON_FAILURE_POLICIES,
   PERMISSION_MODES,
   projectIdFromPath,
+  skillsSchema,
   upsertUserProject,
   validateProjectPath,
   writeAgentAndVerify,
@@ -110,6 +111,8 @@ function presentAgent(a: AgentDefinition, config: DuskFleetConfig) {
     maxDailyCostUsd: a.maxDailyCostUsd ?? null,
     /** Variables this agent's runs get beyond the default allow-list (claude.env_passthrough adds to them). */
     envPassthrough: a.envPassthrough ?? [],
+    /** Duskfleet skills (data/skills, config/skills) bundled into every run. */
+    skills: a.skills ?? [],
     systemPrompt: a.systemPrompt,
     path: a.sourcePath,
   };
@@ -230,6 +233,11 @@ const agentFields = {
     .describe(
       'Environment variables (exact names or PREFIX_*) the runs get on top of the default allow-list (PATH, HOME, ANTHROPIC_*, CLAUDE_*...), e.g. ["GH_TOKEN"] for an agent that uses gh. Everything else in the server\'s environment is dropped',
     ),
+  skills: skillsSchema
+    .optional()
+    .describe(
+      "Duskfleet skills the runs get: names of folders with a SKILL.md in data/skills/ (private, wins) or config/skills/. Unknown names refuse the create/update. Delivered as a bundle passed with --add-dir; the project is never written. The project's own .claude/skills need nothing here",
+    ),
   system_prompt: z.string().optional().describe("Appended to Claude Code's system prompt for every run of this agent"),
 };
 
@@ -343,6 +351,7 @@ export function registerAgentTools(server: McpServer, ctx: ToolContext): void {
               "max_daily_runs",
               "max_daily_cost_usd",
               "env_passthrough",
+              "skills",
             ]),
           )
           .optional()
@@ -372,12 +381,13 @@ export function registerAgentTools(server: McpServer, ctx: ToolContext): void {
             changes.claude_agent ?? existing.claudeAgent,
           );
         const cfgNow = ctx.config;
-        const merged: AgentSpec = { ...agentToSpec(existing) };
+        const stored = agentToSpec(existing);
+        const merged: AgentSpec = { ...stored };
         for (const [k, v] of Object.entries(changes)) if (v !== undefined) (merged as Record<string, unknown>)[k] = v;
         for (const k of clear ?? []) delete (merged as Record<string, unknown>)[k];
         const spec = assertAgentSpecClean(agentSpecSchema.parse(merged));
         const kind = requestedKind ?? agentKind(spec);
-        assertAgentWritable(kind, spec, cfgNow);
+        assertAgentWritable(kind, spec, cfgNow, stored.skills ?? []);
         const fresh = writeAgentAndVerify(cfgNow, spec, () => ctx.config);
         return jsonResult({ updated: true, kind, agent: presentAgent(fresh, ctx.config) });
       } catch (err) {

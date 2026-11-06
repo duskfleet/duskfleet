@@ -383,6 +383,15 @@ const MIGRATIONS: ReadonlyArray<{ version: number; sql: string; backfill?: (db: 
       ALTER TABLE runs ADD COLUMN log_truncated INTEGER;
     `,
   },
+  {
+    // Skills an agent declares (`skills:`, issue #48): the id of the content-addressed bundle under
+    // data/skill-bundles/ the run got with --add-dir, so get_run shows which skills were available.
+    // NULL = the agent declares none (or none of them resolved).
+    version: 28,
+    sql: `
+      ALTER TABLE runs ADD COLUMN skills_bundle TEXT;
+    `,
+  },
 ];
 
 /**

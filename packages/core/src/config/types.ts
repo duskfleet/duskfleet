@@ -93,6 +93,11 @@ export interface AgentDefinition {
    * allow-list and `claude.env_passthrough` (e.g. `GH_TOKEN` for an agent that uses `gh`).
    */
   envPassthrough?: string[];
+  /**
+   * Duskfleet skills the runs get (`skills:`, names of `data/skills/<name>/` or `config/skills/<name>/`),
+   * delivered as a content-addressed bundle under `data/skill-bundles/` passed with --add-dir.
+   */
+  skills?: string[];
   /** Markdown body of the agent file. Sent via --append-system-prompt when non-empty. */
   systemPrompt: string;
   /** Absolute path of the file this agent was loaded from. */

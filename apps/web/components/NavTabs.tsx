@@ -3,27 +3,33 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
+import type { AttentionBadge as Badge } from "@/lib/attention";
 import { parseRunningCount, RUNNING_POLL_MS } from "@/lib/running";
+import { AttentionBadge } from "./AttentionBadge";
 
 const TABS: Array<{ href: string; label: string; match: (p: string) => boolean }> = [
+  // DS-28: Attention first at every width; the tab stays at 0, only its badge goes
+  { href: "/attention", label: "Attention", match: (p) => p.startsWith("/attention") },
   {
     href: "/",
     label: "Runs",
     match: (p) => p === "/" || p.startsWith("/runs") || p.startsWith("/trends") || p.startsWith("/costs"),
   },
   { href: "/agents", label: "Agents", match: (p) => p.startsWith("/agents") },
+  { href: "/projects", label: "Projects", match: (p) => p.startsWith("/projects") },
   { href: "/schedules", label: "Schedules", match: (p) => p.startsWith("/schedules") },
   { href: "/mcp", label: "MCP", match: (p) => p.startsWith("/mcp") },
 ];
 
 /**
- * Top navigation with the current section marked (aria-current + style). DS-30: the Runs tab
- * carries a badge with the number of runs running now; no badge, not a "0", when nothing runs.
- * `running` is the layout's count at its last render. The layout is not re-rendered on a
- * client-side navigation, so while mounted the tabs re-read GET /api/running every
- * RUNNING_POLL_MS and on every pathname change (skipped while the tab is hidden).
+ * Top navigation with the current section marked (aria-current + style); `attention` = the
+ * Attention tab's badge. DS-30: the Runs tab carries a badge with the number of runs running
+ * now; no badge, not a "0", when nothing runs. `running` is the layout's count at its last
+ * render. The layout is not re-rendered on a client-side navigation, so while mounted the tabs
+ * re-read GET /api/running every RUNNING_POLL_MS and on every pathname change (skipped while
+ * the tab is hidden).
  */
-export function NavTabs({ running: initial = 0 }: { running?: number }) {
+export function NavTabs({ running: initial = 0, attention = null }: { running?: number; attention?: Badge | null }) {
   const pathname = usePathname() ?? "/";
   const [running, setRunning] = useState(initial);
 
@@ -66,12 +72,13 @@ export function NavTabs({ running: initial = 0 }: { running?: number }) {
             {t.label}
             {badge ? (
               <>
-                <span className="nav-badge" aria-hidden="true">
+                <span className="run-badge" aria-hidden="true">
                   {running}
                 </span>
                 <span className="sr-only">, {running} running</span>
               </>
             ) : null}
+            {t.href === "/attention" && <AttentionBadge badge={attention} />}
           </Link>
         );
       })}

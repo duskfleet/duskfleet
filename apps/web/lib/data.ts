@@ -55,6 +55,7 @@ import {
   utcDayStart,
   utcMonthStart,
 } from "@duskfleet/core";
+import { ATTENTION_WINDOW_MS, type AttentionSection, attentionSections } from "./attention";
 import { cliCommand, detectInstall, type Install, usableMcpEntry } from "./cli";
 import { ACTIVE_SQL, ACTIVE_STATUSES, RUNNING_COUNT_SQL } from "./running";
 import { costModel, listScoped, scopeList } from "./scope";
@@ -366,6 +367,56 @@ export function adjacentRuns(run: Run): {
 
 export function listProjects() {
   return [...config().projects.values()];
+}
+
+/** One registered project for /projects: its bound agents, its newest real run and this UTC month's runs and spend. */
+export interface ProjectSummary {
+  id: string;
+  path: string;
+  /** Ids of the agents bound to it (`project: <id>`), alphabetical. */
+  agents: string[];
+  lastRun: Pick<Run, "id" | "status" | "reviewReasons" | "createdAt"> | null;
+  /** Real runs started this UTC month (gates left out, as the Runs list counts them). */
+  monthRuns: number;
+  /** Spend this UTC month, gates included, as budgets count it. */
+  monthCostUsd: number;
+}
+
+/**
+ * Every registered project, alphabetical. Runs match by registry id or by folder (older rows
+ * were recorded without `project_id`), the same match as the budgets' project scope.
+ */
+export function projectSummaries(): ProjectSummary[] {
+  const { db, runs } = services();
+  const cfg = config();
+  const monthStart = utcMonthStart(new Date());
+  const lastStmt = db.prepare(
+    `SELECT id FROM runs WHERE kind = 'run' AND (project_id = ? OR project_path = ?) ORDER BY created_at DESC LIMIT 1`,
+  );
+  const monthStmt = db.prepare(
+    `SELECT COALESCE(SUM(kind = 'run'), 0) AS runs, COALESCE(SUM(cost_usd), 0) AS cost
+     FROM runs WHERE created_at >= ? AND (project_id = ? OR project_path = ?)`,
+  );
+  return [...cfg.projects.values()]
+    .sort((a, b) => a.id.localeCompare(b.id))
+    .map((p) => {
+      const last = lastStmt.get(p.id, p.path) as { id: string } | undefined;
+      const run = last ? runs.get(last.id) : null;
+      const month = monthStmt.get(monthStart, p.id, p.path) as { runs: number; cost: number };
+      return {
+        id: p.id,
+        path: p.path,
+        agents: [...cfg.agents.values()]
+          .filter((a) => a.project === p.id)
+          .map((a) => a.id)
+          .sort((a, b) => a.localeCompare(b)),
+        lastRun: run
+          ? { id: run.id, status: run.status, reviewReasons: run.reviewReasons, createdAt: run.createdAt }
+          : null,
+        monthRuns: month.runs,
+        monthCostUsd: month.cost,
+      };
+    });
 }
 
 export function getRun(id: string) {
@@ -1018,6 +1069,50 @@ export function scheduleFiringsWithRuns(ids: readonly string[], limit = 10) {
 /** Firing counts over the last `days` days, across every schedule. */
 export function firingTotals(days = 7): { started: number; skippedBusy: number } {
   return services().schedules.firingTotals(new Date(Date.now() - days * 24 * 3600_000).toISOString());
+}
+
+/** Most runs the attention window reads (48 h of a busy fleet stays far below it). */
+const ATTENTION_RUN_LIMIT = 500;
+/**
+ * Firings read per schedule for the busy streak. Under `scheduler.defer_busy` each
+ * `skipped_busy` row comes with a `deferred` one, so a streak counts up to about half of this.
+ */
+const ATTENTION_FIRINGS = 20;
+
+/**
+ * The /attention sections (lib/attention.ts): ended real runs of the window, every schedule with
+ * its last firings, every budget with its status. A pure read; the nav badge counts the same items.
+ */
+export function attention(now = Date.now()): AttentionSection[] {
+  const { db, runs, schedules } = services();
+  const since = new Date(now - ATTENTION_WINDOW_MS).toISOString();
+  const ids = db
+    .prepare(
+      `SELECT id FROM runs WHERE kind = 'run' AND NOT ${ACTIVE_SQL} AND COALESCE(ended_at, created_at) >= ?
+       ORDER BY COALESCE(ended_at, created_at) DESC LIMIT ?`,
+    )
+    .all(since, ATTENTION_RUN_LIMIT) as Array<{ id: string }>;
+  const label = projectLabeller();
+  const list = ids
+    .map((r) => runs.get(r.id))
+    .filter((r): r is Run => r !== null)
+    .map((r) => ({ ...r, projectLabel: label(r) }));
+  const date = new Date(now);
+  const scheduleRows = schedules.list().map((s) => {
+    let theoreticalNextAt: string | null = null;
+    try {
+      theoreticalNextAt = nextFire(parseCron(s.cron), date, s.timeZone)?.toISOString() ?? null;
+    } catch {
+      // an unparsable cron has no next fire
+    }
+    return { ...s, theoreticalNextAt, firings: schedules.firings(s.id, ATTENTION_FIRINGS) };
+  });
+  return attentionSections({
+    now,
+    runs: list,
+    schedules: scheduleRows,
+    budgets: budgetStatuses(runs.budgets, config()),
+  });
 }
 
 export function schedulerLease() {

@@ -188,6 +188,12 @@ export interface Run {
   logBytes?: number | null;
   logSha256?: string | null;
   logTruncated?: boolean | null;
+  /**
+   * Id of the skills bundle the run got (`data/skill-bundles/<id>`, passed with --add-dir;
+   * migration 28): a content hash of the agent's `skills:` that resolved at start. Null when the
+   * agent declares none, and for older rows.
+   */
+  skillsBundle?: string | null;
 }
 
 /** Longest accepted run / schedule title, in characters (after trimming). */
@@ -465,6 +471,8 @@ export function summarizeRun(run: Run) {
     /** Eval bundle: the agent definition and Claude Code version this run used; null when unknown. */
     agentHash: run.agentHash,
     claudeCodeVersion: run.claudeCodeVersion,
+    /** The skills bundle (data/skill-bundles/<id>) the run got; null when the agent declares no skills. */
+    skillsBundle: run.skillsBundle ?? null,
     claudeSessionId: run.claudeSessionId,
     createdAt: run.createdAt,
     durationMs: run.durationMs,

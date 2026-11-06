@@ -6,7 +6,8 @@ import Link from "next/link";
 import "./globals.css";
 import { NavSettings, NavTabs } from "@/components/NavTabs";
 import { ThemeSwitch } from "@/components/ThemeSwitch";
-import { runningCount, schedulerEnabled, schedulerLease } from "@/lib/data";
+import { attentionBadge } from "@/lib/attention";
+import { attention, runningCount, schedulerEnabled, schedulerLease } from "@/lib/data";
 import { THEME_INIT_SCRIPT } from "@/lib/theme";
 
 // Self-hosted by next/font; globals.css maps these to --font-display/-sans/-mono.
@@ -100,7 +101,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
                 dusk<span className="fleet">fleet</span>
               </span>
             </Link>
-            <NavTabs running={runningCount()} />
+            <NavTabs running={runningCount()} attention={attentionBadge(attention())} />
             <span className="meta">
               <Link href="/schedules" className="scheduler" title={scheduler.title}>
                 scheduler: {scheduler.label}
