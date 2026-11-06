@@ -70,6 +70,14 @@ for (const mode of MODES) {
     }
   });
 
+  // DS-30: the nav's Runs count, --bg ink on a solid --run pill that sits on the nav's --bg
+  test(`${mode}: nav Runs badge, --bg on --run >= 4.5:1 and --run on --bg >= 3:1`, () => {
+    const ink = tokenContrast(tokens, mode, "--bg", "--run");
+    assert.ok(ink >= 4.5, `--bg on --run is ${fmt(ink)}:1`);
+    const edge = tokenContrast(tokens, mode, "--run", "--bg");
+    assert.ok(edge >= 3, `--run on --bg is ${fmt(edge)}:1`);
+  });
+
   test(`${mode}: --border-strong on --bg and --panel >= 3:1`, () => {
     for (const bg of ["--bg", "--panel"]) {
       const ratio = tokenContrast(tokens, mode, "--border-strong", bg);
