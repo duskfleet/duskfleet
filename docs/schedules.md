@@ -315,7 +315,12 @@ counted). When every one of them either completed with 0 tool calls or ended
 empty, how many needed review, the last run's id) is stored as `pausedReason`. It shows in
 `list_schedules` and `duskfleet schedules`, and as an **auto-paused** badge on the
 **Schedules** page. A cancelled or clean run breaks the streak; a run still going is not
-counted yet.
+counted yet. A run that failed on the subscription's usage limit with a known reset time
+(`errorCode` `provider_quota` with `retryNotBefore`) is not the agent's fault: it is left out, so
+it neither breaks nor extends the streak, and an outage of the whole account does not pause
+every schedule (the ticks until the reset are `skipped_quota` instead). Every other failure
+counts, a usage-limit failure without a reset time and `max_turns_exhausted` included: nothing
+else would stop those from starting a run on every tick.
 
 Resume it as any paused schedule (`update_schedule` with `enabled: true`, or **Resume** on the
 dashboard): the reason is cleared, and only runs created after the pause count towards the
@@ -380,7 +385,7 @@ on the row (`concurrencyPolicy`, `catchUpPolicy`, `triggerKind` in `list_schedul
 | `trigger_kind` | `cron` (the only one for now; the field leaves room for other triggers, such as an API call, and the tick only fires `cron` schedules) | `cron` |
 
 What to change when a schedule keeps skipping (`skipped_busy`, `skipped_daily_cap`,
-`skipped_budget`, `auto_paused`, or nothing recorded at all) is in
+`skipped_budget`, `skipped_quota`, `auto_paused`, or nothing recorded at all) is in
 [troubleshooting](troubleshooting.md#runs-skipped-by-gates).
 
 - A tick whose agent or project is still busy is never queued (checked before any
@@ -394,6 +399,12 @@ What to change when a schedule keeps skipping (`skipped_busy`, `skipped_daily_ca
   agent's or its project's) is recorded as `skipped_budget`, also before any gate, and every
   schedule of that budget's scope is paused: it stays paused after the month turns, until you
   resume it (`update_schedule enabled: true` or the dashboard).
+- A scheduled tick while the account is on its usage limit is recorded as `skipped_quota`
+  (before auto-pause and any gate), with "usage limit until <reset time>" as its message: the
+  last `provider_quota` run started on this host gave a reset time (`errorDetail.retryNotBefore`)
+  that is still ahead. Not deferred: the first tick after the reset fires as usual. A manual
+  trigger (**Run now**, `run_schedule_now`) is not held back. The dashboard shows "usage limit
+  until 15:40" on the schedule's card.
 - Missed ticks (nobody running) are not caught up (`skip_missed`): the schedule fires once when
   it is next considered and its next tick is computed from then.
 - `scheduler.enabled: false` in `duskfleet.yaml` is the kill switch, re-read every tick. For a

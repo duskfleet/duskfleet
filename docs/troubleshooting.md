@@ -169,6 +169,12 @@ outcome is recorded on the firing: `lastOutcome` / `lastError` in `list_schedule
   at their stand-in: `duskfleet doctor` lists them under `unpricedRuns`; set a `max_budget_usd`
   on those agents, or `unpriced_policy: allow` on the budget
   ([unknown costs fail closed](agents.md#unknown-costs-fail-closed)).
+- **`skipped_quota`**: the account is on its usage limit (`usage limit until <reset time>`):
+  the last `provider_quota` run on this host said when the limit resets, and that time is still
+  ahead. Nothing to fix: the first tick after the reset fires as usual, and so does every tick
+  once a run on this host (a Run now, say) has completed since. Runs that failed on the limit
+  with a reset time do not count towards [auto-pause](schedules.md#auto-pause); without one
+  they do.
 - **`skipped_gate`**: the schedule's gate found no work; its reason is `lastError`
   ([gates](schedules.md#gates-skip-cheaply-when-there-is-no-work)).
 - **`auto_paused`**: the last `scheduler.auto_pause_after` runs were all empty or needed
