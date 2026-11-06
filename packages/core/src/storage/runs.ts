@@ -425,6 +425,15 @@ export class RunRepository {
     return row ? rowToRun(row) : null;
   }
 
+  /** The newest runs that failed on the provider's usage limit (error_code provider_quota), newest first. */
+  recentQuotaRuns(limit: number): Run[] {
+    return (
+      this.db
+        .prepare("SELECT * FROM runs WHERE error_code = 'provider_quota' ORDER BY created_at DESC, rowid DESC LIMIT ?")
+        .all(limit) as unknown as RunRow[]
+    ).map(rowToRun);
+  }
+
   /** The runs that continued `runId`'s session (run_agent resume_run_id, a schedule's continue), oldest first. */
   continuedBy(runId: string): Run[] {
     return (

@@ -3101,6 +3101,7 @@ summary:focus-visible {
 .sq.busy,
 .sq.capped,
 .sq.budget,
+.sq.quota,
 .sq.skipped {
   border-color: var(--border-strong);
 }

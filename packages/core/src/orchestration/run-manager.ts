@@ -898,6 +898,21 @@ export class RunManager {
     return this.budgetError(agent, projectId, projectPath);
   }
 
+  /**
+   * The reset time (ISO) of the account's usage limit when it is still ahead of `now`, else null:
+   * the `retryNotBefore` of the last `provider_quota` run on this host (the subscription is
+   * per machine login; another host's runs say nothing about this one). Lets the scheduler skip a
+   * tick (`skipped_quota`) instead of starting a run that fails in seconds.
+   */
+  quotaResetAt(now: Date = new Date()): string | null {
+    const host = parseHolder(this.owner).host;
+    const last = this.runs.recentQuotaRuns(20).find((r) => r.owner !== null && parseHolder(r.owner).host === host);
+    const at = last?.errorDetail?.retryNotBefore;
+    if (!at) return null;
+    const t = Date.parse(at);
+    return Number.isFinite(t) && t > now.getTime() ? at : null;
+  }
+
   /** Every budget with this month's spend and its state (ok / warn / over). A pure read. */
   budgetStatuses(now: Date = new Date()): BudgetStatus[] {
     return budgetStatuses(this.runs.budgets, this.config, now);

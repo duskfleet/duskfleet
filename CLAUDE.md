@@ -101,6 +101,9 @@ npm workspaces, one `config/` and one SQLite database shared by three deliverabl
   Auto-pause (`autoPauseReason`, migration 16): before a scheduled fire, the last
   `scheduler.auto_pause_after` ended runs all empty (0 tool calls) or needs review = pause with
   `paused_reason`, outcome `auto_paused`; resume clears it, `auto_paused_at` bounds the next streak.
+  Runs of error family `limit` / `transient` are left out of the streak (`recentEndedRuns`): an
+  account outage is not the agent's fault. A scheduled fire while the last `provider_quota` run on
+  this host has a `retryNotBefore` still ahead is `skipped_quota` (`RunManager.quotaResetAt`), not deferred.
   `scheduler.auto_pause: false` (read every tick) skips the check and keeps the threshold.
   Continuing a session (`run_agent { resume_run_id }`, a schedule's `continue`, migration 23) is
   `continued_from_run_id`, never `resumed_from_run_id` (that one is the single `resume_once` retry,
