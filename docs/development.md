@@ -112,24 +112,26 @@ Re-running it is safe: an existing tag or release is kept, a published version i
   packages (`v0.1.0` and `"0.1.0"`) and fails before anything else otherwise, then runs `npm ci`,
   `npm run check`, `npm run build:web` and `npm run check:pack -- --require-web-build`, and
   publishes `duskfleet`, then `@duskfleet/web`, with `npm publish --provenance --access public`
-  from their package directories. The job authenticates with the `NPM_TOKEN` repository secret:
-  a granular access token with "Read and write (publish and stage)" on those two packages only
-  and "Bypass two-factor authentication" on, the only kind of token that can publish unattended,
-  90 days at most (recreate it when a release fails with E401 or E403). npm removes direct
-  publishing from such tokens in January 2027; the trusted publishing below is meant to have
-  taken over by then. Before each publish the same command runs as `npm publish --dry-run` and
-  the step fails if npm reports an auto-corrected manifest, whatever the tag's code says. A
-  version already on the registry is skipped, so re-running a release whose second package
-  failed finishes it. Provenance requires `id-token: write` and each `package.json` `repository`
-  naming this repository.
-
-  npm trusted publishing (OIDC) is configured too: both packages name this repository and
-  `release.yml` (the workflow that starts the run; publish.yml runs as a reusable workflow it
-  calls) as their trusted publisher, and npm tries that exchange before the token. The registry
-  refuses this repository's OIDC token with "package not found"
-  ([npm/cli#9969](https://github.com/npm/cli/issues/9969): GitHub's immutable `sub` claim,
-  forced on repositories created after 2026-07-15, is not understood by the registry yet). When
-  that is fixed, the token can be deleted and nothing else changes.
+  from their package directories. The job authenticates with **npm trusted publishing (OIDC)**,
+  the path 0.2.0 shipped through on 2026-11-05: on npmjs.com each package names this repository
+  and `release.yml` (the workflow that starts the run; publish.yml runs as a reusable workflow it
+  calls) as its trusted publisher, with the environment left empty and **"Allow npm publish"
+  ticked** (without it the publisher may only stage). Two npm settings decide whether that
+  publish goes live or waits: the trusted publisher configuration **expires** (npm showed the
+  0.1.0-era one as "Expired" four days later; a release that fails with `OIDC token exchange
+  error - package not found` means delete it and create it again), and the package's
+  **Publishing access must be "Require two-factor authentication or a granular access token with
+  bypass 2fa enabled"**: with the "recommended" option (disallow bypass tokens) the registry
+  accepts an OIDC publish with `202` but keeps it **staged** until someone approves it with 2FA,
+  and a later `npm publish` of the same number fails with "previously staged version". The
+  `NPM_TOKEN` secret (a granular token with "Read and write (publish and stage)" on the two
+  packages and "Bypass two-factor authentication", 90 days at most) is only the fallback npm
+  reaches when the OIDC exchange fails; it can be deleted once it has stayed unused, and npm
+  removes direct publishing from such tokens in January 2027 anyway. Before each publish the
+  same command runs as `npm publish --dry-run` and the step fails if npm reports an
+  auto-corrected manifest, whatever the tag's code says. A version already on the registry is
+  skipped, so re-running a release whose second package failed finishes it. Provenance requires
+  `id-token: write` and each `package.json` `repository` naming this repository.
 - `publish dry-run`, on every pull request: the same steps without publishing, ending in
   `npm publish --dry-run` for both packages, so a broken pack shows up before the tag. Instead of
   the tag guard it checks that the two versions are equal. Between releases the manifest still
