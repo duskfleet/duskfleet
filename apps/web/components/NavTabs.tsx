@@ -8,8 +8,6 @@ import { parseRunningCount, RUNNING_POLL_MS } from "@/lib/running";
 import { AttentionBadge } from "./AttentionBadge";
 
 const TABS: Array<{ href: string; label: string; match: (p: string) => boolean }> = [
-  // DS-28: Attention first at every width; the tab stays at 0, only its badge goes
-  { href: "/attention", label: "Attention", match: (p) => p.startsWith("/attention") },
   {
     href: "/",
     label: "Runs",
@@ -19,6 +17,9 @@ const TABS: Array<{ href: string; label: string; match: (p: string) => boolean }
   { href: "/projects", label: "Projects", match: (p) => p.startsWith("/projects") },
   { href: "/schedules", label: "Schedules", match: (p) => p.startsWith("/schedules") },
   { href: "/mcp", label: "MCP", match: (p) => p.startsWith("/mcp") },
+  // DS-28: Attention after MCP at 1280 (the frames), first in the wrapped tab row at 390 so its
+  // badge never wraps out of view (CSS order); the tab stays at 0, only its badge goes
+  { href: "/attention", label: "Attention", match: (p) => p.startsWith("/attention") },
 ];
 
 /**
