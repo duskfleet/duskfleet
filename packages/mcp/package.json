@@ -1,6 +1,6 @@
 {
   "name": "@duskfleet/mcp",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "private": true,
   "description": "Duskfleet MCP server (stdio) and local CLI",
   "type": "module",
@@ -18,7 +18,7 @@
     "test:coverage": "node --test --experimental-test-coverage --test-coverage-exclude=\"test/**\" --test-coverage-exclude=\"../core/test/**\" --test-coverage-exclude=\"../duskfleet/dist/**\" --test-coverage-lines=80 test/*.test.js ../core/test/*.test.js"
   },
   "dependencies": {
-    "@duskfleet/core": "0.2.0",
+    "@duskfleet/core": "0.3.0",
     "@modelcontextprotocol/sdk": "^1.32.2",
     "zod": "^4.6.7"
   }
