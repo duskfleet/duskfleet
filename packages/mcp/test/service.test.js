@@ -298,6 +298,78 @@ test("a cli.js inside the npx cache is refused: the unit would break once npm ev
   );
 });
 
+test("Linux without a user bus: install writes nothing, a failed reload removes the unit, doctor says not installed", () => {
+  const home = mkdtempSync(path.join(tmpdir(), "duskfleet-nobus-"));
+  const t = { ...base, platform: "linux", home, logPath: path.join(home, "data", "logs", "serve.log") };
+  const unitPath = path.join(home, ".config", "systemd", "user", "duskfleet.service");
+  const noBus = { status: 1, stdout: "", stderr: "Failed to connect to user scope bus via local transport" };
+  try {
+    // no bus at all: refused before anything is written, with the hint
+    const probe = fakeExec({ "show-environment": noBus });
+    assert.throws(
+      () => installService(t, probe.exec),
+      (err) =>
+        /no systemd user bus.*user scope bus.*nothing was written/.test(err.message) &&
+        /loginctl enable-linger \$USER/.test(err.message) &&
+        /terminal, tmux or your own supervisor/.test(err.message),
+    );
+    assert.equal(existsSync(unitPath), false);
+    assert.deepEqual(
+      probe.calls.map((c) => c.slice(1).join(" ")),
+      ["--user show-environment"],
+    );
+
+    // systemctl missing (spawn error): same refusal
+    assert.throws(
+      () =>
+        installService(
+          t,
+          fakeExec({ "show-environment": { status: null, stdout: "", stderr: "spawnSync systemctl ENOENT" } }).exec,
+        ),
+      /no systemd user bus \(spawnSync systemctl ENOENT\)/,
+    );
+    assert.equal(existsSync(unitPath), false);
+
+    // the probe passes but daemon-reload fails: the new unit is removed again
+    const reload = fakeExec({ "daemon-reload": noBus });
+    assert.throws(() => installService(t, reload.exec), /daemon-reload failed.*supervisor/);
+    assert.equal(existsSync(unitPath), false);
+    assert.ok(!reload.calls.some((c) => c.includes("enable")));
+
+    // ...and an earlier unit is put back as it was
+    installService(t, fakeExec().exec);
+    const before = readFileSync(unitPath, "utf8");
+    assert.throws(() => installService({ ...t, claudeBin: null }, reload.exec), /daemon-reload failed/);
+    assert.equal(readFileSync(unitPath, "utf8"), before);
+
+    // doctor: a unit file on disk without a reachable bus is not an installed service
+    const st = serviceStatus("linux", () => noBus, home);
+    assert.deepEqual([st.installed, st.running], [false, null]);
+    assert.match(st.detail, /^unit present, not loaded: systemd user bus unreachable \(Failed to connect/);
+    assert.match(st.advice, /terminal, tmux or your own supervisor/);
+    // a unit file systemd has not loaded is not installed either
+    const nf = serviceStatus(
+      "linux",
+      () => ({
+        status: 0,
+        stdout: "LoadState=not-found\nActiveState=inactive\nSubState=dead\nMainPID=0\n",
+        stderr: "",
+      }),
+      home,
+    );
+    assert.deepEqual(
+      [nf.installed, nf.running, nf.detail],
+      [false, false, "unit present, not loaded: run install-service"],
+    );
+    assert.equal(nf.advice, undefined);
+    rmSync(unitPath);
+    const gone = serviceStatus("linux", () => noBus, home);
+    assert.match(gone.detail, /^systemd user bus unreachable/);
+  } finally {
+    rmSync(home, { recursive: true, force: true });
+  }
+});
+
 test("unsupported platform is refused with a hint", () => {
   assert.throws(() => renderService({ ...base, platform: "freebsd" }), /duskfleet serve/);
   const s = serviceStatus("freebsd", () => ({ status: 0, stdout: "", stderr: "" }), "/home/me");
@@ -353,8 +425,14 @@ test("install writes the unit and drives the service manager; uninstall removes 
     assert.equal(rl.unit.unitPath, path.join(home, ".config", "systemd", "user", "duskfleet.service"));
     assert.deepEqual(
       lin.calls.map((c) => c.slice(1).join(" ")),
-      ["--user daemon-reload", "--user enable duskfleet.service", "--user restart duskfleet.service"],
+      [
+        "--user show-environment",
+        "--user daemon-reload",
+        "--user enable duskfleet.service",
+        "--user restart duskfleet.service",
+      ],
     );
+    assert.ok(rl.unit.notes.some((n) => n.includes("loginctl enable-linger $USER")));
     const ls = serviceStatus(
       "linux",
       () => ({ status: 0, stdout: "LoadState=loaded\nActiveState=active\nSubState=running\nMainPID=77\n", stderr: "" }),

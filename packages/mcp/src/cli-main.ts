@@ -593,9 +593,11 @@ async function main(): Promise<void> {
           ? "scheduler.enabled is false in duskfleet.yaml: nothing fires"
           : service.running
             ? null
-            : service.supported
-              ? `schedules fire only while an MCP host keeps the server alive${leaseLive ? "" : " (nothing is ticking right now)"}; run "duskfleet install-service" to run them unattended`
-              : service.detail,
+            : service.advice
+              ? `${service.detail}: install-service cannot work here. ${service.advice}`
+              : service.supported
+                ? `schedules fire only while an MCP host keeps the server alive${leaseLive ? "" : " (nothing is ticking right now)"}; run "duskfleet install-service" to run them unattended`
+                : service.detail,
         // One schedule per agent: create / update refuse a second one, but older databases may hold some.
         duplicateSchedules: app.scheduler.duplicateAgents().map((d) => ({
           agentId: d.agentId,
