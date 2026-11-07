@@ -8,6 +8,14 @@ All notable changes to Duskfleet are listed here. The format follows
 
 ## [Unreleased]
 
+## [0.3.1] - 2026-11-07
+
+No schema change.
+
+### Changed
+
+- README: a busy scheduled tick is deferred as one pending fire, retried until the agent is free or the next occurrence comes; three sentences (Before / after, the How it works diagram, the What you get table) still said it was skipped and never queued. The npm package ships this README ([#421](https://github.com/duskfleet/duskfleet/pull/421)).
+
 ## [0.3.0] - 2026-11-07
 
 One schema migration (28) runs on the first open of an existing database; nothing to do by hand.
@@ -183,7 +191,8 @@ localhost dashboard.
 - An allow-listed MCP server that a run did not use no longer counts as missing ([#165](https://github.com/duskfleet/duskfleet/pull/165)).
 - The published packages had `bin` paths with a `./` prefix, which npm 11 drops at publish time, so `npx duskfleet` would have had no executable; the pack gate now refuses such entries and `publish --dry-run` fails when npm auto-corrects the manifest ([#278](https://github.com/duskfleet/duskfleet/pull/278)); the publish job itself now runs that check before each `npm publish`, so a tag cut before the fix cannot ship without its executables ([#312](https://github.com/duskfleet/duskfleet/pull/312)).
 
-[Unreleased]: https://github.com/duskfleet/duskfleet/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/duskfleet/duskfleet/compare/v0.3.1...HEAD
+[0.3.1]: https://github.com/duskfleet/duskfleet/releases/tag/v0.3.1
 [0.3.0]: https://github.com/duskfleet/duskfleet/releases/tag/v0.3.0
 [0.2.0]: https://github.com/duskfleet/duskfleet/releases/tag/v0.2.0
 [0.1.0]: https://github.com/duskfleet/duskfleet/releases/tag/v0.1.0
