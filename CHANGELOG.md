@@ -8,6 +8,40 @@ All notable changes to Duskfleet are listed here. The format follows
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-11-07
+
+One schema migration (28) runs on the first open of an existing database; nothing to do by hand.
+
+### Added
+
+#### Runs and agents
+
+- Agents declare `skills: [name, ...]` in their frontmatter; a run gets them through a content-addressed bundle passed with `--add-dir`, so the target project is never written. `data/skills/<name>/` (private) wins over `config/skills/<name>/` (committable); `create_agent` and `update_agent` refuse an unknown skill or one whose files carry home paths or secret-looking values; `runs.skills_bundle` (migration 28) records the bundle, shown as `skillsBundle` by `get_run` ([#396](https://github.com/duskfleet/duskfleet/pull/396)).
+
+#### Schedules
+
+- A usage-limit outage no longer auto-pauses a schedule: `provider_quota` and other `limit` / `transient` failures are left out of the auto-pause streak, and a scheduled fire while the last usage-limit run on this host still has a reset time ahead is recorded as `skipped_quota` ("usage limit until …"), never deferred; manual fires are not held back ([#413](https://github.com/duskfleet/duskfleet/pull/413)).
+
+#### Dashboard
+
+- Alerts page (`/attention`) and its nav badge: everything that needs a human in six fixed sections (login and quota errors with a fix line, failed runs, needs review, schedules auto-paused or in error, budget warnings, repeated skipped busy), one item per cause, gone when the cause is fixed; nothing to dismiss ([#401](https://github.com/duskfleet/duskfleet/pull/401), [#416](https://github.com/duskfleet/duskfleet/pull/416), [#418](https://github.com/duskfleet/duskfleet/pull/418)).
+- The Runs tab carries the number of runs running now, from every page; no badge at 0 ([#405](https://github.com/duskfleet/duskfleet/pull/405)).
+
+### Changed
+
+- `install-service` on Linux checks for the systemd user bus before writing anything and refuses with a hint when there is none (containers, WSL without systemd, SSH without linger); `doctor` reports such a unit as not installed instead of telling you to install it ([#415](https://github.com/duskfleet/duskfleet/pull/415)).
+- The Schedules page says what each surface can do: MCP creates (`create_schedule`), the dashboard pauses, resumes, edits and runs now, the CLI lists and fires (`schedules run-now`) ([#414](https://github.com/duskfleet/duskfleet/pull/414)).
+- The README "How it works" section is two Mermaid diagrams GitHub renders in both themes, instead of PNG exports ([#409](https://github.com/duskfleet/duskfleet/pull/409)).
+- Publishing docs: releases go through npm trusted publishing (OIDC); the token is the fallback ([#412](https://github.com/duskfleet/duskfleet/pull/412)).
+
+### Removed
+
+- The Projects page of the dashboard: it duplicated the Agents tables grouped by project and the Runs project filter ([#404](https://github.com/duskfleet/duskfleet/pull/404), [#419](https://github.com/duskfleet/duskfleet/pull/419)).
+
+### Fixed
+
+- "You've hit your 5-hour limit" (and any hyphenated window) is classified as `provider_quota`, with its reset time, instead of a generic failure ([#407](https://github.com/duskfleet/duskfleet/pull/407)).
+
 ## [0.2.0] - 2026-11-05
 
 Six schema migrations (22 to 27) run on the first open of an existing database; nothing to do by hand. See the upgrade note under Changed for monthly budgets.
@@ -149,6 +183,7 @@ localhost dashboard.
 - An allow-listed MCP server that a run did not use no longer counts as missing ([#165](https://github.com/duskfleet/duskfleet/pull/165)).
 - The published packages had `bin` paths with a `./` prefix, which npm 11 drops at publish time, so `npx duskfleet` would have had no executable; the pack gate now refuses such entries and `publish --dry-run` fails when npm auto-corrects the manifest ([#278](https://github.com/duskfleet/duskfleet/pull/278)); the publish job itself now runs that check before each `npm publish`, so a tag cut before the fix cannot ship without its executables ([#312](https://github.com/duskfleet/duskfleet/pull/312)).
 
-[Unreleased]: https://github.com/duskfleet/duskfleet/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/duskfleet/duskfleet/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/duskfleet/duskfleet/releases/tag/v0.3.0
 [0.2.0]: https://github.com/duskfleet/duskfleet/releases/tag/v0.2.0
 [0.1.0]: https://github.com/duskfleet/duskfleet/releases/tag/v0.1.0
