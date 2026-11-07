@@ -114,7 +114,15 @@ Things to know:
   hybrid-sleep.target`; `install-service` prints this hint.
 - Windows: the task does not keep the PC awake either; set Sleep to "Never" on AC power
   (`powercfg /change standby-timeout-ac 0`); `install-service` prints this hint.
-- Linux: `loginctl enable-linger $USER` keeps the unit alive when you are logged out.
+- Linux: `loginctl enable-linger $USER` keeps the unit alive when you are logged out;
+  `install-service` prints this hint.
+- Linux without a systemd user bus (containers, WSL without systemd, some SSH sessions):
+  `install-service` checks the bus first (`systemctl --user show-environment`) and refuses
+  without writing anything; if `daemon-reload` fails anyway, the unit file it wrote is removed
+  again (or the previous one put back). Over SSH on a systemd machine, `loginctl enable-linger
+  $USER` starts your user manager; elsewhere keep `duskfleet serve` running in a terminal,
+  tmux or your own supervisor. `doctor` then reports `installed: false` with the reason, and a
+  unit file systemd has not loaded is `unit present, not loaded`, never `installed: true`.
 - Windows (experimental, see the note above): check `data/logs/serve.log` if `doctor` reports
   the task running but nothing fires, and report what you find as an issue.
 - The MCP server keeps ticking as a fallback: stop the service and it takes over after three
