@@ -232,7 +232,7 @@ code,
   border-radius: 999px;
 }
 /* DS-30: the Runs tab's running count, 6 px after the label inside the pill, same in every tab state.
-   Its own class: .nav-badge is the Attention tab's badge (DS-28), styled differently. */
+   Its own class: .nav-badge is the Alerts tab's badge (DS-28), styled differently. */
 .nav a.tab.has-badge {
   display: inline-flex;
   align-items: center;
@@ -3742,7 +3742,7 @@ details.desc ul {
     flex-basis: 100%;
     height: 0;
   }
-  /* DS-28: Attention leads the wrapped row so its badge never wraps out of view */
+  /* DS-28: Alerts leads the wrapped row so its badge never wraps out of view */
   .nav a.tab:not(.nav-settings) {
     order: 4;
   }
