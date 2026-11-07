@@ -1,6 +1,6 @@
 {
   "name": "duskfleet-workspace",
-  "version": "0.2.0",
+  "version": "0.3.1",
   "private": true,
   "description": "A fleet of agents for your own machine.",
   "license": "MIT",

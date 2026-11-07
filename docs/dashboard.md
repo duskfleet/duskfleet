@@ -126,15 +126,6 @@ no badge when nothing runs); it re-reads the count every 5 seconds and on every 
   agent and reason. User agents can be deleted or unlinked here, with an inline confirmation;
   builtins are never edited here. **Run now…** appears only when a schedule runs the agent and uses that
   schedule's run now (see Schedules below): the dashboard never starts a run itself.
-- **Projects**: every [registered project](configuration.md#projects-configprojectsyaml-optional),
-  alphabetical, under four tiles (projects with and without bound agents, real runs this UTC month,
-  spend this month with the global monthly budget when one exists, and the projects whose last run
-  needs review). One row per project: its id and `~/…` path, the agents bound to it (two chips,
-  then "+N"), its last real run as a status pill (needs review from the stored review reasons,
-  never green; "none" before the first run) with its age, this month's runs and spend (gates
-  included in the spend, as budgets count it) and "runs →" to the Runs page filtered by the
-  project. Runs match the project by id or by folder. With no project registered, one card shows
-  a `data/projects.yaml` sample instead.
 - **Schedules**: a status strip (kill switch, lease holder and when its lease expires, next
   firing, last 7 days fired / skipped busy), then the schedules grouped by project (the
   schedule's own, else its agent's; "no project" last), one card each, titled by its agent (a link to the agent's card on Agents,
@@ -207,9 +198,9 @@ no badge when nothing runs); it re-reads the count every 5 seconds and on every 
   `claude.allow_bypass_permissions`, `env_passthrough`) stay hand edits of the file. The header
   shows when the file last changed and whether that was a hand edit.
 
-## Attention
+## Alerts
 
-`/attention`, the last tab of the nav (first in the wrapped tab row on narrow screens, so its
+`/attention`, the Alerts tab, last in the nav (first in the wrapped tab row on narrow screens, so its
 badge stays in view), lists everything that needs a human, grouped by kind
 in a fixed order. Empty sections are hidden:
 

@@ -144,8 +144,9 @@ the clone's `data/` (git-ignored). Setup, rules and checks: [CONTRIBUTING.md](CO
 **Before**: `claude -p` started by hand or from a crontab, the output in a terminal, and no
 record of what happened overnight.
 
-**After**: agents are Markdown files ([Agents](docs/agents.md)); cron schedules skip a tick when
-the agent is busy, never queue and never catch up ([Schedules](docs/schedules.md#policies));
+**After**: agents are Markdown files ([Agents](docs/agents.md)); cron schedules keep a busy tick as
+one pending fire, retried until the agent is free or the next occurrence comes, and never catch
+up after sleep ([Schedules](docs/schedules.md#busy-ticks-one-deferred-fire));
 every event, tool call, permission denial, token and dollar lands in SQLite plus a JSONL log per
 run ([What a run records](docs/cli.md#what-a-run-records)); and in the dashboard a run that hit a
 permission denial is "needs review", never green ([Needs review](docs/dashboard.md#needs-review)).
@@ -165,7 +166,7 @@ flowchart TB
     end
 
     subgraph rm ["2 · RunManager"]
-        guards["Concurrency guards: busy is refused, never queued<br/>pass: run row recorded (pending)"]
+        guards["Concurrency guards: busy is refused, a scheduled tick is deferred, never queued<br/>pass: run row recorded (pending)"]
     end
 
     subgraph child ["3 · Claude Code child"]
@@ -225,7 +226,7 @@ with diagrams: [How it works](docs/how-it-works.md).
 |---|---|
 | **Agents** | Markdown files: a persona of your own, or a link to an agent the project already defines in `.claude/agents/`. [Agents](docs/agents.md) |
 | **Runs** | Every event, tool call, permission denial, token and dollar, in SQLite and a JSONL log per run. [CLI](docs/cli.md) |
-| **Schedules** | Cron schedules that skip when the agent is busy, never queue and never catch up. [Schedules](docs/schedules.md) |
+| **Schedules** | Cron schedules that defer a busy tick as one pending fire, retried until the agent is free or the next occurrence; no queue, no catch-up after sleep. [Schedules](docs/schedules.md) |
 | **Dashboard** | Runs with cost, timeline and issues; a run that hit a permission denial is "needs review", never green. [Dashboard](docs/dashboard.md) |
 | **MCP tools** | 19 tools to create agents, start and inspect runs and manage schedules from a chat. [MCP server](docs/mcp-server.md) |
 | **CLI** | The same operations from a terminal, plus `serve` and `install-service` for the scheduler. [CLI](docs/cli.md) |

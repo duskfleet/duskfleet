@@ -1,6 +1,6 @@
 {
   "name": "@duskfleet/core",
-  "version": "0.2.0",
+  "version": "0.3.1",
   "private": true,
   "description": "Duskfleet domain: config, storage (SQLite), execution (Claude Code), orchestration, observability, evals",
   "type": "module",

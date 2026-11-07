@@ -14,17 +14,16 @@ const TABS: Array<{ href: string; label: string; match: (p: string) => boolean }
     match: (p) => p === "/" || p.startsWith("/runs") || p.startsWith("/trends") || p.startsWith("/costs"),
   },
   { href: "/agents", label: "Agents", match: (p) => p.startsWith("/agents") },
-  { href: "/projects", label: "Projects", match: (p) => p.startsWith("/projects") },
   { href: "/schedules", label: "Schedules", match: (p) => p.startsWith("/schedules") },
   { href: "/mcp", label: "MCP", match: (p) => p.startsWith("/mcp") },
-  // DS-28: Attention after MCP at 1280 (the frames), first in the wrapped tab row at 390 so its
+  // DS-28: Alerts (the Attention page) after MCP at 1280 (the frames), first in the wrapped tab row at 390 so its
   // badge never wraps out of view (CSS order); the tab stays at 0, only its badge goes
-  { href: "/attention", label: "Attention", match: (p) => p.startsWith("/attention") },
+  { href: "/attention", label: "Alerts", match: (p) => p.startsWith("/attention") },
 ];
 
 /**
  * Top navigation with the current section marked (aria-current + style); `attention` = the
- * Attention tab's badge. DS-30: the Runs tab carries a badge with the number of runs running
+ * Alerts tab's badge. DS-30: the Runs tab carries a badge with the number of runs running
  * now; no badge, not a "0", when nothing runs. `running` is the layout's count at its last
  * render. The layout is not re-rendered on a client-side navigation, so while mounted the tabs
  * re-read GET /api/running every RUNNING_POLL_MS and on every pathname change (skipped while

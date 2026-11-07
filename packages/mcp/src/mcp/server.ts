@@ -19,7 +19,7 @@ export interface ToolContext {
   executorInfo: { name: string; binary: string; version: string | null };
 }
 
-export const SERVER_VERSION = "0.2.0";
+export const SERVER_VERSION = "0.3.1";
 export const SERVER_INSTRUCTIONS =
   "Duskfleet runs autonomous Claude Code agents against local projects. " +
   "Use list_agents and list_projects to discover what is available, run_agent to start a run " +
