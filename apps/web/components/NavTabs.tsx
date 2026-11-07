@@ -14,7 +14,6 @@ const TABS: Array<{ href: string; label: string; match: (p: string) => boolean }
     match: (p) => p === "/" || p.startsWith("/runs") || p.startsWith("/trends") || p.startsWith("/costs"),
   },
   { href: "/agents", label: "Agents", match: (p) => p.startsWith("/agents") },
-  { href: "/projects", label: "Projects", match: (p) => p.startsWith("/projects") },
   { href: "/schedules", label: "Schedules", match: (p) => p.startsWith("/schedules") },
   { href: "/mcp", label: "MCP", match: (p) => p.startsWith("/mcp") },
   // DS-28: Alerts (the Attention page) after MCP at 1280 (the frames), first in the wrapped tab row at 390 so its

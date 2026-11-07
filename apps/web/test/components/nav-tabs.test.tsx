@@ -9,12 +9,12 @@ function current(html: string): string[] {
   return [...html.matchAll(/<a [^>]*aria-current="page"[^>]*>([^<]*)<\/a>/g)].map((m) => m[1]);
 }
 
-test("NavTabs: the five sections, then Alerts last; Runs active on / and on runs, trends and costs", () => {
+test("NavTabs: the four sections, then Alerts last; Runs active on / and on runs, trends and costs", () => {
   setPathname("/");
   const html = renderToStaticMarkup(<NavTabs />);
   assert.deepEqual(
     [...html.matchAll(/href="([^"]*)"/g)].map((m) => m[1]),
-    ["/", "/agents", "/projects", "/schedules", "/mcp", "/attention"],
+    ["/", "/agents", "/schedules", "/mcp", "/attention"],
   );
   // no badge without items: the tab itself stays
   assert.match(html, /<a href="\/attention" class="tab ">Alerts<\/a>/);
@@ -37,11 +37,9 @@ test("NavTabs: Alerts active on /attention, its badge on the tab", () => {
   assert.match(html, /<a href="\/" class="tab ">Runs<\/a>/);
 });
 
-test("NavTabs: a section's sub-pages mark it; Settings marks none of the six", () => {
+test("NavTabs: a section's sub-pages mark it; Settings marks none of the five", () => {
   setPathname("/agents/df-ui-developer");
   assert.deepEqual(current(renderToStaticMarkup(<NavTabs />)), ["Agents"]);
-  setPathname("/projects");
-  assert.deepEqual(current(renderToStaticMarkup(<NavTabs />)), ["Projects"]);
   setPathname("/schedules");
   assert.deepEqual(current(renderToStaticMarkup(<NavTabs />)), ["Schedules"]);
   setPathname("/mcp");
