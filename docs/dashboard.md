@@ -209,7 +209,8 @@ no badge when nothing runs); it re-reads the count every 5 seconds and on every 
 
 ## Attention
 
-`/attention`, the first tab of the nav, lists everything that needs a human, grouped by kind
+`/attention`, the last tab of the nav (first in the wrapped tab row on narrow screens, so its
+badge stays in view), lists everything that needs a human, grouped by kind
 in a fixed order. Empty sections are hidden:
 
 1. **Login and quota errors**: one item per cause (`auth_required`, `provider_quota`, a
