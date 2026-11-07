@@ -3742,11 +3742,15 @@ details.desc ul {
     flex-basis: 100%;
     height: 0;
   }
+  /* DS-28: Attention leads the wrapped row so its badge never wraps out of view */
   .nav a.tab:not(.nav-settings) {
+    order: 4;
+  }
+  .nav a.tab[href="/attention"] {
     order: 3;
   }
   .nav .meta {
-    order: 4;
+    order: 5;
   }
 }
 

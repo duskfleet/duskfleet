@@ -9,12 +9,12 @@ function current(html: string): string[] {
   return [...html.matchAll(/<a [^>]*aria-current="page"[^>]*>([^<]*)<\/a>/g)].map((m) => m[1]);
 }
 
-test("NavTabs: Attention first, then the five sections; Runs active on / and on runs, trends and costs", () => {
+test("NavTabs: the five sections, then Attention last; Runs active on / and on runs, trends and costs", () => {
   setPathname("/");
   const html = renderToStaticMarkup(<NavTabs />);
   assert.deepEqual(
     [...html.matchAll(/href="([^"]*)"/g)].map((m) => m[1]),
-    ["/attention", "/", "/agents", "/projects", "/schedules", "/mcp"],
+    ["/", "/agents", "/projects", "/schedules", "/mcp", "/attention"],
   );
   // no badge without items: the tab itself stays
   assert.match(html, /<a href="\/attention" class="tab ">Attention<\/a>/);
