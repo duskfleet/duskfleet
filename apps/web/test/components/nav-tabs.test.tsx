@@ -86,10 +86,7 @@ test("NavTabs: before the first poll, the badge shows the layout's count", () =>
 test("NavTabs: Runs and Alerts badges together, each on its own tab with its own class", () => {
   setPathname("/agents");
   const html = renderToStaticMarkup(<NavTabs running={3} attention={{ count: 2, tone: "warn" }} />);
-  assert.match(
-    html,
-    /<a href="\/attention" class="tab ">Alerts<span class="nav-badge warn" title="2 items need you">/,
-  );
+  assert.match(html, /<a href="\/attention" class="tab ">Alerts<span class="nav-badge warn" title="2 items need you">/);
   assert.match(html, /<a href="\/" class="tab {2}has-badge">Runs<span class="run-badge" aria-hidden="true">3<\/span>/);
   assert.equal([...html.matchAll(/class="run-badge"/g)].length, 1);
   assert.equal([...html.matchAll(/class="nav-badge /g)].length, 1);
