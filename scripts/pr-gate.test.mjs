@@ -8,13 +8,16 @@ import {
   dependabotDecision,
   dependabotNextStep,
   headVerdict,
+  isDependabotCandidate,
   isDependabotPr,
 } from "./pr-gate.mjs";
 
 const SHA = "a".repeat(40);
 const REVIEWER = "geberele";
 const OWNER = "duskfleet";
-const approve = [{ user: { login: REVIEWER }, created_at: "2026-11-01T00:00:00Z", body: `Reviewed ${SHA}\n\nVERDICT: approve` }];
+const approve = [
+  { user: { login: REVIEWER }, created_at: "2026-11-01T00:00:00Z", body: `Reviewed ${SHA}\n\nVERDICT: approve` },
+];
 
 function pr(overrides = {}) {
   return {
@@ -53,7 +56,11 @@ test("every bump in a group must be safe and the announced count must match", ()
     body: "Updates `vitest` from 3.2.4 to 3.3.0\nUpdates `zod` from 4.1.1 to 4.1.2",
   });
   assert.equal(decision(group).action, "merge");
-  assert.equal(decision({ ...group, body: group.body.replace("zod` from 4.1.1 to 4.1.2", "typescript` from 5.9.3 to 6.0.1") }).action, "owner");
+  assert.equal(
+    decision({ ...group, body: group.body.replace("zod` from 4.1.1 to 4.1.2", "typescript` from 5.9.3 to 6.0.1") })
+      .action,
+    "owner",
+  );
   assert.equal(decision({ ...group, body: "Updates `vitest` from 3.2.4 to 3.3.0" }).action, "owner");
 });
 
@@ -68,7 +75,10 @@ test("only a current-head verdict from the authenticated reviewer is trusted", (
 });
 
 test("the latest comment and its last verdict line decide", () => {
-  const laterChanges = [...approve, { ...approve[0], created_at: "2026-11-02T00:00:00Z", body: `Reviewed ${SHA}\n\nVERDICT: changes` }];
+  const laterChanges = [
+    ...approve,
+    { ...approve[0], created_at: "2026-11-02T00:00:00Z", body: `Reviewed ${SHA}\n\nVERDICT: changes` },
+  ];
   assert.equal(decision(pr(), laterChanges).action, "skip");
   const lastLine = [{ ...approve[0], body: `Reviewed ${SHA}\n\nVERDICT: changes\nVERDICT: approve` }];
   assert.equal(decision(pr(), lastLine).action, "merge");
@@ -76,11 +86,12 @@ test("the latest comment and its last verdict line decide", () => {
 
 test("Dependabot must be the actual author and the head must belong to this repository", () => {
   assert.equal(isDependabotPr(pr(), OWNER), true);
+  assert.equal(isDependabotCandidate(pr({ author: { login: "app/dependabot" } })), true);
+  assert.equal(decision(pr({ author: { login: "app/dependabot" } })).action, "merge");
   assert.equal(decision(pr({ author: { login: "attacker" } })).action, "skip");
   assert.equal(decision(pr({ isCrossRepository: true })).action, "skip");
   assert.equal(decision(pr({ headRepositoryOwner: { login: "attacker" } })).action, "skip");
   assert.equal(isDependabotPr(pr(), "another-owner"), false);
-  assert.equal(decision(pr({ author: { login: "app/dependabot" } })).action, "skip");
 });
 
 test("drafts, wrong branches and missing ready labels are skipped", () => {
@@ -95,7 +106,12 @@ test("0.x minor changes are major; SemVer inputs must be complete and valid", ()
   assert.equal(bumpLevel("1.4.2", "1.5.0"), "minor");
   assert.equal(bumpLevel("1.2", "1.2.1"), "unknown");
   assert.equal(bumpLevel("1.02.0", "1.2.1"), "unknown");
-  assert.equal(bumpLevel("1.2.0-beta.1", "1.2.0+build.2"), "patch");
+  assert.equal(bumpLevel("1.2.0-beta.1", "1.2.0+build.2"), "unknown");
+  assert.equal(bumpLevel("1.2.0", "1.2.0-beta.1"), "unknown");
+  assert.equal(bumpLevel("1.2.0", "1.2.0"), "unknown");
+  assert.equal(bumpLevel("1.2.0+build.1", "1.2.0+build.2"), "unknown");
+  assert.equal(bumpLevel("1.2.1", "1.2.0"), "unknown");
+  assert.equal(bumpLevel("1.2.0", "1.2.1+build.2"), "patch");
 });
 
 test("a branch update is an independent action and dry-run must not imply unavailable writes", () => {
@@ -109,10 +125,9 @@ test("a branch update is an independent action and dry-run must not imply unavai
 
 test("single and grouped bump formats are parsed, including directory suffixes and markdown", () => {
   assert.deepEqual(dependabotBumps("Bump zod from 4.1.1 to 4.1.2", ""), [{ name: "zod", from: "4.1.1", to: "4.1.2" }]);
-  assert.deepEqual(
-    dependabotBumps("Bump eslint from 0.4.2 to 0.5.0 in /apps/web", ""),
-    [{ name: "eslint", from: "0.4.2", to: "0.5.0" }],
-  );
+  assert.deepEqual(dependabotBumps("Bump eslint from 0.4.2 to 0.5.0 in /apps/web", ""), [
+    { name: "eslint", from: "0.4.2", to: "0.5.0" },
+  ]);
   assert.deepEqual(
     dependabotBumps("Bump the npm group", "Bumps [eslint](https://github.com/npm/eslint) from 0.4.2 to 0.4.3"),
     [{ name: "eslint", from: "0.4.2", to: "0.4.3" }],

@@ -108,33 +108,43 @@ export function closedFlowLabels(item, { now, days = CLEANUP_DAYS }) {
 // --- Dependabot auto-merge: pure parts, tested without network ---
 
 const READY_LABEL = "flow: ready-to-merge";
-const DEPENDABOT_LOGIN = "dependabot[bot]";
+const DEPENDABOT_LOGINS = new Set(["app/dependabot", "dependabot[bot]"]);
 
 // A Dependabot PR by its author, its branch and its repository: a fork branch named
 // `dependabot/x` with a forged title is someone else's PR.
-export function isDependabotPr(pr, repositoryOwner) {
+export function isDependabotCandidate(pr) {
   return (
     !pr.isDraft &&
-    pr.author?.login === DEPENDABOT_LOGIN &&
-    pr.isCrossRepository === false &&
-    Boolean(repositoryOwner) &&
-    pr.headRepositoryOwner?.login?.toLowerCase() === repositoryOwner.toLowerCase() &&
+    DEPENDABOT_LOGINS.has(pr.author?.login ?? "") &&
     typeof pr.headRefName === "string" &&
     pr.headRefName.startsWith("dependabot/")
   );
 }
 
-const VERSION = /^v?(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/;
+export function isDependabotPr(pr, repositoryOwner) {
+  return (
+    isDependabotCandidate(pr) &&
+    pr.isCrossRepository === false &&
+    Boolean(repositoryOwner) &&
+    pr.headRepositoryOwner?.login?.toLowerCase() === repositoryOwner.toLowerCase()
+  );
+}
 
-// "patch", "minor", "major" or "unknown" (a SHA, a pre-release, anything not plain semver).
+const VERSION =
+  /^v?(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-((?:0|[1-9]\d*|\d*[A-Za-z-][0-9A-Za-z-]*)(?:\.(?:0|[1-9]\d*|\d*[A-Za-z-][0-9A-Za-z-]*))*))?(?:\+([0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?$/;
+
+// "patch", "minor", "major" or "unknown" (a SHA, pre-release, non-increasing or invalid version).
 // Under the caret rule of npm, 0.x moves its breaking changes one place right: a 0.x minor and
 // a 0.0.x patch count as major.
 export function bumpLevel(from, to) {
   const a = VERSION.exec(from ?? "");
   const b = VERSION.exec(to ?? "");
   if (!a || !b) return "unknown";
-  const [aMajor, aMinor, aPatch] = a.slice(1).map((part) => Number(part ?? 0));
-  const [bMajor, bMinor, bPatch] = b.slice(1).map((part) => Number(part ?? 0));
+  if (a[4] || b[4]) return "unknown";
+  const [aMajor, aMinor, aPatch] = a.slice(1, 4).map(Number);
+  const [bMajor, bMinor, bPatch] = b.slice(1, 4).map(Number);
+  const comparison = [0, 1, 2].map((index) => b[index + 1] - a[index + 1]).find((delta) => delta !== 0) ?? 0;
+  if (comparison <= 0) return "unknown";
   if (aMajor !== bMajor) return "major";
   if (aMajor === 0 && aMinor !== bMinor) return "major";
   if (aMajor === 0 && aMinor === 0 && aPatch !== bPatch) return "major";
@@ -205,7 +215,8 @@ export function headVerdict(comments, { headSha, login }) {
 // the owner merges) or "merge" (approve, auto-merge, keep current).
 export function dependabotDecision(pr, { verdict, repositoryOwner }) {
   const labels = (pr.labels ?? []).map((label) => (typeof label === "string" ? label : label?.name));
-  if (!isDependabotPr(pr, repositoryOwner)) return { action: "skip", why: "not Dependabot's own branch in this repository" };
+  if (!isDependabotPr(pr, repositoryOwner))
+    return { action: "skip", why: "not Dependabot's own branch in this repository" };
   if (!labels.includes(READY_LABEL)) return { action: "skip", why: `not labelled ${READY_LABEL}` };
   if (verdict !== "approve") return { action: "skip", why: "no reviewer approval for the current head" };
   const scope = bumpScope(pr.title, pr.body);
@@ -552,6 +563,7 @@ function recheckAutoMerge(pr) {
 // owner with one comment. Returns the summary bucket.
 function dependabot(pr) {
   if (!autoMerge && !dryRun) return "skipped";
+  if (!isDependabotCandidate(pr)) return "skipped";
   const owner = repositoryOwner();
   if (!isDependabotPr(pr, owner)) return "skipped";
   if (pr.autoMergeRequest) return recheckAutoMerge(pr);
@@ -581,7 +593,9 @@ function dependabot(pr) {
   }
   const action = dependabotAction(mergeStateStatus, updateBranch);
   if (action === "skip") {
-    console.log(`PR #${pr.number}: approved but ${mergeStateStatus === "BEHIND" ? "behind; branch update requires --update-branch" : "auto-merge needs the PR_GATE_TOKEN run (--update-branch)"}`);
+    console.log(
+      `PR #${pr.number}: approved but ${mergeStateStatus === "BEHIND" ? "behind; branch update requires --update-branch" : "auto-merge needs the PR_GATE_TOKEN run (--update-branch)"}`,
+    );
     return "skipped";
   }
   if (action === "update") {
