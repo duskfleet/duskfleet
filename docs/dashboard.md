@@ -207,9 +207,9 @@ no badge when nothing runs); it re-reads the count every 5 seconds and on every 
   `claude.allow_bypass_permissions`, `env_passthrough`) stay hand edits of the file. The header
   shows when the file last changed and whether that was a hand edit.
 
-## Attention
+## Alerts
 
-`/attention`, the last tab of the nav (first in the wrapped tab row on narrow screens, so its
+`/attention`, the Alerts tab, last in the nav (first in the wrapped tab row on narrow screens, so its
 badge stays in view), lists everything that needs a human, grouped by kind
 in a fixed order. Empty sections are hidden:
 

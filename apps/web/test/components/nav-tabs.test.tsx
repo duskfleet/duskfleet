@@ -9,7 +9,7 @@ function current(html: string): string[] {
   return [...html.matchAll(/<a [^>]*aria-current="page"[^>]*>([^<]*)<\/a>/g)].map((m) => m[1]);
 }
 
-test("NavTabs: the five sections, then Attention last; Runs active on / and on runs, trends and costs", () => {
+test("NavTabs: the five sections, then Alerts last; Runs active on / and on runs, trends and costs", () => {
   setPathname("/");
   const html = renderToStaticMarkup(<NavTabs />);
   assert.deepEqual(
@@ -17,7 +17,7 @@ test("NavTabs: the five sections, then Attention last; Runs active on / and on r
     ["/", "/agents", "/projects", "/schedules", "/mcp", "/attention"],
   );
   // no badge without items: the tab itself stays
-  assert.match(html, /<a href="\/attention" class="tab ">Attention<\/a>/);
+  assert.match(html, /<a href="\/attention" class="tab ">Alerts<\/a>/);
   assert.deepEqual(current(html), ["Runs"]);
   assert.match(html, /<a href="\/" class="tab active" aria-current="page">Runs<\/a>/);
   assert.match(html, /<a href="\/agents" class="tab ">Agents<\/a>/);
@@ -27,12 +27,12 @@ test("NavTabs: the five sections, then Attention last; Runs active on / and on r
   }
 });
 
-test("NavTabs: Attention active on /attention, its badge on the tab", () => {
+test("NavTabs: Alerts active on /attention, its badge on the tab", () => {
   setPathname("/attention");
   const html = renderToStaticMarkup(<NavTabs attention={{ count: 3, tone: "bad" }} />);
   assert.match(
     html,
-    /<a href="\/attention" class="tab active" aria-current="page">Attention<span class="nav-badge bad" title="3 items need you">/,
+    /<a href="\/attention" class="tab active" aria-current="page">Alerts<span class="nav-badge bad" title="3 items need you">/,
   );
   assert.match(html, /<a href="\/" class="tab ">Runs<\/a>/);
 });
@@ -83,12 +83,12 @@ test("NavTabs: before the first poll, the badge shows the layout's count", () =>
   assert.match(renderToStaticMarkup(<NavTabs running={1} />), /<span class="run-badge" aria-hidden="true">1<\/span>/);
 });
 
-test("NavTabs: Runs and Attention badges together, each on its own tab with its own class", () => {
+test("NavTabs: Runs and Alerts badges together, each on its own tab with its own class", () => {
   setPathname("/agents");
   const html = renderToStaticMarkup(<NavTabs running={3} attention={{ count: 2, tone: "warn" }} />);
   assert.match(
     html,
-    /<a href="\/attention" class="tab ">Attention<span class="nav-badge warn" title="2 items need you">/,
+    /<a href="\/attention" class="tab ">Alerts<span class="nav-badge warn" title="2 items need you">/,
   );
   assert.match(html, /<a href="\/" class="tab {2}has-badge">Runs<span class="run-badge" aria-hidden="true">3<\/span>/);
   assert.equal([...html.matchAll(/class="run-badge"/g)].length, 1);
