@@ -135,3 +135,12 @@ test("single and grouped bump formats are parsed, including directory suffixes a
   assert.equal(decision(pr({ title: "Bump the npm group", body: "" })).action, "owner");
   assert.equal(decision(pr({ title: "Bump foo from latest to 2.0.0", body: "" })).action, "owner");
 });
+
+test("pre-release and downgrade bumps are held for the owner, never patch or minor", () => {
+  assert.equal(bumpLevel("1.2.3", "1.2.4-rc.1"), "unknown");
+  assert.equal(bumpLevel("2.0.0-beta.1", "2.0.0-beta.2"), "unknown");
+  assert.equal(bumpLevel("1.5.0", "1.4.0"), "unknown");
+  assert.equal(bumpLevel("1.2.3", "1.2.3"), "unknown");
+  assert.equal(decision(pr({ title: "Bump zod from 1.2.3 to 1.2.4-rc.1", body: "" })).action, "owner");
+  assert.equal(decision(pr({ title: "Bump zod from 1.5.0 to 1.4.0", body: "" })).action, "owner");
+});
