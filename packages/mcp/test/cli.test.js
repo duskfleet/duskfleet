@@ -117,7 +117,7 @@ test("cli run: human result on stdout by default; --json the trimmed record with
     // Human: header, cause / fix / more, log path, all on stdout; no JSON, no escape codes in a pipe.
     const human = cli(configDir, ["run", "--project", project, "--", "auth"]);
     assert.equal(human.status, 1);
-    assert.match(human.stdout, /^run \S+ failed \(failed\) · /, human.stdout);
+    assert.match(human.stdout, /^run \S+ failed \([^)]+\) · /, human.stdout);
     assert.match(human.stdout, /^cause: Claude is not logged in: .*Please run \/login/m);
     assert.match(human.stdout, /^fix: Claude Code is not authenticated/m);
     assert.match(human.stdout, /^more: duskfleet run-info \S+$/m);

@@ -109,5 +109,5 @@ test("paint: plain text without colour, one escape sequence per role with it", (
     assert.equal(paint(role, "x", { color: false }), "x");
     assert.equal(paint(role, "x", { color: true }), expected[role], role);
   }
-  assert.equal(badge("failed", { color: true, width: 100 }), expected.bad);
+  assert.equal(badge("failed", { color: true, width: 100 }), "\x1b[31mfailed\x1b[39m");
 });
