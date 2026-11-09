@@ -75,7 +75,23 @@ Only commands that need the config report a missing one (`init`, `tools`, `mcp s
 [where config and data live](configuration.md#where-config-and-data-live)). `--version` prints the version of the installed
 `duskfleet` package and needs neither a config nor Node 24.
 
-Logs go to stderr, so stdout stays the command's JSON. A one-shot command logs warnings and
+### Output
+
+Human-readable by default, `--json` for scripts, logs on stderr. `run`, `runs` and `run-info`
+print a human view on stdout: tables that fit the terminal (`COLUMNS`, else its width, else 100
+columns; the least useful columns are dropped first, the label is cut with `…`), aligned key
+blocks, and colour for statuses. Colour follows Node's rules for the stream: only on a terminal,
+never in a pipe (`duskfleet runs | cat`) or under `NO_COLOR`, always under `FORCE_COLOR`.
+`--json`, anywhere before a `--` and on any command, prints exactly the JSON these commands
+printed before (the other commands print JSON either way for now). Scripts, git hooks and CI
+should always pass it:
+
+```bash
+duskfleet runs --json | jq '.[0].status'
+duskfleet run --project my-app --agent fixer --json -- "Fix the failing test" | jq .id
+```
+
+Logs go to stderr, so stdout stays the command's output. A one-shot command logs warnings and
 errors only; `--verbose`, anywhere before a `--`, brings the info lines back (config loaded,
 executor ready, `storage: applied N migrations (M → N)` after an upgrade). `serve` and the MCP
 server keep info: their log is the record. `DUSKFLEET_LOG_LEVEL=debug|info|warn|error` overrides
@@ -175,28 +191,30 @@ A run with no agent, when none exists, fails with
 
 ## What run prints
 
-On stderr, the run id and its log as it starts. When the run did not end clean (failed, timed
-out, cancelled, or completed but [needs review](dashboard.md#needs-review)), a short block follows before
-anything else: the status with its review reasons, the cause in one line, the fix when there is
-one, and where to look next. A run against a Claude that is not logged in:
+On stderr, the run id and its log as it starts. On stdout, once it ends, one header line
+(`run <id> <status> · <duration> · <cost>`, a cost at API value marked `≈`); when the run did not
+end clean (failed, timed out, cancelled, or completed but [needs review](dashboard.md#needs-review)),
+the status carries its review reasons and three lines follow: the cause in one line, the fix when
+there is one, and where to look next; then the log path. A run against a Claude that is not
+logged in:
 
 ```text
-run 7f3c9a2e-... started (session 0b1d...)
-log: <data>/logs/7f3c9a2e-....jsonl
-run 7f3c9a2e-... failed (non-zero exit code)
+run 7f3c9a2e-... failed (non-zero exit code) · 1.2s
 cause: Claude is not logged in: Not logged in · Please run /login
 fix: Claude Code is not authenticated: run "claude" in a terminal and log in (or check ANTHROPIC_API_KEY)
-more: duskfleet run-info 7f3c9a2e-..., or the run's page in the dashboard; full record: run --json
+more: duskfleet run-info 7f3c9a2e-...
+log: <data>/logs/7f3c9a2e-....jsonl
 ```
 
 The fix lines come from one table in core (`FAILURE_FIXES` per error code, `REVIEW_REASON_FIXES`
 per review reason, plus a `claude` binary that was not found), the same one `doctor --probe`
-uses for its advice. A permission denial names the denied tools.
+uses for its advice. A permission denial names the denied tools. The exit code is 0 for
+`completed` or, with `--no-wait`, `running`; 1 otherwise.
 
-On stdout, the run record as JSON for scripts (exit 0 for `completed` or, with `--no-wait`,
-`running`; 1 otherwise). It leaves out `command.argv` (the full spawned command line, system
-prompt included) and `rawResultJson`; `run --json` prints the full record, the same as
-`run-info <run_id>`. `title` is what `--title` gave (null without it); `runs` and `run-info` also
+`run --json` prints the run record as JSON on stdout for scripts, and the status / cause / fix /
+more block on stderr as before. The record leaves out `command.argv` (the full spawned command
+line, system prompt included) and `rawResultJson`; `run --full` (it implies `--json`) prints the
+full record, the same as `run-info <run_id> --json`. `title` is what `--title` gave (null without it); `runs` and `run-info` also
 print `label`, the title or else the first prompt line, the same label the MCP tools return.
 
 ## agents create
@@ -350,9 +368,11 @@ otherwise (a subscription run, or one recorded before `billingType` existed). `l
 returns `cost`, the listed runs summed by billing type (`apiUsd` billed, `subscriptionUsd` the API
 value of subscription usage) with the wording to show: `heading` is `Spent` when every run is
 billed, `Usage (API value)` when none is (`note`: included in your Claude subscription), `Spent and
-usage` when both kinds are listed. `runs` prints the same total as one line on stderr (stdout stays
-the JSON array), for example `Usage (API value): $3.2 over 20 runs, included in your Claude
-subscription`.
+usage` when both kinds are listed. `runs` prints the same total as one line, for example `Usage
+(API value): $3.2 over 20 runs, included in your Claude subscription`: the last line of its table,
+or with `--json` on stderr (stdout stays the JSON array). In the table a cost at API value is
+marked `≈`, a run that ended without a cost says `unpriced`, and `!` after the status marks a run
+that needs review.
 
 `contextExhausted` comes only from structured signals (termination reason, result subtype,
 stop reason, or the error text of a failed run), never from scanning the result's prose.

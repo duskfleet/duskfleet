@@ -164,7 +164,7 @@ test("init with Claude Code logged out (#349): config written, login hint, exit 
 
     const project = path.join(s.root, "project");
     mkdirSync(project);
-    const run = s.cli("run", "--project", project, "--agent", "fixer", "--", "Make the tests pass");
+    const run = s.cli("run", "--project", project, "--agent", "fixer", "--json", "--", "Make the tests pass");
     assert.equal(run.status, 1, run.stderr);
     const recorded = JSON.parse(run.stdout);
     assert.equal(recorded.status, "failed");
