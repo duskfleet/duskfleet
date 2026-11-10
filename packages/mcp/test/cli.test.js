@@ -15,6 +15,8 @@ import { testEnv } from "./helpers.js";
 const here = path.dirname(fileURLToPath(import.meta.url));
 const fakeBinary = path.join(here, "fake-claude.js");
 const cliEntry = path.join(here, "..", "dist", "cli.js");
+/** Start of an ANSI escape sequence (colour). */
+const ESC = "\u001b[";
 
 function makeRoot() {
   const root = mkdtempSync(path.join(tmpdir(), "duskfleet-cli-"));
@@ -46,13 +48,13 @@ function cli(configDir, args, extraEnv = {}, cwd = undefined) {
 test("cli run --project accepts a registered id or a path; unknown ids and both flags fail clearly", () => {
   const { root, configDir, project } = makeRoot();
   try {
-    const byId = cli(configDir, ["run", "--project", "demo", "--", "hello"]);
+    const byId = cli(configDir, ["run", "--project", "demo", "--json", "--", "hello"]);
     assert.equal(byId.status, 0, byId.stderr);
     const run = JSON.parse(byId.stdout);
     assert.equal(run.projectId, "demo");
     assert.equal(run.projectPath, project);
 
-    const byPath = cli(configDir, ["run", "--project", project, "--", "hello"]);
+    const byPath = cli(configDir, ["run", "--project", project, "--json", "--", "hello"]);
     assert.equal(byPath.status, 0, byPath.stderr);
     assert.equal(JSON.parse(byPath.stdout).projectId, "demo", "a registered path still resolves to its id");
 
@@ -79,21 +81,21 @@ test("cli run --project resolves a relative path from the shell directory and re
     mkdirSync(scratch);
     const real = realpathSync(scratch);
 
-    const dot = cli(configDir, ["run", "--project", ".", "--", "hello"], {}, scratch);
+    const dot = cli(configDir, ["run", "--project", ".", "--json", "--", "hello"], {}, scratch);
     assert.equal(dot.status, 0, dot.stderr);
     const run = JSON.parse(dot.stdout);
     assert.equal(run.projectPath, real, "`.` is the shell directory, stored absolute");
     assert.equal(run.projectId, null);
 
-    const dotSlash = cli(configDir, ["run", "--project", "./scratch", "--", "hello"], {}, root);
+    const dotSlash = cli(configDir, ["run", "--project", "./scratch", "--json", "--", "hello"], {}, root);
     assert.equal(dotSlash.status, 0, dotSlash.stderr);
     assert.equal(JSON.parse(dotSlash.stdout).projectPath, real);
 
-    const bare = cli(configDir, ["run", "--project", "scratch", "--", "hello"], {}, root);
+    const bare = cli(configDir, ["run", "--project", "scratch", "--json", "--", "hello"], {}, root);
     assert.equal(bare.status, 0, bare.stderr);
     assert.equal(JSON.parse(bare.stdout).projectPath, real, "a bare name that is a directory here is a path");
 
-    const registered = cli(configDir, ["run", "--project", "../project", "--", "hello"], {}, scratch);
+    const registered = cli(configDir, ["run", "--project", "../project", "--json", "--", "hello"], {}, scratch);
     assert.equal(registered.status, 0, registered.stderr);
     assert.equal(
       JSON.parse(registered.stdout).projectId,
@@ -109,11 +111,24 @@ test("cli run --project resolves a relative path from the shell directory and re
   }
 });
 
-test("cli run: a failed run prints cause and fix first; stdout is trimmed unless --json", () => {
+test("cli run: human result on stdout by default; --json the trimmed record with cause and fix on stderr, --full the whole one", () => {
   const { root, configDir, project } = makeRoot();
   try {
+    // Human: header, cause / fix / more, log path, all on stdout; no JSON, no escape codes in a pipe.
+    const human = cli(configDir, ["run", "--project", project, "--", "auth"]);
+    assert.equal(human.status, 1);
+    assert.match(human.stdout, /^run \S+ failed \([^)]+\) · /, human.stdout);
+    assert.match(human.stdout, /^cause: Claude is not logged in: .*Please run \/login/m);
+    assert.match(human.stdout, /^fix: Claude Code is not authenticated/m);
+    assert.match(human.stdout, /^more: duskfleet run-info \S+$/m);
+    assert.match(human.stdout, /^log: .+\.jsonl$/m);
+    assert.ok(!human.stdout.includes(ESC), "no escape codes in a pipe");
+    assert.throws(() => JSON.parse(human.stdout));
+    assert.match(human.stderr, /^run \S+ started/m, "the started and log lines stay on stderr");
+    assert.doesNotMatch(human.stderr, /^cause:/m, "the block is not printed twice");
+
     // Logged out: fake-claude's "auth" prompt fails with "Invalid API key · Please run /login".
-    const auth = cli(configDir, ["run", "--project", project, "--", "auth"]);
+    const auth = cli(configDir, ["run", "--project", project, "--json", "--", "auth"]);
     assert.equal(auth.status, 1);
     const lines = auth.stderr.split("\n");
     const top = lines.slice(0, 5).join("\n");
@@ -128,18 +143,26 @@ test("cli run: a failed run prints cause and fix first; stdout is trimmed unless
     assert.equal("rawResultJson" in trimmed, false);
     assert.equal(trimmed.command.cwd, project);
 
-    const full = JSON.parse(cli(configDir, ["run", "--project", project, "--json", "--", "auth"]).stdout);
-    assert.ok(Array.isArray(full.command.argv) && full.command.argv.includes("--append-system-prompt"));
-    assert.equal(typeof full.rawResultJson, "string", "--json prints the full record");
+    for (const flags of [["--json", "--full"], ["--full"]]) {
+      const full = JSON.parse(cli(configDir, ["run", "--project", project, ...flags, "--", "auth"]).stdout);
+      assert.ok(Array.isArray(full.command.argv) && full.command.argv.includes("--append-system-prompt"));
+      assert.equal(typeof full.rawResultJson, "string", `${flags.join(" ")} prints the full record`);
+    }
 
     // A review reason without an error code gets the reason's fix.
-    const budget = cli(configDir, ["run", "--project", project, "--", "budget"]);
+    const budget = cli(configDir, ["run", "--project", project, "--json", "--", "budget"]);
     assert.equal(budget.status, 1);
     assert.match(budget.stderr, /\(budget exhausted/);
     assert.match(budget.stderr, /^fix: raise the agent's max_budget_usd/m);
 
-    // A clean run: no block, same trimmed shape.
-    const ok = cli(configDir, ["run", "--project", project, "--", "ok"]);
+    // A clean run, human: the header and the log path only.
+    const okHuman = cli(configDir, ["run", "--project", project, "--", "ok"]);
+    assert.equal(okHuman.status, 0, okHuman.stderr);
+    assert.match(okHuman.stdout, /^run \S+ completed/);
+    assert.doesNotMatch(okHuman.stdout, /^(cause|fix|more):/m);
+
+    // A clean run, --json: no block, same trimmed shape.
+    const ok = cli(configDir, ["run", "--project", project, "--json", "--", "ok"]);
     assert.equal(ok.status, 0, ok.stderr);
     assert.doesNotMatch(ok.stderr, /^(cause|fix|more):/m);
     const okRun = JSON.parse(ok.stdout);
@@ -151,12 +174,68 @@ test("cli run: a failed run prints cause and fix first; stdout is trimmed unless
   }
 });
 
+test("cli runs and run-info: a human view by default, plain in a pipe and under NO_COLOR, --json the JSON as before", () => {
+  const { root, configDir, project } = makeRoot();
+  /** The CLI with FORCE_COLOR / NO_COLOR exactly as given (an inherited FORCE_COLOR would colour a pipe). */
+  const plainCli = (args, colorEnv = {}) => {
+    const env = testEnv({ DUSKFLEET_CONFIG: configDir, DUSKFLEET_LOG_LEVEL: "warn" });
+    delete env.FORCE_COLOR;
+    delete env.NO_COLOR;
+    return spawnSync(process.execPath, [cliEntry, ...args], { env: { ...env, ...colorEnv }, encoding: "utf8" });
+  };
+  try {
+    const empty = plainCli(["runs"]);
+    assert.equal(empty.status, 0, empty.stderr);
+    assert.match(empty.stdout, /^no runs yet/);
+
+    const ran = cli(configDir, ["run", "--project", project, "--json", "--", "ok"]);
+    assert.equal(ran.status, 0, ran.stderr);
+    const id = JSON.parse(ran.stdout).id;
+
+    const human = plainCli(["runs"]);
+    assert.equal(human.status, 0, human.stderr);
+    assert.throws(() => JSON.parse(human.stdout), "the default is not JSON");
+    assert.match(human.stdout, /^when +status/);
+    assert.match(human.stdout, /completed/);
+    assert.match(human.stdout, new RegExp(id));
+    assert.match(human.stdout.trimEnd().split("\n").at(-1), /over 1 run/, "the cost total is the last stdout line");
+    assert.ok(!human.stdout.includes(ESC), "a pipe gets no escape codes");
+    assert.equal(human.stderr, "", "the total is not repeated on stderr");
+
+    const json = plainCli(["runs", "--json"]);
+    const listed = JSON.parse(json.stdout);
+    assert.deepEqual(
+      listed.map((r) => r.id),
+      [id],
+    );
+    assert.match(json.stderr, /over 1 run/, "with --json the total stays on stderr");
+
+    assert.ok(!plainCli(["runs"], { NO_COLOR: "1" }).stdout.includes(ESC), "NO_COLOR: no escape codes");
+    assert.ok(plainCli(["runs"], { FORCE_COLOR: "1" }).stdout.includes(ESC), "FORCE_COLOR colours a pipe");
+
+    const narrow = plainCli(["runs"], { COLUMNS: "60" });
+    for (const line of narrow.stdout.trimEnd().split("\n").slice(0, 2)) {
+      assert.ok(line.length <= 60, `fits COLUMNS=60: ${JSON.stringify(line)}`);
+    }
+
+    const info = plainCli(["run-info", id]);
+    assert.equal(info.status, 0, info.stderr);
+    assert.match(info.stdout, /^Run\n/);
+    assert.match(info.stdout, new RegExp(`^  id +${id}$`, "m"));
+    assert.match(info.stdout, /^Usage$/m);
+    assert.equal(JSON.parse(plainCli(["run-info", id, "--json"]).stdout).id, id);
+    assert.match(plainCli(["run-info", id, "--events"]).stdout, /^Events$/m);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("doctor lists the stuck pending and running rows of a dead owner its startup sweep failed", () => {
   const { root, configDir, project } = makeRoot();
   try {
-    const first = cli(configDir, ["run", "--project", project, "--", "hello"]);
+    const first = cli(configDir, ["run", "--project", project, "--json", "--", "hello"]);
     assert.equal(first.status, 0, first.stderr);
-    const second = cli(configDir, ["run", "--project", project, "--", "hello"]);
+    const second = cli(configDir, ["run", "--project", project, "--json", "--", "hello"]);
     assert.equal(second.status, 0, second.stderr);
     const pendingId = JSON.parse(first.stdout).id;
     const runningId = JSON.parse(second.stdout).id;
@@ -210,7 +289,7 @@ test("doctor --probe makes one haiku run outside any project, says it costs mone
     assert.equal(report.probe.costUsd, 0.0123);
     assert.equal(report.probe.advice, null);
     assert.match(report.probe.note, /costs/);
-    const runs = JSON.parse(cli(configDir, ["runs"]).stdout);
+    const runs = JSON.parse(cli(configDir, ["runs", "--json"]).stdout);
     assert.equal(runs.length, 0, "the probe is a diagnostic, not a recorded run");
 
     const auth = cli(configDir, ["doctor", "--probe"], { FAKE_CLAUDE_MODE: "auth" });
@@ -404,7 +483,11 @@ test("README Quick start on a fresh clone: no agents, agents create fixer, then 
       ["fixer"],
     );
 
-    const run = cli(configDir, ["run", "--project", project, "--agent", "fixer", "--", "Fix the failing test"], env);
+    const run = cli(
+      configDir,
+      ["run", "--project", project, "--agent", "fixer", "--json", "--", "Fix the failing test"],
+      env,
+    );
     assert.equal(run.status, 0, run.stderr);
     const r = JSON.parse(run.stdout);
     assert.equal(r.status, "completed");
@@ -483,7 +566,7 @@ test("agents create refuses an existing id without --force, home paths, secrets 
 test("a CLAUDE_BIN that does not exist falls through to claude.binary and never reaches the run's child", () => {
   const { root, configDir } = makeRoot();
   try {
-    const res = cli(configDir, ["run", "--project", "demo", "--", "env"], {
+    const res = cli(configDir, ["run", "--project", "demo", "--json", "--", "env"], {
       CLAUDE_BIN: path.join(root, "no-such-claude"),
     });
     assert.equal(res.status, 0, res.stderr);
