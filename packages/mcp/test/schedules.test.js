@@ -399,7 +399,7 @@ test("one schedule per agent: create and agent changes refused; older duplicates
   }
   try {
     // The database still opens, and doctor reports the duplicate as a warning.
-    const doctor = spawnSync(process.execPath, [cliEntry, "doctor"], {
+    const doctor = spawnSync(process.execPath, [cliEntry, "doctor", "--json"], {
       env: testEnv({ DUSKFLEET_CONFIG: configDir, DUSKFLEET_LOG_LEVEL: "warn" }),
       encoding: "utf8",
     });

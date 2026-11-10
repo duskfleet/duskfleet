@@ -249,7 +249,7 @@ test("doctor lists the stuck pending and running rows of a dead owner its startu
     stuck.run("running", owner, runningId);
     db.close();
 
-    const doctor = cli(configDir, ["doctor"]);
+    const doctor = cli(configDir, ["doctor", "--json"]);
     assert.equal(doctor.status, 0, doctor.stderr);
     const { orphans } = JSON.parse(doctor.stdout);
     assert.deepEqual(
@@ -261,7 +261,7 @@ test("doctor lists the stuck pending and running rows of a dead owner its startu
     );
     assert.match(orphans.advice, /marked 2 run\(s\) failed/);
 
-    const again = JSON.parse(cli(configDir, ["doctor"]).stdout);
+    const again = JSON.parse(cli(configDir, ["doctor", "--json"]).stdout);
     assert.deepEqual(again.orphans, { recovered: [], advice: null }, "already failed by the first doctor");
   } finally {
     rmSync(root, { recursive: true, force: true });
@@ -271,15 +271,21 @@ test("doctor lists the stuck pending and running rows of a dead owner its startu
 test("doctor --probe makes one haiku run outside any project, says it costs money and reports failures", () => {
   const { root, configDir } = makeRoot();
   try {
-    const plain = cli(configDir, ["doctor"]);
+    const plain = cli(configDir, ["doctor", "--json"]);
     assert.equal(plain.status, 0, plain.stderr);
     const plainReport = JSON.parse(plain.stdout);
     assert.equal("probe" in plainReport, false, "no probe without the flag");
     assert.equal(typeof plainReport.path, "string", "doctor prints the effective PATH");
     assert.equal(typeof plainReport.pathDefaulted, "boolean");
     assert.doesNotMatch(plain.stderr, /costs/);
+    const human = cli(configDir, ["doctor"]);
+    assert.equal(human.status, 0, human.stderr);
+    assert.match(human.stdout, /^Claude\n {2}binary /, "the default is the sectioned report");
+    assert.match(human.stdout, /\nScheduler\n/);
+    assert.ok(!human.stdout.includes("\u001b["), "piped output has no escape codes");
+    assert.doesNotMatch(human.stdout, /^Probe$/m, "no probe section without the flag");
 
-    const ok = cli(configDir, ["doctor", "--probe"]);
+    const ok = cli(configDir, ["doctor", "--probe", "--json"]);
     assert.equal(ok.status, 0, ok.stderr);
     assert.match(ok.stderr, /one real Claude run on haiku \(costs a few cents/);
     const report = JSON.parse(ok.stdout);
@@ -292,7 +298,7 @@ test("doctor --probe makes one haiku run outside any project, says it costs mone
     const runs = JSON.parse(cli(configDir, ["runs", "--json"]).stdout);
     assert.equal(runs.length, 0, "the probe is a diagnostic, not a recorded run");
 
-    const auth = cli(configDir, ["doctor", "--probe"], { FAKE_CLAUDE_MODE: "auth" });
+    const auth = cli(configDir, ["doctor", "--probe", "--json"], { FAKE_CLAUDE_MODE: "auth" });
     assert.equal(auth.status, 1);
     const authProbe = JSON.parse(auth.stdout).probe;
     assert.equal(authProbe.ok, false);
@@ -301,13 +307,13 @@ test("doctor --probe makes one haiku run outside any project, says it costs mone
     assert.match(authProbe.advice, /not authenticated/);
 
     // default_timeout_minutes is 0.05 here, below the probe's 2 minute ceiling.
-    const hang = cli(configDir, ["doctor", "--probe"], { FAKE_CLAUDE_MODE: "hang" });
+    const hang = cli(configDir, ["doctor", "--probe", "--json"], { FAKE_CLAUDE_MODE: "hang" });
     assert.equal(hang.status, 1);
     const hangProbe = JSON.parse(hang.stdout).probe;
     assert.equal(hangProbe.outcome, "timed_out");
     assert.match(hangProbe.advice, /no result within 3 s: a hook or a prompt is likely blocking/);
 
-    const noVersion = cli(configDir, ["doctor", "--probe"], { FAKE_CLAUDE_MODE: "no-version" });
+    const noVersion = cli(configDir, ["doctor", "--probe", "--json"], { FAKE_CLAUDE_MODE: "no-version" });
     assert.equal(noVersion.status, 1);
     assert.match(noVersion.stderr, /doctor --probe skipped: claude --version failed/);
     assert.doesNotMatch(noVersion.stderr, /costs a few cents/, "nothing is spent when the probe is skipped");
@@ -316,7 +322,7 @@ test("doctor --probe makes one haiku run outside any project, says it costs mone
     assert.equal(skipped.outcome, "skipped");
 
     // mkdtempSync under a missing TMPDIR throws inside runProbe: doctor still prints its report.
-    const thrown = cli(configDir, ["doctor", "--probe"], { TMPDIR: path.join(root, "missing-tmp") });
+    const thrown = cli(configDir, ["doctor", "--probe", "--json"], { TMPDIR: path.join(root, "missing-tmp") });
     assert.equal(thrown.status, 1);
     const thrownReport = JSON.parse(thrown.stdout);
     assert.equal(thrownReport.claudeVersion, "9.9.9 (fake)");
@@ -464,7 +470,7 @@ test("README Quick start on a fresh clone: no agents, agents create fixer, then 
     assert.equal(emptyHuman.stdout, "", "human mode: no table, the hint is on stderr");
     assert.match(emptyHuman.stderr, /Duskfleet ships none/);
 
-    const doctor = cli(configDir, ["doctor"], env);
+    const doctor = cli(configDir, ["doctor", "--json"], env);
     assert.deepEqual(JSON.parse(doctor.stdout).agents, []);
 
     const noAgent = cli(configDir, ["run", "--project", project, "--", "Fix the failing test"], env);

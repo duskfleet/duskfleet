@@ -73,17 +73,22 @@ import {
 } from "./mcp-register.js";
 import { PROBE_COST_NOTE, type ProbeReport, probeNotRun, runProbe } from "./probe.js";
 import {
+  type DoctorReport,
   type RenderOpts,
   renderAgentCreated,
   renderAgents,
   renderBudgetSet,
   renderBudgets,
+  renderDoctor,
+  renderMcpStatus,
   renderProjects,
   renderRunInfo,
   renderRunResult,
   renderRuns,
   renderScheduleRequested,
   renderSchedules,
+  renderServiceInstalled,
+  renderServiceUninstalled,
   runReportLines,
   scheduleRequestedLine,
   trimmedRun,
@@ -440,7 +445,7 @@ async function main(): Promise<void> {
   }
   // Read-only and config-free: works before `init`.
   if (command === "mcp" && rest[0] === "status" && rest.length === 1) {
-    print(mcpStatus());
+    print(mcpStatus(), renderMcpStatus);
     return;
   }
   // Needs the config (data and config paths), not the database: the dashboard opens it itself.
@@ -541,23 +546,26 @@ async function main(): Promise<void> {
       }
       const { unit, ran } = installService(target);
       const status = serviceStatus(process.platform);
-      print({
-        installed: true,
-        platform: unit.platform,
-        label: unit.label,
-        unitPath: unit.unitPath,
-        logPath: target.logPath,
-        keepAwake: unit.keepAwake,
-        ran,
-        status,
-        notes: unit.notes,
-      });
+      print(
+        {
+          installed: true as const,
+          platform: unit.platform,
+          label: unit.label,
+          unitPath: unit.unitPath,
+          logPath: target.logPath,
+          keepAwake: unit.keepAwake,
+          ran,
+          status,
+          notes: unit.notes,
+        },
+        renderServiceInstalled,
+      );
       return done(status.running === false ? 1 : 0);
     }
     case "uninstall-service": {
       // Needs no config: removing the unit works after the config is gone.
       const r = uninstallService(process.platform);
-      print({ uninstalled: true, ...r });
+      print({ uninstalled: true as const, ...r }, renderServiceUninstalled);
       return done();
     }
     case "mcp": {
@@ -678,7 +686,7 @@ async function main(): Promise<void> {
           );
         }
       }
-      print({
+      const report: DoctorReport = {
         node: process.version,
         claudeBinary: app.executor.binary,
         claudeVersion: version,
@@ -727,7 +735,8 @@ async function main(): Promise<void> {
             : null,
         },
         ...(doctorFlags.probe ? { probe } : {}),
-      });
+      };
+      print(report, renderDoctor);
       return done(error || (probe && !probe.ok) ? 1 : 0);
     }
     case "run": {

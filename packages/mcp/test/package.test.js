@@ -200,7 +200,7 @@ test("the bundled CLI runs: --help without config, doctor on a config with the f
       path.join(configDir, "duskfleet.yaml"),
       `data_dir: ../data\nclaude:\n  binary: ${JSON.stringify(fakeBinary)}\n`,
     );
-    const doctor = run(entry, ["doctor"], { DUSKFLEET_CONFIG: configDir });
+    const doctor = run(entry, ["doctor", "--json"], { DUSKFLEET_CONFIG: configDir });
     assert.equal(doctor.status, 0, doctor.stderr);
     const report = JSON.parse(doctor.stdout);
     assert.equal(report.claudeVersion, "9.9.9 (fake)");

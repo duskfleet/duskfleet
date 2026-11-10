@@ -28,8 +28,9 @@ rather than `~/Library/Application Support`: Duskfleet is a terminal tool (like 
 The data directory (SQLite database, `logs/`, user agents, the private `projects.yaml`) is the
 first of: `DUSKFLEET_DATA`; `data_dir` in `duskfleet.yaml` (relative to the config directory);
 the user-level data directory when the config is the user-level one; otherwise `../data` next to
-the config directory (a clone's `data/`). `duskfleet doctor` prints both directories, where each
-came from (`configSource`, `dataSource`) and every config candidate (`configLookup`).
+the config directory (a clone's `data/`). `duskfleet doctor` prints both directories under Paths, where each
+came from and every config candidate (`configSource`, `dataSource` and `configLookup` in
+`doctor --json`).
 
 A user-level config directory starts with a starter `duskfleet.yaml` (no agent: Duskfleet ships
 none), written by the onboarding command; it is never overwritten. Until it exists, every

@@ -55,7 +55,7 @@ On macOS `install-service` keeps the Mac awake by default (`--keep-awake`): the 
 `serve` under `caffeinate -i -s`, which blocks idle sleep, and system sleep while on AC power
 only (on battery the Mac may still sleep). `--no-keep-awake` renders the unit without
 `caffeinate`. On Linux and Windows the flag changes nothing; `install-service` prints how to
-disable sleep there. `doctor` reports `scheduler.keepAwake` on macOS.
+disable sleep there. `doctor` reports it on macOS (`keep awake`; `scheduler.keepAwake` in `--json`).
 
 `duskfleet` with no arguments prints the usage on stderr and exits 2; `--help` prints it on
 stdout and exits 0. Both end with `First time here? Run: npx duskfleet init`.
@@ -78,14 +78,16 @@ Only commands that need the config report a missing one (`init`, `tools`, `mcp s
 ### Output
 
 Human-readable by default, `--json` for scripts, logs on stderr. `run`, `runs`, `run-info`,
-`agents`, `agents create`, `projects`, `schedules`, `schedules run-now`, `budgets`, `budgets set`
-and `budgets delete` print a human view on stdout: tables that fit the terminal (`COLUMNS`, else
+`agents`, `agents create`, `projects`, `schedules`, `schedules run-now`, `budgets`, `budgets set`,
+`budgets delete`, `doctor`, `install-service`, `uninstall-service` and `mcp status` print a human
+view on stdout: tables that fit the terminal (`COLUMNS`, else
 its width, else 100 columns; the least useful columns are dropped first, the label or
 description is cut with `…`), aligned key blocks, and colour for statuses. Colour follows Node's
 rules for the stream: only on a terminal, never in a pipe (`duskfleet runs | cat`) or under
 `NO_COLOR`, always under `FORCE_COLOR`. `--json`, anywhere before a `--` and on any command,
-prints exactly the JSON these commands printed before (`doctor`, `install-service`,
-`uninstall-service`, `mcp status`, `tools` and `repair-subagents` print JSON either way for now).
+prints exactly the JSON these commands printed before (`tools` and `repair-subagents` print JSON
+either way for now; `install-service --print` prints the raw unit). `mcp status` shows the names
+of an entry's env keys, never their values; `--json` prints the entry as the host's config holds it.
 Scripts, git hooks and CI should always pass it:
 
 ```bash
@@ -262,6 +264,14 @@ It prints the agent it wrote (and a line when it replaced one with the same id) 
 file and the next command; with `--json`, stdout is `{ created, overrode, agent }`.
 
 ## doctor, logs and diffs
+
+`doctor` prints a report in sections: **Claude** (binary, version, node; a binary that cannot be
+run shows its error), **Paths** (config and data directories with where each came from, the config
+lookup candidates, a note when `PATH` was defaulted), **Agents** (count, ids, agents with more than
+one schedule), **Scheduler** (enabled, who ticks, the service, keep-awake on macOS), **Budgets**
+(only when runs without a cost count against one), **Orphans** and, with `--probe`, **Probe**.
+Advice lines start with `!` and are painted as warnings. `doctor --json` prints the report as an
+object, the keys named below; scripts read that form. The exit code is the same in both.
 
 `doctor` prints where the config and data come from: `configDir` with `configSource` (`env` for
 `DUSKFLEET_CONFIG`, `repo` for a `config/` found walking up from the CLI, `user` for the
