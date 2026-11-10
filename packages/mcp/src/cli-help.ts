@@ -52,7 +52,7 @@ export const COMMAND_HELP: Readonly<Record<string, CommandHelp>> = {
   },
   run: {
     usage: [
-      'duskfleet run --project <id or path> [--agent <id>] [--model <m>] [--title <text>] [--no-wait] -- "<prompt>"',
+      'duskfleet run --project <id or path> [--agent <id>] [--model <m>] [--title <text>] [--no-wait] [--json [--full]] -- "<prompt>"',
     ],
     options: [
       "-p, --project <id or path>   registered project id or absolute path",
@@ -61,23 +61,26 @@ export const COMMAND_HELP: Readonly<Record<string, CommandHelp>> = {
       "-m, --model <m>              override the agent's model",
       "--title <text>               what the run is for, listed instead of the first prompt line (max 120)",
       "--no-wait                    print the run id and exit (the run is not recorded once the CLI exits)",
+      "--json                       the run record as JSON on stdout (trimmed: no argv, no raw result)",
+      "--full                       the whole run record as JSON (implies --json)",
     ],
     example: 'duskfleet run --project my-app --agent fixer --model haiku -- "Fix the failing test"',
     doc: `${DOCS}/cli.md#first-run`,
   },
   runs: {
-    usage: ["duskfleet runs [--status <status>] [--limit <n>] [--agent <id>]"],
+    usage: ["duskfleet runs [--status <status>] [--limit <n>] [--agent <id>] [--json]"],
     options: [
       "--status <status>   pending, running, completed, failed, cancelled or timed_out",
       "--limit <n>         at most n runs",
       "--agent <id>        runs of one agent",
+      "--json              the runs as a JSON array on stdout, the cost total on stderr",
     ],
     example: "duskfleet runs --status completed --limit 10",
     doc: `${DOCS}/cli.md#what-a-run-records`,
   },
   "run-info": {
-    usage: ["duskfleet run-info <run_id> [--events]"],
-    options: ["--events   add the event timeline"],
+    usage: ["duskfleet run-info <run_id> [--events] [--json]"],
+    options: ["--events   add the event timeline", "--json     the run record as JSON on stdout"],
     example: "duskfleet run-info <run_id> --events",
     doc: `${DOCS}/cli.md#what-a-run-records`,
   },

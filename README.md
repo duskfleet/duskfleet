@@ -106,6 +106,8 @@ npx duskfleet runs
 npx duskfleet dashboard        # installs the dashboard on first use, opens http://localhost:4777
 ```
 
+`run` and `runs` print a human view; scripts add `--json` ([CLI output](docs/cli.md#output)).
+
 Before running agents unattended, review the [security boundaries](docs/security.md) and set
 [`allowed_project_roots`](docs/configuration.md#configduskfleetyaml) to the project directories you intend to expose.
 

@@ -9,7 +9,8 @@ import { fileURLToPath } from "node:url";
  *   duskfleet agents
  *   duskfleet agents create <id> [--model <m>] [--budget <usd>] [...] [--force] -- "<system prompt>"
  *   duskfleet projects
- *   duskfleet run --project <id or path> [--agent <id>] [--model <m>] [--no-wait] [--json] -- "<prompt>"
+ *   duskfleet run --project <id or path> [--agent <id>] [--model <m>] [--no-wait] [--json [--full]] -- "<prompt>"
+ *   (every command takes --json and --verbose; run, runs and run-info print a human view without --json)
  *   duskfleet run --first [--project <absolute path>]   # the guided first run of init (first-run.ts)
  *   duskfleet runs [--status <s>] [--limit <n>]
  *   duskfleet run-info <run_id> [--events]
@@ -28,7 +29,7 @@ import { fileURLToPath } from "node:url";
  *   duskfleet doctor --probe   # plus one real hello run on haiku (costs cents): auth, blocking hooks
  *   duskfleet --version        # handled in cli.ts, before the Node version check
  */
-import { parseArgs } from "node:util";
+import { parseArgs, styleText } from "node:util";
 import {
   assertAgentIdFree,
   type BudgetInput,
@@ -70,7 +71,14 @@ import {
   runClaudeCodeAdd,
 } from "./mcp-register.js";
 import { PROBE_COST_NOTE, type ProbeReport, probeNotRun, runProbe } from "./probe.js";
-import { runReportLines, trimmedRun } from "./run-report.js";
+import {
+  type RenderOpts,
+  renderRunInfo,
+  renderRunResult,
+  renderRuns,
+  runReportLines,
+  trimmedRun,
+} from "./render/index.js";
 import {
   exportedDataDir,
   installService,
@@ -85,8 +93,30 @@ import {
 import { buildToolCatalog } from "./tools-catalog.js";
 import { packageVersion } from "./version.js";
 
-function print(value: unknown): void {
-  process.stdout.write(JSON.stringify(value, null, 2) + "\n");
+/** Set once from the global `--json` flag, before any command runs. */
+let jsonOutput = false;
+
+/**
+ * How human output is drawn on this stdout: colour as Node decides it for the stream (a terminal,
+ * NO_COLOR / FORCE_COLOR honoured), width from COLUMNS, else the terminal's, else 100.
+ */
+function renderOpts(): RenderOpts {
+  const color = styleText("red", "x", { stream: process.stdout, validateStream: true }) !== "x";
+  const fromEnv = Number(process.env["COLUMNS"]);
+  const width = Number.isInteger(fromEnv) && fromEnv > 0 ? fromEnv : process.stdout.columns || 100;
+  return { color, width };
+}
+
+/**
+ * A command's result on stdout: JSON with `--json` or when the command has no human renderer,
+ * else `render(value)`. The renderer gets the very value JSON would print.
+ */
+function print<T>(value: T, render?: (value: T, opts: RenderOpts) => string[]): void {
+  if (jsonOutput || !render) {
+    process.stdout.write(JSON.stringify(value, null, 2) + "\n");
+    return;
+  }
+  process.stdout.write(`${render(value, renderOpts()).join("\n")}\n`);
 }
 
 /** Last line of the usage, and of any command that fails because no config was found. */
@@ -105,9 +135,9 @@ function usage(asked = false): never {
       "                          [--allowed-tools <a,b>] [--disallowed-tools <a,b>] [--timeout <minutes>]",
       '                          [--description <text>] [--force] (-- "<system prompt>" | --prompt-file <file>)',
       "  duskfleet projects",
-      '  duskfleet run --project <id or path> [--agent <id>] [--model <m>] [--no-wait] [--json] -- "<prompt>"',
+      '  duskfleet run --project <id or path> [--agent <id>] [--model <m>] [--no-wait] [--json [--full]] -- "<prompt>"',
       "  duskfleet run --first [--project <absolute path>]",
-      "  duskfleet runs [--status <status>] [--limit <n>]",
+      "  duskfleet runs [--status <status>] [--limit <n>] [--agent <id>]",
       "  duskfleet run-info <run_id> [--events]",
       "  duskfleet repair-subagents",
       "  duskfleet schedules",
@@ -128,6 +158,8 @@ function usage(asked = false): never {
       "",
       "Any command takes --verbose: info logs on stderr (default: warnings and errors only,",
       "except serve). DUSKFLEET_LOG_LEVEL=debug|info|warn|error overrides both.",
+      "Any command takes --json: stdout is the command's JSON, for scripts (run, runs and",
+      "run-info print a human view by default; NO_COLOR or a pipe turn its colours off).",
       "",
       INIT_HINT,
       "",
@@ -352,15 +384,16 @@ async function mcpRegister(
 }
 
 /**
- * The arguments without `--verbose`, and whether it was there. Taken out wherever it stands
- * before a `--` (after it, everything is the prompt), so every command accepts it.
+ * The arguments without the global flags `--verbose` and `--json`, and which of them were there.
+ * Taken out wherever they stand before a `--` (after it, everything is the prompt), so every
+ * command accepts them.
  */
-function takeVerbose(args: string[]): { args: string[]; verbose: boolean } {
+function takeGlobalFlags(args: string[]): { args: string[]; verbose: boolean; json: boolean } {
   const end = args.indexOf("--");
   const head = end === -1 ? args : args.slice(0, end);
   const tail = end === -1 ? [] : args.slice(end);
-  const kept = head.filter((a) => a !== "--verbose");
-  return { args: [...kept, ...tail], verbose: kept.length !== head.length };
+  const kept = head.filter((a) => a !== "--verbose" && a !== "--json");
+  return { args: [...kept, ...tail], verbose: head.includes("--verbose"), json: head.includes("--json") };
 }
 
 /**
@@ -373,7 +406,8 @@ function cliLogLevel(command: string | undefined, verbose: boolean): LogLevel {
 }
 
 async function main(): Promise<void> {
-  const { args, verbose } = takeVerbose(process.argv.slice(2));
+  const { args, verbose, json } = takeGlobalFlags(process.argv.slice(2));
+  jsonOutput = json;
   const [command, ...rest] = args;
   setDefaultLogLevel(cliLogLevel(command, verbose));
   if (!command) usage();
@@ -691,7 +725,7 @@ async function main(): Promise<void> {
           model: { type: "string", short: "m" },
           title: { type: "string" },
           "no-wait": { type: "boolean", default: false },
-          json: { type: "boolean", default: false },
+          full: { type: "boolean", default: false },
           first: { type: "boolean", default: false },
         },
       });
@@ -703,7 +737,8 @@ async function main(): Promise<void> {
           values.model ||
           values.title !== undefined ||
           values["project-id"] ||
-          values["no-wait"]
+          values["no-wait"] ||
+          values.full
         ) {
           throw new Error("run --first takes only --project <absolute path>; agent, model and prompt are fixed");
         }
@@ -736,10 +771,16 @@ async function main(): Promise<void> {
       if (!values["no-wait"]) {
         run = await app.runs.waitForRun(run.id, 24 * 60 * 60 * 1000);
       }
-      // A run that did not end clean: cause and fix first, on stderr, before the record.
-      const report = runReportLines(run);
-      if (report) process.stderr.write(`${report.join("\n")}\n`);
-      print(values.json ? run : trimmedRun(run));
+      // --full implies JSON: the untrimmed record. --json: the trimmed one, and for a run that did
+      // not end clean the cause and fix first, on stderr, as before. Else the human result on stdout.
+      if (values.full || jsonOutput) {
+        const report = runReportLines(run);
+        if (report) process.stderr.write(`${report.join("\n")}\n`);
+        jsonOutput = true;
+        print(values.full ? run : trimmedRun(run));
+      } else {
+        print(run, renderRunResult);
+      }
       return done(run.status === "completed" || run.status === "running" ? 0 : 1);
     }
     case "runs": {
@@ -756,9 +797,10 @@ async function main(): Promise<void> {
       if (values.limit) filter.limit = Number(values.limit);
       if (values.agent) filter.agentId = values.agent;
       const runs = app.runs.listRuns(filter);
-      print(runs.map(summarizeRun));
-      // The total in its true wording, on stderr so stdout stays the JSON array scripts parse.
-      if (runs.length > 0) process.stderr.write(`${costTotalsLine(costTotals(runs))}\n`);
+      const totals = runs.length > 0 ? costTotals(runs) : null;
+      // Human: the total is the table's last line. --json: on stderr, so stdout stays the array scripts parse.
+      print(runs.map(summarizeRun), (summaries, opts) => renderRuns(summaries, totals, opts));
+      if (jsonOutput && totals) process.stderr.write(`${costTotalsLine(totals)}\n`);
       return done();
     }
     case "schedules": {
@@ -874,10 +916,11 @@ async function main(): Promise<void> {
       const diff = app.runs.diff(id); // same field as get_run
       const costLabel = runCostLabel(run.billingType); // same field as get_run
       const label = runLabel(run); // same field as get_run
+      const events = values.events ? app.runs.events(id) : undefined;
+      // The renderer reads the same pieces the JSON flattens into one object.
       print(
-        values.events
-          ? { ...run, label, costLabel, diff, subagents, events: app.runs.events(id) }
-          : { ...run, label, costLabel, diff, subagents },
+        events ? { ...run, label, costLabel, diff, subagents, events } : { ...run, label, costLabel, diff, subagents },
+        (_v, opts) => renderRunInfo({ run, label, costLabel, diff, subagents, ...(events ? { events } : {}) }, opts),
       );
       return done();
     }
