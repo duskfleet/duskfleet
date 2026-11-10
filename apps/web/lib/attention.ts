@@ -1,8 +1,9 @@
 /**
  * The /attention page and the nav badge (DS-28, issue #69): everything that needs a human, as
  * items grouped by kind in a fixed order. A pure view of what the database already says (stored
- * `reviewReasons`, `errorCode`, schedule rows and firings, budget statuses): no dismiss, no
- * state of its own. An item leaves when its cause is fixed, or when it is older than the window.
+ * `reviewReasons`, `errorCode`, schedule rows and firings, budget statuses). An item leaves when
+ * its cause is fixed, or when it is older than the window. Its only state is "seen" (DS-32, issue
+ * #430): `applySeen` moves the items with an ack for their current key to the Seen group.
  *
  * Pure (no database, no `server-only`): lib/data.ts reads the inputs, the tests feed them.
  */
@@ -58,7 +59,27 @@ const LOGIN_LABELS: Record<LoginCode, { badge: string; summary: string }> = {
   claude_not_found: { badge: "Claude not found", summary: "Claude Code not found" },
 };
 
-export interface LoginItem {
+/**
+ * What every item carries for the "seen" state (DS-32, issue #430). The ack key is
+ * `kind:subjectId:eventId` (`ackKey`): a new event of the same subject is a new key, so a seen
+ * item comes back by itself.
+ */
+interface ItemBase {
+  /** The agent, schedule, budget or login code the item is about. */
+  subjectId: string;
+  /** The latest event that makes up the item: run id, firing id, budget month + threshold. */
+  eventId: string;
+  /** False for the kinds that leave only when fixed (login and quota, a spent hard-stop budget). */
+  dismissable: boolean;
+  /** "df-planner · timed out": the toast and the seen toggle's accessible name. */
+  label: string;
+  /** Set by `applySeen` on an item of the Seen group: when its current key was marked seen. */
+  seenAt?: string;
+  /** Set by `applySeen` on an unseen item an older event of which was seen: that older `seen_at`. */
+  newSinceSeen?: string;
+}
+
+export interface LoginItem extends ItemBase {
   kind: "login";
   key: string;
   tone: "bad";
@@ -75,7 +96,7 @@ export interface LoginItem {
   fix: string;
 }
 
-export interface RunItem {
+export interface RunItem extends ItemBase {
   kind: "failed" | "review";
   key: string;
   tone: "bad" | "warn";
@@ -93,7 +114,7 @@ export interface RunItem {
   at: string;
 }
 
-export interface ScheduleItem {
+export interface ScheduleItem extends ItemBase {
   kind: "schedules";
   key: string;
   tone: "bad" | "warn";
@@ -108,7 +129,7 @@ export interface ScheduleItem {
   nextAt: string | null;
 }
 
-export interface BudgetItem {
+export interface BudgetItem extends ItemBase {
   kind: "budgets";
   key: string;
   tone: "bad" | "warn";
@@ -120,7 +141,7 @@ export interface BudgetItem {
   amountUsd: number;
 }
 
-export interface BusyItem {
+export interface BusyItem extends ItemBase {
   kind: "busy";
   key: string;
   tone: "neutral";
@@ -179,8 +200,8 @@ export type AttentionSchedule = Pick<
 > & {
   /** Next cron occurrence from now, whether paused or not (null when the cron does not parse). */
   theoreticalNextAt: string | null;
-  /** Newest first. */
-  firings: Array<Pick<ScheduleFiring, "firedAt" | "outcome">>;
+  /** Newest first. The id makes up the item key; a row without one keys on its time. */
+  firings: Array<Pick<ScheduleFiring, "firedAt" | "outcome"> & { id?: number }>;
 };
 
 export type AttentionBudget = Pick<
@@ -273,6 +294,10 @@ function loginItems(runs: AttentionRun[]): { items: LoginItem[]; folded: Set<str
     items.push({
       kind: "login",
       key: `login:${code}`,
+      subjectId: code,
+      eventId: list[0]!.id,
+      dismissable: false,
+      label: `claude CLI · ${label.badge.toLowerCase()}`,
       tone: "bad",
       code,
       badge: label.badge,
@@ -310,6 +335,10 @@ function runItems(
       return {
         kind,
         key: `${kind}:${agentId}`,
+        subjectId: agentId,
+        eventId: head.id,
+        dismissable: true,
+        label: `${agentId} · ${label.toLowerCase()}`,
         tone: kind === "failed" ? "bad" : "warn",
         badge: group.length > 1 ? `${label} ×${group.length}` : label,
         agentId,
@@ -328,15 +357,24 @@ function runItems(
   return { failed: failed.sort(newestFirst), review: review.sort(newestFirst) };
 }
 
+/** A firing's part of an item key: its row id, or its time for a row read without one. */
+const firingEvent = (f: { id?: number; firedAt: string } | undefined, fallback: string) =>
+  f ? (f.id !== undefined ? String(f.id) : f.firedAt) : fallback;
+
 function scheduleItems(schedules: AttentionSchedule[], since: number): ScheduleItem[] {
   const items: ScheduleItem[] = [];
   for (const s of schedules) {
+    // The newest firing or outcome row: an auto-pause writes one, so does an errored fire.
+    const seen = { subjectId: s.id, dismissable: true };
     if (!s.enabled && s.pausedReason) {
       const when = s.autoPausedAt ?? s.lastFiredAt;
       if (!when || Date.parse(when) < since) continue;
       items.push({
         kind: "schedules",
         key: `schedule:${s.id}`,
+        ...seen,
+        eventId: firingEvent(s.firings[0], when),
+        label: `${s.name} · auto-paused`,
         tone: "warn",
         badge: "Auto-paused",
         scheduleId: s.id,
@@ -350,6 +388,9 @@ function scheduleItems(schedules: AttentionSchedule[], since: number): ScheduleI
       items.push({
         kind: "schedules",
         key: `schedule:${s.id}`,
+        ...seen,
+        eventId: firingEvent(s.firings[0], s.lastFiredAt),
+        label: `${s.name} · error`,
         tone: "bad",
         badge: "Error",
         scheduleId: s.id,
@@ -373,12 +414,18 @@ function budgetItems(budgets: AttentionBudget[]): BudgetItem[] {
     .sort((a, b) => b.percent - a.percent)
     .map((b) => {
       const spent = b.state === "over" && b.hardStop;
+      const title = `${b.scope === "global" ? "global" : `${b.scope} ${b.scopeId}`} · ${MONTH.format(new Date(b.periodStart))}`;
       return {
         kind: "budgets",
         key: `budget:${b.id}`,
+        subjectId: b.id,
+        // Month + the threshold crossed: the next threshold (or month) is a new event.
+        eventId: `${b.periodStart.slice(0, 7)}:${b.state}`,
+        dismissable: !spent,
+        label: `${title} · budget ${Math.round(b.percent)} %`,
         tone: spent ? "bad" : "warn",
         badge: `Budget ${Math.round(b.percent)} %`,
-        title: `${b.scope === "global" ? "global" : `${b.scope} ${b.scopeId}`} · ${MONTH.format(new Date(b.periodStart))}`,
+        title,
         detail:
           `${usd(b.countedUsd)} of ${usd(b.amountUsd)} spent; warns at ${b.warnPercent} %, ` +
           (b.hardStop ? (spent ? "hard stop reached: new runs are refused" : "hard stop at 100 %") : "no hard stop"),
@@ -396,6 +443,7 @@ function busyItems(schedules: AttentionSchedule[], since: number): BusyItem[] {
     // row only comes when that deferral expires: skip deferred rows, stop at anything else.
     let streak = 0;
     let last: AttentionSchedule["firings"][number] | undefined;
+    // `last` is the newest skipped_busy row: its id is the item's event.
     for (const f of s.firings) {
       if (f.outcome === "deferred") continue;
       if (f.outcome !== "skipped_busy") break;
@@ -406,6 +454,10 @@ function busyItems(schedules: AttentionSchedule[], since: number): BusyItem[] {
     items.push({
       kind: "busy",
       key: `busy:${s.id}`,
+      subjectId: s.id,
+      eventId: firingEvent(last, last.firedAt),
+      dismissable: true,
+      label: `${s.name} · skipped busy ×${streak}`,
       tone: "neutral",
       badge: `Skipped busy ×${streak}`,
       scheduleId: s.id,
@@ -456,9 +508,15 @@ const CHIP_NOUNS: Record<SectionKind, [string, string]> = {
   busy: ["skipped busy", "skipped busy"],
 };
 
-/** The summary chips under the title: "1 login error", "6 failed runs", ... with the section's tone. */
-export function summaryChips(sections: AttentionSection[]): Array<{ kind: SectionKind; label: string; tone: Tone }> {
-  return sections.map((s) => {
+/**
+ * The summary chips under the title: "1 login error", "6 failed runs", ... with the section's tone,
+ * counted over the sections given (the unseen ones on the page), then a neutral "n seen" chip.
+ */
+export function summaryChips(
+  sections: AttentionSection[],
+  seenCount = 0,
+): Array<{ kind: SectionKind | "seen"; label: string; tone: Tone }> {
+  const chips: Array<{ kind: SectionKind | "seen"; label: string; tone: Tone }> = sections.map((s) => {
     const n = s.items.length;
     const [one, many] = CHIP_NOUNS[s.kind];
     const tone: Tone =
@@ -471,4 +529,95 @@ export function summaryChips(sections: AttentionSection[]): Array<{ kind: Sectio
             : "warn";
     return { kind: s.kind, label: `${n} ${n === 1 ? one : many}`, tone };
   });
+  if (seenCount > 0) chips.push({ kind: "seen", label: `${seenCount} seen`, tone: "neutral" });
+  return chips;
+}
+
+/** The ack key of an item (`attention_acks.item_key`): kind + subject id + latest event id. */
+export function ackKey(item: Pick<AttentionItem, "kind" | "subjectId" | "eventId">): string {
+  return `${item.kind}:${item.subjectId}:${item.eventId}`;
+}
+
+/** An `attention_acks` row as `applySeen` reads it. */
+export interface SeenAck {
+  itemKey: string;
+  kind: string;
+  subjectId: string;
+  seenAt: string;
+}
+
+export interface AttentionView {
+  /** The unseen items, in their sections; a section with none left is dropped. */
+  sections: AttentionSection[];
+  /** The seen items, in section order, each with its `seenAt`. */
+  seen: AttentionItem[];
+  /** Every item, seen or not: the "M items" of the title. */
+  total: number;
+}
+
+/**
+ * Splits the items by the acks: an item with an ack for its current key goes to the Seen group;
+ * an unseen one with an ack for an older event of the same kind + subject gets `newSinceSeen`
+ * (the latest such `seen_at`). Items that cannot be marked seen ignore acks altogether.
+ */
+export function applySeen(sections: AttentionSection[], acks: SeenAck[]): AttentionView {
+  const byKey = new Map(acks.map((a) => [a.itemKey, a.seenAt]));
+  const bySubject = new Map<string, string>();
+  for (const a of acks) {
+    const k = `${a.kind}:${a.subjectId}`;
+    const prev = bySubject.get(k);
+    if (!prev || a.seenAt > prev) bySubject.set(k, a.seenAt);
+  }
+  const seen: AttentionItem[] = [];
+  const out: AttentionSection[] = [];
+  let total = 0;
+  for (const s of sections) {
+    const unseen: AttentionItem[] = [];
+    for (const item of s.items as AttentionItem[]) {
+      total++;
+      if (!item.dismissable) {
+        unseen.push(item);
+        continue;
+      }
+      const seenAt = byKey.get(ackKey(item));
+      if (seenAt) {
+        seen.push({ ...item, seenAt });
+        continue;
+      }
+      const before = bySubject.get(`${item.kind}:${item.subjectId}`);
+      unseen.push(before ? { ...item, newSinceSeen: before } : item);
+    }
+    if (unseen.length) out.push({ ...s, items: unseen } as AttentionSection);
+  }
+  return { sections: out, seen, total };
+}
+
+/** An ack the "mark seen" action may insert. */
+export interface AckInput {
+  itemKey: string;
+  kind: string;
+  subjectId: string;
+  eventId: string;
+}
+
+/**
+ * What the "mark seen" action inserts for the keys it was sent, checked against the current items:
+ * an unknown key (the item changed or left meanwhile) or an item that cannot be marked seen
+ * (login and quota, a spent hard-stop budget) is refused, never stored.
+ */
+export function acksFor(sections: AttentionSection[], keys: string[]): { acks: AckInput[]; refused: string[] } {
+  const items = new Map(sections.flatMap((s) => (s.items as AttentionItem[]).map((i) => [ackKey(i), i] as const)));
+  const acks: AckInput[] = [];
+  const refused: string[] = [];
+  for (const key of new Set(keys)) {
+    const item = items.get(key);
+    if (!item || !item.dismissable) refused.push(key);
+    else acks.push({ itemKey: key, kind: item.kind, subjectId: item.subjectId, eventId: item.eventId });
+  }
+  return { acks, refused };
+}
+
+/** The keys a bulk button marks: the dismissable items it shows (they are all unseen). */
+export function dismissableKeys(items: AttentionItem[]): string[] {
+  return items.filter((i) => i.dismissable).map(ackKey);
 }

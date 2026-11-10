@@ -20,6 +20,8 @@ const STUBS = {
   "@/app/schedules/actions": "test/stubs/schedule-actions.js",
   // A "use server" module: it writes duskfleet.yaml through core.
   "@/app/settings/actions": "test/stubs/settings-actions.js",
+  // A "use server" module: it writes attention_acks through lib/data.
+  "@/app/attention/actions": "test/stubs/attention-actions.js",
 };
 
 /** `./RunRow` -> `./RunRow.js`, `./lib` -> `./lib/index.js`, as a bundler would. */

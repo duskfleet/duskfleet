@@ -215,12 +215,22 @@ in a fixed order. Empty sections are hidden:
 6. **Repeated skipped busy**: a schedule whose last 3 or more firings were all `skipped_busy`
    (the `deferred` rows `scheduler.defer_busy` writes in between do not break the streak).
 
-The page is a pure view: nothing is stored and nothing can be dismissed. An item leaves when its
-cause is fixed: the agent ends a clean run, or its schedule is paused by hand (run items); a later
-run ends without the login code; the schedule is resumed or fires again; the spend drops below
-the warning or the month changes. Run and schedule items older than 48 hours are dropped too.
-The tab's badge counts items, not runs. It is coral when a login or quota error or a spent hard
-stop is present, amber otherwise, and absent at 0.
+An item leaves when its cause is fixed: the agent ends a clean run, or its schedule is paused by
+hand (run items); a later run ends without the login code; the schedule is resumed or fires again;
+the spend drops below the warning or the month changes. Run and schedule items older than 48 hours
+are dropped too.
+
+**Seen.** Each item has a check button that marks it seen; "Mark section seen" and "Mark all seen"
+mark every item shown, and a toast offers Undo for about 8 seconds. A seen item moves to the
+collapsible **Seen** group at the bottom ("seen hh:mm"); its pressed button un-sees it. The mark is
+stored in the database (`attention_acks`), so it is the same in every browser and survives a
+reload. It belongs to the item's latest event (the newest run of the agent, the newest firing of
+the schedule, the budget's month and threshold): a new event brings the item back by itself, with
+a "New since seen hh:mm" pill. Login and quota errors and a spent hard-stop budget cannot be marked
+seen; they leave only when fixed.
+
+The tab's badge counts unseen items, not runs. It is coral when a login or quota error or a spent
+hard stop is present, amber otherwise, and absent at 0.
 
 ## Trends
 

@@ -392,6 +392,22 @@ const MIGRATIONS: ReadonlyArray<{ version: number; sql: string; backfill?: (db: 
       ALTER TABLE runs ADD COLUMN skills_bundle TEXT;
     `,
   },
+  {
+    // The dashboard's "seen" state of an Alerts item (DS-32, issue #430). item_key = kind + subject
+    // id + the id of the latest event of the item, so a new event is a new key and the item comes
+    // back by itself. Rows that match no current item are inert (attention-acks.ts prunes them).
+    version: 29,
+    sql: `
+      CREATE TABLE IF NOT EXISTS attention_acks (
+        item_key TEXT PRIMARY KEY,
+        kind TEXT NOT NULL,
+        subject_id TEXT NOT NULL,
+        event_id TEXT NOT NULL,
+        seen_at TEXT NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS idx_attention_acks_subject ON attention_acks(kind, subject_id);
+    `,
+  },
 ];
 
 /**

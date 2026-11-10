@@ -3,8 +3,9 @@
  * data/duskfleet.db the MCP server uses. The dashboard never mutates runs;
  * cancelling goes through the MCP server (cancel_run) or the CLI. Its writes
  * are server actions on user agent files (app/agents/actions.ts), on
- * schedule rows (app/schedules/actions.ts) and on config/duskfleet.yaml
- * (app/settings/actions.ts), all on the core API.
+ * schedule rows (app/schedules/actions.ts), on config/duskfleet.yaml
+ * (app/settings/actions.ts) and on the Alerts "seen" marks (app/attention/actions.ts),
+ * all on the core API.
  */
 import "server-only";
 import { existsSync, readFileSync } from "node:fs";
@@ -12,6 +13,7 @@ import { homedir } from "node:os";
 import path from "node:path";
 import type { DatabaseSync } from "node:sqlite";
 import {
+  AttentionAckRepository,
   type BudgetStatus,
   budgetForScope,
   budgetPlan,
@@ -55,7 +57,13 @@ import {
   utcDayStart,
   utcMonthStart,
 } from "@duskfleet/core";
-import { ATTENTION_WINDOW_MS, type AttentionSection, attentionSections } from "./attention";
+import {
+  ATTENTION_WINDOW_MS,
+  type AttentionSection,
+  type AttentionView,
+  applySeen,
+  attentionSections,
+} from "./attention";
 import { cliCommand, detectInstall, type Install, usableMcpEntry } from "./cli";
 import { ACTIVE_SQL, ACTIVE_STATUSES, RUNNING_COUNT_SQL } from "./running";
 import { costModel, listScoped, scopeList } from "./scope";
@@ -1063,6 +1071,16 @@ export function attention(now = Date.now()): AttentionSection[] {
     schedules: scheduleRows,
     budgets: budgetStatuses(runs.budgets, config()),
   });
+}
+
+/** The "seen" marks of the Alerts items (migration 29); written only by app/attention/actions.ts. */
+export function attentionAcks(): AttentionAckRepository {
+  return new AttentionAckRepository(services().db);
+}
+
+/** The /attention items split into unseen sections and the Seen group; the nav badge counts the unseen. */
+export function attentionView(now = Date.now()): AttentionView {
+  return applySeen(attention(now), attentionAcks().list());
 }
 
 export function schedulerLease() {
