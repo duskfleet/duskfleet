@@ -4,7 +4,7 @@
  * system prompt).
  */
 import type { AgentDefinition, AgentSource } from "@duskfleet/core";
-import { type Cell, type Column, fmtUsd, kv, type RenderOpts, table } from "./primitives.js";
+import { type Cell, type Column, fmtUsd, kv, oneLine, type RenderOpts, table } from "./primitives.js";
 import { paint } from "./theme.js";
 
 /** An agent as the CLI prints it: the definition without its system prompt. */
@@ -38,7 +38,7 @@ export function renderAgents(agents: readonly AgentView[], opts: RenderOpts): st
     a.project ?? none,
     a.maxBudgetUsd === undefined ? none : fmtUsd(a.maxBudgetUsd),
     timeoutText(a.timeoutMinutes) ?? none,
-    a.description || none,
+    oneLine(a.description ?? "") || none,
   ]);
   return table(COLUMNS, rows, opts);
 }
@@ -74,7 +74,7 @@ export function renderAgentCreated(value: AgentCreated, opts: RenderOpts): strin
         ["budget", a.maxBudgetUsd === undefined ? null : `${fmtUsd(a.maxBudgetUsd)} per run`],
         ["timeout", timeoutText(a.timeoutMinutes)],
         ["project", a.project ?? null],
-        ["description", a.description || null],
+        ["description", oneLine(a.description ?? "") || null],
       ],
       opts,
     ),

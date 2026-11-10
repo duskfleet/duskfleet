@@ -59,6 +59,16 @@ test("renderAgents: a narrow terminal drops columns and cuts the description", (
   ]);
 });
 
+test("renderAgents / renderAgentCreated: a multi-line description stays on one line", () => {
+  const multi = { ...FIXER, description: "Fixes the\nfailing test\n" };
+  assert.deepEqual(renderAgents([multi], plain()), [
+    "id     kind  source  model  project  budget  timeout  description",
+    "fixer  own   user    haiku  -         $0.50      10m  Fixes the failing test",
+  ]);
+  const created = renderAgentCreated({ created: true, overrode: null, agent: multi }, plain());
+  assert.equal(created.at(-1), "description      Fixes the failing test");
+});
+
 test("renderAgents: no agents prints nothing (the hint is on stderr)", () => {
   assert.deepEqual(renderAgents([], plain()), []);
 });
