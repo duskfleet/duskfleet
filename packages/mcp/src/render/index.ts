@@ -1,6 +1,8 @@
 /** Human-readable CLI output (the default; `--json` prints the same value as JSON). */
 export { type AgentCreated, type AgentView, agentKind, renderAgentCreated, renderAgents } from "./agents.js";
 export { renderBudgetSet, renderBudgets } from "./budgets.js";
+export { type DoctorReport, renderDoctor, WARN_MARK, warnLine } from "./doctor.js";
+export { renderMcpStatus } from "./mcp-status.js";
 export * from "./primitives.js";
 export { type ProjectList, renderProjects } from "./projects.js";
 export { costCell, renderRunResult, runReportLines, trimmedRun } from "./run.js";
@@ -13,4 +15,10 @@ export {
   scheduleRequestedLine,
   type Ticker,
 } from "./schedules.js";
+export {
+  renderServiceInstalled,
+  renderServiceUninstalled,
+  type ServiceInstalled,
+  type ServiceUninstalled,
+} from "./service.js";
 export { paint, ROLE_FORMAT, ROLES, type Role, STATUS_ROLE } from "./theme.js";
