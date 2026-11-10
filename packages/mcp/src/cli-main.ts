@@ -10,7 +10,8 @@ import { fileURLToPath } from "node:url";
  *   duskfleet agents create <id> [--model <m>] [--budget <usd>] [...] [--force] -- "<system prompt>"
  *   duskfleet projects
  *   duskfleet run --project <id or path> [--agent <id>] [--model <m>] [--no-wait] [--json [--full]] -- "<prompt>"
- *   (every command takes --json and --verbose; run, runs and run-info print a human view without --json)
+ *   (every command takes --json and --verbose; run, runs, run-info, agents, projects, schedules and
+ *   budgets print a human view without --json)
  *   duskfleet run --first [--project <absolute path>]   # the guided first run of init (first-run.ts)
  *   duskfleet runs [--status <s>] [--limit <n>]
  *   duskfleet run-info <run_id> [--events]
@@ -73,10 +74,18 @@ import {
 import { PROBE_COST_NOTE, type ProbeReport, probeNotRun, runProbe } from "./probe.js";
 import {
   type RenderOpts,
+  renderAgentCreated,
+  renderAgents,
+  renderBudgetSet,
+  renderBudgets,
+  renderProjects,
   renderRunInfo,
   renderRunResult,
   renderRuns,
+  renderScheduleRequested,
+  renderSchedules,
   runReportLines,
+  scheduleRequestedLine,
   trimmedRun,
 } from "./render/index.js";
 import {
@@ -116,7 +125,9 @@ function print<T>(value: T, render?: (value: T, opts: RenderOpts) => string[]): 
     process.stdout.write(JSON.stringify(value, null, 2) + "\n");
     return;
   }
-  process.stdout.write(`${render(value, renderOpts()).join("\n")}\n`);
+  const lines = render(value, renderOpts());
+  // An empty view (no agents: the hint is on stderr) prints nothing, not a blank line.
+  if (lines.length > 0) process.stdout.write(`${lines.join("\n")}\n`);
 }
 
 /** Last line of the usage, and of any command that fails because no config was found. */
@@ -158,8 +169,9 @@ function usage(asked = false): never {
       "",
       "Any command takes --verbose: info logs on stderr (default: warnings and errors only,",
       "except serve). DUSKFLEET_LOG_LEVEL=debug|info|warn|error overrides both.",
-      "Any command takes --json: stdout is the command's JSON, for scripts (run, runs and",
-      "run-info print a human view by default; NO_COLOR or a pipe turn its colours off).",
+      "Any command takes --json: stdout is the command's JSON, for scripts (run, runs, run-info,",
+      "agents, projects, schedules and budgets print a human view by default; NO_COLOR or a pipe",
+      "turn its colours off).",
       "",
       INIT_HINT,
       "",
@@ -580,7 +592,7 @@ async function main(): Promise<void> {
         process.stderr.write(
           `agent "${id}" written to ${agent.sourcePath}\nnext: duskfleet run --project <id or path> --agent ${id} -- "<task>"\n`,
         );
-        print({ created: true, overrode: existing?.source ?? null, agent: shown });
+        print({ created: true, overrode: existing?.source ?? null, agent: shown }, renderAgentCreated);
         return done();
       }
       if (sub) commandUsage("agents", `unknown agents subcommand: ${sub}`);
@@ -591,12 +603,16 @@ async function main(): Promise<void> {
           `no agents yet: Duskfleet ships none. Create your first one with\n  duskfleet agents create <id> --model haiku -- "<system prompt>"\n`,
         );
       }
-      print(agents);
+      print(agents, renderAgents);
       return done();
     }
     case "projects": {
       const app = await open();
-      print({ allowedProjectRoots: app.config.allowedProjectRoots, projects: [...app.config.projects.values()] });
+      const agents = [...app.config.agents.values()];
+      print(
+        { allowedProjectRoots: app.config.allowedProjectRoots, projects: [...app.config.projects.values()] },
+        (value, opts) => renderProjects(value, agents, opts),
+      );
       return done();
     }
     case "doctor": {
@@ -819,17 +835,19 @@ async function main(): Promise<void> {
         }
         const lease = app.scheduler.status().lease;
         const leaseLive = lease ? new Date(lease.expiresAt).getTime() > Date.now() : false;
-        process.stderr.write(
-          leaseLive
-            ? `schedule "${schedule.name}" requested; ${lease!.holder} fires it within ${app.config.scheduler.tickSeconds}s\n`
-            : `schedule "${schedule.name}" requested, but nothing is ticking: it fires when a scheduler starts (duskfleet serve / install-service)\n`,
-        );
-        print(schedule);
+        const ticker = leaseLive ? { holder: lease!.holder, tickSeconds: app.config.scheduler.tickSeconds } : null;
+        // Human: the confirmation line is the output. --json: it stays on stderr, stdout is the row.
+        if (jsonOutput) {
+          process.stderr.write(
+            `${scheduleRequestedLine(schedule, ticker, { color: false, width: Number.POSITIVE_INFINITY })}\n`,
+          );
+        }
+        print(schedule, (s, opts) => renderScheduleRequested(s, ticker, opts));
         return done();
       }
       if (sub) commandUsage("schedules", `unknown schedules subcommand: ${sub}`);
       const app = await open();
-      print({ scheduler: app.scheduler.status(), schedules: app.scheduler.listWithLastRun() });
+      print({ scheduler: app.scheduler.status(), schedules: app.scheduler.listWithLastRun() }, renderSchedules);
       return done();
     }
     case "budgets": {
@@ -854,22 +872,23 @@ async function main(): Promise<void> {
         if (values.warn) input.warnPercent = Number(values.warn);
         if (values["no-hard-stop"]) input.hardStop = false;
         if (values.unpriced) input.unpricedPolicy = values.unpriced as NonNullable<BudgetInput["unpricedPolicy"]>;
-        print(app.runs.setBudget(input));
+        print(app.runs.setBudget(input), renderBudgetSet);
         return done();
       }
       if (sub === "delete") {
-        if (!args[0]) commandUsage("budgets", "budgets delete needs a budget id");
+        const id = args[0];
+        if (!id) commandUsage("budgets", "budgets delete needs a budget id");
         const app = await open();
-        if (!app.runs.deleteBudget(args[0])) {
-          process.stderr.write(`budget not found: ${args[0]}\n`);
+        if (!app.runs.deleteBudget(id)) {
+          process.stderr.write(`budget not found: ${id}\n`);
           return done(1);
         }
-        print({ deleted: true });
+        print({ deleted: true }, () => [`budget ${id} deleted`]);
         return done();
       }
       if (sub) commandUsage("budgets", `unknown budgets subcommand: ${sub}`);
       const app = await open();
-      print(app.runs.budgetStatuses());
+      print(app.runs.budgetStatuses(), renderBudgets);
       return done();
     }
     case "serve": {

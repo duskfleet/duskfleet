@@ -54,7 +54,7 @@ the dashboard's Schedules page and `duskfleet doctor` show it. That page groups 
 the project they run on: the schedule's own `project_id`, else the project its agent is bound
 to (projects alphabetically, "no project" last, normally empty: only a schedule whose agent was
 deleted lands there). Each group is headed by the project link, its schedule count and how
-many are paused. `list_schedules` and `duskfleet schedules` return the same value as
+many are paused. `list_schedules` and `duskfleet schedules --json` return the same value as
 `effectiveProjectId`; `projectId` stays the stored one (null for a bound agent).
 
 **Relying on the MCP server alone means schedules stop when Claude Desktop or Claude Code

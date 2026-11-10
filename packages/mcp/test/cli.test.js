@@ -393,7 +393,16 @@ test("cli schedules run-now stamps run_requested_at by id or name and spawns not
     });
     db.close();
 
-    const byName = cli(configDir, ["schedules", "run-now", "pr review"]);
+    const human = cli(configDir, ["schedules", "run-now", "pr review"]);
+    assert.equal(human.status, 0, human.stderr);
+    assert.equal(
+      human.stdout,
+      'schedule "pr review" requested, but nothing is ticking: it fires when a scheduler starts (duskfleet serve / install-service)\n',
+      "human mode: the confirmation line is the output",
+    );
+    assert.doesNotMatch(human.stderr, /requested/);
+
+    const byName = cli(configDir, ["schedules", "run-now", "pr review", "--json"]);
     assert.equal(byName.status, 0, byName.stderr);
     assert.ok(JSON.parse(byName.stdout).runRequestedAt, "the request is stamped, even on a paused schedule");
     assert.match(
@@ -402,7 +411,7 @@ test("cli schedules run-now stamps run_requested_at by id or name and spawns not
       "a CLI process never ticks, so it tells the caller who will fire it",
     );
 
-    const byId = cli(configDir, ["schedules", "run-now", s.id]);
+    const byId = cli(configDir, ["schedules", "run-now", s.id, "--json"]);
     assert.equal(byId.status, 0, byId.stderr);
     assert.equal(
       JSON.parse(byId.stdout).runRequestedAt,
@@ -447,10 +456,13 @@ test("README Quick start on a fresh clone: no agents, agents create fixer, then 
   const { root, configDir, project, agentsDir } = makeFreshRoot();
   const env = { CLAUDE_BIN: fakeBinary };
   try {
-    const empty = cli(configDir, ["agents"], env);
+    const empty = cli(configDir, ["agents", "--json"], env);
     assert.equal(empty.status, 0, empty.stderr);
     assert.deepEqual(JSON.parse(empty.stdout), []);
     assert.match(empty.stderr, /Duskfleet ships none.*\n.*agents create <id>/);
+    const emptyHuman = cli(configDir, ["agents"], env);
+    assert.equal(emptyHuman.stdout, "", "human mode: no table, the hint is on stderr");
+    assert.match(emptyHuman.stderr, /Duskfleet ships none/);
 
     const doctor = cli(configDir, ["doctor"], env);
     assert.deepEqual(JSON.parse(doctor.stdout).agents, []);
@@ -462,7 +474,11 @@ test("README Quick start on a fresh clone: no agents, agents create fixer, then 
       /Known agents: \(none: no agent file in .+ or .+; create one with "agents create <id>"\)/,
     );
 
-    const created = cli(configDir, ["agents", "create", "fixer", "--model", "haiku", "--", QUICK_START_PROMPT], env);
+    const created = cli(
+      configDir,
+      ["agents", "create", "fixer", "--model", "haiku", "--json", "--", QUICK_START_PROMPT],
+      env,
+    );
     assert.equal(created.status, 0, created.stderr);
     const out = JSON.parse(created.stdout);
     assert.equal(out.created, true);
@@ -477,11 +493,16 @@ test("README Quick start on a fresh clone: no agents, agents create fixer, then 
     assert.deepEqual(readdirSync(agentsDir), ["fixer.md"], "written to the user agents dir, never config/agents");
     assert.deepEqual(readdirSync(configDir).sort(), ["duskfleet.yaml", "projects.yaml"]);
 
-    const listed = JSON.parse(cli(configDir, ["agents"], env).stdout);
+    const listed = JSON.parse(cli(configDir, ["agents", "--json"], env).stdout);
     assert.deepEqual(
       listed.map((a) => a.id),
       ["fixer"],
     );
+    const table = cli(configDir, ["agents"], { ...env, COLUMNS: "200" });
+    assert.equal(table.status, 0, table.stderr);
+    assert.ok(!table.stdout.includes(ESC), "piped output has no escape codes");
+    assert.match(table.stdout.split("\n")[0], /^id\s+kind\s+source\s+model/);
+    assert.match(table.stdout.split("\n")[1], /^fixer\s+own\s+user\s+haiku\s/);
 
     const run = cli(
       configDir,
@@ -518,7 +539,7 @@ test("agents create refuses an existing id without --force, home paths, secrets 
 
     const forced = cli(
       configDir,
-      ["agents", "create", "fixer", "--force", "--model", "sonnet", "--", "Be brief."],
+      ["agents", "create", "fixer", "--force", "--model", "sonnet", "--json", "--", "Be brief."],
       env,
     );
     assert.equal(forced.status, 0, forced.stderr);
