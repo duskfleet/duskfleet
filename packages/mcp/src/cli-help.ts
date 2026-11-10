@@ -154,7 +154,10 @@ export const COMMAND_HELP: Readonly<Record<string, CommandHelp>> = {
     doc: `${DOCS}/schedules.md#who-ticks`,
   },
   mcp: {
-    usage: ["duskfleet mcp register --target claude-code|claude-desktop [--dry-run] [--yes]", "duskfleet mcp status [--json]"],
+    usage: [
+      "duskfleet mcp register --target claude-code|claude-desktop [--dry-run] [--yes]",
+      "duskfleet mcp status [--json]",
+    ],
     options: [
       "--target <host>   claude-code or claude-desktop",
       "--dry-run         show the change, write nothing",
