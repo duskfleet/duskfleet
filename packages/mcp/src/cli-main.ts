@@ -73,6 +73,8 @@ import {
 } from "./mcp-register.js";
 import { PROBE_COST_NOTE, type ProbeReport, probeNotRun, runProbe } from "./probe.js";
 import {
+  AGENT_CREATE,
+  agentKind,
   type DoctorReport,
   type RenderOpts,
   renderAgentCreated,
@@ -597,19 +599,21 @@ async function main(): Promise<void> {
         const existing = assertAgentIdFree(config, id, force, "--force", null);
         const agent = createAgentFromFields("own", fields, config, () => app.runs.reloadConfig());
         const { systemPrompt: _p, ...shown } = agent;
-        process.stderr.write(
-          `agent "${id}" written to ${agent.sourcePath}\nnext: duskfleet run --project <id or path> --agent ${id} -- "<task>"\n`,
-        );
+        // Human: the acknowledgement on stdout says it. --json: on stderr, stdout stays the object.
+        if (jsonOutput) {
+          process.stderr.write(
+            `agent "${id}" written to ${agent.sourcePath}\nnext: duskfleet run --project <id or path> --agent ${id} -- "<task>"\n`,
+          );
+        }
         print({ created: true, overrode: existing?.source ?? null, agent: shown }, renderAgentCreated);
         return done();
       }
       if (sub) commandUsage("agents", `unknown agents subcommand: ${sub}`);
       const app = await open();
       const agents = [...app.config.agents.values()].map(({ systemPrompt: _p, ...a }) => a);
-      if (agents.length === 0) {
-        process.stderr.write(
-          `no agents yet: Duskfleet ships none. Create your first one with\n  duskfleet agents create <id> --model haiku -- "<system prompt>"\n`,
-        );
+      // Human: the empty state is on stdout. --json: the hint on stderr, stdout stays `[]`.
+      if (agents.length === 0 && jsonOutput) {
+        process.stderr.write(`no agents yet: Duskfleet ships none. Create your first one with\n  ${AGENT_CREATE}\n`);
       }
       print(agents, renderAgents);
       return done();
@@ -822,10 +826,16 @@ async function main(): Promise<void> {
       if (values.limit) filter.limit = Number(values.limit);
       if (values.agent) filter.agentId = values.agent;
       const runs = app.runs.listRuns(filter);
-      const totals = runs.length > 0 ? costTotals(runs) : null;
-      // Human: the total is the table's last line. --json: on stderr, so stdout stays the array scripts parse.
-      print(runs.map(summarizeRun), (summaries, opts) => renderRuns(summaries, totals, opts));
-      if (jsonOutput && totals) process.stderr.write(`${costTotalsLine(totals)}\n`);
+      const narrowed = [
+        values.status ? `status=${values.status}` : "",
+        values.agent ? `agent=${values.agent}` : "",
+        values.limit ? `limit=${values.limit}` : "",
+      ]
+        .filter(Boolean)
+        .join(", ");
+      // Human: the total is the footer of the table. --json: on stderr, so stdout stays the array scripts parse.
+      print(runs.map(summarizeRun), (summaries, opts) => renderRuns(summaries, opts, narrowed || undefined));
+      if (jsonOutput && runs.length > 0) process.stderr.write(`${costTotalsLine(costTotals(runs))}\n`);
       return done();
     }
     case "schedules": {
@@ -932,14 +942,25 @@ async function main(): Promise<void> {
         allowPositionals: true,
         options: { events: { type: "boolean", default: false } },
       });
-      const id = positionals[0];
-      if (!id) commandUsage("run-info", "run-info needs a run id");
+      const given = positionals[0];
+      if (!given) commandUsage("run-info", "run-info needs a run id");
       const app = await open();
-      const run = app.runs.getRun(id);
+      // Lists show the first 8 characters of an id: a unique prefix names the run too.
+      let run = app.runs.getRun(given);
       if (!run) {
-        process.stderr.write(`run not found: ${id}\n`);
+        const matches = app.runs.runIdsWithPrefix(given);
+        if (matches.length > 1) {
+          process.stderr.write(`run id prefix is ambiguous: ${given} (give more characters)\n`);
+          return done(1);
+        }
+        run = matches[0] ? app.runs.getRun(matches[0]) : null;
+      }
+      if (!run) {
+        process.stderr.write(`run not found: ${given}\n`);
         return done(1);
       }
+      const id = run.id;
+      const def = app.config.agents.get(run.agentId);
       const subagents = app.runs.agents(id).map((s) => subagentView(s)); // same names as get_run
       const diff = app.runs.diff(id); // same field as get_run
       const costLabel = runCostLabel(run.billingType); // same field as get_run
@@ -948,7 +969,19 @@ async function main(): Promise<void> {
       // The renderer reads the same pieces the JSON flattens into one object.
       print(
         events ? { ...run, label, costLabel, diff, subagents, events } : { ...run, label, costLabel, diff, subagents },
-        (_v, opts) => renderRunInfo({ run, label, costLabel, diff, subagents, ...(events ? { events } : {}) }, opts),
+        (_v, opts) =>
+          renderRunInfo(
+            {
+              run,
+              label,
+              costLabel,
+              diff,
+              subagents,
+              agent: def ? { kind: agentKind(def), source: def.source } : null,
+              ...(events ? { events } : {}),
+            },
+            opts,
+          ),
       );
       return done();
     }

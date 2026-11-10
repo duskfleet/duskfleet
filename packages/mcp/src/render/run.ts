@@ -1,14 +1,14 @@
 /**
  * What `duskfleet run` prints once the run has ended. Human mode: on stdout a header line
- * (`run <id> <status> · <duration> · <cost>`), the cause / fix / more lines when the run did not
- * end clean, and the log path. `--json`: the run record, trimmed of what nobody reads in a
- * terminal (the spawned argv with the system prompt, the raw result JSON), with the cause / fix
- * block on stderr as before; `--full` prints the whole record. The fix line comes from core's hint
- * table (`runFixHint`), the same one `doctor --probe` uses.
+ * (`run <id> <glyph status> · <duration> · <cost>`), the bold cause / fix / more lines when the run
+ * did not end clean, and a dim `log: <path>` last. `--json`: the run record, trimmed of what nobody
+ * reads in a terminal (the spawned argv with the system prompt, the raw result JSON), with the
+ * cause / fix block on stderr as before; `--full` prints the whole record. The fix line comes from
+ * core's hint table (`runFixHint`), the same one `doctor --probe` uses.
  */
-import { FAILURE_LABELS, REVIEW_REASON_LABELS, type Run, runCostLabel, runFixHint } from "@duskfleet/core";
-import { type Cell, fmtDuration, fmtUsd, oneLine, type RenderOpts } from "./primitives.js";
-import { paint, STATUS_ROLE } from "./theme.js";
+import { FAILURE_LABELS, REVIEW_REASON_LABELS, type Run, runFixHint } from "@duskfleet/core";
+import { type Cell, fmtCents, fmtDuration, oneLine, paintCell, type RenderOpts, statusCell } from "./primitives.js";
+import { paint } from "./theme.js";
 
 /** Longest cause line; the full error stays in the record and in `run-info`. */
 const CAUSE_MAX_CHARS = 240;
@@ -27,7 +27,7 @@ function endedUnclean(run: Run): boolean {
   return !(run.status === "completed" && run.reviewReasons.length === 0);
 }
 
-/** `failed`, `completed, needs review (budget exhausted)`, `timed out (timed out)`. */
+/** `failed`, `completed, needs review (budget exhausted)`, `timed out (timed out)`: the stderr wording. */
 function stateText(run: Run): string {
   const state =
     run.status === "completed" && run.reviewReasons.length > 0
@@ -37,17 +37,27 @@ function stateText(run: Run): string {
   return `${state}${reasons ? ` (${reasons})` : ""}`;
 }
 
+/** Why the run did not end clean, in one line: the failure label and error, else the review reasons. */
+export function causeText(
+  run: Pick<Run, "errorCode" | "error" | "reviewReasons">,
+  max = CAUSE_MAX_CHARS,
+): string | null {
+  const label = run.errorCode ? FAILURE_LABELS[run.errorCode] : null;
+  const error = run.error ? oneLine(run.error, max) : null;
+  if (label || error) return label && error ? `${label}: ${error}` : (label ?? error);
+  const reasons = run.reviewReasons.map((r) => REVIEW_REASON_LABELS[r]).join(", ");
+  return reasons || null;
+}
+
 /** The cause / fix / more lines of a run that did not end clean; empty otherwise. */
 function failureLines(run: Run, opts: RenderOpts): string[] {
   if (!endedUnclean(run)) return [];
   const lines: string[] = [];
-  const label = run.errorCode ? FAILURE_LABELS[run.errorCode] : null;
-  const error = run.error ? oneLine(run.error, CAUSE_MAX_CHARS) : null;
-  const cause = label && error ? `${label}: ${error}` : (label ?? error);
-  if (cause) lines.push(`${paint("muted", "cause:", opts)} ${cause}`);
+  const cause = causeText(run);
+  if (cause) lines.push(`${paint("heading", "cause:", opts)} ${cause}`);
   const fix = runFixHint(run);
-  if (fix) lines.push(`${paint("muted", "fix:", opts)} ${fix}`);
-  lines.push(`${paint("muted", "more:", opts)} duskfleet run-info ${run.id}`);
+  if (fix) lines.push(`${paint("heading", "fix:", opts)} ${fix}`);
+  lines.push(`${paint("heading", "more:", opts)} ${paint("accent", `duskfleet run-info ${run.id}`, opts)}`);
   return lines;
 }
 
@@ -57,38 +67,31 @@ function failureLines(run: Run, opts: RenderOpts): string[] {
  */
 export function runReportLines(run: Run): string[] | null {
   if (!endedUnclean(run)) return null;
-  return [`run ${run.id} ${stateText(run)}`, ...failureLines(run, { color: false, width: Number.POSITIVE_INFINITY })];
+  const plain = { color: false, width: Number.POSITIVE_INFINITY };
+  const lines = failureLines(run, plain);
+  // The stderr block keeps the reasons on its first line, so the cause line names the error only.
+  const first = lines[0]?.startsWith("cause:") && !run.errorCode && !run.error ? 1 : 0;
+  return [`run ${run.id} ${stateText(run)}`, ...lines.slice(first)];
 }
 
 /**
- * One run's cost as a cell: `$0.0123` billed, `≈$0.0123` at API value (subscription or unknown
- * billing, the `costLabel` rule), `unpriced` when the run ended without a cost, `-` while unknown.
+ * One run's cost as a cell: `$0.08` reported, `~$0.21` estimated (an API value, not billed),
+ * `?` unpriced (ended without a cost), `-` while unknown.
  */
-export function costCell(run: {
-  costUsd: number | null;
-  costLabel: string;
-  costStatus?: string | null | undefined;
-}): Cell {
-  if (run.costStatus === "unpriced") return { text: "unpriced", role: "warn" };
-  if (run.costUsd === null) return { text: "-", role: "faint" };
-  return `${run.costLabel === "API value" ? "≈" : ""}${fmtUsd(run.costUsd)}`;
+export function costCell(run: { costUsd: number | null; costStatus?: string | null | undefined }): Cell {
+  if (run.costStatus === "unpriced") return "?";
+  if (run.costUsd === null) return "-";
+  return `${run.costStatus === "estimated" ? "~" : ""}${fmtCents(run.costUsd)}`;
 }
 
 /** Human stdout of `duskfleet run`: header, then the failure block when there is one, then the log path. */
 export function renderRunResult(run: Run, opts: RenderOpts): string[] {
-  const unclean = endedUnclean(run);
-  const role = unclean && run.status === "completed" ? "warn" : STATUS_ROLE[run.status];
-  const cost = costCell({ costUsd: run.costUsd, costLabel: runCostLabel(run.billingType), costStatus: run.costStatus });
   const parts = [
-    `run ${paint("accent", run.id, opts)} ${paint(role, stateText(run), opts)}`,
+    `run ${paint("accent", run.id, opts)} ${paintCell(statusCell(run.status, run.reviewReasons.length > 0), opts)}`,
     run.durationMs !== null ? fmtDuration(run.durationMs) : null,
-    run.costUsd !== null || run.costStatus === "unpriced"
-      ? typeof cost === "string"
-        ? cost
-        : paint(cost.role, cost.text, opts)
-      : null,
+    run.costUsd !== null || run.costStatus === "unpriced" ? paintCell(costCell(run), opts) : null,
   ].filter((p): p is string => p !== null);
   const lines = [parts.join(" · "), ...failureLines(run, opts)];
-  if (run.logPath) lines.push(`${paint("muted", "log:", opts)} ${run.logPath}`);
+  if (run.logPath) lines.push(paint("muted", `log: ${run.logPath}`, opts));
   return lines;
 }

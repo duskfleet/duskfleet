@@ -117,7 +117,7 @@ test("cli run: human result on stdout by default; --json the trimmed record with
     // Human: header, cause / fix / more, log path, all on stdout; no JSON, no escape codes in a pipe.
     const human = cli(configDir, ["run", "--project", project, "--", "auth"]);
     assert.equal(human.status, 1);
-    assert.match(human.stdout, /^run \S+ failed \([^)]+\) · /, human.stdout);
+    assert.match(human.stdout, /^run \S+ ✗ failed · /, human.stdout);
     assert.match(human.stdout, /^cause: Claude is not logged in: .*Please run \/login/m);
     assert.match(human.stdout, /^fix: Claude Code is not authenticated/m);
     assert.match(human.stdout, /^more: duskfleet run-info \S+$/m);
@@ -158,7 +158,7 @@ test("cli run: human result on stdout by default; --json the trimmed record with
     // A clean run, human: the header and the log path only.
     const okHuman = cli(configDir, ["run", "--project", project, "--", "ok"]);
     assert.equal(okHuman.status, 0, okHuman.stderr);
-    assert.match(okHuman.stdout, /^run \S+ completed/);
+    assert.match(okHuman.stdout, /^run \S+ (✓ completed|! needs review)/);
     assert.doesNotMatch(okHuman.stdout, /^(cause|fix|more):/m);
 
     // A clean run, --json: no block, same trimmed shape.
@@ -195,10 +195,13 @@ test("cli runs and run-info: a human view by default, plain in a pipe and under 
     const human = plainCli(["runs"]);
     assert.equal(human.status, 0, human.stderr);
     assert.throws(() => JSON.parse(human.stdout), "the default is not JSON");
-    assert.match(human.stdout, /^when +status/);
-    assert.match(human.stdout, /completed/);
-    assert.match(human.stdout, new RegExp(id));
-    assert.match(human.stdout.trimEnd().split("\n").at(-1), /over 1 run/, "the cost total is the last stdout line");
+    assert.match(human.stdout, /^ID +STATUS +AGENT +PROJECT +MODEL +AGE +DURATION +COST +TOOLS$/m);
+    assert.match(human.stdout, /✓ completed|! needs review/);
+    assert.match(human.stdout, new RegExp(`^${id.slice(0, 8)} `, "m"), "the short id");
+    const tail = human.stdout.trimEnd().split("\n").slice(-3);
+    assert.match(tail[0], /^total \$\d+\.\d\d/, "the cost total in the footer");
+    assert.equal(tail[1], "1 run · newest first");
+    assert.match(tail[2], /^json: add --json/, "the json line last");
     assert.ok(!human.stdout.includes(ESC), "a pipe gets no escape codes");
     assert.equal(human.stderr, "", "the total is not repeated on stderr");
 
@@ -213,18 +216,30 @@ test("cli runs and run-info: a human view by default, plain in a pipe and under 
     assert.ok(!plainCli(["runs"], { NO_COLOR: "1" }).stdout.includes(ESC), "NO_COLOR: no escape codes");
     assert.ok(plainCli(["runs"], { FORCE_COLOR: "1" }).stdout.includes(ESC), "FORCE_COLOR colours a pipe");
 
-    const narrow = plainCli(["runs"], { COLUMNS: "60" });
+    const narrow = plainCli(["runs"], { COLUMNS: "80" });
+    assert.match(
+      narrow.stdout,
+      /^ID +STATUS +AGENT +MODEL +AGE +DURATION +COST$/m,
+      "80 columns: TOOLS and PROJECT dropped",
+    );
     for (const line of narrow.stdout.trimEnd().split("\n").slice(0, 2)) {
-      assert.ok(line.length <= 60, `fits COLUMNS=60: ${JSON.stringify(line)}`);
+      assert.ok(line.length <= 80, `fits COLUMNS=80: ${JSON.stringify(line)}`);
     }
 
     const info = plainCli(["run-info", id]);
     assert.equal(info.status, 0, info.stderr);
-    assert.match(info.stdout, /^Run\n/);
-    assert.match(info.stdout, new RegExp(`^  id +${id}$`, "m"));
-    assert.match(info.stdout, /^Usage$/m);
+    assert.match(info.stdout, new RegExp(`^run ${id} {2}(✓ completed|! needs review)\n`));
+    assert.match(info.stdout, /^Run ─+$/m);
+    assert.match(info.stdout, /^ {2}agent +\S+ \((own|link), (builtin|user)\)$/m, "the agent's kind and source");
+    assert.match(info.stdout, /^Usage ─+$/m);
+    assert.match(info.stdout.trimEnd().split("\n").at(-1), /^json: add --json · log: /);
     assert.equal(JSON.parse(plainCli(["run-info", id, "--json"]).stdout).id, id);
-    assert.match(plainCli(["run-info", id, "--events"]).stdout, /^Events$/m);
+    assert.match(plainCli(["run-info", id, "--events"]).stdout, /^Events ─+$/m);
+    // The short id lists show names the run too.
+    const short = plainCli(["run-info", id.slice(0, 8)]);
+    assert.equal(short.status, 0, short.stderr);
+    assert.match(short.stdout, new RegExp(`^run ${id} `));
+    assert.equal(plainCli(["run-info", "zzzzzzzz"]).status, 1);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
@@ -280,10 +295,10 @@ test("doctor --probe makes one haiku run outside any project, says it costs mone
     assert.doesNotMatch(plain.stderr, /costs/);
     const human = cli(configDir, ["doctor"]);
     assert.equal(human.status, 0, human.stderr);
-    assert.match(human.stdout, /^Claude\n {2}binary /, "the default is the sectioned report");
-    assert.match(human.stdout, /\nScheduler\n/);
+    assert.match(human.stdout, /^doctor · \d+ warnings? · 0 errors\n/, "the default is the check list");
+    assert.match(human.stdout, /^[✓!] scheduler {7}/m);
     assert.ok(!human.stdout.includes("\u001b["), "piped output has no escape codes");
-    assert.doesNotMatch(human.stdout, /^Probe$/m, "no probe section without the flag");
+    assert.doesNotMatch(human.stdout, /^. probe /m, "no probe check without the flag");
 
     const ok = cli(configDir, ["doctor", "--probe", "--json"]);
     assert.equal(ok.status, 0, ok.stderr);
@@ -403,8 +418,8 @@ test("cli schedules run-now stamps run_requested_at by id or name and spawns not
     assert.equal(human.status, 0, human.stderr);
     assert.equal(
       human.stdout,
-      'schedule "pr review" requested, but nothing is ticking: it fires when a scheduler starts (duskfleet serve / install-service)\n',
-      "human mode: the confirmation line is the output",
+      "✓ schedule pr review requested\n  nothing is ticking: start a scheduler with duskfleet serve\n",
+      "human mode: the acknowledgement is the output",
     );
     assert.doesNotMatch(human.stderr, /requested/);
 
@@ -467,8 +482,12 @@ test("README Quick start on a fresh clone: no agents, agents create fixer, then 
     assert.deepEqual(JSON.parse(empty.stdout), []);
     assert.match(empty.stderr, /Duskfleet ships none.*\n.*agents create <id>/);
     const emptyHuman = cli(configDir, ["agents"], env);
-    assert.equal(emptyHuman.stdout, "", "human mode: no table, the hint is on stderr");
-    assert.match(emptyHuman.stderr, /Duskfleet ships none/);
+    assert.match(
+      emptyHuman.stdout,
+      /^no agents yet\n {2}duskfleet agents create <id>/,
+      "human mode: the empty state on stdout",
+    );
+    assert.doesNotMatch(emptyHuman.stderr, /Duskfleet ships none/, "not repeated on stderr");
 
     const doctor = cli(configDir, ["doctor", "--json"], env);
     assert.deepEqual(JSON.parse(doctor.stdout).agents, []);
@@ -507,7 +526,7 @@ test("README Quick start on a fresh clone: no agents, agents create fixer, then 
     const table = cli(configDir, ["agents"], { ...env, COLUMNS: "200" });
     assert.equal(table.status, 0, table.stderr);
     assert.ok(!table.stdout.includes(ESC), "piped output has no escape codes");
-    assert.match(table.stdout.split("\n")[0], /^id\s+kind\s+source\s+model/);
+    assert.match(table.stdout.split("\n")[0], /^ID\s+KIND\s+SOURCE\s+MODEL/);
     assert.match(table.stdout.split("\n")[1], /^fixer\s+own\s+user\s+haiku\s/);
 
     const run = cli(

@@ -1,12 +1,13 @@
 /**
  * The human views of `agents`, `agents create`, `projects`, `schedules`, `schedules run-now`,
- * `budgets` and `budgets set` (packages/mcp/src/render), as exact plain lines.
+ * `budgets` and `budgets set` (packages/mcp/src/render, DS-33), as plain lines.
  */
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import "./helpers.js";
 import { COMMAND_HELP } from "../dist/cli-help.js";
 import {
+  AGENT_CREATE,
   renderAgentCreated,
   renderAgents,
   renderBudgetSet,
@@ -43,84 +44,67 @@ const REVIEWER = {
   sourcePath: "/srv/config/agents/reviewer.md",
 };
 
-test("renderAgents: one row per agent, kind own / link, defaults shown as such", () => {
+test("renderAgents: ID · KIND · SOURCE · MODEL · PROJECT · BUDGET · TIMEOUT · DESCRIPTION, a link without a model reads agent", () => {
   assert.deepEqual(renderAgents([FIXER, REVIEWER], plain()), [
-    "id        kind  source   model    project  budget  timeout  description",
-    "fixer     own   user     haiku    -         $0.50      10m  Fixes the failing test",
-    "reviewer  link  builtin  default  demo          -        -  -",
-  ]);
-});
-
-test("renderAgents: a narrow terminal drops columns and cuts the description", () => {
-  assert.deepEqual(renderAgents([FIXER, REVIEWER], plain(40)), [
-    "id        kind  model    description",
-    "fixer     own   haiku    Fixes the fail…",
-    "reviewer  link  default  -",
-  ]);
-});
-
-test("renderAgents / renderAgentCreated: a multi-line description stays on one line", () => {
-  const multi = { ...FIXER, description: "Fixes the\nfailing test\n" };
-  assert.deepEqual(renderAgents([multi], plain()), [
-    "id     kind  source  model  project  budget  timeout  description",
-    "fixer  own   user    haiku  -         $0.50      10m  Fixes the failing test",
-  ]);
-  const created = renderAgentCreated({ created: true, overrode: null, agent: multi }, plain());
-  assert.equal(created.at(-1), "description      Fixes the failing test");
-});
-
-test("renderAgents: no agents prints nothing (the hint is on stderr)", () => {
-  assert.deepEqual(renderAgents([], plain()), []);
-});
-
-test("renderAgentCreated: the agent written, and a line when it overrides a builtin", () => {
-  assert.deepEqual(renderAgentCreated({ created: true, overrode: "builtin", agent: FIXER }, plain()), [
-    "agent fixer created",
-    'overrides the builtin agent "fixer" (same id; delete the user file to restore it)',
+    "ID                    KIND  SOURCE   MODEL   PROJECT     BUDGET  TIMEOUT  DESCRIPTION",
+    "fixer                 own   user     haiku   none         $0.50      10m  Fixes the failing test",
+    "reviewer              link  builtin  agent   demo             -        -  -",
     "",
-    "kind             own",
-    "model            haiku",
-    "permission mode  dontAsk",
-    "allowed tools    Read, Edit",
-    "budget           $0.50 per run",
-    "timeout          10m",
-    "description      Fixes the failing test",
-  ]);
-  const fresh = renderAgentCreated({ created: true, overrode: null, agent: { ...FIXER, model: undefined } }, plain());
-  assert.deepEqual(fresh.slice(0, 4), [
-    "agent fixer created",
-    "",
-    "kind             own",
-    "model            default (the Claude Code default)",
+    `json: add --json · new agent: ${AGENT_CREATE}`,
   ]);
 });
 
-test("renderProjects: the allowed roots, then the projects with their bound agents", () => {
+test("renderAgents: the description fills the rest of the line and is cut; a multi-line one stays on one line", () => {
+  const long = { ...FIXER, description: "Fixes the\nfailing test and then writes a very long report about it" };
+  const lines = renderAgents([long], plain(100));
+  assert.equal(lines[1].length, 100);
+  assert.ok(lines[1].endsWith("…"));
+  assert.match(lines[1], / {2}Fixes the failing test/);
+});
+
+test("renderAgents: the empty state names the command that writes a first agent", () => {
+  assert.deepEqual(renderAgents([], plain()), ["no agents yet", `  ${AGENT_CREATE}`]);
+});
+
+test("renderAgentCreated: a ✓ line, the run command, the file written (and what it replaced)", () => {
+  assert.deepEqual(renderAgentCreated({ created: true, overrode: null, agent: FIXER }, plain()), [
+    "✓ agent fixer created",
+    '  duskfleet run --project <id or path> --agent fixer -- "<task>"',
+    "  wrote /srv/data/agents/fixer.md",
+  ]);
+  const over = renderAgentCreated({ created: true, overrode: "builtin", agent: FIXER }, plain());
+  assert.equal(
+    over[2],
+    '  wrote /srv/data/agents/fixer.md (overrides the builtin "fixer": delete this file to restore it)',
+  );
+  const colored = renderAgentCreated({ created: true, overrode: null, agent: FIXER }, { ...plain(), color: true });
+  assert.ok(colored[0].includes("\u001b[35mfixer\u001b[39m"), "subject in magenta");
+});
+
+test("renderProjects: the allowed roots in the header, ID · PATH · AGENTS, overflow as +n", () => {
   const value = {
     allowedProjectRoots: [],
     projects: [
-      { id: "demo", path: "/srv/demo" },
+      { id: "demo", path: "/home/me/src/demo" },
       { id: "side", path: "/srv/side-project" },
     ],
   };
-  const agents = [{ id: "fixer" }, { id: "reviewer", project: "demo" }, { id: "helper", project: "demo" }];
-  assert.deepEqual(renderProjects(value, agents, plain()), [
-    "Allowed project roots",
-    "  any directory",
-    "",
-    "id    path               agents",
-    "demo  /srv/demo          reviewer, helper",
-    "side  /srv/side-project  -",
-  ]);
+  const many = Array.from({ length: 12 }, (_, i) => ({ id: `agent-number-${i}`, project: "demo" }));
+  const lines = renderProjects(value, [{ id: "fixer" }, ...many], plain(), "/home/me");
+  assert.equal(lines[0], "projects · allowed roots: any directory");
+  assert.equal(lines[2], "ID            PATH                            AGENTS");
+  assert.match(lines[3], /^demo {10}~\/src\/demo {22}agent-number-0, .+, \+\d+$/);
+  assert.ok(lines[3].length <= 100);
+  assert.equal(lines[4], "side          /srv/side-project               none");
+  assert.equal(lines.at(-1), "json: add --json · register more in projects.yaml");
 });
 
 test("renderProjects: roots listed, and the empty state", () => {
   assert.deepEqual(renderProjects({ allowedProjectRoots: ["/srv", "/opt"], projects: [] }, [], plain()), [
-    "Allowed project roots",
-    "  /srv",
-    "  /opt",
+    "projects · allowed roots: /srv, /opt",
     "",
-    "no projects registered: run --project also takes a path, or add an id to projects.yaml",
+    "no projects registered",
+    "  duskfleet run --project <absolute path> ...",
   ]);
 });
 
@@ -155,7 +139,7 @@ const SCHEDULES = [
     name: "nightly",
     agentId: "fixer",
     cron: "0 2 * * *",
-    timeZone: "UTC",
+    timeZone: "Europe/London",
     enabled: false,
     pausedReason: "3 empty runs in a row",
     nextRunAt: "2026-11-10T02:00:00Z",
@@ -168,16 +152,30 @@ const SCHEDULES = [
   },
 ];
 
-test("renderSchedules: scheduler header, then how each schedule's last run ended", () => {
-  assert.deepEqual(renderSchedules({ scheduler: TICKING, schedules: SCHEDULES }, plain(160)), [
-    "scheduler  enabled",
-    "ticking    serve@mac:42, lease ends in 1m",
+test("renderSchedules at 100 columns: status line, time zone, every column, └ under a paused schedule", () => {
+  assert.deepEqual(renderSchedules({ scheduler: TICKING, schedules: SCHEDULES }, plain()), [
+    "scheduler  ✓ enabled · ● running · holder serve@mac:42 · lease ends in 1m",
+    "time zone  Europe/London",
     "",
-    "name       agent     cron                       state                          next    last fired        last run             fires/skips",
-    "pr review  reviewer  0 9 * * * (Europe/London)  enabled                        in 21h  3h ago → started  completed ! $0.0123          5/1",
-    "nightly    fixer     0 2 * * * (UTC)            paused: 3 empty runs in a row  -       -                 -                            0/0",
-    "! needs review: duskfleet run-info <id>",
+    "NAME            AGENT           CRON         STATE       NEXT  LAST            LAST RUN    FIRE/SKIP",
+    "pr review       reviewer        0 9 * * *    ✓ on         21h  started         ! $0.01           5/1",
+    "nightly         fixer           0 2 * * *    ‖ paused       -  -               -                 0/0",
+    "                └ 3 empty runs in a row · resume: duskfleet dashboard",
+    "",
+    "json: add --json · fire one now: duskfleet schedules run-now <name>",
   ]);
+});
+
+test("renderSchedules at 80 columns drops FIRE/SKIP then CRON, below 70 LAST RUN; the status header wraps", () => {
+  const at80 = renderSchedules({ scheduler: TICKING, schedules: SCHEDULES }, plain(80));
+  assert.deepEqual(at80.slice(0, 2), [
+    "scheduler  ✓ enabled · ● running",
+    "           holder serve@mac:42 · lease ends in 1m",
+  ]);
+  assert.equal(at80[4], "NAME            AGENT           STATE       NEXT  LAST            LAST RUN");
+  assert.ok(at80.every((l) => l.length <= 80));
+  const at68 = renderSchedules({ scheduler: TICKING, schedules: SCHEDULES }, plain(68));
+  assert.match(at68[4], /^NAME +AGENT +STATE +NEXT +LAST$/);
 });
 
 test("renderSchedules: disabled, nothing ticking, a scheduler pause with its reason, no schedules", () => {
@@ -187,26 +185,30 @@ test("renderSchedules: disabled, nothing ticking, a scheduler pause with its rea
     lease: null,
     pause: { pausedUntil: "2026-11-09T15:00:00Z", pausedAt: "2026-11-09T11:00:00Z", reason: "deploy", pausedBy: null },
   };
-  assert.deepEqual(renderSchedules({ scheduler: status, schedules: [] }, plain()), [
-    "scheduler  disabled: nothing fires (scheduler.enabled is false)",
-    "ticking    nothing: schedules fire while duskfleet serve or an MCP host runs",
-    "paused     until 2026-11-09T15:00:00Z (in 3h): deploy",
-    "",
-    "no schedules yet: create one with the create_schedule MCP tool",
-  ]);
+  const lines = renderSchedules({ scheduler: status, schedules: [] }, plain(300));
+  assert.equal(
+    lines[0],
+    "scheduler  ✗ disabled: nothing fires (scheduler.enabled is false) · ! not running · ‖ paused until 2026-11-09T15:00:00Z (in 3h): deploy · nothing ticks: schedules fire while duskfleet serve or an MCP host runs",
+  );
+  assert.deepEqual(lines.slice(1), ["", "no schedules yet", "  create one with the create_schedule MCP tool"]);
 });
 
-test("renderSchedules: an expired lease is nothing ticking; a requested schedule says so", () => {
+test("renderSchedules: an expired lease is nothing ticking; a requested schedule fires now", () => {
   const stale = { ...TICKING, lease: { holder: "serve@mac:42", expiresAt: "2026-11-09T11:00:00Z" } };
   const requested = [{ ...SCHEDULES[0], runRequestedAt: "2026-11-09T11:59:00Z" }];
-  const lines = renderSchedules({ scheduler: stale, schedules: requested }, plain(160));
-  assert.equal(lines[1], "ticking    nothing: schedules fire while duskfleet serve or an MCP host runs");
-  assert.match(lines[4], /enabled\s+requested\s+3h ago/);
+  const lines = renderSchedules({ scheduler: stale, schedules: requested }, plain(200));
+  assert.match(lines[0], /! not running · nothing ticks/);
+  assert.match(lines[4], /✓ on +now {2}started/);
 });
 
-test("renderScheduleRequested: one confirmation line, with or without a ticker", () => {
+test("renderScheduleRequested: a ✓ line, then who fires it or how to start a scheduler", () => {
   assert.deepEqual(renderScheduleRequested(SCHEDULES[0], { holder: "serve@mac:42", tickSeconds: 30 }, plain()), [
-    'schedule "pr review" requested; serve@mac:42 fires it within 30s',
+    "✓ schedule pr review requested",
+    "  serve@mac:42 fires it within 30s",
+  ]);
+  assert.deepEqual(renderScheduleRequested(SCHEDULES[0], null, plain()), [
+    "✓ schedule pr review requested",
+    "  nothing is ticking: start a scheduler with duskfleet serve",
   ]);
   assert.equal(
     scheduleRequestedLine(SCHEDULES[0], null, plain()),
@@ -262,30 +264,33 @@ const PROJECT = {
   unpricedPolicy: "allow",
   spentUsd: 3,
   unpricedRuns: 2,
-  countedUsd: 3,
-  percent: 30,
-  state: "ok",
+  countedUsd: 9,
+  percent: 90,
+  state: "warn",
 };
 
-test("renderBudgets: counted against amount, state, stand-ins and the over-by-running note", () => {
-  assert.deepEqual(renderBudgets([GLOBAL, AGENT, PROJECT], plain(120)), [
-    "scope         counted / amount  percent  state   warn  hard stop  id        unpriced",
-    "global         $12.00 / $50.00      24%  ok       80%  yes        b-global  count",
-    "agent fixer      $1.40 / $1.00     140%  over *   80%  yes        b-fixer   count: $1.00 for 1 unpriced, 1 running",
-    "project demo    $3.00 / $10.00      30%  ok       80%  no         b-demo    allow (2 unpriced not counted)",
-    "* over only counting runs still going: new runs are refused until they end, schedules are not paused",
+test("renderBudgets: month and policy header, a meter per scope, stand-ins on └ lines", () => {
+  assert.deepEqual(renderBudgets([GLOBAL, AGENT, PROJECT], plain()), [
+    "budgets · UTC month since 2026-11-01 · unpriced_policy count, allow",
     "",
-    "UTC month since 2026-11-01",
+    "SCOPE                      SPENT     LIMIT   USED              STATE      WARN  HARD STOP",
+    "global                    $12.00    $50.00    24%  ■■········  ✓ ok        80%  ✓ yes",
+    "agent fixer                $1.40     $1.00   140%  ■■■■■■■■■■  ✗ stopped   80%  ✓ yes",
+    "  └ stand-ins: $1.00 for 1 unpriced, 1 running · over only by running runs: schedules not paused",
+    "project demo               $9.00    $10.00    90%  ■■■■■■■■■·  ! warning   80%  – no",
+    "  └ allow: 2 unpriced not counted",
+    "",
+    `json: add --json · set one: ${COMMAND_HELP.budgets.example}`,
   ]);
 });
 
 test("renderBudgets: the empty state names the command that sets one", () => {
-  assert.deepEqual(renderBudgets([], plain()), ["no budgets. Set one with:", `  ${COMMAND_HELP.budgets.example}`]);
+  assert.deepEqual(renderBudgets([], plain()), ["no budgets yet", `  ${COMMAND_HELP.budgets.example}`]);
 });
 
-test("renderBudgetSet: the budget as written, with this month's state", () => {
+test("renderBudgetSet: a ✓ line and the budget as written, with this month's state", () => {
   assert.deepEqual(renderBudgetSet(GLOBAL, plain()), [
-    "budget global set",
+    "✓ budget global set",
     "",
     "id          b-global",
     "amount      $50.00 a month (UTC)",
@@ -293,12 +298,15 @@ test("renderBudgetSet: the budget as written, with this month's state", () => {
     "hard stop   yes: refuses new runs and pauses the scope's schedules",
     "unpriced    count",
     "this month  $12.00 counted, 24%",
-    "state       ok",
+    "state       ✓ ok",
   ]);
 });
 
-test("renderers paint only with color: true", () => {
-  const colored = renderBudgets([GLOBAL], { color: true, width: 120, now }).join("\n");
-  assert.ok(colored.includes("\u001b["), "colour codes with color: true");
-  assert.ok(!renderBudgets([GLOBAL], plain(120)).join("\n").includes("\u001b["), "none with color: false");
+test("renderers paint only with color: true; the meter's empty cells are dim", () => {
+  const colored = renderBudgets([GLOBAL], { color: true, width: 100, now }).join("\n");
+  assert.ok(
+    colored.includes("\u001b[32m■■\u001b[39m\u001b[2m········\u001b[22m"),
+    "filled in the state colour, empty dim",
+  );
+  assert.ok(!renderBudgets([GLOBAL], plain()).join("\n").includes("\u001b["), "none with color: false");
 });

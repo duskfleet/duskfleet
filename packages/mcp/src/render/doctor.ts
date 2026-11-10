@@ -1,13 +1,15 @@
 /**
- * `duskfleet doctor` for a human: the report `doctor --json` prints, in sections (Claude, Paths,
- * Agents, Scheduler, Budgets, Orphans, Probe). Advice lines are warnings; a missing binary or a
- * failed probe is painted as an error. Pure: the exit code stays the CLI's business.
+ * `duskfleet doctor` for a human (DS-33): a `doctor · n warnings · n errors` header, then one check
+ * per line (glyph, a 16-column name, the value) in a fixed order: node, claude, PATH, config, data,
+ * agents, scheduler, schedules, unpriced runs, orphans, probe. Advice lines are indented under their
+ * check. A missing binary is the only error. Pure: the exit code stays the CLI's business.
  */
 import type { BudgetState, ConfigSource, DataSource } from "@duskfleet/core";
 import type { ProbeReport } from "../probe.js";
 import type { KeepAwakeStatus, ServiceStatus } from "../service.js";
-import { type Cell, fmtDuration, fmtUsd, kv, oneLine, type RenderOpts, section, sections } from "./primitives.js";
-import { paint, type Role } from "./theme.js";
+import { AGENT_CREATE } from "./agents.js";
+import { fmtCents, fmtDuration, jsonLine, oneLine, type RenderOpts } from "./primitives.js";
+import { GLYPH, paint } from "./theme.js";
 
 export interface DoctorReport {
   node: string;
@@ -50,159 +52,142 @@ export interface DoctorReport {
 }
 
 /** Prefix of a warning line. */
-export const WARN_MARK = "!";
+export const WARN_MARK = GLYPH.warn;
 
-/** One advice line, painted as a warning. */
+/** One advice line, glyph painted as a warning, text in the default colour. */
 export function warnLine(text: string, opts: RenderOpts): string {
-  return paint("warn", `${WARN_MARK} ${text}`, opts);
+  return `${paint("warn", WARN_MARK, opts)} ${text}`;
 }
 
-const yesNo = (v: boolean, noRole: Role | null = "muted"): Cell => (v ? "yes" : { text: "no", role: noRole });
+type Level = "ok" | "warn" | "error";
 
-const BUDGET_ROLE: Readonly<Record<BudgetState, Role>> = { ok: "ok", warn: "warn", over: "bad" };
-
-function claudeSection(r: DoctorReport, opts: RenderOpts): string[] {
-  const lines = kv(
-    [
-      ["binary", r.claudeBinary],
-      ["version", r.claudeVersion ?? (r.error ? { text: "unknown", role: "bad" } : "unknown")],
-      ["error", r.error ? { text: oneLine(r.error), role: "bad" } : null],
-      ["node", r.node],
-    ],
-    opts,
-  );
-  return section("Claude", lines, opts);
+interface Check {
+  level: Level;
+  name: string;
+  /** The value, already painted. */
+  value: string;
+  /** Indented under the check. */
+  advice?: string[];
 }
 
-function pathsSection(r: DoctorReport, opts: RenderOpts): string[] {
-  const candidate = (name: string, dir: string | null) =>
-    paint("faint", `${name.padEnd(4)}  ${dir ?? "-"}${name === r.configSource ? "  (used)" : ""}`, opts);
-  const lines = [
-    ...kv(
-      [
-        ["config", `${r.configDir} (${r.configSource})`],
-        ["data", `${r.dataDir} (${r.dataSource})`],
-      ],
-      opts,
-    ),
-    paint("muted", "config lookup, first match wins:", opts),
-    `  ${candidate("env", r.configLookup.env)}`,
-    `  ${candidate("repo", r.configLookup.repo)}`,
-    `  ${candidate("user", r.configLookup.user)}`,
-  ];
-  if (r.pathDefaulted) {
-    lines.push(
-      paint("faint", "PATH was missing or minimal: the usual install directories were put in front for claude", opts),
-    );
+const NAME = 16;
+
+const ok = (name: string, value: string, advice: string[] = []): Check => ({ level: "ok", name, value, advice });
+const warn = (name: string, value: string, advice: string[] = []): Check => ({ level: "warn", name, value, advice });
+
+/** `spawn claude ENOENT`, `command not found`: the binary is missing, not merely failing. */
+const looksMissing = (error: string) => /ENOENT|not found|no such file/i.test(error);
+
+function claudeCheck(r: DoctorReport, opts: RenderOpts): Check {
+  if (r.error) {
+    const missing = looksMissing(r.error);
+    const advice = [`${r.claudeBinary}: ${oneLine(r.error)}`];
+    return missing
+      ? { level: "error", name: "claude", value: paint("bad", "not found", opts), advice }
+      : warn("claude", `version unknown · ${r.claudeBinary}`, advice);
   }
-  return section("Paths", lines, opts);
+  return ok("claude", `${r.claudeVersion ?? "version unknown"} · ${r.claudeBinary}`);
 }
 
-function agentsSection(r: DoctorReport, opts: RenderOpts): string[] {
-  const dupes = r.scheduler.duplicateSchedules.map((d) => d.agentId);
-  return section(
-    "Agents",
-    kv(
-      [
-        ["count", String(r.agents.length)],
-        ["ids", r.agents.length ? r.agents.join(", ") : null],
-        ["duplicates", dupes.length ? { text: `${dupes.join(", ")} (more than one schedule)`, role: "warn" } : null],
-      ],
-      opts,
-    ),
-    opts,
-  );
-}
-
-function serviceCell(s: ServiceStatus): Cell {
-  if (!s.supported) return { text: "not supported here", role: "muted" };
-  if (!s.installed) return { text: s.detail, role: "warn" };
-  if (s.running === false) return { text: s.detail, role: "bad" };
-  return { text: s.detail, role: s.running ? "ok" : null };
-}
-
-function keepAwakeCell(k: KeepAwakeStatus | null): Cell | null {
-  if (!k || k.wrapsCaffeinate === null) return null;
-  const sleeps =
-    k.sleepMinutes === null
-      ? ""
-      : k.sleepMinutes === 0
-        ? ", Mac sleep never"
-        : `, Mac sleeps after ${k.sleepMinutes} min idle`;
-  return k.wrapsCaffeinate ? { text: `yes (caffeinate)${sleeps}`, role: null } : { text: `no${sleeps}`, role: "warn" };
-}
-
-function schedulerSection(r: DoctorReport, opts: RenderOpts): string[] {
+function schedulerCheck(r: DoctorReport): Check {
   const s = r.scheduler;
   const h = s.holder;
-  const lines = kv(
-    [
-      ["enabled", yesNo(s.enabled, "warn")],
-      [
-        "ticking",
-        s.ticking
-          ? `yes (${h ? `${h.role}@${h.host}${h.pid === null ? "" : ` pid ${h.pid}`}` : "holder unknown"})`
-          : { text: "no", role: "warn" },
-      ],
-      ["service", serviceCell(s.service)],
-      ["service pid", s.service.pid === null ? null : String(s.service.pid)],
-      ["keep awake", keepAwakeCell(s.keepAwake)],
-    ],
-    opts,
-  );
-  const advice = [s.advice, s.keepAwake?.advice ?? null, ...s.duplicateSchedules.map((d) => d.warning)].filter(
-    (a): a is string => !!a,
-  );
-  return section("Scheduler", [...lines, ...advice.map((a) => warnLine(a, opts))], opts);
+  const ticking = s.ticking
+    ? `ticking ${h ? `${h.role}@${h.host}${h.pid === null ? "" : ` pid ${h.pid}`}` : "(holder unknown)"}`
+    : "nothing ticking";
+  const service = s.service.supported ? `service ${s.service.detail}` : "service not supported here";
+  const awake =
+    s.keepAwake && s.keepAwake.wrapsCaffeinate !== null
+      ? `keep awake ${s.keepAwake.wrapsCaffeinate ? "yes" : "no"}${s.keepAwake.sleepMinutes ? ` (sleeps after ${s.keepAwake.sleepMinutes} min idle)` : ""}`
+      : null;
+  const value = [s.enabled ? "enabled" : "disabled", ticking, service, awake].filter(Boolean).join(" · ");
+  const advice = [s.advice, s.keepAwake?.advice ?? null].filter((a): a is string => !!a);
+  const healthy = s.enabled && s.ticking && s.service.running !== false && advice.length === 0;
+  return healthy ? ok("scheduler", value) : warn("scheduler", value, advice);
 }
 
-function budgetsSection(r: DoctorReport, opts: RenderOpts): string[] {
-  const lines = r.unpricedRuns.flatMap((b) => [
-    `${paint("accent", b.budget, opts)}  ${b.runs.length} unpriced run(s), counted ${fmtUsd(b.countedUsd)} / ${fmtUsd(b.amountUsd)} ${paint(BUDGET_ROLE[b.state], b.state, opts)}`,
-    warnLine(b.advice, opts),
-  ]);
-  return section("Budgets", lines, opts);
+function probeCheck(p: ProbeReport, opts: RenderOpts): Check {
+  const parts = [
+    p.ok ? `${p.outcome}, ok` : p.outcome,
+    p.model,
+    p.durationMs ? fmtDuration(p.durationMs) : null,
+    p.costUsd === null ? null : fmtCents(p.costUsd),
+  ].filter(Boolean);
+  const advice = [
+    ...(p.error ? [oneLine(p.error)] : []),
+    ...(p.lingeredAfterResult ? ["kept running after its result"] : []),
+    ...(p.advice ? [p.advice] : []),
+    paint("muted", p.note, opts),
+  ];
+  return p.ok ? ok("probe", parts.join(" · "), advice) : warn("probe", parts.join(" · "), advice);
 }
 
-function orphansSection(r: DoctorReport, opts: RenderOpts): string[] {
+function checks(r: DoctorReport, opts: RenderOpts): Check[] {
+  const dupes = r.scheduler.duplicateSchedules;
+  const unpriced = r.unpricedRuns.reduce((n, b) => n + b.runs.length, 0);
   const rec = r.orphans.recovered;
-  const lines = [
-    ...kv([["recovered", rec.length ? { text: String(rec.length), role: "warn" } : "0"]], opts),
-    ...rec.map((o) => `  ${paint("accent", o.id, opts)}  ${o.agentId}, was ${o.was}`),
-    ...(r.orphans.advice ? [warnLine(r.orphans.advice, opts)] : []),
+  const list: Check[] = [
+    ok("node", r.node),
+    claudeCheck(r, opts),
+    r.pathDefaulted
+      ? warn("PATH", "defaulted", [
+          "PATH was missing or minimal: the usual install directories were put in front for claude",
+        ])
+      : ok("PATH", "inherited"),
+    ok("config", `${r.configDir} (${r.configSource})`),
+    ok("data", `${r.dataDir} (${r.dataSource})`),
+    r.agents.length
+      ? ok("agents", `${r.agents.length}: ${r.agents.join(", ")}`)
+      : warn("agents", "none yet", [paint("accent", AGENT_CREATE, opts)]),
+    schedulerCheck(r),
+    dupes.length
+      ? warn(
+          "schedules",
+          `${dupes.length} agent(s) with more than one schedule`,
+          dupes.map((d) => d.warning),
+        )
+      : ok("schedules", "one per agent"),
+    unpriced
+      ? warn(
+          "unpriced runs",
+          `${unpriced} this month`,
+          r.unpricedRuns.map(
+            (b) =>
+              `${b.budget}: counted ${fmtCents(b.countedUsd)} / ${fmtCents(b.amountUsd)} (${b.state}) · ${b.advice}`,
+          ),
+        )
+      : ok("unpriced runs", "none"),
+    rec.length
+      ? warn("orphans", `${rec.length} recovered`, [
+          ...rec.map((o) => `${paint("accent", o.id, opts)}  ${o.agentId}, was ${o.was}`),
+          ...(r.orphans.advice ? [r.orphans.advice] : []),
+        ])
+      : ok("orphans", "none recovered"),
   ];
-  return section("Orphans", lines, opts);
+  if (r.probe) list.push(probeCheck(r.probe, opts));
+  return list;
 }
 
-function probeSection(p: ProbeReport | null | undefined, opts: RenderOpts): string[] {
-  if (!p) return [];
-  const lines = [
-    ...kv(
-      [
-        ["outcome", { text: p.ok ? `${p.outcome}, ok` : p.outcome, role: p.ok ? "ok" : "bad" }],
-        ["model", p.model],
-        ["duration", p.durationMs ? fmtDuration(p.durationMs) : null],
-        ["cost", p.costUsd === null ? null : fmtUsd(p.costUsd)],
-        ["result", p.resultText ? oneLine(p.resultText, 120) : null],
-        ["error", p.error ? { text: oneLine(p.error), role: "bad" } : null],
-        ["lingered", p.lingeredAfterResult ? { text: "yes: kept running after its result", role: "bad" } : null],
-      ],
-      opts,
-    ),
-    ...(p.advice ? [warnLine(p.advice, opts)] : []),
-    paint("faint", p.note, opts),
-  ];
-  return section("Probe", lines, opts);
-}
+const GLYPHS: Readonly<Record<Level, [string, "ok" | "warn" | "bad"]>> = {
+  ok: [GLYPH.ok, "ok"],
+  warn: [GLYPH.warn, "warn"],
+  error: [GLYPH.bad, "bad"],
+};
 
 export function renderDoctor(report: DoctorReport, opts: RenderOpts): string[] {
-  return sections([
-    claudeSection(report, opts),
-    pathsSection(report, opts),
-    agentsSection(report, opts),
-    schedulerSection(report, opts),
-    budgetsSection(report, opts),
-    orphansSection(report, opts),
-    probeSection(report.probe, opts),
-  ]);
+  const list = checks(report, opts);
+  const warnings = list.filter((c) => c.level === "warn").length;
+  const errors = list.filter((c) => c.level === "error").length;
+  const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? "" : "s"}`;
+  const lines = [
+    `${paint("heading", "doctor", opts)} · ${plural(warnings, "warning")} · ${plural(errors, "error")}`,
+    "",
+  ];
+  for (const c of list) {
+    const [glyph, role] = GLYPHS[c.level];
+    lines.push(`${paint(role, glyph, opts)} ${paint("heading", c.name.padEnd(NAME), opts)}${c.value}`);
+    for (const a of c.advice ?? []) lines.push(`  ${" ".repeat(NAME)}${a}`);
+  }
+  lines.push("", jsonLine(opts, report.probe ? undefined : "one real run on haiku: duskfleet doctor --probe"));
+  return lines;
 }

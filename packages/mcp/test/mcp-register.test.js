@@ -416,8 +416,10 @@ test("cli: claude-code --dry-run prints the claude mcp add command; mcp status r
     const status = JSON.parse(s.stdout);
     const human = cli(env, ["mcp", "status"]);
     assert.equal(human.status, 0, human.stderr);
-    assert.match(human.stdout, /^Claude Code\n {2}registered {2}no\n {2}config {6}\S+/);
-    assert.match(human.stdout, /\n\nClaude Desktop\n {2}registered {2}no\n/);
+    assert.match(human.stdout, /^HOST +CONFIG +ENTRY +RUNS\n/);
+    assert.match(human.stdout, /\nClaude Code +\S+ +– no +-\n/);
+    assert.match(human.stdout, /\nClaude Desktop +\S.* +– no +-\n/);
+    assert.match(human.stdout, /\nregister: duskfleet mcp register --target claude-code\n/);
     assert.deepEqual(
       status.map((t) => [t.target, t.registered]),
       [
