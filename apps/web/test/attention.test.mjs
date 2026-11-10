@@ -1,7 +1,17 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { FAILURE_FIXES } from "@duskfleet/core";
-import { attentionBadge, attentionSections, loginCode, SECTION_KINDS, summaryChips } from "../lib/attention.ts";
+import {
+  ackKey,
+  acksFor,
+  applySeen,
+  attentionBadge,
+  attentionSections,
+  dismissableKeys,
+  loginCode,
+  SECTION_KINDS,
+  summaryChips,
+} from "../lib/attention.ts";
 
 const NOW = Date.parse("2026-11-05T22:45:00Z");
 const ago = (min) => new Date(NOW - min * 60_000).toISOString();
@@ -234,4 +244,134 @@ test("sections keep the fixed order and the chips name each one", () => {
     ],
   );
   assert.deepEqual(attentionBadge(s), { count: 6, tone: "bad" });
+});
+
+// DS-32 (issue #430): item keys, the seen split, and what may be marked seen.
+
+const items = (s) => s.flatMap((x) => x.items);
+const ack = (item, seenAt = ago(5)) => ({ itemKey: ackKey(item), kind: item.kind, subjectId: item.subjectId, seenAt });
+
+test("item keys: kind + subject + latest event, so a new event is a new key", () => {
+  const first = items(sections({ runs: [run({ id: "a1", status: "failed", error: "boom" })] }))[0];
+  assert.equal(ackKey(first), "failed:dev:a1");
+  const later = items(
+    sections({
+      runs: [run({ id: "a2", status: "failed", error: "boom", minAgo: 1 }), run({ id: "a1", status: "failed" })],
+    }),
+  )[0];
+  assert.equal(ackKey(later), "failed:dev:a2");
+
+  const sched = items(
+    sections({
+      schedules: [
+        schedule({
+          enabled: false,
+          pausedReason: "empty",
+          autoPausedAt: ago(4),
+          firings: [{ id: 77, firedAt: ago(4), outcome: "auto_paused" }],
+        }),
+      ],
+    }),
+  )[0];
+  assert.equal(ackKey(sched), "schedules:s1:77");
+
+  const busy = items(
+    sections({
+      schedules: [
+        schedule({ firings: [9, 8, 7].map((id, i) => ({ id, firedAt: ago(i + 1), outcome: "skipped_busy" })) }),
+      ],
+    }),
+  )[0];
+  assert.equal(ackKey(busy), "busy:s1:9");
+
+  const warn = items(sections({ budgets: [budget()] }))[0];
+  assert.equal(ackKey(warn), "budgets:b1:2026-11:warn");
+  assert.equal(warn.dismissable, true);
+  const over = items(sections({ budgets: [budget({ state: "over", percent: 105, hardStop: false })] }))[0];
+  assert.equal(ackKey(over), "budgets:b1:2026-11:over");
+});
+
+test("login and quota errors and a spent hard-stop budget cannot be marked seen", () => {
+  const s = sections({
+    runs: [run({ status: "failed", errorCode: "auth_required" })],
+    budgets: [budget({ state: "over", percent: 110, hardStop: true })],
+  });
+  assert.deepEqual(
+    items(s).map((i) => i.dismissable),
+    [false, false],
+  );
+  assert.deepEqual(dismissableKeys(items(s)), []);
+  const { acks, refused } = acksFor(s, items(s).map(ackKey));
+  assert.deepEqual(acks, []);
+  assert.equal(refused.length, 2);
+  // an ack for them (written by hand) is ignored: they stay unseen
+  const view = applySeen(
+    s,
+    items(s).map((i) => ack(i)),
+  );
+  assert.equal(view.seen.length, 0);
+  assert.equal(attentionBadge(view.sections).tone, "bad");
+});
+
+test("acksFor: only current dismissable items; unknown keys refused", () => {
+  const s = sections({ runs: [run({ id: "x", status: "timed_out" })] });
+  const key = ackKey(items(s)[0]);
+  const { acks, refused } = acksFor(s, [key, key, "failed:dev:old"]);
+  assert.deepEqual(acks, [{ itemKey: key, kind: "failed", subjectId: "dev", eventId: "x" }]);
+  assert.deepEqual(refused, ["failed:dev:old"]);
+});
+
+test("applySeen: seen items leave their section for the Seen group; the badge counts unseen only", () => {
+  const s = sections({
+    runs: [
+      run({ agentId: "a", status: "timed_out", minAgo: 1 }),
+      run({ agentId: "b", status: "timed_out", minAgo: 2 }),
+      run({ agentId: "c", reviewReasons: ["empty_run"], minAgo: 3 }),
+    ],
+  });
+  const [a, b, c] = items(s);
+  const view = applySeen(s, [ack(a, ago(2)), ack(c, ago(1))]);
+  assert.equal(view.total, 3);
+  assert.deepEqual(kinds(view.sections), ["failed"]); // review held only seen items: gone
+  assert.deepEqual(
+    view.sections[0].items.map((i) => i.subjectId),
+    ["b"],
+  );
+  assert.deepEqual(
+    view.seen.map((i) => [i.subjectId, i.seenAt]),
+    [
+      ["a", ago(2)],
+      ["c", ago(1)],
+    ],
+  );
+  assert.deepEqual(attentionBadge(view.sections), { count: 1, tone: "warn" });
+  assert.deepEqual(
+    summaryChips(view.sections, view.seen.length).map((x) => [x.label, x.tone]),
+    [
+      ["1 failed run", "bad"],
+      ["2 seen", "neutral"],
+    ],
+  );
+  // every item seen: no badge, a single "n seen" chip
+  const all = applySeen(
+    s,
+    [a, b, c].map((i) => ack(i)),
+  );
+  assert.equal(attentionBadge(all.sections), null);
+  assert.deepEqual(
+    summaryChips(all.sections, all.seen.length).map((x) => x.label),
+    ["3 seen"],
+  );
+});
+
+test("applySeen: a new event brings a seen item back with the older seen time", () => {
+  const old = items(sections({ runs: [run({ id: "o", status: "failed", minAgo: 30 })] }))[0];
+  const s = sections({
+    runs: [run({ id: "n", status: "failed", minAgo: 1 }), run({ id: "o", status: "failed", minAgo: 30 })],
+  });
+  const view = applySeen(s, [ack(old, ago(20))]);
+  assert.equal(view.seen.length, 0);
+  assert.equal(view.sections[0].items[0].newSinceSeen, ago(20));
+  // no ack at all: plain unseen
+  assert.equal(applySeen(s, []).sections[0].items[0].newSinceSeen, undefined);
 });

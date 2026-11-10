@@ -258,6 +258,7 @@ export {
 export { attachLastRun, type RunSummarySource, type ScheduleWithLastRun } from "./scheduler/last-run.js";
 export { type FireResult, Scheduler, type SchedulerOptions, type SchedulerStatus } from "./scheduler/scheduler.js";
 export * from "./scheduler/types.js";
+export { type AttentionAck, AttentionAckRepository } from "./storage/attention-acks.js";
 export { BudgetRepository } from "./storage/budgets.js";
 export {
   COST_SPLITS,

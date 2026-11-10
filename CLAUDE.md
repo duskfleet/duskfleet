@@ -58,7 +58,9 @@ npm workspaces, one `config/` and one SQLite database shared by three deliverabl
   `updateSchedule` / `requestRun`; run now only stamps `run_requested_at`, the lease holder
   fires it on its next tick) and on the editable keys of `config/duskfleet.yaml`
   (`app/settings/actions.ts`, through core's `writeGlobalFile`: comments kept, rolled back when
-  `loadConfig` refuses the result; `scheduler.enabled` only through its own action). No auth,
+  `loadConfig` refuses the result; `scheduler.enabled` only through its own action) and on the
+  Alerts "seen" marks (`app/attention/actions.ts`, `attention_acks`, migration 29, through core's
+  `AttentionAckRepository`; login/quota and spent hard-stop items are refused). No auth,
   localhost only.
 - `config/`: `duskfleet.yaml`, `agents/*.md` (where a checkout may commit agents, "builtin":
   YAML frontmatter + system prompt body; only specialised patterns here, never a starter or
