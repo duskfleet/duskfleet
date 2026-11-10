@@ -26,12 +26,13 @@ export const COMMAND_HELP: Readonly<Record<string, CommandHelp>> = {
   },
   agents: {
     usage: [
-      "duskfleet agents",
+      "duskfleet agents [--json]",
       "duskfleet agents create <id> [--model <m>] [--budget <usd>] [--permission-mode <mode>]",
       "                       [--allowed-tools <a,b>] [--disallowed-tools <a,b>] [--timeout <minutes>]",
-      '                       [--description <text>] [--force] (-- "<system prompt>" | --prompt-file <file>)',
+      '                       [--description <text>] [--force] [--json] (-- "<system prompt>" | --prompt-file <file>)',
     ],
     options: [
+      "--json                      the agents (or { created, overrode, agent }) as JSON on stdout",
       "-m, --model <m>             model of the agent (none: the Claude Code default)",
       "--budget <usd>              max_budget_usd per run (default 0.5)",
       "--permission-mode <mode>    default dontAsk",
@@ -46,7 +47,8 @@ export const COMMAND_HELP: Readonly<Record<string, CommandHelp>> = {
     doc: `${DOCS}/cli.md#agents-create`,
   },
   projects: {
-    usage: ["duskfleet projects"],
+    usage: ["duskfleet projects [--json]"],
+    options: ["--json   { allowedProjectRoots, projects } as JSON on stdout"],
     example: "duskfleet projects",
     doc: `${DOCS}/configuration.md`,
   },
@@ -90,17 +92,22 @@ export const COMMAND_HELP: Readonly<Record<string, CommandHelp>> = {
     doc: `${DOCS}/cli.md`,
   },
   schedules: {
-    usage: ["duskfleet schedules", "duskfleet schedules run-now <schedule id or name>"],
+    usage: ["duskfleet schedules [--json]", "duskfleet schedules run-now <schedule id or name> [--json]"],
+    options: [
+      "--json   { scheduler, schedules } (run-now: the schedule row) as JSON on stdout; run-now's",
+      "         confirmation line goes to stderr",
+    ],
     example: 'duskfleet schedules run-now "pr review"',
     doc: `${DOCS}/schedules.md`,
   },
   budgets: {
     usage: [
-      "duskfleet budgets",
-      "duskfleet budgets set <global | agent <id> | project <id>> --amount <usd> [--warn <percent>] [--no-hard-stop] [--unpriced count|allow]",
-      "duskfleet budgets delete <budget id>",
+      "duskfleet budgets [--json]",
+      "duskfleet budgets set <global | agent <id> | project <id>> --amount <usd> [--warn <percent>] [--no-hard-stop] [--unpriced count|allow] [--json]",
+      "duskfleet budgets delete <budget id> [--json]",
     ],
     options: [
+      "--json               the budget statuses (set: the budget, delete: { deleted }) as JSON on stdout",
       "--amount <usd>       monthly amount (UTC month)",
       "--warn <percent>     warn at this share of the amount",
       "--no-hard-stop       warn only, never pause the scope's schedules",

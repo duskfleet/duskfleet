@@ -77,19 +77,38 @@ Only commands that need the config report a missing one (`init`, `tools`, `mcp s
 
 ### Output
 
-Human-readable by default, `--json` for scripts, logs on stderr. `run`, `runs` and `run-info`
-print a human view on stdout: tables that fit the terminal (`COLUMNS`, else its width, else 100
-columns; the least useful columns are dropped first, the label is cut with `…`), aligned key
-blocks, and colour for statuses. Colour follows Node's rules for the stream: only on a terminal,
-never in a pipe (`duskfleet runs | cat`) or under `NO_COLOR`, always under `FORCE_COLOR`.
-`--json`, anywhere before a `--` and on any command, prints exactly the JSON these commands
-printed before (the other commands print JSON either way for now). Scripts, git hooks and CI
-should always pass it:
+Human-readable by default, `--json` for scripts, logs on stderr. `run`, `runs`, `run-info`,
+`agents`, `agents create`, `projects`, `schedules`, `schedules run-now`, `budgets`, `budgets set`
+and `budgets delete` print a human view on stdout: tables that fit the terminal (`COLUMNS`, else
+its width, else 100 columns; the least useful columns are dropped first, the label or
+description is cut with `…`), aligned key blocks, and colour for statuses. Colour follows Node's
+rules for the stream: only on a terminal, never in a pipe (`duskfleet runs | cat`) or under
+`NO_COLOR`, always under `FORCE_COLOR`. `--json`, anywhere before a `--` and on any command,
+prints exactly the JSON these commands printed before (`doctor`, `install-service`,
+`uninstall-service`, `mcp status`, `tools` and `repair-subagents` print JSON either way for now).
+Scripts, git hooks and CI should always pass it:
 
 ```bash
 duskfleet runs --json | jq '.[0].status'
 duskfleet run --project my-app --agent fixer --json -- "Fix the failing test" | jq .id
+duskfleet schedules --json | jq '.schedules[] | select(.enabled == false) | .name'
 ```
+
+What the list commands show:
+
+- `agents`: id, kind (`own` / `link`), source (`builtin` / `user`), model (`default` = the Claude
+  Code default), bound project, budget and timeout per run, description. With no agent, stdout
+  stays empty and the hint to `agents create` goes to stderr (with `--json`: `[]`).
+- `projects`: the `allowed_project_roots` (`any directory` when there are none), then id, path
+  and the agents bound to each project.
+- `schedules`: the scheduler first (enabled or disabled, which process ticks and when its lease
+  ends, a `pause_scheduler` pause in force), then name, agent, cron and time zone, state
+  (`enabled`, or `paused` with the auto-pause reason), next fire, last fire and its outcome, how
+  the last run ended and its cost (`!` = needs review), fires / skips.
+- `budgets`: scope, counted / amount (counted = recorded spend plus the stand-ins of unpriced and
+  running runs), percent, state (`ok` / `warn` / `over`; `over *` = over only because of runs
+  still going: new runs are refused, schedules are not paused), warn percent, hard stop, the
+  budget id (what `budgets delete` takes) and the unpriced policy with its stand-ins.
 
 Logs go to stderr, so stdout stays the command's output. A one-shot command logs warnings and
 errors only; `--verbose`, anywhere before a `--`, brings the info lines back (config loaded,
@@ -239,7 +258,8 @@ agent use `create_agent` over MCP ([Agents](agents.md)).
 | `--prompt-file <file>` | body (system prompt) | instead of the text after `--` |
 | `--force` | | overwrite an agent with the same id (a builtin id becomes a user override) |
 
-It prints `{ created, overrode, agent }` as JSON and the next command on stderr.
+It prints the agent it wrote (and a line when it replaced one with the same id) and, on stderr, the
+file and the next command; with `--json`, stdout is `{ created, overrode, agent }`.
 
 ## doctor, logs and diffs
 
@@ -302,7 +322,9 @@ duskfleet schedules run-now "pr review"
 This only stamps `run_requested_at` on the schedule row (the same thing the dashboard's **Run
 now** does); the process holding the scheduler lease, normally the
 [service](schedules.md#who-ticks), fires it on its next tick (≤ `tick_seconds`), even when the
-schedule is paused, with the usual busy rules. Nothing is spawned by the hook itself. A
+schedule is paused, with the usual busy rules. Nothing is spawned by the hook itself. It prints
+one line saying who fires it and within how long (or that nothing is ticking); with `--json`
+stdout is the schedule row and that line goes to stderr. A
 `pre-push` hook that asks for a PR review after every push looks like this (`.git/hooks/pre-push`,
 executable; `.git/` is never versioned):
 

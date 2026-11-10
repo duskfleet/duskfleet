@@ -11,8 +11,8 @@ import { paint } from "./theme.js";
 
 export type RunListItem = ReturnType<typeof summarizeRun>;
 
-/** Marks a run that needs review in the status column. */
-const REVIEW_MARK = "!";
+/** Marks a run that needs review in the status column (also the last-run column of `schedules`). */
+export const REVIEW_MARK = "!";
 
 const COLUMNS: readonly Column[] = [
   { header: "when", priority: 3 },
