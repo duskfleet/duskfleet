@@ -288,4 +288,72 @@ test("renderRunInfo: title, Run, Usage and Outcome with 14-column keys; Subagent
   const colored = renderRunInfo({ ...info, events: more.events ?? [] }, { ...plain(), color: true }).join("\n");
   assert.ok(colored.includes("\u001b[1mdenied: Bash\u001b[22m"), "denied tools in bold");
   assert.ok(colored.includes("\u001b[2m─"), "the section rule is dim");
+
+  // Pre-existing changes left out, a file changed again, a worktree and a removed worktree's branch.
+  const totals = { totalsPartial: false, filesTruncated: false, commitsTruncated: false };
+  const withWorktrees = renderRunInfo(
+    {
+      ...info,
+      diff: {
+        base: "aaaaaaaaaa",
+        head: "aaaaaaaaaa",
+        additions: 1,
+        deletions: 0,
+        totalsPartial: false,
+        filesChanged: 1,
+        changedFiles: [{ path: "a.txt", status: "modified", additions: 1, deletions: 0, preexisting: true }],
+        filesTruncated: false,
+        patchPath: "/tmp/r9.diff",
+        patchBytes: 10,
+        patchTruncated: false,
+        preexisting: 2,
+        worktrees: [
+          {
+            ...totals,
+            path: "/p/.claude/worktrees/issue-1",
+            branch: "issue/1-x",
+            removed: false,
+            base: "cccccccccc",
+            head: "dddddddddd",
+            commits: [{ sha: "dddddddddd", subject: "feature (#1)" }],
+            additions: 2,
+            deletions: 0,
+            filesChanged: 1,
+            changedFiles: [{ path: "feature.txt", status: "added", additions: 2, deletions: 0 }],
+          },
+          {
+            ...totals,
+            path: null,
+            branch: "issue/2-y",
+            removed: true,
+            base: "cccccccccc",
+            head: "eeeeeeeeee",
+            commits: [
+              { sha: "eeeeeeeeee", subject: "b" },
+              { sha: "ffffffffff", subject: "a" },
+            ],
+            additions: 1,
+            deletions: 1,
+            filesChanged: 1,
+            changedFiles: [{ path: "a.txt", status: "modified", additions: 1, deletions: 1 }],
+          },
+        ],
+      },
+    },
+    plain(),
+  );
+  const diffLines = withWorktrees.slice(
+    withWorktrees.indexOf(rule("Diff")) + 1,
+    withWorktrees.indexOf(rule("Diff")) + 9,
+  );
+  assert.deepEqual(diffLines, [
+    "  1 file changed · +1 −0 · aaaaaaa",
+    "  2 files already changed before the run and left as they were: not shown",
+    "  modified  a.txt  +1 −0  (also changed before the run)",
+    "  worktree /p/.claude/worktrees/issue-1 (issue/1-x) · 1 file changed · +2 −0 · 1 commit · ccccccc..ddddddd",
+    "    added     feature.txt  +2 −0",
+    "  branch issue/2-y (worktree removed) · 1 file changed · +1 −1 · 2 commits · ccccccc..eeeeeee",
+    "    modified  a.txt  +1 −1",
+    "  patch: /tmp/r9.diff",
+  ]);
 });

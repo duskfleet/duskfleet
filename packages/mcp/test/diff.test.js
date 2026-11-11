@@ -34,8 +34,10 @@ import {
   openDatabase,
   parseNameStatus,
   parseNumstat,
+  parseWorktreeList,
   RunManager,
   RunRepository,
+  snapshotCheckout,
 } from "@duskfleet/core";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -338,6 +340,175 @@ test("captureRunDiff: a patch read that fails marks the patch incomplete", {
     if (existsSync(locked)) chmodSync(locked, 0o644);
     rmSync(root, { recursive: true, force: true });
   }
+});
+
+/** A temp repository (realpath) and its cleanup; `snapshot` and `capture` wrap the pair of calls a run makes. */
+function tempRepo() {
+  const root = realpathSync(mkdtempSync(path.join(tmpdir(), "duskfleet-diff-")));
+  const repo = path.join(root, "repo");
+  makeRepo(repo);
+  git(repo, "branch", "-M", "main");
+  const out = path.join(root, "run.diff");
+  return {
+    root,
+    repo,
+    out,
+    capture: (before) => captureRunDiff(repo, before.base, out, undefined, before),
+    cleanup: () => rmSync(root, { recursive: true, force: true }),
+  };
+}
+
+test("a dirty checkout the run leaves alone: empty diff with the pre-existing count", () => {
+  const t = tempRepo();
+  try {
+    writeFileSync(path.join(t.repo, "a.txt"), "owner edit\n");
+    writeFileSync(path.join(t.repo, "notes.txt"), "owner's untracked file\n");
+    const before = snapshotCheckout(t.repo);
+    assert.equal(before.dirty.size, 2);
+    assert.ok(before.stash, "git stash create recorded the tracked dirty state");
+    assert.equal(git(t.repo, "stash", "list"), "", "no stash entry was added");
+    const diff = t.capture(before);
+    assert.equal(diff.filesChanged, 0);
+    assert.deepEqual(diff.changedFiles, []);
+    assert.equal(diff.preexisting, 2);
+    assert.deepEqual(diff.worktrees, []);
+    assert.equal(diff.patchPath, null);
+    assert.equal(readFileSync(path.join(t.repo, "a.txt"), "utf8"), "owner edit\n", "the working tree is untouched");
+  } finally {
+    t.cleanup();
+  }
+});
+
+test("a file dirty before and changed again shows the run's delta; a new change is reported in full", () => {
+  const t = tempRepo();
+  try {
+    writeFileSync(path.join(t.repo, "a.txt"), "one\nowner\n");
+    writeFileSync(path.join(t.repo, "gone.txt"), "bye\nowner\n");
+    const before = snapshotCheckout(t.repo);
+    // The run: a.txt gets one more line, gone.txt is left as the owner had it, new.txt is created.
+    writeFileSync(path.join(t.repo, "a.txt"), "one\nowner\nagent\n");
+    writeFileSync(path.join(t.repo, "new.txt"), "fresh\n");
+    const diff = t.capture(before);
+    const byPath = Object.fromEntries(diff.changedFiles.map((f) => [f.path, f]));
+    assert.deepEqual(byPath["a.txt"], {
+      path: "a.txt",
+      status: "modified",
+      additions: 1,
+      deletions: 0,
+      preexisting: true,
+    });
+    assert.deepEqual(byPath["new.txt"], { path: "new.txt", status: "untracked", additions: 1, deletions: 0 });
+    assert.equal(byPath["gone.txt"], undefined);
+    assert.equal(diff.preexisting, 1);
+    assert.equal(diff.additions, 2);
+    const patch = readFileSync(t.out, "utf8");
+    assert.match(patch, /^\+agent$/m);
+    assert.doesNotMatch(patch, /^\+owner$/m, "the owner's lines are not the run's");
+    assert.ok(!patch.includes("gone.txt"));
+  } finally {
+    t.cleanup();
+  }
+});
+
+test("a worktree created, committed and pushed during the run is listed with its commits and patch", () => {
+  const t = tempRepo();
+  try {
+    const remote = path.join(t.root, "remote.git");
+    git(t.root, "init", "-q", "--bare", remote);
+    git(t.repo, "remote", "add", "origin", remote);
+    git(t.repo, "push", "-q", "origin", "main");
+    // Upstream moves on after the checkout's HEAD: the worktree starts from the fetched tip.
+    const other = path.join(t.root, "other");
+    git(t.root, "clone", "-q", remote, other);
+    writeFileSync(path.join(other, "upstream.txt"), "not the run's\n");
+    git(other, "add", "upstream.txt");
+    git(other, "commit", "-q", "-m", "upstream");
+    git(other, "push", "-q", "origin", "HEAD:main");
+
+    // As in a project that ignores its agents' worktrees folder.
+    writeFileSync(path.join(t.repo, ".git", "info", "exclude"), ".claude/\n");
+    const upstreamTip = git(other, "rev-parse", "HEAD").trim();
+
+    const before = snapshotCheckout(t.repo);
+    git(t.repo, "fetch", "-q", "origin");
+    const wt = path.join(t.repo, ".claude", "worktrees", "issue-1");
+    git(t.repo, "worktree", "add", "-q", "-b", "issue/1-x", wt, "origin/main");
+    writeFileSync(path.join(wt, "feature.txt"), "a\nb\n");
+    git(wt, "add", "feature.txt");
+    git(wt, "commit", "-q", "-m", "feature (#1)");
+    git(wt, "push", "-q", "-u", "origin", "issue/1-x");
+    writeFileSync(path.join(wt, "a.txt"), "one\nleft uncommitted\n");
+
+    const diff = t.capture(before);
+    assert.equal(diff.filesChanged, 0, "the checkout itself is untouched");
+    assert.equal(diff.worktrees.length, 1);
+    const [w] = diff.worktrees;
+    assert.equal(w.path, wt);
+    assert.equal(w.branch, "issue/1-x");
+    assert.equal(w.removed, false);
+    assert.equal(w.base, upstreamTip, "based on the fetched tip it was created from, not the checkout's HEAD");
+    assert.deepEqual(
+      w.commits.map((c) => c.subject),
+      ["feature (#1)"],
+    );
+    const byPath = Object.fromEntries(w.changedFiles.map((f) => [f.path, f]));
+    assert.deepEqual(byPath["feature.txt"], { path: "feature.txt", status: "added", additions: 2, deletions: 0 });
+    assert.deepEqual(byPath["a.txt"], { path: "a.txt", status: "modified", additions: 1, deletions: 0 });
+    assert.equal(byPath["upstream.txt"], undefined, "upstream commits are not the run's");
+    assert.equal(w.filesChanged, 2);
+    const patch = readFileSync(t.out, "utf8");
+    assert.match(patch, /^# worktree .*issue-1 \(issue\/1-x\) /m);
+    assert.match(patch, /^\+left uncommitted$/m);
+    assert.equal(diff.patchPath, t.out);
+  } finally {
+    t.cleanup();
+  }
+});
+
+test("a worktree removed before the run ends still yields its branch's diff", () => {
+  const t = tempRepo();
+  try {
+    writeFileSync(path.join(t.repo, ".git", "info", "exclude"), ".claude/\n");
+    // A worktree that exists before the run and that the run leaves alone is not listed.
+    git(t.repo, "worktree", "add", "-q", "-b", "idle", path.join(t.repo, ".claude", "worktrees", "idle"));
+    const before = snapshotCheckout(t.repo);
+    const wt = path.join(t.repo, ".claude", "worktrees", "issue-2");
+    git(t.repo, "worktree", "add", "-q", "-b", "issue/2-y", wt, "main");
+    writeFileSync(path.join(wt, "a.txt"), "one\ntwo\n");
+    git(wt, "commit", "-q", "-am", "edit a (#2)");
+    git(t.repo, "worktree", "remove", wt);
+
+    const diff = t.capture(before);
+    assert.equal(diff.filesChanged, 0);
+    assert.equal(diff.worktrees.length, 1);
+    const [w] = diff.worktrees;
+    assert.equal(w.path, null);
+    assert.equal(w.branch, "issue/2-y");
+    assert.equal(w.removed, true);
+    assert.equal(w.base, before.base);
+    assert.deepEqual(
+      w.commits.map((c) => c.subject),
+      ["edit a (#2)"],
+    );
+    assert.deepEqual(w.changedFiles, [{ path: "a.txt", status: "modified", additions: 1, deletions: 0 }]);
+    assert.match(readFileSync(t.out, "utf8"), /^# branch issue\/2-y \(worktree removed\) /m);
+  } finally {
+    t.cleanup();
+  }
+});
+
+test("git worktree list --porcelain parsing", () => {
+  const sha = "a".repeat(40);
+  assert.deepEqual(
+    parseWorktreeList(
+      `worktree /r\nHEAD ${sha}\nbranch refs/heads/main\n\nworktree /r/wt\nHEAD ${sha}\ndetached\n\nworktree /r/bare\nbare\n`,
+    ),
+    [
+      { path: "/r", head: sha, branch: "main" },
+      { path: "/r/wt", head: sha, branch: null },
+      { path: "/r/bare", head: null, branch: null },
+    ],
+  );
 });
 
 test("name-status and numstat -z parsing", () => {
