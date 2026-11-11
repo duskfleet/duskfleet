@@ -53,6 +53,10 @@ CLI's stdout must add `--json`**; stderr is unchanged. Colour follows the termin
 
 - Biome 2.x bump ([#423](https://github.com/duskfleet/duskfleet/pull/423)).
 
+### Fixed
+
+- Subagents: the task lines Claude Code now prints around plain Bash calls (`task_type: "local_bash"`) were recorded as subagents of type `unknown`; they open no subagent row any more ([#435](https://github.com/duskfleet/duskfleet/issues/435)).
+
 ## [0.3.1] - 2026-11-07
 
 No schema change.
