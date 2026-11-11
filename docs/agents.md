@@ -460,6 +460,9 @@ Tool-use
 events in the timeline carry the `agentId` they belong to (null for the main session).
 Nothing is spawned differently: the data comes from the `task_started` /
 `task_notification` lines and the `agent_id` field of nested messages in Claude Code's
-stream, so it works for `own` and `link` agents alike. Remember that a subagent's own
+stream, so it works for `own` and `link` agents alike. Claude Code also wraps plain Bash calls
+in task lines (`task_type: "local_bash"`, seen 2026-11-10): those are not subagents and open no
+row. A task line counts when its `task_type` is an agent type (`local_agent`, any `*_agent`), when
+it names a `subagent_type`, or when it has no `task_type` at all (older CLIs). Remember that a subagent's own
 `tools:` list is a hard filter: a name that does not exist in the run (for instance a
 `mcp__plugin_*` prefix) leaves it without that tool, and only the recorded row shows it.

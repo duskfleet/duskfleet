@@ -8,6 +8,10 @@ All notable changes to Duskfleet are listed here. The format follows
 
 ## [Unreleased]
 
+### Fixed
+
+- Subagents: the task lines Claude Code now prints around plain Bash calls (`task_type: "local_bash"`) were recorded as subagents of type `unknown`; they open no subagent row any more ([#435](https://github.com/duskfleet/duskfleet/issues/435)).
+
 ## [0.3.1] - 2026-11-07
 
 No schema change.
