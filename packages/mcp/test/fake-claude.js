@@ -15,6 +15,8 @@
  *                 hand-back tool_result), shapes from a real run of 2026-10-12; its result
  *                 line has a main-session-only `usage` and a two-model `modelUsage`
  *   "subagent-hang" -> same, but the process is killed before the hand-back
+ *   "subagent-bash" -> like "subagent", after a main-session Bash call wrapped in
+ *                 `task_type: "local_bash"` task lines (2026-11-10): not a subagent
  *   "env"      -> like "ok", result text says whether CLAUDE_BIN reached the child
  *   "env-secret" -> like "ok", result text says what DF_TEST_SECRET is in the child and
  *                 whether PATH and HOME reached it (the environment allow-list)
@@ -318,7 +320,53 @@ if (resumeIdx >= 0) {
     stop_reason: "end_turn",
   });
   process.exit(0);
-} else if (prompt === "subagent" || prompt === "subagent-hang") {
+} else if (prompt === "subagent" || prompt === "subagent-hang" || prompt === "subagent-bash") {
+  if (prompt === "subagent-bash") {
+    // A plain Bash call in the main session: Claude Code wraps it in task lines of type
+    // `local_bash` (shape verified on a run of 2026-11-10, claude-opus-5-5). Not a subagent.
+    const bashCall = "toolu_bash_1";
+    out({
+      type: "assistant",
+      message: {
+        id: "msg_main_0",
+        model,
+        role: "assistant",
+        content: [{ type: "tool_use", id: bashCall, name: "Bash", input: { command: "npm test" } }],
+        usage: { input_tokens: 1, output_tokens: 1 },
+      },
+      parent_tool_use_id: null,
+      session_id: sessionId,
+      timestamp: "2026-10-12T20:27:40.000Z",
+    });
+    out({
+      type: "system",
+      subtype: "task_started",
+      task_id: "bks4b6ifo",
+      run_id: "r1",
+      tool_use_id: bashCall,
+      description: "Run the test suite",
+      is_backgrounded: false,
+      task_type: "local_bash",
+      uuid: "u1",
+      session_id: sessionId,
+    });
+    out({
+      type: "system",
+      subtype: "task_notification",
+      task_id: "bks4b6ifo",
+      tool_use_id: bashCall,
+      status: "completed",
+      summary: "Run the test suite",
+      session_id: sessionId,
+    });
+    out({
+      type: "user",
+      message: { role: "user", content: [{ tool_use_id: bashCall, type: "tool_result", content: "ok" }] },
+      parent_tool_use_id: null,
+      session_id: sessionId,
+      timestamp: "2026-10-12T20:27:44.000Z",
+    });
+  }
   const agentId = "a6b73b2ad14bf09f8";
   const agentCall = "toolu_agent_1";
   const nested = {
