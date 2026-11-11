@@ -419,7 +419,9 @@ test("a worktree created, committed and pushed during the run is listed with its
     git(t.repo, "push", "-q", "origin", "main");
     // Upstream moves on after the checkout's HEAD: the worktree starts from the fetched tip.
     const other = path.join(t.root, "other");
-    git(t.root, "clone", "-q", remote, other);
+    // -b main: the bare remote's HEAD follows init.defaultBranch (master on CI), so a plain
+    // clone would check out nothing and its commit would not descend from main.
+    git(t.root, "clone", "-q", "-b", "main", remote, other);
     writeFileSync(path.join(other, "upstream.txt"), "not the run's\n");
     git(other, "add", "upstream.txt");
     git(other, "commit", "-q", "-m", "upstream");
