@@ -1,6 +1,6 @@
 {
   "name": "@duskfleet/web",
-  "version": "0.3.1",
+  "version": "0.4.0",
   "type": "module",
   "description": "Duskfleet dashboard: agents, running and past runs; it never writes runs, it edits agent files, schedules and the editable settings keys",
   "homepage": "https://duskfleet.com",
@@ -46,7 +46,7 @@
     "react-dom": "^19.3.1"
   },
   "devDependencies": {
-    "@duskfleet/core": "0.3.1",
+    "@duskfleet/core": "0.4.0",
     "@types/react": "^19.1.0",
     "@types/react-dom": "^19.1.0",
     "typescript": "^5.9.3"
