@@ -151,7 +151,9 @@ export {
 } from "./execution/stream-json.js";
 export * from "./execution/types.js";
 export {
+  type CheckoutSnapshot,
   captureRunDiff,
+  DIFF_MAX_COMMITS,
   DIFF_MAX_COUNTED_BYTES,
   DIFF_MAX_COUNTED_FILES,
   DIFF_MAX_FILES,
@@ -163,7 +165,10 @@ export {
   headSha,
   parseNameStatus,
   parseNumstat,
+  parseWorktreeList,
   type RunDiff,
+  snapshotCheckout,
+  type WorktreeDiff,
 } from "./git/diff.js";
 export * from "./observability/billing.js";
 export * from "./observability/failure.js";

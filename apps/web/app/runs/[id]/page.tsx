@@ -513,50 +513,97 @@ const DIFF_STATUS_MARK: Record<DiffFileStatus, string> = {
   untracked: "?",
 };
 
-/** What the run changed in its git checkout: one line per file, totals, a link to the patch. */
+type DiffTotals = Pick<RunDiff, "filesChanged" | "additions" | "deletions" | "totalsPartial" | "changedFiles">;
+
+const filesSummary = (d: DiffTotals) =>
+  `${fmtInt(d.filesChanged)} file${d.filesChanged === 1 ? "" : "s"} · +${fmtInt(d.additions)}${d.totalsPartial ? "+" : ""} −${fmtInt(d.deletions)}`;
+
+/** One line per changed file: status mark, path, line counts. */
+function ChangedFiles({ diff }: { diff: DiffTotals }) {
+  if (diff.filesChanged === 0) return null;
+  return (
+    <ul className="changes">
+      {diff.changedFiles.map((f) => (
+        <li key={`${f.status}:${f.path}`}>
+          <span className="st" title={f.status.replace("_", " ")}>
+            {DIFF_STATUS_MARK[f.status] ?? "M"}
+          </span>
+          <span className="file">
+            {f.oldPath ? `${f.oldPath} → ${f.path}` : f.path}
+            {f.preexisting && (
+              <span className="muted" title="already changed before the run; the lines are the run's own changes">
+                {" "}
+                (also changed before the run)
+              </span>
+            )}
+          </span>
+          <span className="lines">
+            {f.uncounted ? (
+              <span className="muted" title="past the line-counting caps">
+                not counted
+              </span>
+            ) : f.additions === null ? (
+              <span className="muted">binary</span>
+            ) : (
+              <>
+                <span className="add">+{fmtInt(f.additions)}</span>{" "}
+                <span className="del">−{fmtInt(f.deletions ?? 0)}</span>
+              </>
+            )}
+          </span>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+/** What the run changed in its git checkout and in the worktrees it used: one line per file, totals, a link to the patch. */
 function Changes({ run, diff }: { run: Run; diff: RunDiff }) {
   const n = diff.filesChanged;
+  const worktrees = diff.worktrees ?? [];
   return (
     <>
       <h2 id="changes">
         Changes{" "}
         <span className="count">
-          {n === 0
-            ? "no files changed"
-            : `${fmtInt(n)} file${n === 1 ? "" : "s"} · +${fmtInt(diff.additions)}${diff.totalsPartial ? "+" : ""} −${fmtInt(diff.deletions)}`}
+          {n === 0 ? (worktrees.length ? "no files changed in the checkout" : "no files changed") : filesSummary(diff)}
         </span>
       </h2>
-      {n > 0 && (
-        <ul className="changes">
-          {diff.changedFiles.map((f) => (
-            <li key={`${f.status}:${f.path}`}>
-              <span className="st" title={f.status.replace("_", " ")}>
-                {DIFF_STATUS_MARK[f.status] ?? "M"}
-              </span>
-              <span className="file">{f.oldPath ? `${f.oldPath} → ${f.path}` : f.path}</span>
-              <span className="lines">
-                {f.uncounted ? (
-                  <span className="muted" title="past the line-counting caps">
-                    not counted
-                  </span>
-                ) : f.additions === null ? (
-                  <span className="muted">binary</span>
-                ) : (
-                  <>
-                    <span className="add">+{fmtInt(f.additions)}</span>{" "}
-                    <span className="del">−{fmtInt(f.deletions ?? 0)}</span>
-                  </>
-                )}
-              </span>
-            </li>
-          ))}
-        </ul>
-      )}
+      <ChangedFiles diff={diff} />
+      {worktrees.map((w) => (
+        <div key={`${w.path ?? ""}:${w.branch ?? ""}`}>
+          <h3 title={`${w.base}..${w.head}`}>
+            {w.removed
+              ? `branch ${w.branch} (worktree removed)`
+              : `worktree ${w.path}${w.branch ? ` (${w.branch})` : ""}`}{" "}
+            <span className="count">
+              {filesSummary(w)} · {fmtInt(w.commits.length)}
+              {w.commitsTruncated ? "+" : ""} commit{w.commits.length === 1 ? "" : "s"}
+            </span>
+          </h3>
+          <ChangedFiles diff={w} />
+        </div>
+      ))}
       <div className="timeline-foot">
         <span className="muted" title={diff.base}>
           since {diff.base.slice(0, 8)}
           {diff.head && diff.head !== diff.base ? ` (now ${diff.head.slice(0, 8)}, the run committed)` : ""}
         </span>
+        {diff.preexisting ? (
+          <>
+            <span className="sep">·</span>
+            <span className="muted">
+              {fmtInt(diff.preexisting)} file{diff.preexisting === 1 ? "" : "s"} already changed before the run and left
+              as they were, not shown
+            </span>
+          </>
+        ) : null}
+        {diff.worktreesPartial && (
+          <>
+            <span className="sep">·</span>
+            <span className="muted">some worktrees or branches could not be read</span>
+          </>
+        )}
         {diff.filesTruncated && (
           <>
             <span className="sep">·</span>
