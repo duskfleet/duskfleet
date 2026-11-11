@@ -3,9 +3,10 @@
  * Public-repo hygiene gate (CLAUDE.md "This repo is public", docs/development.md "Quality gates").
  *
  * Fails when a versioned file contains a home directory path, the current user's name or
- * host name, or when the index holds a symbolic link (a symlink to an absolute path leaked
- * a home directory once). Runs on `git ls-files`, so untracked and ignored files such as
- * data/, notes/ and .mcp.json are never inspected.
+ * host name, a reference to the private `notes/` directory (only .gitignore, CLAUDE.md and
+ * this script may name it), or when the index holds a symbolic link (a symlink to an absolute
+ * path leaked a home directory once). Runs on `git ls-files`, so untracked and ignored files
+ * such as data/, notes/ and .mcp.json are never inspected.
  *
  * Usage: node scripts/check-public.mjs      (exit 1 with a list of offending lines)
  */
@@ -49,6 +50,10 @@ const allowed = [
   /\\Users\\(you|me)\b/,
 ];
 
+// The private notes directory: versioned files must not point readers at it.
+const NOTES = { re: /(^|[^A-Za-z0-9_./-])notes\//, why: "reference to the private notes/ directory" };
+const NOTES_ALLOWED = new Set([".gitignore", "CLAUDE.md", "scripts/check-public.mjs"]);
+
 const binary = /\.(png|jpg|jpeg|gif|ico|webp|woff2?|ttf|db|sqlite|pdf|zip)$/i;
 const problems = [];
 
@@ -75,7 +80,8 @@ for (const { mode, file } of index) {
   const lines = text.split("\n");
   lines.forEach((line, i) => {
     if (allowed.some((a) => a.test(line))) return;
-    for (const p of [...patterns, ...local]) {
+    const checks = NOTES_ALLOWED.has(file) ? [...patterns, ...local] : [...patterns, ...local, NOTES];
+    for (const p of checks) {
       if (p.re.test(line)) {
         problems.push(`${file}:${i + 1}: ${p.why}: ${line.trim().slice(0, 120)}`);
         break;
@@ -92,7 +98,9 @@ if (problems.length) {
   );
   process.exit(1);
 }
-console.log(`check-public: ${index.length} versioned files, no home paths, user or host names, no symlinks.`);
+console.log(
+  `check-public: ${index.length} versioned files, no home paths, user or host names, no notes/ references, no symlinks.`,
+);
 
 function escapeRegExp(s) {
   return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");

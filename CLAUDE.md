@@ -2,8 +2,8 @@
 
 Local platform that orchestrates, observes and (later) schedules and evaluates autonomous
 Claude Code agents. An MCP server (stdio) spawns `claude -p --output-format stream-json`
-with a target project as cwd and records every run in SQLite. The design notes are private
-(not in the repo). User docs: `README.md` (short entry page) and `docs/*.md` (one page per
+with a target project as cwd and records every run in SQLite. The design notes are not in
+the repo. User docs: `README.md` (short entry page) and `docs/*.md` (one page per
 topic). Keep them in sync when behaviour changes.
 
 ## Commands
@@ -64,7 +64,7 @@ npm workspaces, one `config/` and one SQLite database shared by three deliverabl
   localhost only.
 - `config/`: `duskfleet.yaml`, `agents/*.md` (where a checkout may commit agents, "builtin":
   YAML frontmatter + system prompt body; only specialised patterns here, never a starter or
-  default agent: owner decision 2026-10-26, a user's first agent comes from `agents create`),
+  default agent: a user's first agent comes from `agents create`),
   `projects.yaml` (repo-relative examples only). Meant to be committed.
   **This repo is public: no usernames, home paths or machine-specific values in versioned
   files, docs or examples** (`npm run check:public` enforces it in CI; placeholders `<you>`, `me` are fine). Personal projects live in `data/projects.yaml`, personal agents
@@ -79,9 +79,8 @@ npm workspaces, one `config/` and one SQLite database shared by three deliverabl
   agents. Neither folder is ever shipped in the npm packages.
 - `playground/`: ignored scratch directory for a local run target when trying things out.
   Not part of the repo; register it in the private `data/projects.yaml` if needed.
-- `notes/`: private, never committed (`.gitignore`): daily journal (`notes/journal/daily/`),
-  `notes/TODO.md` (backlog and launch plan) and research notes. The Obsidian vault is the repo
-  root; `.obsidian/` is ignored too. Nothing in `notes/` may be referenced from versioned files.
+- `notes/`: private, never committed (`.gitignore`, like `.obsidian/`). Nothing in `notes/` may
+  be referenced from versioned files (`npm run check:public` enforces it).
 
 ## Rules
 
@@ -96,7 +95,7 @@ npm workspaces, one `config/` and one SQLite database shared by three deliverabl
   `pause_scheduler` (one `scheduler_pause` row, migration 21) stops all firing until an instant,
   also read every tick (the holder keeps the lease and the sweep). `trigger_kind` is only `cron`.
   Create/update validation is `scheduler/crud.ts`, shared by MCP, CLI and dashboard.
-  One schedule per agent (owner decision 2026-11-01): `assertOneSchedulePerAgent` refuses a create
+  One schedule per agent: `assertOneSchedulePerAgent` refuses a create
   or an agent change, a repo query, never a unique index (older DBs hold duplicates; `doctor` lists them).
   Command gates (`sh -c`, the runs' env allow-list) are opt-in: `scheduler.allow_command_gates` (default false)
   is checked on create/update (`assertCommandGateAllowed`) and again in `evaluateGate` per tick.
@@ -131,7 +130,7 @@ npm workspaces, one `config/` and one SQLite database shared by three deliverabl
 - Real runs cost money. When one is needed to verify something, use `--model haiku`
   (cents) and say so. An agent without an explicit model uses the CLI default,
   which can be 100x more expensive.
-- Dashboard components are tested (owner rule 2026-11-02, harness in #344): every new or changed
+- Dashboard components are tested (harness in #344): every new or changed
   component in `apps/web/components` ships with a render test in `apps/web/test` (`react-dom/server`,
   one assertion per visible state, no snapshots; stateful logic lives in `apps/web/lib` and is
   tested there). A component PR without its test is incomplete. Browser tests are #79, separate.
@@ -249,4 +248,4 @@ npm workspaces, one `config/` and one SQLite database shared by three deliverabl
 Shipped: the scheduler (cron, gates, daily caps, monthly budgets, auto-pause, `serve` /
 `install-service`). Next: deterministic evals (`tests_passed`, `build_passed`, `files_exist`) as post-run hooks,
 then LLM evals as a second read-only run, then metrics tools and Git integration. A Codex CLI
-executor as a second runtime is assessed in the design notes (after evals).
+executor as a second runtime comes after evals.
