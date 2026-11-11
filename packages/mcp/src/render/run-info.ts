@@ -166,19 +166,44 @@ function subagentBlock(info: RunInfo, opts: RenderOpts): string[] {
   return section("Subagents", table(SUBAGENT_COLUMNS, rows, { ...opts, width: opts.width - 2 }), opts);
 }
 
+type DiffTotals = Pick<RunDiff, "filesChanged" | "additions" | "deletions" | "totalsPartial" | "changedFiles">;
+
+function filesLine(d: DiffTotals): string {
+  return `${d.filesChanged} file${d.filesChanged === 1 ? "" : "s"} changed · +${d.additions} −${d.deletions}${d.totalsPartial ? " (partial)" : ""}`;
+}
+
+function fileLines(d: DiffTotals): string[] {
+  const lines = d.changedFiles.slice(0, DIFF_FILES_SHOWN).map((f) => {
+    const counts = f.additions === null || f.deletions === null ? "" : `  +${f.additions} −${f.deletions}`;
+    const again = f.preexisting ? "  (also changed before the run)" : "";
+    return `${f.status.padEnd(9)} ${f.oldPath ? `${f.oldPath} -> ` : ""}${f.path}${counts}${again}`;
+  });
+  const more = d.filesChanged - Math.min(d.changedFiles.length, DIFF_FILES_SHOWN);
+  if (more > 0) lines.push(`… ${more} more`);
+  return lines;
+}
+
 function diffBlock(info: RunInfo, opts: RenderOpts): string[] {
   const d = info.diff;
   if (!d) return [];
   const range = d.head && d.head !== d.base ? `${d.base.slice(0, 7)}..${d.head.slice(0, 7)}` : d.base.slice(0, 7);
-  const lines = [
-    `${d.filesChanged} file${d.filesChanged === 1 ? "" : "s"} changed · +${d.additions} −${d.deletions}${d.totalsPartial ? " (partial)" : ""} · ${range}`,
-  ];
-  for (const f of d.changedFiles.slice(0, DIFF_FILES_SHOWN)) {
-    const counts = f.additions === null || f.deletions === null ? "" : `  +${f.additions} −${f.deletions}`;
-    lines.push(`${f.status.padEnd(9)} ${f.oldPath ? `${f.oldPath} -> ` : ""}${f.path}${counts}`);
+  const lines = [`${filesLine(d)} · ${range}`];
+  if (d.preexisting)
+    lines.push(
+      `${d.preexisting} file${d.preexisting === 1 ? "" : "s"} already changed before the run and left as they were: not shown`,
+    );
+  lines.push(...fileLines(d));
+  for (const w of d.worktrees ?? []) {
+    const where = w.removed
+      ? `branch ${w.branch} (worktree removed)`
+      : `worktree ${w.path}${w.branch ? ` (${w.branch})` : ""}`;
+    const commits = `${w.commits.length}${w.commitsTruncated ? "+" : ""} commit${w.commits.length === 1 ? "" : "s"}`;
+    lines.push(
+      `${paint("heading", where, opts)} · ${filesLine(w)} · ${commits} · ${w.base.slice(0, 7)}..${w.head.slice(0, 7)}`,
+    );
+    lines.push(...fileLines(w).map((l) => `  ${l}`));
   }
-  const more = d.filesChanged - Math.min(d.changedFiles.length, DIFF_FILES_SHOWN);
-  if (more > 0) lines.push(`… ${more} more`);
+  if (d.worktreesPartial) lines.push("some worktrees or branches could not be read");
   if (d.patchPath)
     lines.push(`${paint("heading", "patch:", opts)} ${d.patchPath}${d.patchTruncated ? " (truncated)" : ""}`);
   return section("Diff", lines, opts);

@@ -99,7 +99,9 @@ no badge when nothing runs); it re-reads the count every 5 seconds and on every 
   half, the same line as the title of the agent page's "wrap-up" limit; the wrap-up's own tool
   calls sit between `wrap-up started` / `wrap-up ended` rows of the timeline), a **Changes** section when the project is a git checkout (files the
   run changed with lines added / deleted, the base commit, a link to the patch at
-  `/runs/<id>/diff`), event timeline with legend and grouped repeats,
+  `/runs/<id>/diff`; changes already there before the run are left out and counted in the
+  footer, a file changed again is marked "also changed before the run", and each worktree the
+  run created or moved, or the branch of one it removed, gets its own list with its commit count), event timeline with legend and grouped repeats,
   previous / next run of the same agent, a "run again" CLI command, the `claude --resume`
   command and the exact command executed. Home paths print as `~/…`; Copy buttons give the
   full value. Every CLI command the dashboard shows (run again, `budgets set` on Costs,
