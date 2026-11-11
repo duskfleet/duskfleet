@@ -1,15 +1,17 @@
 /**
- * `duskfleet run-info <id>` for a human: the run, its usage, how it ended, its subagents, what it
- * changed and (with `--events`) its event timeline. Receives exactly the object `--json` prints.
+ * `duskfleet run-info <id>` for a human (DS-33): a `run <id>  <status>` title, then the Run, Usage,
+ * Outcome, Subagents and Diff sections (Events only with `--events`), keys in a 14-column label,
+ * and the dim json line with the log path last. Receives the object `--json` prints, plus the
+ * agent's kind and source when the agent still loads (shown, never printed as JSON).
  */
 import {
-  FAILURE_LABELS,
   REVIEW_REASON_LABELS,
   type Run,
   type RunAgentView,
   type RunDiff,
   type RunEvent,
   runFixHint,
+  type SubagentStatus,
   summarizeWrapUp,
 } from "@duskfleet/core";
 import {
@@ -17,17 +19,21 @@ import {
   type Cell,
   type Column,
   fmtDuration,
-  fmtRelative,
   fmtUsd,
+  fmtWhen,
+  jsonLine,
   kv,
   oneLine,
+  paintCell,
   type RenderOpts,
+  type Segment,
   section,
   sections,
+  statusCell,
   table,
 } from "./primitives.js";
-import { costCell } from "./run.js";
-import { paint } from "./theme.js";
+import { causeText } from "./run.js";
+import { paint, type StateRole, stateSegments } from "./theme.js";
 
 export interface RunInfo {
   run: Run;
@@ -36,40 +42,43 @@ export interface RunInfo {
   diff: RunDiff | null;
   subagents: RunAgentView[];
   events?: RunEvent[];
+  /** The agent as it loads now (`own` / `link`, builtin / user); absent when it no longer loads. */
+  agent?: { kind: string; source: string } | null;
 }
 
+/** Width of the key column. */
+const LABEL = 14;
 /** Files listed under Diff; the rest is counted. */
 const DIFF_FILES_SHOWN = 20;
 
 const fmtCount = (n: number | null | undefined) => (n === null || n === undefined ? null : n.toLocaleString("en-US"));
-
-function when(iso: string | null, opts: RenderOpts): string | null {
-  return iso ? `${iso} (${fmtRelative(iso, opts.now)})` : null;
-}
+const needsReview = (run: Run) => run.reviewReasons.length > 0;
 
 function runBlock(info: RunInfo, opts: RenderOpts): string[] {
   const { run } = info;
-  const reasons = run.reviewReasons.map((r) => REVIEW_REASON_LABELS[r]).join(", ");
-  const status = reasons
-    ? `${badge(run.status, opts)} ${paint("warn", `needs review: ${reasons}`, opts)}`
-    : badge(run.status, opts);
+  const model = run.modelUsed ?? run.modelRequested;
   return section(
     "Run",
     kv(
       [
-        ["id", { text: run.id, role: "accent" }],
-        ["label", info.label],
-        ["status", status],
-        ["agent", run.agentId],
+        ["agent", info.agent ? `${run.agentId} (${info.agent.kind}, ${info.agent.source})` : run.agentId],
         ["project", run.projectId ? `${run.projectId} (${run.projectPath})` : run.projectPath],
-        ["model", run.modelUsed ?? run.modelRequested],
+        ["label", info.label],
+        ["schedule", run.scheduleId],
+        [
+          "model",
+          model
+            ? `${model}${run.claudeCodeVersion ? ` (claude code ${run.claudeCodeVersion})` : ""}`
+            : run.claudeCodeVersion
+              ? `default (claude code ${run.claudeCodeVersion})`
+              : null,
+        ],
         ["session", run.claudeSessionId],
-        ["created", when(run.createdAt, opts)],
-        ["ended", when(run.endedAt, opts)],
+        ["created", fmtWhen(run.createdAt, opts.now)],
         ["duration", run.durationMs !== null ? fmtDuration(run.durationMs) : null],
-        ["log", run.logPath],
       ],
       opts,
+      LABEL,
     ),
     opts,
   );
@@ -78,31 +87,30 @@ function runBlock(info: RunInfo, opts: RenderOpts): string[] {
 function usageBlock(info: RunInfo, opts: RenderOpts): string[] {
   const { run } = info;
   const denied = [...new Set(run.deniedTools.map((d) => d.tool))];
-  const tokens = [
-    ["in", run.inputTokens],
-    ["out", run.outputTokens],
-    ["cache read", run.cacheReadTokens],
-    ["cache write", run.cacheCreationTokens],
-  ]
-    .filter(([, n]) => n !== null)
-    .map(([k, n]) => `${fmtCount(n as number)} ${k}`)
-    .join(", ");
-  const cost = costCell({ costUsd: run.costUsd, costLabel: info.costLabel, costStatus: run.costStatus });
-  const costText = typeof cost === "string" ? cost : cost.text;
+  const cost =
+    run.costUsd === null && !run.costStatus
+      ? null
+      : `${run.costUsd === null ? "?" : fmtUsd(run.costUsd)}${run.costStatus ? ` (${run.costStatus})` : ""}`;
+  const toolCalls = fmtCount(run.toolCalls);
+  const tools: Cell | null =
+    toolCalls === null
+      ? null
+      : denied.length
+        ? [
+            { text: `${toolCalls} · `, role: null },
+            { text: `denied: ${denied.join(", ")}`, role: "strong" },
+          ]
+        : toolCalls;
   return section(
     "Usage",
     kv(
       [
+        [info.costLabel.toLowerCase(), cost],
         ["turns", fmtCount(run.numTurns)],
-        ["tool calls", fmtCount(run.toolCalls)],
-        ["denied tools", denied.length ? { text: denied.join(", "), role: "warn" } : null],
-        ["tokens", tokens || null],
-        [
-          info.costLabel.toLowerCase(),
-          run.costUsd === null && !run.costStatus ? null : `${costText}${run.costStatus ? ` (${run.costStatus})` : ""}`,
-        ],
+        ["tool calls", tools],
       ],
       opts,
+      LABEL,
     ),
     opts,
   );
@@ -111,50 +119,50 @@ function usageBlock(info: RunInfo, opts: RenderOpts): string[] {
 function outcomeBlock(info: RunInfo, opts: RenderOpts): string[] {
   const { run } = info;
   const wrapUp = summarizeWrapUp(run);
+  const reasons = run.reviewReasons.map((r) => REVIEW_REASON_LABELS[r]).join(", ");
+  const exit = run.exitCode !== null && run.exitCode !== 0 ? `exit code ${run.exitCode}` : null;
+  const failure = run.errorCode ? `${run.errorCode}, ${run.errorFamily ?? "unknown"}` : null;
+  const cause = run.errorCode || run.error ? causeText(run) : null;
   return section(
     "Outcome",
     kv(
       [
-        ["termination", run.terminationReason],
-        ["exit code", run.exitCode !== null && run.exitCode !== 0 ? String(run.exitCode) : null],
-        [
-          "failure",
-          run.errorCode
-            ? {
-                text: `${FAILURE_LABELS[run.errorCode]} (${run.errorCode}, ${run.errorFamily ?? "unknown"})`,
-                role: "bad",
-              }
-            : null,
-        ],
-        ["error", run.error ? oneLine(run.error) : null],
+        ["status", statusCell(run.status, needsReview(run))],
+        ["reasons", reasons || null],
+        ["termination", [run.terminationReason, exit].filter(Boolean).join(", ") || null],
+        ["cause", cause ? (failure ? `${cause} (${failure})` : cause) : null],
         ["fix", runFixHint(run)],
         ["wrap-up", wrapUp ? `${wrapUp.outcome}, ${fmtUsd(wrapUp.costUsd)}, ${fmtDuration(wrapUp.durationMs)}` : null],
+        ["human", run.humanIntervention ? "needed: a tool was denied" : null],
+        ["context", run.contextExhausted ? "exhausted" : null],
       ],
       opts,
+      LABEL,
     ),
     opts,
   );
 }
 
+const SUBAGENT_ROLE: Readonly<Record<SubagentStatus, [string, StateRole | null]>> = {
+  running: ["●", "run"],
+  completed: ["✓", "ok"],
+  failed: ["✗", "bad"],
+  interrupted: ["–", null],
+};
+
 const SUBAGENT_COLUMNS: readonly Column[] = [
-  { header: "type" },
-  { header: "status" },
-  { header: "model", priority: 1 },
-  { header: "tools", align: "right", priority: 2 },
-  { header: "duration", align: "right", priority: 3 },
-  { header: "description", flex: true },
+  { header: "NAME", width: 18, flex: true },
+  { header: "STATUS", width: 14 },
+  { header: "TOKENS", width: 8, align: "right" },
+  { header: "DURATION", width: 9, align: "right" },
 ];
 
 function subagentBlock(info: RunInfo, opts: RenderOpts): string[] {
   if (info.subagents.length === 0) return [];
-  const rows = info.subagents.map((s): Cell[] => [
-    s.type,
-    s.status,
-    s.model ?? "-",
-    String(s.toolCalls),
-    fmtDuration(s.durationMs),
-    s.description ? oneLine(s.description) : "",
-  ]);
+  const rows = info.subagents.map((s): Cell[] => {
+    const [glyph, role] = SUBAGENT_ROLE[s.status] ?? ["–", null];
+    return [s.type, stateSegments(glyph, s.status, role), fmtCount(s.totalTokens) ?? "-", fmtDuration(s.durationMs)];
+  });
   return section("Subagents", table(SUBAGENT_COLUMNS, rows, { ...opts, width: opts.width - 2 }), opts);
 }
 
@@ -163,25 +171,21 @@ function diffBlock(info: RunInfo, opts: RenderOpts): string[] {
   if (!d) return [];
   const range = d.head && d.head !== d.base ? `${d.base.slice(0, 7)}..${d.head.slice(0, 7)}` : d.base.slice(0, 7);
   const lines = [
-    `${d.filesChanged} file${d.filesChanged === 1 ? "" : "s"} changed, ${paint("ok", `+${d.additions}`, opts)} ${paint("bad", `-${d.deletions}`, opts)}${d.totalsPartial ? " (partial)" : ""} · ${range}`,
+    `${d.filesChanged} file${d.filesChanged === 1 ? "" : "s"} changed · +${d.additions} −${d.deletions}${d.totalsPartial ? " (partial)" : ""} · ${range}`,
   ];
   for (const f of d.changedFiles.slice(0, DIFF_FILES_SHOWN)) {
-    const counts = f.additions === null || f.deletions === null ? "" : `  +${f.additions} -${f.deletions}`;
+    const counts = f.additions === null || f.deletions === null ? "" : `  +${f.additions} −${f.deletions}`;
     lines.push(`${f.status.padEnd(9)} ${f.oldPath ? `${f.oldPath} -> ` : ""}${f.path}${counts}`);
   }
   const more = d.filesChanged - Math.min(d.changedFiles.length, DIFF_FILES_SHOWN);
-  if (more > 0) lines.push(paint("faint", `… ${more} more`, opts));
+  if (more > 0) lines.push(`… ${more} more`);
   if (d.patchPath)
-    lines.push(`${paint("muted", "patch:", opts)} ${d.patchPath}${d.patchTruncated ? " (truncated)" : ""}`);
+    lines.push(`${paint("heading", "patch:", opts)} ${d.patchPath}${d.patchTruncated ? " (truncated)" : ""}`);
   return section("Diff", lines, opts);
 }
 
-const EVENT_COLUMNS: readonly Column[] = [
-  { header: "time" },
-  { header: "type" },
-  { header: "agent", priority: 1 },
-  { header: "detail", flex: true },
-];
+/** Width of an event's kind. */
+const EVENT_KIND = 10;
 
 function eventDetail(e: RunEvent): string {
   if (e.payload === null || e.payload === undefined) return "";
@@ -191,22 +195,37 @@ function eventDetail(e: RunEvent): string {
 function eventsBlock(info: RunInfo, opts: RenderOpts): string[] {
   if (!info.events) return [];
   if (info.events.length === 0) return section("Events", ["none"], opts);
-  const rows = info.events.map((e): Cell[] => [
-    { text: e.ts.slice(11, 19), role: "muted" },
-    e.type,
-    e.agentId ?? "main",
-    eventDetail(e),
-  ]);
-  return section("Events", table(EVENT_COLUMNS, rows, { ...opts, width: opts.width - 2 }), opts);
+  const room = Math.max(0, opts.width - 2 - 8 - 2 - EVENT_KIND - 2);
+  const lines = info.events.map((e) => {
+    const kind = e.type.length > EVENT_KIND ? `${e.type.slice(0, EVENT_KIND - 1)}…` : e.type.padEnd(EVENT_KIND);
+    const denied = /denied/.test(e.type);
+    const detail = eventDetail(e);
+    const segs: Segment[] = [
+      { text: e.ts.slice(11, 19), role: "muted" },
+      { text: "  ", role: null },
+      { text: kind, role: denied ? "strong" : null },
+      { text: "  ", role: null },
+      { text: detail.length > room ? `${detail.slice(0, Math.max(0, room - 1))}…` : detail, role: null },
+    ];
+    return paintCell(segs, opts).trimEnd();
+  });
+  return section("Events", lines, opts);
 }
 
 export function renderRunInfo(info: RunInfo, opts: RenderOpts): string[] {
-  return sections([
-    runBlock(info, opts),
-    usageBlock(info, opts),
-    outcomeBlock(info, opts),
-    subagentBlock(info, opts),
-    diffBlock(info, opts),
-    eventsBlock(info, opts),
-  ]);
+  const { run } = info;
+  const title = `${paint("heading", "run", opts)} ${paint("accent", run.id, opts)}  ${badge(run.status, opts, needsReview(run))}`;
+  return [
+    ...sections([
+      [title],
+      runBlock(info, opts),
+      usageBlock(info, opts),
+      outcomeBlock(info, opts),
+      subagentBlock(info, opts),
+      diffBlock(info, opts),
+      eventsBlock(info, opts),
+    ]),
+    "",
+    jsonLine(opts, run.logPath ? `log: ${run.logPath}` : undefined),
+  ];
 }

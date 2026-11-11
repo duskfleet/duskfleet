@@ -1,11 +1,13 @@
 /**
  * The CLI's human-output building blocks (packages/mcp/src/render): exact plain lines with
- * `color: false`, and the escape sequence of each role with `color: true`.
+ * `color: false`, and the SGR codes of each DS-33 role with `color: true`.
  */
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
   badge,
+  cutMiddle,
+  fmtAge,
   fmtDuration,
   fmtPercent,
   fmtRelative,
@@ -16,36 +18,45 @@ import {
   ROLES,
   section,
   sections,
+  shortModel,
   table,
+  tildePath,
 } from "../dist/render/index.js";
 
 const plain = (width = 100) => ({ color: false, width });
 
-const COLUMNS = [{ header: "name" }, { header: "n", align: "right", priority: 1 }, { header: "note", flex: true }];
+const COLUMNS = [
+  { header: "NAME", width: 5 },
+  { header: "N", width: 3, align: "right", priority: 1 },
+  { header: "NOTE", width: 10, flex: true, min: 6 },
+];
 const ROWS = [
   ["a", "1", "a fairly long note text"],
-  ["bbb", "22", "x"],
+  ["bbbbbbb", "22", "x"],
 ];
 
-test("table: padded columns, numbers right-aligned, no trailing spaces", () => {
+test("table: design widths, numbers right-aligned, cells cut with …, no trailing spaces", () => {
   assert.deepEqual(table(COLUMNS, ROWS, plain()), [
-    "name   n  note",
-    "a      1  a fairly long note text",
-    "bbb   22  x",
+    "NAME     N  NOTE",
+    "a        1  a fairly long note text",
+    "bbbb…   22  x",
   ]);
 });
 
-test("table: the flexible column is cut with … to fit the width", () => {
-  const lines = table(COLUMNS, ROWS, plain(30));
-  assert.deepEqual(lines, ["name   n  note", "a      1  a fairly long note …", "bbb   22  x"]);
-  assert.ok(lines.every((l) => l.length <= 30));
+test("table: the flexible column gives way to its floor, then the lowest-priority column drops", () => {
+  assert.deepEqual(table(COLUMNS, ROWS, plain(24)), ["NAME     N  NOTE", "a        1  a fairly lo…", "bbbb…   22  x"]);
+  assert.deepEqual(table(COLUMNS, ROWS, plain(16)), ["NAME   NOTE", "a      a fairly…", "bbbb…  x"]);
 });
 
-test("table: the lowest-priority column is dropped before the flexible one goes below its minimum", () => {
-  assert.deepEqual(table(COLUMNS, ROWS, plain(20)), ["name  note", "a     a fairly long…", "bbb   x"]);
+test("table: a fill column takes the rest of the line", () => {
+  const cols = [
+    { header: "ID", width: 4 },
+    { header: "TEXT", fill: true },
+  ];
+  assert.deepEqual(table(cols, [["ab", "x".repeat(30)]], plain(20)), ["ID    TEXT", `ab    ${"x".repeat(13)}…`]);
 });
 
-test("kv: aligned keys, null values left out", () => {
+test("kv: bold labels padded to a width, null values left out", () => {
   assert.deepEqual(
     kv(
       [
@@ -57,10 +68,12 @@ test("kv: aligned keys, null values left out", () => {
     ),
     ["id        abc", "long key  v"],
   );
+  assert.deepEqual(kv([["id", "abc"]], plain(), 6), ["id    abc"]);
+  assert.equal(kv([["id", "abc"]], { color: true, width: 100 })[0], "\u001b[1mid\u001b[22m  abc");
 });
 
-test("section and sections: indented lines, blank line between blocks, empty ones skipped", () => {
-  assert.deepEqual(section("Run", ["a", ""], plain()), ["Run", "  a", ""]);
+test("section and sections: a bold title with a rule, indented lines, blank line between blocks", () => {
+  assert.deepEqual(section("Run", ["a", ""], plain(20)), [`Run ${"─".repeat(16)}`, "  a", ""]);
   assert.deepEqual(section("Empty", [], plain()), []);
   assert.deepEqual(sections([["x"], [], ["y"]]), ["x", "", "y"]);
 });
@@ -80,6 +93,11 @@ test("formatting helpers", () => {
   assert.equal(fmtRelative("2026-09-01T08:00:00Z", now), "2026-09-01");
   assert.equal(fmtRelative("2026-11-09T12:04:00Z", now), "in 4m");
   assert.equal(fmtRelative(null, now), "-");
+  assert.equal(fmtAge("2026-11-09T11:58:00Z", now), "2m");
+  assert.equal(fmtAge("2026-11-09T11:42:00Z", now), "18m");
+  assert.equal(fmtAge("2026-11-09T09:00:00Z", now), "3h");
+  assert.equal(fmtAge("2026-11-07T12:00:00Z", now), "2d");
+  assert.equal(fmtAge("2026-11-10T09:00:00Z", now), "21h", "future ages read the same");
 
   assert.equal(fmtUsd(0.0123), "$0.0123");
   assert.equal(fmtUsd(1.25), "$1.25");
@@ -90,24 +108,39 @@ test("formatting helpers", () => {
 
   assert.equal(oneLine("a\n   b "), "a b");
   assert.equal(oneLine("x".repeat(10), 8), "xxxxx...");
-  assert.equal(badge("timed_out", plain()), "timed out");
+  assert.equal(badge("timed_out", plain()), "✗ timed out");
+  assert.equal(badge("completed", plain(), true), "! needs review");
+  assert.equal(badge("cancelled", plain()), "– cancelled");
+  assert.equal(shortModel("claude-sonnet-4-5-20250929"), "sonnet");
+  assert.equal(shortModel("custom-model"), "custom-model");
+  assert.equal(tildePath("/home/me/src/app", "/home/me"), "~/src/app");
+  assert.equal(tildePath("/srv/app", "/home/me"), "/srv/app");
+  const cutPath = cutMiddle("/home/me/.config/Claude/claude_desktop_config.json", 30);
+  assert.equal(cutPath.length, 30);
+  assert.match(cutPath, /^\/home\/me\/.+\/…\/.+config\.json$/);
 });
 
-test("paint: plain text without colour, one escape sequence per role with it", () => {
+test("paint: plain text without colour, the DS-33 SGR codes with it; never red 31 or bright black 90", () => {
   const expected = {
     ok: "\x1b[32mx\x1b[39m",
     warn: "\x1b[33mx\x1b[39m",
-    bad: "\x1b[31mx\x1b[39m",
+    bad: "\x1b[91m\x1b[1mx\x1b[22m\x1b[39m",
     run: "\x1b[36mx\x1b[39m",
     accent: "\x1b[35mx\x1b[39m",
     muted: "\x1b[2mx\x1b[22m",
-    faint: "\x1b[90mx\x1b[39m",
     heading: "\x1b[1mx\x1b[22m",
+    strong: "\x1b[1mx\x1b[22m",
   };
   assert.deepEqual([...ROLES].sort(), Object.keys(expected).sort());
   for (const role of ROLES) {
     assert.equal(paint(role, "x", { color: false }), "x");
     assert.equal(paint(role, "x", { color: true }), expected[role], role);
+    const painted = paint(role, "x", { color: true });
+    assert.ok(!painted.includes("\x1b[31m") && !painted.includes("\x1b[90m"), role);
   }
-  assert.equal(badge("failed", { color: true, width: 100 }), "\x1b[31mfailed\x1b[39m");
+  const color = { color: true, width: 100 };
+  assert.equal(badge("failed", color), "\x1b[91m\x1b[1m✗ failed\x1b[22m\x1b[39m", "failed paints glyph and word");
+  assert.equal(badge("completed", color), "\x1b[32m✓\x1b[39m completed", "the other words stay default fg");
+  assert.equal(badge("running", color), "\x1b[36m●\x1b[39m running");
+  assert.equal(badge("completed", color, true), "\x1b[33m!\x1b[39m \x1b[1mneeds review\x1b[22m");
 });

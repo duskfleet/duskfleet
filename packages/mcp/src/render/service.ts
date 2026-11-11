@@ -1,10 +1,12 @@
 /**
- * `install-service` and `uninstall-service` for a human: what was written and what the service
- * manager says now. `install-service --print` keeps printing the raw unit, not through here.
+ * `install-service` and `uninstall-service` for a human (DS-33 acknowledgements): one glyph line
+ * with what the service manager says now, then at most two indented lines (the file written, the
+ * command that checks it). `--json` keeps the commands run and the notes; `install-service --print`
+ * keeps printing the raw unit, not through here.
  */
 import type { ServicePlatform, ServiceStatus } from "../service.js";
-import { type Cell, kv, type RenderOpts } from "./primitives.js";
-import { paint } from "./theme.js";
+import type { RenderOpts } from "./primitives.js";
+import { GLYPH, paint } from "./theme.js";
 
 export interface ServiceInstalled {
   installed: true;
@@ -30,35 +32,20 @@ const MANAGER: Readonly<Record<ServicePlatform, string>> = {
   win32: "Task Scheduler",
 };
 
-function statusCell(s: ServiceStatus): Cell {
-  if (s.running === true) return { text: s.detail, role: "ok" };
-  if (s.running === false) return { text: s.detail, role: "bad" };
-  return { text: s.detail, role: "warn" };
-}
-
 export function renderServiceInstalled(v: ServiceInstalled, opts: RenderOpts): string[] {
-  const lines = [
-    `service ${paint("accent", v.label, opts)} installed (${MANAGER[v.platform]})`,
-    "",
-    ...kv(
-      [
-        ["status", statusCell(v.status)],
-        ["unit", v.unitPath],
-        ["log", v.logPath],
-        ["keep awake", v.platform === "darwin" ? (v.keepAwake ? "yes (caffeinate -i -s)" : "no") : null],
-      ],
-      opts,
-    ),
+  const failed = v.status.running === false;
+  const glyph = failed ? paint("bad", GLYPH.bad, opts) : paint("ok", GLYPH.ok, opts);
+  const awake = v.platform === "darwin" ? (v.keepAwake ? ", keep awake" : ", may sleep") : "";
+  return [
+    `${glyph} service ${paint("accent", v.label, opts)} installed (${MANAGER[v.platform]}${awake}) · ${failed ? paint("bad", v.status.detail, opts) : v.status.detail}`,
+    `  wrote ${v.unitPath} · log ${v.logPath}`,
+    `  check it: ${paint("accent", "duskfleet doctor", opts)}`,
   ];
-  if (v.ran.length > 0) {
-    lines.push("", paint("muted", "ran:", opts), ...v.ran.map((c) => `  ${paint("faint", c, opts)}`));
-  }
-  if (v.notes.length > 0) {
-    lines.push("", paint("muted", "notes:", opts), ...v.notes.map((n) => `  - ${n}`));
-  }
-  return lines;
 }
 
-export function renderServiceUninstalled(v: ServiceUninstalled, _opts: RenderOpts): string[] {
-  return [v.removed ? "service uninstalled: unit file removed" : "service uninstalled: no unit file was present"];
+export function renderServiceUninstalled(v: ServiceUninstalled, opts: RenderOpts): string[] {
+  return [
+    `${paint("ok", GLYPH.ok, opts)} service uninstalled`,
+    v.removed ? "  removed the unit file" : "  no unit file was present",
+  ];
 }

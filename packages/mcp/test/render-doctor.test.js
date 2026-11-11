@@ -1,11 +1,12 @@
 /**
  * The human views of `doctor`, `install-service`, `uninstall-service` and `mcp status`
- * (packages/mcp/src/render), as exact plain lines.
+ * (packages/mcp/src/render, DS-33), as exact plain lines.
  */
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import "./helpers.js";
 import {
+  AGENT_CREATE,
   renderDoctor,
   renderMcpStatus,
   renderServiceInstalled,
@@ -49,46 +50,31 @@ const HEALTHY = {
   orphans: { recovered: [], advice: null },
 };
 
-const CLAUDE_LINES = [
-  "Claude",
-  "  binary   /usr/local/bin/claude",
-  "  version  2.1.0 (Claude Code)",
-  "  node     v24.1.0",
-];
-const PATHS_LINES = [
-  "Paths",
-  "  config  /srv/repo/config (repo)",
-  "  data    /srv/repo/data (config)",
-  "  config lookup, first match wins:",
-  "    env   -",
-  "    repo  /srv/repo/config  (used)",
-  "    user  /home/me/.config/duskfleet",
-];
+const PAD = " ".repeat(18);
 
-test("doctor: a healthy report in sections, no Budgets or Probe section", () => {
+test("doctor: a healthy report is one ✓ line per check, in order, then the json line", () => {
   assert.deepEqual(renderDoctor(HEALTHY, plain), [
-    ...CLAUDE_LINES,
+    "doctor · 0 warnings · 0 errors",
     "",
-    ...PATHS_LINES,
+    "✓ node            v24.1.0",
+    "✓ claude          2.1.0 (Claude Code) · /usr/local/bin/claude",
+    "✓ PATH            inherited",
+    "✓ config          /srv/repo/config (repo)",
+    "✓ data            /srv/repo/data (config)",
+    "✓ agents          2: fixer, reviewer",
+    "✓ scheduler       enabled · ticking serve@box pid 4242 · service systemd: active (running)",
+    "✓ schedules       one per agent",
+    "✓ unpriced runs   none",
+    "✓ orphans         none recovered",
     "",
-    "Agents",
-    "  count  2",
-    "  ids    fixer, reviewer",
-    "",
-    "Scheduler",
-    "  enabled      yes",
-    "  ticking      yes (serve@box pid 4242)",
-    "  service      systemd: active (running)",
-    "  service pid  4242",
-    "",
-    "Orphans",
-    "  recovered  0",
+    "json: add --json · one real run on haiku: duskfleet doctor --probe",
   ]);
 });
 
-test("doctor: advice, duplicates, unpriced runs and orphans are warnings", () => {
+test("doctor: advice, duplicates, unpriced runs and orphans are warnings with their advice indented", () => {
   const report = {
     ...HEALTHY,
+    agents: [],
     pathDefaulted: true,
     scheduler: {
       enabled: true,
@@ -138,48 +124,47 @@ test("doctor: advice, duplicates, unpriced runs and orphans are warnings", () =>
     },
   };
   assert.deepEqual(renderDoctor(report, plain), [
-    ...CLAUDE_LINES,
+    "doctor · 6 warnings · 0 errors",
     "",
-    ...PATHS_LINES,
-    "  PATH was missing or minimal: the usual install directories were put in front for claude",
+    "✓ node            v24.1.0",
+    "✓ claude          2.1.0 (Claude Code) · /usr/local/bin/claude",
+    "! PATH            defaulted",
+    `${PAD}PATH was missing or minimal: the usual install directories were put in front for claude`,
+    "✓ config          /srv/repo/config (repo)",
+    "✓ data            /srv/repo/data (config)",
+    "! agents          none yet",
+    `${PAD}${AGENT_CREATE}`,
+    "! scheduler       enabled · nothing ticking · service not installed",
+    `${PAD}schedules fire only while an MCP host keeps the server alive`,
+    "! schedules       1 agent(s) with more than one schedule",
+    `${PAD}agent "fixer" has 2 schedules; one schedule per agent`,
+    "! unpriced runs   1 this month",
+    `${PAD}global: counted $4.50 / $5.00 (warn) · 1 run(s) without a recorded cost count against the global budget`,
+    "! orphans         1 recovered",
+    `${PAD}run-1  fixer, was running`,
+    `${PAD}marked 1 run(s) failed with the orphaned error: their owning process is gone`,
     "",
-    "Agents",
-    "  count       2",
-    "  ids         fixer, reviewer",
-    "  duplicates  fixer (more than one schedule)",
-    "",
-    "Scheduler",
-    "  enabled  yes",
-    "  ticking  no",
-    "  service  not installed",
-    "  ! schedules fire only while an MCP host keeps the server alive",
-    '  ! agent "fixer" has 2 schedules; one schedule per agent',
-    "",
-    "Budgets",
-    "  global  1 unpriced run(s), counted $4.50 / $5.00 warn",
-    "  ! 1 run(s) without a recorded cost count against the global budget",
-    "",
-    "Orphans",
-    "  recovered  1",
-    "    run-1  fixer, was running",
-    "  ! marked 1 run(s) failed with the orphaned error: their owning process is gone",
+    "json: add --json · one real run on haiku: duskfleet doctor --probe",
   ]);
 });
 
-test("doctor: a missing binary shows its error and an unknown version", () => {
-  const lines = renderDoctor({ ...HEALTHY, claudeVersion: null, error: "Error: spawn claude ENOENT" }, plain);
-  assert.deepEqual(lines.slice(0, 5), [
-    "Claude",
-    "  binary   /usr/local/bin/claude",
-    "  version  unknown",
-    "  error    Error: spawn claude ENOENT",
-    "  node     v24.1.0",
+test("doctor: a missing binary is the only error, `not found` in bright red", () => {
+  const missing = { ...HEALTHY, claudeVersion: null, error: "Error: spawn claude ENOENT" };
+  const lines = renderDoctor(missing, plain);
+  assert.equal(lines[0], "doctor · 0 warnings · 1 error");
+  assert.deepEqual(lines.slice(3, 5), [
+    "✗ claude          not found",
+    `${PAD}/usr/local/bin/claude: Error: spawn claude ENOENT`,
   ]);
+  const colored = renderDoctor(missing, { ...plain, color: true });
+  assert.ok(colored[3].includes("\u001b[91m\u001b[1mnot found"), "not found in bright red bold");
+  const failing = renderDoctor({ ...HEALTHY, claudeVersion: null, error: "exit code 3" }, plain);
+  assert.equal(failing[0], "doctor · 1 warning · 0 errors", "a binary that fails otherwise is a warning");
 });
 
 const NOTE = "doctor --probe makes one real Claude run on haiku";
 
-test("doctor --probe: a Probe section, ok or failed with its advice", () => {
+test("doctor --probe: the probe check last, ok or a warning with its advice", () => {
   const ok = renderDoctor(
     {
       ...HEALTHY,
@@ -198,14 +183,11 @@ test("doctor --probe: a Probe section, ok or failed with its advice", () => {
     },
     plain,
   );
-  assert.deepEqual(ok.slice(ok.indexOf("Probe")), [
-    "Probe",
-    "  outcome   completed, ok",
-    "  model     haiku",
-    "  duration  2.3s",
-    "  cost      $0.0123",
-    "  result    pong",
-    `  ${NOTE}`,
+  assert.deepEqual(ok.slice(-4), [
+    "✓ probe           completed, ok · haiku · 2.3s · $0.01",
+    `${PAD}${NOTE}`,
+    "",
+    "json: add --json",
   ]);
 
   const failed = renderDoctor(
@@ -226,87 +208,86 @@ test("doctor --probe: a Probe section, ok or failed with its advice", () => {
     },
     plain,
   );
-  assert.deepEqual(failed.slice(failed.indexOf("Probe")), [
-    "Probe",
-    "  outcome   failed",
-    "  model     haiku",
-    "  duration  900ms",
-    "  error     Please run /login",
-    "  ! Claude Code is not authenticated",
-    `  ${NOTE}`,
+  assert.equal(failed[0], "doctor · 1 warning · 0 errors");
+  assert.deepEqual(failed.slice(-6), [
+    "! probe           failed · haiku · 900ms",
+    `${PAD}Please run /login`,
+    `${PAD}Claude Code is not authenticated`,
+    `${PAD}${NOTE}`,
+    "",
+    "json: add --json",
   ]);
 });
 
 test("doctor: colour only when asked for", () => {
   const colored = renderDoctor(HEALTHY, { ...plain, color: true }).join("\n");
-  assert.ok(colored.includes("\u001b["), "escape codes with color: true");
+  assert.ok(colored.includes("\u001b[32m✓\u001b[39m"), "green glyphs with color: true");
   assert.ok(!renderDoctor(HEALTHY, plain).join("\n").includes("\u001b["), "none with color: false");
 });
 
-test("install-service: status, paths, the commands run and the notes", () => {
-  const lines = renderServiceInstalled(
-    {
-      installed: true,
-      platform: "darwin",
-      label: "com.duskfleet.scheduler",
-      unitPath: "/home/me/Library/LaunchAgents/com.duskfleet.scheduler.plist",
-      logPath: "/srv/data/logs/serve.log",
-      keepAwake: true,
-      ran: ["launchctl bootstrap gui/501 /home/me/Library/LaunchAgents/com.duskfleet.scheduler.plist"],
-      status: {
-        platform: "darwin",
-        supported: true,
-        label: "com.duskfleet.scheduler",
-        unitPath: "/home/me/Library/LaunchAgents/com.duskfleet.scheduler.plist",
-        installed: true,
-        running: true,
-        pid: 77,
-        detail: "launchd: running pid 77",
-      },
-      notes: ["Re-run install-service after every build."],
-    },
+const RUNNING = {
+  platform: "darwin",
+  supported: true,
+  label: "com.duskfleet.scheduler",
+  unitPath: "/home/me/Library/LaunchAgents/com.duskfleet.scheduler.plist",
+  installed: true,
+  running: true,
+  pid: 77,
+  detail: "launchd: running pid 77",
+};
+
+test("install-service: a ✓ line with the manager's state, the file written, the command that checks it", () => {
+  const value = {
+    installed: true,
+    platform: "darwin",
+    label: "com.duskfleet.scheduler",
+    unitPath: "/home/me/Library/LaunchAgents/com.duskfleet.scheduler.plist",
+    logPath: "/srv/data/logs/serve.log",
+    keepAwake: true,
+    ran: ["launchctl bootstrap gui/501 /home/me/Library/LaunchAgents/com.duskfleet.scheduler.plist"],
+    status: RUNNING,
+    notes: ["Re-run install-service after every build."],
+  };
+  assert.deepEqual(renderServiceInstalled(value, plain), [
+    "✓ service com.duskfleet.scheduler installed (launchd, keep awake) · launchd: running pid 77",
+    "  wrote /home/me/Library/LaunchAgents/com.duskfleet.scheduler.plist · log /srv/data/logs/serve.log",
+    "  check it: duskfleet doctor",
+  ]);
+  const down = renderServiceInstalled(
+    { ...value, status: { ...RUNNING, running: false, detail: "launchd: not running" } },
     plain,
   );
-  assert.deepEqual(lines, [
-    "service com.duskfleet.scheduler installed (launchd)",
-    "",
-    "status      launchd: running pid 77",
-    "unit        /home/me/Library/LaunchAgents/com.duskfleet.scheduler.plist",
-    "log         /srv/data/logs/serve.log",
-    "keep awake  yes (caffeinate -i -s)",
-    "",
-    "ran:",
-    "  launchctl bootstrap gui/501 /home/me/Library/LaunchAgents/com.duskfleet.scheduler.plist",
-    "",
-    "notes:",
-    "  - Re-run install-service after every build.",
-  ]);
+  assert.equal(down[0], "✗ service com.duskfleet.scheduler installed (launchd, keep awake) · launchd: not running");
 });
 
-test("uninstall-service: one line", () => {
+test("uninstall-service: a ✓ line and what was removed", () => {
   assert.deepEqual(renderServiceUninstalled({ uninstalled: true, removed: true, ran: [] }, plain), [
-    "service uninstalled: unit file removed",
+    "✓ service uninstalled",
+    "  removed the unit file",
   ]);
   assert.deepEqual(renderServiceUninstalled({ uninstalled: true, removed: false, ran: [] }, plain), [
-    "service uninstalled: no unit file was present",
+    "✓ service uninstalled",
+    "  no unit file was present",
   ]);
 });
 
-test("mcp status: one block per host, env names only", () => {
+const STATUS_CODE = {
+  target: "claude-code",
+  configPath: "/home/me/.claude.json",
+  registered: true,
+  command: "node",
+  args: ["/srv/duskfleet/dist/index.js"],
+  env: { CLAUDE_BIN: "/usr/local/bin/claude-secret-path" },
+  error: null,
+};
+
+test("mcp status: HOST · CONFIG · ENTRY · RUNS, env names only, the register command for the first missing host", () => {
   const lines = renderMcpStatus(
     [
-      {
-        target: "claude-code",
-        configPath: "/home/me/.claude.json",
-        registered: true,
-        command: "node",
-        args: ["/srv/duskfleet/dist/index.js"],
-        env: { CLAUDE_BIN: "/usr/local/bin/claude-secret-path" },
-        error: null,
-      },
+      STATUS_CODE,
       {
         target: "claude-desktop",
-        configPath: "/home/me/.config/Claude/claude_desktop_config.json",
+        configPath: "/home/me/Library/Application Support/Claude/claude_desktop_config.json",
         registered: false,
         command: null,
         args: [],
@@ -316,17 +297,19 @@ test("mcp status: one block per host, env names only", () => {
     ],
     plain,
   );
-  assert.deepEqual(lines, [
-    "Claude Code",
-    "  registered  yes",
-    "  config      /home/me/.claude.json",
-    "  command     node /srv/duskfleet/dist/index.js",
-    "  env         CLAUDE_BIN",
+  assert.equal(lines[0], "HOST                    CONFIG                              ENTRY   RUNS");
+  assert.equal(
+    lines[1],
+    "Claude Code             /home/me/.claude.json               ✓ yes   node /srv/duskfleet/dist/index.…",
+    "RUNS fills the rest of the line and is cut there",
+  );
+  assert.match(renderMcpStatus([{ ...STATUS_CODE }], { ...plain, width: 160 })[1], /index\.js · env CLAUDE_BIN$/);
+  assert.match(lines[2], /^Claude Desktop {10}\/home\/me\/Libr.*\/…\/.*config\.json {2}✗ no {4}-$/);
+  assert.equal(lines[3], "  └ Unexpected token } in JSON");
+  assert.deepEqual(lines.slice(4), [
     "",
-    "Claude Desktop",
-    "  registered  no",
-    "  config      /home/me/.config/Claude/claude_desktop_config.json",
-    "  error       Unexpected token } in JSON",
+    "register: duskfleet mcp register --target claude-desktop",
+    "json: add --json · env values only with --json",
   ]);
   assert.doesNotMatch(lines.join("\n"), /claude-secret-path/, "env values are never printed");
 });

@@ -81,10 +81,16 @@ Human-readable by default, `--json` for scripts, logs on stderr. `run`, `runs`, 
 `agents`, `agents create`, `projects`, `schedules`, `schedules run-now`, `budgets`, `budgets set`,
 `budgets delete`, `doctor`, `install-service`, `uninstall-service` and `mcp status` print a human
 view on stdout: tables that fit the terminal (`COLUMNS`, else
-its width, else 100 columns; the least useful columns are dropped first, the label or
-description is cut with `…`), aligned key blocks, and colour for statuses. Colour follows Node's
-rules for the stream: only on a terminal, never in a pipe (`duskfleet runs | cat`) or under
-`NO_COLOR`, always under `FORCE_COLOR`. `--json`, anywhere before a `--` and on any command,
+its width, else 100 columns; two spaces between columns, numbers right-aligned, the least useful
+columns dropped first, one flexible column cut with `…`), `└` lines under a row that needs a
+look, aligned key blocks, and a dim `json: add --json` last line. A status is a glyph and a word:
+`● running`, `✓ completed`, `! needs review`, `✗ failed`, `– cancelled`, `‖ paused`. Colour is
+chosen to read on a dark and a light terminal: the glyph is coloured, the word stays in the
+terminal's default colour (`needs review` bold), only `failed` / errors colour the word (bright
+red, bold); ids and commands to copy are magenta, paths never coloured, dim is decoration only.
+Colour follows Node's rules for the stream: only on a terminal, never in a pipe
+(`duskfleet runs | cat`) or under `NO_COLOR`, always under `FORCE_COLOR`; without colour the
+glyphs, words and columns are the same. `--json`, anywhere before a `--` and on any command,
 prints exactly the JSON these commands printed before (`tools` and `repair-subagents` print JSON
 either way for now; `install-service --print` prints the raw unit). `mcp status` shows the names
 of an entry's env keys, never their values; `--json` prints the entry as the host's config holds it.
@@ -98,19 +104,29 @@ duskfleet schedules --json | jq '.schedules[] | select(.enabled == false) | .nam
 
 What the list commands show:
 
+- `runs`: ID (the first 8 characters; `run-info` takes any unique prefix), STATUS, AGENT, PROJECT,
+  MODEL, AGE, DURATION, COST, TOOLS. Narrower than 100 columns drops TOOLS, then PROJECT, then
+  MODEL. A run that needs review gets a `└` line with its reasons and denied tools, a failed one
+  its error family and the fix. Then the total, the count and the filter.
 - `agents`: id, kind (`own` / `link`), source (`builtin` / `user`), model (`default` = the Claude
-  Code default), bound project, budget and timeout per run, description. With no agent, stdout
-  stays empty and the hint to `agents create` goes to stderr (with `--json`: `[]`).
-- `projects`: the `allowed_project_roots` (`any directory` when there are none), then id, path
-  and the agents bound to each project.
-- `schedules`: the scheduler first (enabled or disabled, which process ticks and when its lease
-  ends, a `pause_scheduler` pause in force), then name, agent, cron and time zone, state
-  (`enabled`, or `paused` with the auto-pause reason), next fire, last fire and its outcome, how
-  the last run ended and its cost (`!` = needs review), fires / skips.
-- `budgets`: scope, counted / amount (counted = recorded spend plus the stand-ins of unpriced and
-  running runs), percent, state (`ok` / `warn` / `over`; `over *` = over only because of runs
-  still going: new runs are refused, schedules are not paused), warn percent, hard stop, the
-  budget id (what `budgets delete` takes) and the unpriced policy with its stand-ins.
+  Code default, `agent` = a link that uses its project agent's model), bound project (`none`),
+  budget and timeout per run, description. With no agent: `no agents yet` and the `agents create`
+  command (with `--json`: `[]`, the hint on stderr).
+- `projects`: the `allowed_project_roots` in the header (`any directory` when there are none),
+  then id, path (home as `~`) and the agents bound to each project (`+n` when they do not fit).
+- `schedules`: the scheduler first (enabled or disabled, whether a process ticks, its holder and
+  when its lease ends, a `pause_scheduler` pause in force) and the time zone, then name, agent,
+  cron, state (`✓ on` / `‖ paused`, with a `└` line giving the reason), next fire, last outcome,
+  how the last run ended and its cost (`!` = needs review), fires / skips. Narrower than 100
+  columns drops FIRE/SKIP, then CRON, then LAST RUN.
+- `budgets`: the month and the unpriced policy, then scope, spent (counted = recorded spend plus
+  the stand-ins of unpriced and running runs), limit, used, a 10-cell meter, state (`✓ ok` /
+  `! warning` / `✗ stopped`), warn percent and hard stop; the stand-ins go on a `└` line (over
+  only by running runs: new runs are refused, schedules are not paused). The budget id that
+  `budgets delete` takes is in `budgets --json`.
+- `doctor`: `doctor · n warnings · n errors`, then one line per check (node, claude, PATH, config,
+  data, agents, scheduler, schedules, unpriced runs, orphans, probe) with its advice indented
+  under it. A missing `claude` binary is the only error.
 
 Logs go to stderr, so stdout stays the command's output. A one-shot command logs warnings and
 errors only; `--verbose`, anywhere before a `--`, brings the info lines back (config loaded,
@@ -213,9 +229,9 @@ A run with no agent, when none exists, fails with
 ## What run prints
 
 On stderr, the run id and its log as it starts. On stdout, once it ends, one header line
-(`run <id> <status> · <duration> · <cost>`, a cost at API value marked `≈`); when the run did not
-end clean (failed, timed out, cancelled, or completed but [needs review](dashboard.md#needs-review)),
-the status carries its review reasons and three lines follow: the cause in one line, the fix when
+(`run <id> <glyph status> · <duration> · <cost>`, an estimated cost marked `~`, an unpriced one
+`?`); when the run did not end clean (failed, timed out, cancelled, or completed but
+[needs review](dashboard.md#needs-review)), three lines follow: the cause in one line, the fix when
 there is one, and where to look next; then the log path. A run against a Claude that is not
 logged in:
 
@@ -400,11 +416,11 @@ otherwise (a subscription run, or one recorded before `billingType` existed). `l
 returns `cost`, the listed runs summed by billing type (`apiUsd` billed, `subscriptionUsd` the API
 value of subscription usage) with the wording to show: `heading` is `Spent` when every run is
 billed, `Usage (API value)` when none is (`note`: included in your Claude subscription), `Spent and
-usage` when both kinds are listed. `runs` prints the same total as one line, for example `Usage
-(API value): $3.2 over 20 runs, included in your Claude subscription`: the last line of its table,
-or with `--json` on stderr (stdout stays the JSON array). In the table a cost at API value is
-marked `≈`, a run that ended without a cost says `unpriced`, and `!` after the status marks a run
-that needs review.
+usage` when both kinds are listed. `runs --json` prints the same total as one line on stderr
+(stdout stays the JSON array), for example `Usage (API value): $3.2 over 20 runs, included in
+your Claude subscription`. The human table ends with `total $x · ~ estimated · ? unpriced, not
+in the total (n)`: in its COST column `$0.08` is reported, `~$0.21` estimated (an API value, not
+billed) and `?` unpriced (ended without a cost).
 
 `contextExhausted` comes only from structured signals (termination reason, result subtype,
 stop reason, or the error text of a failed run), never from scanning the result's prose.

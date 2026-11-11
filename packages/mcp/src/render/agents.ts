@@ -1,11 +1,21 @@
 /**
- * `duskfleet agents` and `agents create` for a human: one table row per agent, and the kv block of
- * the agent just written. The values are exactly what `--json` prints (the agents without their
- * system prompt).
+ * `duskfleet agents` and `agents create` for a human (DS-33): one row per agent, the description
+ * filling the rest of the line, and the `✓` acknowledgement of the agent just written. The values
+ * are what `--json` prints (the agents without their system prompt).
  */
 import type { AgentDefinition, AgentSource } from "@duskfleet/core";
-import { type Cell, type Column, fmtUsd, kv, oneLine, type RenderOpts, table } from "./primitives.js";
-import { paint } from "./theme.js";
+import {
+  type Cell,
+  type Column,
+  emptyState,
+  fmtCents,
+  jsonLine,
+  oneLine,
+  type RenderOpts,
+  shortModel,
+  table,
+} from "./primitives.js";
+import { GLYPH, paint } from "./theme.js";
 
 /** An agent as the CLI prints it: the definition without its system prompt. */
 export type AgentView = Omit<AgentDefinition, "systemPrompt">;
@@ -13,34 +23,42 @@ export type AgentView = Omit<AgentDefinition, "systemPrompt">;
 /** `own` (persona written here) or `link` (runs a project's `.claude/agents/<name>.md`). */
 export const agentKind = (a: Pick<AgentView, "claudeAgent">): "own" | "link" => (a.claudeAgent ? "link" : "own");
 
+/** The command that writes a first agent. */
+export const AGENT_CREATE = 'duskfleet agents create <id> --model haiku -- "<system prompt>"';
+
 const COLUMNS: readonly Column[] = [
-  { header: "id" },
-  { header: "kind", priority: 6 },
-  { header: "source", priority: 2 },
-  { header: "model", priority: 5 },
-  { header: "project", priority: 4 },
-  { header: "budget", align: "right", priority: 3 },
-  { header: "timeout", align: "right", priority: 1 },
-  { header: "description", flex: true },
+  { header: "ID", width: 20, flex: true },
+  { header: "KIND", width: 4, priority: 5 },
+  { header: "SOURCE", width: 7, priority: 2 },
+  { header: "MODEL", width: 6, priority: 4 },
+  { header: "PROJECT", width: 10, priority: 3 },
+  { header: "BUDGET", width: 6, align: "right", priority: 1 },
+  { header: "TIMEOUT", width: 7, align: "right", priority: 0 },
+  { header: "DESCRIPTION", width: 24, fill: true },
 ];
 
-const none: Cell = { text: "-", role: "faint" };
-const timeoutText = (minutes: number | undefined): string | null => (minutes === undefined ? null : `${minutes}m`);
+const timeoutText = (minutes: number | undefined): string => (minutes === undefined ? "-" : `${minutes}m`);
 
-/** The table; empty when there is no agent (the CLI prints its hint on stderr). */
+/** A link with no model of its own runs the project agent's: `agent`; an own one the CLI default. */
+function modelText(a: AgentView): string {
+  if (a.model) return shortModel(a.model);
+  return agentKind(a) === "link" ? "agent" : "default";
+}
+
+/** The table, or the empty state naming the command that writes a first agent. */
 export function renderAgents(agents: readonly AgentView[], opts: RenderOpts): string[] {
-  if (agents.length === 0) return [];
+  if (agents.length === 0) return emptyState("no agents yet", AGENT_CREATE, opts);
   const rows = agents.map((a): Cell[] => [
     { text: a.id, role: "accent" },
     agentKind(a),
-    { text: a.source, role: "muted" },
-    a.model ?? { text: "default", role: "faint" },
-    a.project ?? none,
-    a.maxBudgetUsd === undefined ? none : fmtUsd(a.maxBudgetUsd),
-    timeoutText(a.timeoutMinutes) ?? none,
-    oneLine(a.description ?? "") || none,
+    a.source,
+    modelText(a),
+    a.project ?? "none",
+    a.maxBudgetUsd === undefined ? "-" : fmtCents(a.maxBudgetUsd),
+    timeoutText(a.timeoutMinutes),
+    oneLine(a.description ?? "") || "-",
   ]);
-  return table(COLUMNS, rows, opts);
+  return [...table(COLUMNS, rows, opts), "", jsonLine(opts, `new agent: ${AGENT_CREATE}`)];
 }
 
 export interface AgentCreated {
@@ -50,34 +68,18 @@ export interface AgentCreated {
   agent: AgentView;
 }
 
-/** `agents create`: what was written, and a line when it replaced an agent with the same id. */
+/** `agents create`: a `✓` line, the command that runs it, and the file written (with what it replaced). */
 export function renderAgentCreated(value: AgentCreated, opts: RenderOpts): string[] {
   const a = value.agent;
-  const list = (items: readonly string[] | undefined) => (items?.length ? items.join(", ") : null);
-  const lines = [`agent ${paint("accent", a.id, opts)} created`];
-  if (value.overrode === "builtin") {
-    lines.push(
-      paint("warn", `overrides the builtin agent "${a.id}" (same id; delete the user file to restore it)`, opts),
-    );
-  } else if (value.overrode === "user") {
-    lines.push(paint("warn", `replaced the user agent "${a.id}"`, opts));
-  }
-  lines.push(
-    "",
-    ...kv(
-      [
-        ["kind", agentKind(a)],
-        ["model", a.model ?? { text: "default (the Claude Code default)", role: "faint" }],
-        ["permission mode", a.permissionMode],
-        ["allowed tools", list(a.allowedTools)],
-        ["disallowed tools", list(a.disallowedTools)],
-        ["budget", a.maxBudgetUsd === undefined ? null : `${fmtUsd(a.maxBudgetUsd)} per run`],
-        ["timeout", timeoutText(a.timeoutMinutes)],
-        ["project", a.project ?? null],
-        ["description", oneLine(a.description ?? "") || null],
-      ],
-      opts,
-    ),
-  );
-  return lines;
+  const replaced =
+    value.overrode === "builtin"
+      ? ` (overrides the builtin "${a.id}": delete this file to restore it)`
+      : value.overrode === "user"
+        ? ` (replaced the user agent "${a.id}")`
+        : "";
+  return [
+    `${paint("ok", GLYPH.ok, opts)} agent ${paint("accent", a.id, opts)} created`,
+    `  ${paint("accent", `duskfleet run --project <id or path> --agent ${a.id} -- "<task>"`, opts)}`,
+    `  wrote ${a.sourcePath}${replaced}`,
+  ];
 }

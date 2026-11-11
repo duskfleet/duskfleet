@@ -366,6 +366,11 @@ export class RunManager {
     return this.runs.get(id);
   }
 
+  /** Run ids starting with `prefix`, newest first, at most two: one = the run, two = ambiguous. */
+  runIdsWithPrefix(prefix: string): string[] {
+    return this.runs.idsWithPrefix(prefix, 2);
+  }
+
   listRuns(filter: ListRunsFilter): Run[] {
     return this.runs.list(filter);
   }
