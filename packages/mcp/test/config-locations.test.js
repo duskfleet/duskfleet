@@ -172,7 +172,11 @@ test("the built bin outside any checkout: doctor uses the user-level config and 
     });
     delete env.DUSKFLEET_CONFIG;
     const doctor = () =>
-      spawnSync(process.execPath, [path.join(pkg, "dist", "cli.js"), "doctor"], { cwd, env, encoding: "utf8" });
+      spawnSync(process.execPath, [path.join(pkg, "dist", "cli.js"), "doctor", "--json"], {
+        cwd,
+        env,
+        encoding: "utf8",
+      });
 
     const before = doctor();
     assert.equal(before.status, 1, "no starter config yet");

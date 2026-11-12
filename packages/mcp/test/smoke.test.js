@@ -393,6 +393,32 @@ test("subagent invocations are recorded as run_agents rows with the persona hash
   }
 });
 
+test("local_bash task lines are not subagents; a real subagent in the same stream still is", async () => {
+  const app = makeApp();
+  try {
+    const started = await app.runs.startRun({ prompt: "subagent-bash", projectPath: app.project });
+    const run = await app.runs.waitForRun(started.id, 10_000);
+    assert.equal(run.status, "completed");
+    assert.equal(run.toolCalls, 4, "the Bash call, the Agent call and two subagent tool calls");
+    const subagents = app.runs.agents(run.id);
+    assert.deepEqual(
+      subagents.map((s) => [s.agentId, s.subagentType]),
+      [["a6b73b2ad14bf09f8", "reviewer"]],
+      "no row for the local_bash task bks4b6ifo",
+    );
+    const starts = app.runs.events(run.id).filter((e) => e.type === "subagent_start" || e.type === "subagent_end");
+    assert.deepEqual(
+      starts.map((e) => [e.type, e.agentId]),
+      [
+        ["subagent_start", "a6b73b2ad14bf09f8"],
+        ["subagent_end", "a6b73b2ad14bf09f8"],
+      ],
+    );
+  } finally {
+    await app.cleanup();
+  }
+});
+
 test("subagent rows recorded by an older parser are repaired from the jsonl log by the backfill, never on read", async () => {
   const app = makeApp();
   try {

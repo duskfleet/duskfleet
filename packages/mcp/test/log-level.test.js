@@ -65,15 +65,15 @@ function stderrUntil(entry, args, configDir, pattern) {
 test("a one-shot CLI command prints no info lines by default; --verbose brings them back, migrations in one line", () => {
   const { root, configDir } = makeRoot();
   try {
-    const quiet = cli(configDir, ["agents"]);
+    const quiet = cli(configDir, ["agents", "--json"]);
     assert.equal(quiet.status, 0, quiet.stderr);
-    assert.deepEqual(JSON.parse(quiet.stdout), [], "stdout is only the JSON");
+    assert.deepEqual(JSON.parse(quiet.stdout), [], "with --json, stdout is only the JSON");
     assert.doesNotMatch(quiet.stderr, /\[info\]/, "no info lines, not even the migrations of a fresh database");
 
     rmSync(path.join(root, "data"), { recursive: true, force: true }); // fresh database again
-    const verbose = cli(configDir, ["agents", "--verbose"]);
+    const verbose = cli(configDir, ["agents", "--verbose", "--json"]);
     assert.equal(verbose.status, 0, verbose.stderr);
-    assert.deepEqual(JSON.parse(verbose.stdout), [], "--verbose is not passed on to the command");
+    assert.deepEqual(JSON.parse(verbose.stdout), [], "with --json, --verbose is not passed on to the command");
     assert.match(verbose.stderr, /\[info\] bootstrap: config loaded/);
     assert.match(verbose.stderr, /\[info\] storage: applied \d+ migrations \(0 → \d+\)/);
     assert.equal(verbose.stderr.match(/storage: applied/g)?.length, 1, "one line for the whole batch");

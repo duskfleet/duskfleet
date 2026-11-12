@@ -8,6 +8,60 @@ All notable changes to Duskfleet are listed here. The format follows
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-11-12
+
+One schema migration (29) runs on the first open of an existing database; nothing to do by hand.
+
+### Changed
+
+#### CLI output: human-readable by default, `--json` for scripts
+
+Every data command of the CLI now prints a designed, human-readable view in a terminal; the global
+`--json` flag prints exactly what the CLI printed before. **Scripts, hooks and tests that parse the
+CLI's stdout must add `--json`**; stderr is unchanged. Colour follows the terminal: a pipe or
+`NO_COLOR` gives plain text, `FORCE_COLOR` forces colour, `COLUMNS` (else the terminal width, else
+100) sets the table width and narrow terminals drop the least important columns instead of wrapping.
+
+- `run`, `runs`, `run-info`: the rendering infrastructure (`packages/mcp/src/render/`, one pure
+  renderer per command, a theme file and shared table / key-value primitives), the runs table with a
+  cost footer, `run-info` in sections (Run, Usage, Outcome with the cause and the fix hint,
+  Subagents, Diff, Events with `--events`), the `run` result as a header line plus the cause / fix /
+  more block. `run --json` prints the trimmed record as before; the new `run --full` prints the
+  untrimmed one. The `more:` line reads `duskfleet run-info <id>` ([#429](https://github.com/duskfleet/duskfleet/pull/429)).
+- `agents`, `agents create`, `projects`, `schedules`, `schedules run-now`, `budgets`,
+  `budgets set` / `delete`: tables and key-value blocks; the scheduler header says which process
+  ticks and when its lease ends; a paused schedule shows its reason; the run-now confirmation is on
+  stdout in human mode ([#432](https://github.com/duskfleet/duskfleet/pull/432)).
+- `doctor`, `install-service`, `uninstall-service`, `mcp status`: `doctor` as a checklist with a
+  `n warnings · n errors` summary, advice under its check; the service result as a key-value block;
+  one block per host for `mcp status`, env variable names only, never values ([#433](https://github.com/duskfleet/duskfleet/pull/433)).
+- The terminal design (DS-33): the colour carries only the glyph (`✓` ok, `●` running, `!` needs
+  review, `✗` failed) and the word carries the meaning, so the output reads the same without colour;
+  ids and the commands to type are magenta, headings bold, hints dim; every status word is legible
+  on dark and light terminal grounds; column orders and truncation rules per screen, with the
+  columns that drop first on 80-column terminals ([#434](https://github.com/duskfleet/duskfleet/pull/434)).
+
+### Added
+
+- Dashboard, Alerts: items can be marked seen, one by one, per section or all at once, with Undo.
+  Seen items move to a collapsible Seen group at the bottom and come back, marked "New since seen",
+  when a new event of the same agent, schedule or budget happens. The nav badge counts unseen items
+  only; login / quota errors and a spent hard-stop budget can never be marked seen. Stored in the
+  database (migration 29, `attention_acks`), so every viewer sees the same state ([#431](https://github.com/duskfleet/duskfleet/pull/431)).
+
+### Dependencies
+
+- Biome 2.x bump ([#423](https://github.com/duskfleet/duskfleet/pull/423)).
+
+### Fixed
+
+- Subagents: the task lines Claude Code now prints around plain Bash calls (`task_type: "local_bash"`) were recorded as subagents of type `unknown`; they open no subagent row any more ([#438](https://github.com/duskfleet/duskfleet/pull/438)).
+- Run diff: the changes recorded for a run no longer include what was already uncommitted in the
+  checkout before it started (counted as pre-existing instead), and they now include the git
+  worktrees the run created or moved, each with its commits and its patch, also when the worktree
+  was removed before the run ended. `run-info` and the run page's Changes section show both. The
+  event only gains optional fields: no migration, older runs still render ([#439](https://github.com/duskfleet/duskfleet/pull/439)).
+
 ## [0.3.1] - 2026-11-07
 
 No schema change.
@@ -191,7 +245,8 @@ localhost dashboard.
 - An allow-listed MCP server that a run did not use no longer counts as missing ([#165](https://github.com/duskfleet/duskfleet/pull/165)).
 - The published packages had `bin` paths with a `./` prefix, which npm 11 drops at publish time, so `npx duskfleet` would have had no executable; the pack gate now refuses such entries and `publish --dry-run` fails when npm auto-corrects the manifest ([#278](https://github.com/duskfleet/duskfleet/pull/278)); the publish job itself now runs that check before each `npm publish`, so a tag cut before the fix cannot ship without its executables ([#312](https://github.com/duskfleet/duskfleet/pull/312)).
 
-[Unreleased]: https://github.com/duskfleet/duskfleet/compare/v0.3.1...HEAD
+[Unreleased]: https://github.com/duskfleet/duskfleet/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/duskfleet/duskfleet/releases/tag/v0.4.0
 [0.3.1]: https://github.com/duskfleet/duskfleet/releases/tag/v0.3.1
 [0.3.0]: https://github.com/duskfleet/duskfleet/releases/tag/v0.3.0
 [0.2.0]: https://github.com/duskfleet/duskfleet/releases/tag/v0.2.0

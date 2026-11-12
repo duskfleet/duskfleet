@@ -55,7 +55,7 @@ On macOS `install-service` keeps the Mac awake by default (`--keep-awake`): the 
 `serve` under `caffeinate -i -s`, which blocks idle sleep, and system sleep while on AC power
 only (on battery the Mac may still sleep). `--no-keep-awake` renders the unit without
 `caffeinate`. On Linux and Windows the flag changes nothing; `install-service` prints how to
-disable sleep there. `doctor` reports `scheduler.keepAwake` on macOS.
+disable sleep there. `doctor` reports it on macOS (`keep awake`; `scheduler.keepAwake` in `--json`).
 
 `duskfleet` with no arguments prints the usage on stderr and exits 2; `--help` prints it on
 stdout and exits 0. Both end with `First time here? Run: npx duskfleet init`.
@@ -75,7 +75,60 @@ Only commands that need the config report a missing one (`init`, `tools`, `mcp s
 [where config and data live](configuration.md#where-config-and-data-live)). `--version` prints the version of the installed
 `duskfleet` package and needs neither a config nor Node 24.
 
-Logs go to stderr, so stdout stays the command's JSON. A one-shot command logs warnings and
+### Output
+
+Human-readable by default, `--json` for scripts, logs on stderr. `run`, `runs`, `run-info`,
+`agents`, `agents create`, `projects`, `schedules`, `schedules run-now`, `budgets`, `budgets set`,
+`budgets delete`, `doctor`, `install-service`, `uninstall-service` and `mcp status` print a human
+view on stdout: tables that fit the terminal (`COLUMNS`, else
+its width, else 100 columns; two spaces between columns, numbers right-aligned, the least useful
+columns dropped first, one flexible column cut with `…`), `└` lines under a row that needs a
+look, aligned key blocks, and a dim `json: add --json` last line. A status is a glyph and a word:
+`● running`, `✓ completed`, `! needs review`, `✗ failed`, `– cancelled`, `‖ paused`. Colour is
+chosen to read on a dark and a light terminal: the glyph is coloured, the word stays in the
+terminal's default colour (`needs review` bold), only `failed` / errors colour the word (bright
+red, bold); ids and commands to copy are magenta, paths never coloured, dim is decoration only.
+Colour follows Node's rules for the stream: only on a terminal, never in a pipe
+(`duskfleet runs | cat`) or under `NO_COLOR`, always under `FORCE_COLOR`; without colour the
+glyphs, words and columns are the same. `--json`, anywhere before a `--` and on any command,
+prints exactly the JSON these commands printed before (`tools` and `repair-subagents` print JSON
+either way for now; `install-service --print` prints the raw unit). `mcp status` shows the names
+of an entry's env keys, never their values; `--json` prints the entry as the host's config holds it.
+Scripts, git hooks and CI should always pass it:
+
+```bash
+duskfleet runs --json | jq '.[0].status'
+duskfleet run --project my-app --agent fixer --json -- "Fix the failing test" | jq .id
+duskfleet schedules --json | jq '.schedules[] | select(.enabled == false) | .name'
+```
+
+What the list commands show:
+
+- `runs`: ID (the first 8 characters; `run-info` takes any unique prefix), STATUS, AGENT, PROJECT,
+  MODEL, AGE, DURATION, COST, TOOLS. Narrower than 100 columns drops TOOLS, then PROJECT, then
+  MODEL. A run that needs review gets a `└` line with its reasons and denied tools, a failed one
+  its error family and the fix. Then the total, the count and the filter.
+- `agents`: id, kind (`own` / `link`), source (`builtin` / `user`), model (`default` = the Claude
+  Code default, `agent` = a link that uses its project agent's model), bound project (`none`),
+  budget and timeout per run, description. With no agent: `no agents yet` and the `agents create`
+  command (with `--json`: `[]`, the hint on stderr).
+- `projects`: the `allowed_project_roots` in the header (`any directory` when there are none),
+  then id, path (home as `~`) and the agents bound to each project (`+n` when they do not fit).
+- `schedules`: the scheduler first (enabled or disabled, whether a process ticks, its holder and
+  when its lease ends, a `pause_scheduler` pause in force) and the time zone, then name, agent,
+  cron, state (`✓ on` / `‖ paused`, with a `└` line giving the reason), next fire, last outcome,
+  how the last run ended and its cost (`!` = needs review), fires / skips. Narrower than 100
+  columns drops FIRE/SKIP, then CRON, then LAST RUN.
+- `budgets`: the month and the unpriced policy, then scope, spent (counted = recorded spend plus
+  the stand-ins of unpriced and running runs), limit, used, a 10-cell meter, state (`✓ ok` /
+  `! warning` / `✗ stopped`), warn percent and hard stop; the stand-ins go on a `└` line (over
+  only by running runs: new runs are refused, schedules are not paused). The budget id that
+  `budgets delete` takes is in `budgets --json`.
+- `doctor`: `doctor · n warnings · n errors`, then one line per check (node, claude, PATH, config,
+  data, agents, scheduler, schedules, unpriced runs, orphans, probe) with its advice indented
+  under it. A missing `claude` binary is the only error.
+
+Logs go to stderr, so stdout stays the command's output. A one-shot command logs warnings and
 errors only; `--verbose`, anywhere before a `--`, brings the info lines back (config loaded,
 executor ready, `storage: applied N migrations (M → N)` after an upgrade). `serve` and the MCP
 server keep info: their log is the record. `DUSKFLEET_LOG_LEVEL=debug|info|warn|error` overrides
@@ -175,28 +228,30 @@ A run with no agent, when none exists, fails with
 
 ## What run prints
 
-On stderr, the run id and its log as it starts. When the run did not end clean (failed, timed
-out, cancelled, or completed but [needs review](dashboard.md#needs-review)), a short block follows before
-anything else: the status with its review reasons, the cause in one line, the fix when there is
-one, and where to look next. A run against a Claude that is not logged in:
+On stderr, the run id and its log as it starts. On stdout, once it ends, one header line
+(`run <id> <glyph status> · <duration> · <cost>`, an estimated cost marked `~`, an unpriced one
+`?`); when the run did not end clean (failed, timed out, cancelled, or completed but
+[needs review](dashboard.md#needs-review)), three lines follow: the cause in one line, the fix when
+there is one, and where to look next; then the log path. A run against a Claude that is not
+logged in:
 
 ```text
-run 7f3c9a2e-... started (session 0b1d...)
-log: <data>/logs/7f3c9a2e-....jsonl
-run 7f3c9a2e-... failed (non-zero exit code)
+run 7f3c9a2e-... failed (non-zero exit code) · 1.2s
 cause: Claude is not logged in: Not logged in · Please run /login
 fix: Claude Code is not authenticated: run "claude" in a terminal and log in (or check ANTHROPIC_API_KEY)
-more: duskfleet run-info 7f3c9a2e-..., or the run's page in the dashboard; full record: run --json
+more: duskfleet run-info 7f3c9a2e-...
+log: <data>/logs/7f3c9a2e-....jsonl
 ```
 
 The fix lines come from one table in core (`FAILURE_FIXES` per error code, `REVIEW_REASON_FIXES`
 per review reason, plus a `claude` binary that was not found), the same one `doctor --probe`
-uses for its advice. A permission denial names the denied tools.
+uses for its advice. A permission denial names the denied tools. The exit code is 0 for
+`completed` or, with `--no-wait`, `running`; 1 otherwise.
 
-On stdout, the run record as JSON for scripts (exit 0 for `completed` or, with `--no-wait`,
-`running`; 1 otherwise). It leaves out `command.argv` (the full spawned command line, system
-prompt included) and `rawResultJson`; `run --json` prints the full record, the same as
-`run-info <run_id>`. `title` is what `--title` gave (null without it); `runs` and `run-info` also
+`run --json` prints the run record as JSON on stdout for scripts, and the status / cause / fix /
+more block on stderr as before. The record leaves out `command.argv` (the full spawned command
+line, system prompt included) and `rawResultJson`; `run --full` (it implies `--json`) prints the
+full record, the same as `run-info <run_id> --json`. `title` is what `--title` gave (null without it); `runs` and `run-info` also
 print `label`, the title or else the first prompt line, the same label the MCP tools return.
 
 ## agents create
@@ -221,9 +276,18 @@ agent use `create_agent` over MCP ([Agents](agents.md)).
 | `--prompt-file <file>` | body (system prompt) | instead of the text after `--` |
 | `--force` | | overwrite an agent with the same id (a builtin id becomes a user override) |
 
-It prints `{ created, overrode, agent }` as JSON and the next command on stderr.
+It prints the agent it wrote (and a line when it replaced one with the same id) and, on stderr, the
+file and the next command; with `--json`, stdout is `{ created, overrode, agent }`.
 
 ## doctor, logs and diffs
+
+`doctor` prints a report in sections: **Claude** (binary, version, node; a binary that cannot be
+run shows its error), **Paths** (config and data directories with where each came from, the config
+lookup candidates, a note when `PATH` was defaulted), **Agents** (count, ids, agents with more than
+one schedule), **Scheduler** (enabled, who ticks, the service, keep-awake on macOS), **Budgets**
+(only when runs without a cost count against one), **Orphans** and, with `--probe`, **Probe**.
+Advice lines start with `!` and are painted as warnings. `doctor --json` prints the report as an
+object, the keys named below; scripts read that form. The exit code is the same in both.
 
 `doctor` prints where the config and data come from: `configDir` with `configSource` (`env` for
 `DUSKFLEET_CONFIG`, `repo` for a `config/` found walking up from the CLI, `user` for the
@@ -267,7 +331,12 @@ probe cancels the run, removes its temporary directory and exits 130 without a r
 Each run writes a raw event log to `data/logs/<run_id>.jsonl` and a structured row to SQLite.
 In a git checkout it also writes the patch of what it changed to `data/logs/<run_id>.diff`;
 `run-info` shows the summary as `diff` (base commit, files with lines added / deleted), the
-same field as `get_run` ([how it works](how-it-works.md#what-gets-recorded)).
+same field as `get_run` ([how it works](how-it-works.md#what-gets-recorded)). The diff is what
+the run did, not the state of the checkout: changes already there before the run and left as
+they were are not shown (Diff says how many), and the worktrees the run created or moved are
+listed under their path, with their files and commit count (a worktree it removed shows as its
+branch). It is not a record of other processes: a worktree another agent used at the same time
+in the same repository would be listed too.
 
 ## Firing an agent from a script or a git hook
 
@@ -284,7 +353,9 @@ duskfleet schedules run-now "pr review"
 This only stamps `run_requested_at` on the schedule row (the same thing the dashboard's **Run
 now** does); the process holding the scheduler lease, normally the
 [service](schedules.md#who-ticks), fires it on its next tick (≤ `tick_seconds`), even when the
-schedule is paused, with the usual busy rules. Nothing is spawned by the hook itself. A
+schedule is paused, with the usual busy rules. Nothing is spawned by the hook itself. It prints
+one line saying who fires it and within how long (or that nothing is ticking); with `--json`
+stdout is the schedule row and that line goes to stderr. A
 `pre-push` hook that asks for a PR review after every push looks like this (`.git/hooks/pre-push`,
 executable; `.git/` is never versioned):
 
@@ -350,9 +421,11 @@ otherwise (a subscription run, or one recorded before `billingType` existed). `l
 returns `cost`, the listed runs summed by billing type (`apiUsd` billed, `subscriptionUsd` the API
 value of subscription usage) with the wording to show: `heading` is `Spent` when every run is
 billed, `Usage (API value)` when none is (`note`: included in your Claude subscription), `Spent and
-usage` when both kinds are listed. `runs` prints the same total as one line on stderr (stdout stays
-the JSON array), for example `Usage (API value): $3.2 over 20 runs, included in your Claude
-subscription`.
+usage` when both kinds are listed. `runs --json` prints the same total as one line on stderr
+(stdout stays the JSON array), for example `Usage (API value): $3.2 over 20 runs, included in
+your Claude subscription`. The human table ends with `total $x · ~ estimated · ? unpriced, not
+in the total (n)`: in its COST column `$0.08` is reported, `~$0.21` estimated (an API value, not
+billed) and `?` unpriced (ended without a cost).
 
 `contextExhausted` comes only from structured signals (termination reason, result subtype,
 stop reason, or the error text of a failed run), never from scanning the result's prose.

@@ -67,7 +67,7 @@ test("init --yes from an empty directory: starter config, exit 0, doctor works, 
     assert.doesNotMatch(init.stdout + init.stderr, /first run/i, "init --yes never reaches the guided first run");
     assert.ok(existsSync(s.yaml));
 
-    const doctor = s.cli("doctor");
+    const doctor = s.cli("doctor", "--json");
     assert.equal(doctor.status, 0, doctor.stderr);
     const report = JSON.parse(doctor.stdout);
     assert.equal(report.configSource, "user");
@@ -152,7 +152,7 @@ test("init with Claude Code logged out (#349): config written, login hint, exit 
       assert.ok(existsSync(s.yaml), "the config is written without a login");
     }
 
-    const doctor = s.cli("doctor");
+    const doctor = s.cli("doctor", "--json");
     assert.equal(doctor.status, 0, doctor.stderr);
     assert.equal(JSON.parse(doctor.stdout).configSource, "user");
     for (const args of [["agents"], ["projects"], ["runs"], ["schedules"]]) {
@@ -164,7 +164,7 @@ test("init with Claude Code logged out (#349): config written, login hint, exit 
 
     const project = path.join(s.root, "project");
     mkdirSync(project);
-    const run = s.cli("run", "--project", project, "--agent", "fixer", "--", "Make the tests pass");
+    const run = s.cli("run", "--project", project, "--agent", "fixer", "--json", "--", "Make the tests pass");
     assert.equal(run.status, 1, run.stderr);
     const recorded = JSON.parse(run.stdout);
     assert.equal(recorded.status, "failed");

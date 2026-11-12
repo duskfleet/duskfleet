@@ -9,7 +9,9 @@ import { fileURLToPath } from "node:url";
  *   duskfleet agents
  *   duskfleet agents create <id> [--model <m>] [--budget <usd>] [...] [--force] -- "<system prompt>"
  *   duskfleet projects
- *   duskfleet run --project <id or path> [--agent <id>] [--model <m>] [--no-wait] [--json] -- "<prompt>"
+ *   duskfleet run --project <id or path> [--agent <id>] [--model <m>] [--no-wait] [--json [--full]] -- "<prompt>"
+ *   (every command takes --json and --verbose; run, runs, run-info, agents, projects, schedules and
+ *   budgets print a human view without --json)
  *   duskfleet run --first [--project <absolute path>]   # the guided first run of init (first-run.ts)
  *   duskfleet runs [--status <s>] [--limit <n>]
  *   duskfleet run-info <run_id> [--events]
@@ -28,7 +30,7 @@ import { fileURLToPath } from "node:url";
  *   duskfleet doctor --probe   # plus one real hello run on haiku (costs cents): auth, blocking hooks
  *   duskfleet --version        # handled in cli.ts, before the Node version check
  */
-import { parseArgs } from "node:util";
+import { parseArgs, styleText } from "node:util";
 import {
   assertAgentIdFree,
   type BudgetInput,
@@ -70,7 +72,29 @@ import {
   runClaudeCodeAdd,
 } from "./mcp-register.js";
 import { PROBE_COST_NOTE, type ProbeReport, probeNotRun, runProbe } from "./probe.js";
-import { runReportLines, trimmedRun } from "./run-report.js";
+import {
+  AGENT_CREATE,
+  agentKind,
+  type DoctorReport,
+  type RenderOpts,
+  renderAgentCreated,
+  renderAgents,
+  renderBudgetSet,
+  renderBudgets,
+  renderDoctor,
+  renderMcpStatus,
+  renderProjects,
+  renderRunInfo,
+  renderRunResult,
+  renderRuns,
+  renderScheduleRequested,
+  renderSchedules,
+  renderServiceInstalled,
+  renderServiceUninstalled,
+  runReportLines,
+  scheduleRequestedLine,
+  trimmedRun,
+} from "./render/index.js";
 import {
   exportedDataDir,
   installService,
@@ -85,8 +109,32 @@ import {
 import { buildToolCatalog } from "./tools-catalog.js";
 import { packageVersion } from "./version.js";
 
-function print(value: unknown): void {
-  process.stdout.write(JSON.stringify(value, null, 2) + "\n");
+/** Set once from the global `--json` flag, before any command runs. */
+let jsonOutput = false;
+
+/**
+ * How human output is drawn on this stdout: colour as Node decides it for the stream (a terminal,
+ * NO_COLOR / FORCE_COLOR honoured), width from COLUMNS, else the terminal's, else 100.
+ */
+function renderOpts(): RenderOpts {
+  const color = styleText("red", "x", { stream: process.stdout, validateStream: true }) !== "x";
+  const fromEnv = Number(process.env["COLUMNS"]);
+  const width = Number.isInteger(fromEnv) && fromEnv > 0 ? fromEnv : process.stdout.columns || 100;
+  return { color, width };
+}
+
+/**
+ * A command's result on stdout: JSON with `--json` or when the command has no human renderer,
+ * else `render(value)`. The renderer gets the very value JSON would print.
+ */
+function print<T>(value: T, render?: (value: T, opts: RenderOpts) => string[]): void {
+  if (jsonOutput || !render) {
+    process.stdout.write(JSON.stringify(value, null, 2) + "\n");
+    return;
+  }
+  const lines = render(value, renderOpts());
+  // An empty view (no agents: the hint is on stderr) prints nothing, not a blank line.
+  if (lines.length > 0) process.stdout.write(`${lines.join("\n")}\n`);
 }
 
 /** Last line of the usage, and of any command that fails because no config was found. */
@@ -105,9 +153,9 @@ function usage(asked = false): never {
       "                          [--allowed-tools <a,b>] [--disallowed-tools <a,b>] [--timeout <minutes>]",
       '                          [--description <text>] [--force] (-- "<system prompt>" | --prompt-file <file>)',
       "  duskfleet projects",
-      '  duskfleet run --project <id or path> [--agent <id>] [--model <m>] [--no-wait] [--json] -- "<prompt>"',
+      '  duskfleet run --project <id or path> [--agent <id>] [--model <m>] [--no-wait] [--json [--full]] -- "<prompt>"',
       "  duskfleet run --first [--project <absolute path>]",
-      "  duskfleet runs [--status <status>] [--limit <n>]",
+      "  duskfleet runs [--status <status>] [--limit <n>] [--agent <id>]",
       "  duskfleet run-info <run_id> [--events]",
       "  duskfleet repair-subagents",
       "  duskfleet schedules",
@@ -128,6 +176,9 @@ function usage(asked = false): never {
       "",
       "Any command takes --verbose: info logs on stderr (default: warnings and errors only,",
       "except serve). DUSKFLEET_LOG_LEVEL=debug|info|warn|error overrides both.",
+      "Any command takes --json: stdout is the command's JSON, for scripts (run, runs, run-info,",
+      "agents, projects, schedules and budgets print a human view by default; NO_COLOR or a pipe",
+      "turn its colours off).",
       "",
       INIT_HINT,
       "",
@@ -352,15 +403,16 @@ async function mcpRegister(
 }
 
 /**
- * The arguments without `--verbose`, and whether it was there. Taken out wherever it stands
- * before a `--` (after it, everything is the prompt), so every command accepts it.
+ * The arguments without the global flags `--verbose` and `--json`, and which of them were there.
+ * Taken out wherever they stand before a `--` (after it, everything is the prompt), so every
+ * command accepts them.
  */
-function takeVerbose(args: string[]): { args: string[]; verbose: boolean } {
+function takeGlobalFlags(args: string[]): { args: string[]; verbose: boolean; json: boolean } {
   const end = args.indexOf("--");
   const head = end === -1 ? args : args.slice(0, end);
   const tail = end === -1 ? [] : args.slice(end);
-  const kept = head.filter((a) => a !== "--verbose");
-  return { args: [...kept, ...tail], verbose: kept.length !== head.length };
+  const kept = head.filter((a) => a !== "--verbose" && a !== "--json");
+  return { args: [...kept, ...tail], verbose: head.includes("--verbose"), json: head.includes("--json") };
 }
 
 /**
@@ -373,7 +425,8 @@ function cliLogLevel(command: string | undefined, verbose: boolean): LogLevel {
 }
 
 async function main(): Promise<void> {
-  const { args, verbose } = takeVerbose(process.argv.slice(2));
+  const { args, verbose, json } = takeGlobalFlags(process.argv.slice(2));
+  jsonOutput = json;
   const [command, ...rest] = args;
   setDefaultLogLevel(cliLogLevel(command, verbose));
   if (!command) usage();
@@ -394,7 +447,7 @@ async function main(): Promise<void> {
   }
   // Read-only and config-free: works before `init`.
   if (command === "mcp" && rest[0] === "status" && rest.length === 1) {
-    print(mcpStatus());
+    print(mcpStatus(), renderMcpStatus);
     return;
   }
   // Needs the config (data and config paths), not the database: the dashboard opens it itself.
@@ -495,23 +548,26 @@ async function main(): Promise<void> {
       }
       const { unit, ran } = installService(target);
       const status = serviceStatus(process.platform);
-      print({
-        installed: true,
-        platform: unit.platform,
-        label: unit.label,
-        unitPath: unit.unitPath,
-        logPath: target.logPath,
-        keepAwake: unit.keepAwake,
-        ran,
-        status,
-        notes: unit.notes,
-      });
+      print(
+        {
+          installed: true as const,
+          platform: unit.platform,
+          label: unit.label,
+          unitPath: unit.unitPath,
+          logPath: target.logPath,
+          keepAwake: unit.keepAwake,
+          ran,
+          status,
+          notes: unit.notes,
+        },
+        renderServiceInstalled,
+      );
       return done(status.running === false ? 1 : 0);
     }
     case "uninstall-service": {
       // Needs no config: removing the unit works after the config is gone.
       const r = uninstallService(process.platform);
-      print({ uninstalled: true, ...r });
+      print({ uninstalled: true as const, ...r }, renderServiceUninstalled);
       return done();
     }
     case "mcp": {
@@ -543,26 +599,32 @@ async function main(): Promise<void> {
         const existing = assertAgentIdFree(config, id, force, "--force", null);
         const agent = createAgentFromFields("own", fields, config, () => app.runs.reloadConfig());
         const { systemPrompt: _p, ...shown } = agent;
-        process.stderr.write(
-          `agent "${id}" written to ${agent.sourcePath}\nnext: duskfleet run --project <id or path> --agent ${id} -- "<task>"\n`,
-        );
-        print({ created: true, overrode: existing?.source ?? null, agent: shown });
+        // Human: the acknowledgement on stdout says it. --json: on stderr, stdout stays the object.
+        if (jsonOutput) {
+          process.stderr.write(
+            `agent "${id}" written to ${agent.sourcePath}\nnext: duskfleet run --project <id or path> --agent ${id} -- "<task>"\n`,
+          );
+        }
+        print({ created: true, overrode: existing?.source ?? null, agent: shown }, renderAgentCreated);
         return done();
       }
       if (sub) commandUsage("agents", `unknown agents subcommand: ${sub}`);
       const app = await open();
       const agents = [...app.config.agents.values()].map(({ systemPrompt: _p, ...a }) => a);
-      if (agents.length === 0) {
-        process.stderr.write(
-          `no agents yet: Duskfleet ships none. Create your first one with\n  duskfleet agents create <id> --model haiku -- "<system prompt>"\n`,
-        );
+      // Human: the empty state is on stdout. --json: the hint on stderr, stdout stays `[]`.
+      if (agents.length === 0 && jsonOutput) {
+        process.stderr.write(`no agents yet: Duskfleet ships none. Create your first one with\n  ${AGENT_CREATE}\n`);
       }
-      print(agents);
+      print(agents, renderAgents);
       return done();
     }
     case "projects": {
       const app = await open();
-      print({ allowedProjectRoots: app.config.allowedProjectRoots, projects: [...app.config.projects.values()] });
+      const agents = [...app.config.agents.values()];
+      print(
+        { allowedProjectRoots: app.config.allowedProjectRoots, projects: [...app.config.projects.values()] },
+        (value, opts) => renderProjects(value, agents, opts),
+      );
       return done();
     }
     case "doctor": {
@@ -628,7 +690,7 @@ async function main(): Promise<void> {
           );
         }
       }
-      print({
+      const report: DoctorReport = {
         node: process.version,
         claudeBinary: app.executor.binary,
         claudeVersion: version,
@@ -677,7 +739,8 @@ async function main(): Promise<void> {
             : null,
         },
         ...(doctorFlags.probe ? { probe } : {}),
-      });
+      };
+      print(report, renderDoctor);
       return done(error || (probe && !probe.ok) ? 1 : 0);
     }
     case "run": {
@@ -691,7 +754,7 @@ async function main(): Promise<void> {
           model: { type: "string", short: "m" },
           title: { type: "string" },
           "no-wait": { type: "boolean", default: false },
-          json: { type: "boolean", default: false },
+          full: { type: "boolean", default: false },
           first: { type: "boolean", default: false },
         },
       });
@@ -703,7 +766,8 @@ async function main(): Promise<void> {
           values.model ||
           values.title !== undefined ||
           values["project-id"] ||
-          values["no-wait"]
+          values["no-wait"] ||
+          values.full
         ) {
           throw new Error("run --first takes only --project <absolute path>; agent, model and prompt are fixed");
         }
@@ -736,10 +800,16 @@ async function main(): Promise<void> {
       if (!values["no-wait"]) {
         run = await app.runs.waitForRun(run.id, 24 * 60 * 60 * 1000);
       }
-      // A run that did not end clean: cause and fix first, on stderr, before the record.
-      const report = runReportLines(run);
-      if (report) process.stderr.write(`${report.join("\n")}\n`);
-      print(values.json ? run : trimmedRun(run));
+      // --full implies JSON: the untrimmed record. --json: the trimmed one, and for a run that did
+      // not end clean the cause and fix first, on stderr, as before. Else the human result on stdout.
+      if (values.full || jsonOutput) {
+        const report = runReportLines(run);
+        if (report) process.stderr.write(`${report.join("\n")}\n`);
+        jsonOutput = true;
+        print(values.full ? run : trimmedRun(run));
+      } else {
+        print(run, renderRunResult);
+      }
       return done(run.status === "completed" || run.status === "running" ? 0 : 1);
     }
     case "runs": {
@@ -756,9 +826,16 @@ async function main(): Promise<void> {
       if (values.limit) filter.limit = Number(values.limit);
       if (values.agent) filter.agentId = values.agent;
       const runs = app.runs.listRuns(filter);
-      print(runs.map(summarizeRun));
-      // The total in its true wording, on stderr so stdout stays the JSON array scripts parse.
-      if (runs.length > 0) process.stderr.write(`${costTotalsLine(costTotals(runs))}\n`);
+      const narrowed = [
+        values.status ? `status=${values.status}` : "",
+        values.agent ? `agent=${values.agent}` : "",
+        values.limit ? `limit=${values.limit}` : "",
+      ]
+        .filter(Boolean)
+        .join(", ");
+      // Human: the total is the footer of the table. --json: on stderr, so stdout stays the array scripts parse.
+      print(runs.map(summarizeRun), (summaries, opts) => renderRuns(summaries, opts, narrowed || undefined));
+      if (jsonOutput && runs.length > 0) process.stderr.write(`${costTotalsLine(costTotals(runs))}\n`);
       return done();
     }
     case "schedules": {
@@ -777,17 +854,19 @@ async function main(): Promise<void> {
         }
         const lease = app.scheduler.status().lease;
         const leaseLive = lease ? new Date(lease.expiresAt).getTime() > Date.now() : false;
-        process.stderr.write(
-          leaseLive
-            ? `schedule "${schedule.name}" requested; ${lease!.holder} fires it within ${app.config.scheduler.tickSeconds}s\n`
-            : `schedule "${schedule.name}" requested, but nothing is ticking: it fires when a scheduler starts (duskfleet serve / install-service)\n`,
-        );
-        print(schedule);
+        const ticker = leaseLive ? { holder: lease!.holder, tickSeconds: app.config.scheduler.tickSeconds } : null;
+        // Human: the confirmation line is the output. --json: it stays on stderr, stdout is the row.
+        if (jsonOutput) {
+          process.stderr.write(
+            `${scheduleRequestedLine(schedule, ticker, { color: false, width: Number.POSITIVE_INFINITY })}\n`,
+          );
+        }
+        print(schedule, (s, opts) => renderScheduleRequested(s, ticker, opts));
         return done();
       }
       if (sub) commandUsage("schedules", `unknown schedules subcommand: ${sub}`);
       const app = await open();
-      print({ scheduler: app.scheduler.status(), schedules: app.scheduler.listWithLastRun() });
+      print({ scheduler: app.scheduler.status(), schedules: app.scheduler.listWithLastRun() }, renderSchedules);
       return done();
     }
     case "budgets": {
@@ -812,22 +891,23 @@ async function main(): Promise<void> {
         if (values.warn) input.warnPercent = Number(values.warn);
         if (values["no-hard-stop"]) input.hardStop = false;
         if (values.unpriced) input.unpricedPolicy = values.unpriced as NonNullable<BudgetInput["unpricedPolicy"]>;
-        print(app.runs.setBudget(input));
+        print(app.runs.setBudget(input), renderBudgetSet);
         return done();
       }
       if (sub === "delete") {
-        if (!args[0]) commandUsage("budgets", "budgets delete needs a budget id");
+        const id = args[0];
+        if (!id) commandUsage("budgets", "budgets delete needs a budget id");
         const app = await open();
-        if (!app.runs.deleteBudget(args[0])) {
-          process.stderr.write(`budget not found: ${args[0]}\n`);
+        if (!app.runs.deleteBudget(id)) {
+          process.stderr.write(`budget not found: ${id}\n`);
           return done(1);
         }
-        print({ deleted: true });
+        print({ deleted: true }, () => [`budget ${id} deleted`]);
         return done();
       }
       if (sub) commandUsage("budgets", `unknown budgets subcommand: ${sub}`);
       const app = await open();
-      print(app.runs.budgetStatuses());
+      print(app.runs.budgetStatuses(), renderBudgets);
       return done();
     }
     case "serve": {
@@ -862,22 +942,46 @@ async function main(): Promise<void> {
         allowPositionals: true,
         options: { events: { type: "boolean", default: false } },
       });
-      const id = positionals[0];
-      if (!id) commandUsage("run-info", "run-info needs a run id");
+      const given = positionals[0];
+      if (!given) commandUsage("run-info", "run-info needs a run id");
       const app = await open();
-      const run = app.runs.getRun(id);
+      // Lists show the first 8 characters of an id: a unique prefix names the run too.
+      let run = app.runs.getRun(given);
       if (!run) {
-        process.stderr.write(`run not found: ${id}\n`);
+        const matches = app.runs.runIdsWithPrefix(given);
+        if (matches.length > 1) {
+          process.stderr.write(`run id prefix is ambiguous: ${given} (give more characters)\n`);
+          return done(1);
+        }
+        run = matches[0] ? app.runs.getRun(matches[0]) : null;
+      }
+      if (!run) {
+        process.stderr.write(`run not found: ${given}\n`);
         return done(1);
       }
+      const id = run.id;
+      const def = app.config.agents.get(run.agentId);
       const subagents = app.runs.agents(id).map((s) => subagentView(s)); // same names as get_run
       const diff = app.runs.diff(id); // same field as get_run
       const costLabel = runCostLabel(run.billingType); // same field as get_run
       const label = runLabel(run); // same field as get_run
+      const events = values.events ? app.runs.events(id) : undefined;
+      // The renderer reads the same pieces the JSON flattens into one object.
       print(
-        values.events
-          ? { ...run, label, costLabel, diff, subagents, events: app.runs.events(id) }
-          : { ...run, label, costLabel, diff, subagents },
+        events ? { ...run, label, costLabel, diff, subagents, events } : { ...run, label, costLabel, diff, subagents },
+        (_v, opts) =>
+          renderRunInfo(
+            {
+              run,
+              label,
+              costLabel,
+              diff,
+              subagents,
+              agent: def ? { kind: agentKind(def), source: def.source } : null,
+              ...(events ? { events } : {}),
+            },
+            opts,
+          ),
       );
       return done();
     }

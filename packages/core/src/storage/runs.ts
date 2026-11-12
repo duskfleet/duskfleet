@@ -510,6 +510,15 @@ export class RunRepository {
     return row ? rowToRun(row) : null;
   }
 
+  /** Ids starting with `prefix` (the short ids lists show), at most `limit`. */
+  idsWithPrefix(prefix: string, limit = 2): string[] {
+    if (prefix === "") return [];
+    const rows = this.db
+      .prepare("SELECT id FROM runs WHERE substr(id, 1, length(?)) = ? ORDER BY created_at DESC LIMIT ?")
+      .all(prefix, prefix, limit) as unknown as { id: string }[];
+    return rows.map((r) => r.id);
+  }
+
   list(filter: ListRunsFilter = {}): Run[] {
     const where: string[] = [];
     const values: Array<string | number> = [];

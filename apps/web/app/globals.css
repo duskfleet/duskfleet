@@ -5277,8 +5277,223 @@ details.desc ul {
   font-size: 14px;
   line-height: 21px;
 }
+/* DS-32 (issue #430): seen toggle, bulk "Mark ... seen", "New since seen" pill, Seen group, toast */
+.att-title-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  width: 100%;
+}
+.att-section-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+.att-section .att-section-head .att-h2 {
+  margin: 0;
+}
+.att-head-note {
+  color: var(--faint);
+  font-size: 13px;
+  line-height: 16px;
+  font-weight: 400;
+  font-family: var(--font-sans);
+}
+.att-mark {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border: 1px solid var(--border-strong);
+  border-radius: 6px;
+  background: var(--panel);
+  color: var(--text);
+  font: inherit;
+  font-size: 13px;
+  line-height: 18px;
+  font-weight: 500;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.att-mark:hover,
+.att-seen:hover {
+  background: var(--panel-2);
+}
+.att-mark:disabled,
+.att-seen:disabled {
+  opacity: 0.6;
+  cursor: progress;
+}
+.att-short {
+  display: none;
+}
+.att-check {
+  flex: none;
+}
+.att-table .c-seen {
+  width: 44px;
+  text-align: right;
+}
+.att-seen {
+  position: relative;
+  z-index: 1;
+  display: inline-grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 1px solid var(--border-strong);
+  border-radius: 6px;
+  background: var(--panel);
+  color: var(--muted);
+  cursor: pointer;
+}
+.att-seen[aria-pressed="true"] {
+  background: var(--panel-2);
+  color: var(--text);
+}
+.att-new {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  margin-left: 8px;
+  padding: 0 7px;
+  border: 1px solid var(--accent);
+  border-radius: 999px;
+  color: var(--accent);
+  font-family: var(--font-sans);
+  font-size: 12px;
+  line-height: 16px;
+  white-space: nowrap;
+  vertical-align: 1px;
+}
+.att-new-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--accent);
+}
+.att-seen-row .att-title {
+  color: var(--muted);
+}
+.att-seen-row .att-detail,
+.att-seen-table .c-when {
+  color: var(--faint);
+}
+.att-seen-head {
+  display: block;
+}
+.att-disclosure {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 0;
+  border: none;
+  background: none;
+  color: var(--text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.att-chevron {
+  flex: none;
+  transition: transform 0.15s;
+}
+.att-seen-group.open .att-chevron {
+  transform: rotate(90deg);
+}
+.att-show {
+  margin-left: auto;
+  color: var(--accent);
+  font-size: 15px;
+  font-family: var(--font-sans);
+  font-weight: 500;
+}
+/* collapsed: one full-width row */
+.att-seen-group:not(.open) .att-disclosure {
+  padding: 12px 18px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+}
+.att-toast-host {
+  position: fixed;
+  right: 20px;
+  bottom: 20px;
+  z-index: 50;
+}
+.att-toast {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 16px;
+  background: var(--panel-2);
+  border: 1px solid var(--border-strong);
+  border-radius: 10px;
+  box-shadow: var(--shadow);
+  color: var(--text);
+  font-size: 14px;
+  line-height: 20px;
+}
+.att-undo {
+  padding: 0;
+  border: none;
+  background: none;
+  color: var(--accent);
+  font: inherit;
+  font-weight: 500;
+  cursor: pointer;
+}
 /* 390: each row becomes a stacked card (badge + time, title, detail, link); the whole card is the target */
 @media (max-width: 600px) {
+  .att-wide,
+  .att-head-note,
+  .att-new-time {
+    display: none;
+  }
+  .att-short {
+    display: inline;
+  }
+  .att-login .att-head-note {
+    display: block;
+    margin-top: 4px;
+  }
+  .att-login .att-section-head .att-h2 {
+    display: block;
+  }
+  .att-head .att-title-row {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+  .att-head .att-title-row .att-mark {
+    align-self: flex-end;
+  }
+  .att-seen {
+    width: 32px;
+    height: 32px;
+  }
+  .att-table tr.att-row:has(.c-seen .att-seen) {
+    grid-template-columns: 1fr auto auto;
+    grid-template-areas: "badge when seen" "main main main" "act act act";
+  }
+  .att-table .c-seen {
+    grid-area: seen;
+  }
+  .att-table tr.att-row .c-seen:empty {
+    display: none;
+  }
+  .att-toast-host {
+    left: 12px;
+    right: 12px;
+    bottom: 12px;
+  }
+  .att-toast .att-toast-text {
+    flex: 1;
+  }
   .att-table,
   .att-table tbody {
     display: block;

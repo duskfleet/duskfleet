@@ -73,9 +73,9 @@ test("run --first end to end: registers the project, creates the agent, runs hai
     assert.equal(config.projects.get("my-app")?.path, project, "registered in the private registry");
     assert.ok(readFileSync(config.userProjectsFile, "utf8").includes("my-app"));
 
-    const runs = JSON.parse(cli(configDir, ["runs"]).stdout);
+    const runs = JSON.parse(cli(configDir, ["runs", "--json"]).stdout);
     assert.equal(runs.length, 1);
-    const info = JSON.parse(cli(configDir, ["run-info", runs[0].id]).stdout);
+    const info = JSON.parse(cli(configDir, ["run-info", runs[0].id, "--json"]).stdout);
     assert.equal(info.agentId, "first-run", "the run row keeps its agent id after the delete");
     assert.equal(info.modelRequested, "haiku");
     assert.equal(info.projectId, "my-app");
@@ -136,7 +136,7 @@ test("run --first refuses an existing first-run agent that is not read-only and 
     assert.match(res.stderr, /allowed_tools contains Bash/);
     assert.match(res.stderr, /max_budget_usd is \$5, above \$0\.25/);
     assert.equal(loadConfig(configDir).projects.size, 0, "nothing registered");
-    assert.equal(JSON.parse(cli(configDir, ["runs"]).stdout).length, 0, "nothing run");
+    assert.equal(JSON.parse(cli(configDir, ["runs", "--json"]).stdout).length, 0, "nothing run");
     assert.ok(existsSync(agentFile), "the user's agent is left alone");
   } finally {
     rmSync(root, { recursive: true, force: true });
@@ -210,7 +210,7 @@ test("run --first: a run refused by startRun (spent budget) is reported, and the
     assert.match(res.stderr, /First run: the run was refused, nothing was run: .*budget/i);
     assert.match(res.stdout, /Deleted .+first-run\.md/, "the agent this pass wrote is offered for deletion");
     assert.equal(existsSync(agentFile), false);
-    assert.equal(JSON.parse(cli(configDir, ["runs"]).stdout).length, 1, "no second run");
+    assert.equal(JSON.parse(cli(configDir, ["runs", "--json"]).stdout).length, 1, "no second run");
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

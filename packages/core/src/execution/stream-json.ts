@@ -6,7 +6,10 @@
  *   {"type":"assistant","message":{"id","model","usage",content:[{type:"text"|"tool_use",...}]},
  *      "parent_tool_use_id":null|string,"agent_id"?,"subagent_type"?,"timestamp"}
  *   {"type":"user", ...}                                     (tool results; same nesting fields)
- *   {"type":"system","subtype":"task_started","task_id","tool_use_id","description","subagent_type","prompt"}
+ *   {"type":"system","subtype":"task_started","task_id","tool_use_id","description","subagent_type","prompt",
+ *      "task_type":"local_agent"}
+ *   {"type":"system","subtype":"task_started","task_id","tool_use_id","description","is_backgrounded",
+ *      "task_type":"local_bash"}                             (a Bash call, not a subagent: ignored, 2026-11-10)
  *   {"type":"system","subtype":"task_notification","task_id","tool_use_id","status","summary",
  *      "usage":{"total_tokens","tool_uses","duration_ms"}}
  *   {"type":"result","subtype","is_error","session_id","result","num_turns","duration_ms",
@@ -139,6 +142,19 @@ function addUsage(into: TokenUsage, usage: Json): void {
   add("cacheCreationTokens", "cache_creation_input_tokens");
 }
 
+/**
+ * Whether a `task_started` line opens a subagent. Claude Code also emits task lines for plain
+ * Bash calls (`"task_type":"local_bash"`, verified 2026-11-10): those are not subagents. An agent
+ * task is `local_agent` (or any `*_agent` type), or carries a `subagent_type`. Lines without
+ * `task_type` (older CLIs) keep counting as subagents. Their `task_progress` /
+ * `task_notification` lines are ignored because no record exists for the task id.
+ */
+function isAgentTask(msg: Json): boolean {
+  const taskType = str(msg["task_type"]);
+  if (taskType === null || taskType.endsWith("_agent")) return true;
+  return str(msg["subagent_type"]) !== null;
+}
+
 /** Feed one line. Returns the structured events it produced (may be empty). */
 export function ingestLine(state: StreamState, line: string): ExecutionEvent[] {
   const trimmed = line.trim();
@@ -178,7 +194,7 @@ export function ingestLine(state: StreamState, line: string): ExecutionEvent[] {
         }
         case "task_started": {
           const agentId = str(msg["task_id"]);
-          if (!agentId) break;
+          if (!agentId || !isAgentTask(msg)) break;
           const record = subagentFor(
             state,
             agentId,

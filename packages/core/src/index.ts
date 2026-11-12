@@ -151,7 +151,9 @@ export {
 } from "./execution/stream-json.js";
 export * from "./execution/types.js";
 export {
+  type CheckoutSnapshot,
   captureRunDiff,
+  DIFF_MAX_COMMITS,
   DIFF_MAX_COUNTED_BYTES,
   DIFF_MAX_COUNTED_FILES,
   DIFF_MAX_FILES,
@@ -163,7 +165,10 @@ export {
   headSha,
   parseNameStatus,
   parseNumstat,
+  parseWorktreeList,
   type RunDiff,
+  snapshotCheckout,
+  type WorktreeDiff,
 } from "./git/diff.js";
 export * from "./observability/billing.js";
 export * from "./observability/failure.js";
@@ -258,6 +263,7 @@ export {
 export { attachLastRun, type RunSummarySource, type ScheduleWithLastRun } from "./scheduler/last-run.js";
 export { type FireResult, Scheduler, type SchedulerOptions, type SchedulerStatus } from "./scheduler/scheduler.js";
 export * from "./scheduler/types.js";
+export { type AttentionAck, AttentionAckRepository } from "./storage/attention-acks.js";
 export { BudgetRepository } from "./storage/budgets.js";
 export {
   COST_SPLITS,

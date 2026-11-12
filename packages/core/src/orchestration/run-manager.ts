@@ -27,7 +27,7 @@ import {
   type TokenUsage,
   type UsageByModel,
 } from "../execution/types.js";
-import { captureRunDiff, headSha } from "../git/diff.js";
+import { type CheckoutSnapshot, captureRunDiff, snapshotCheckout } from "../git/diff.js";
 import { costStatusOf } from "../observability/billing.js";
 import {
   continueRefusal,
@@ -158,8 +158,8 @@ interface ActiveRun {
   cancelRequested: boolean;
   /** When the main pass was launched; the wrap-up pass only gets what is left of the run's timeout. */
   startedAtMs: number;
-  /** HEAD of the project before the spawn; null when it is not a git checkout (no diff event then). */
-  gitBase: string | null;
+  /** The project checkout before the spawn (HEAD, dirty paths, worktrees); null when it is not a git checkout (no diff event then). */
+  gitBase: CheckoutSnapshot | null;
   /** When `last_event_at` was last written (0 = never); throttled to LAST_EVENT_WRITE_MS. */
   lastEventWriteMs: number;
   /** Why the row could not be marked `running` after the spawn (the child was then stopped); null when it was. */
@@ -364,6 +364,11 @@ export class RunManager {
 
   getRun(id: string): Run | null {
     return this.runs.get(id);
+  }
+
+  /** Run ids starting with `prefix`, newest first, at most two: one = the run, two = ambiguous. */
+  runIdsWithPrefix(prefix: string): string[] {
+    return this.runs.idsWithPrefix(prefix, 2);
   }
 
   listRuns(filter: ListRunsFilter): Run[] {
@@ -638,7 +643,13 @@ export class RunManager {
     }
 
     // What the checkout looked like before the agent touched it; the diff event compares with it.
-    const gitBase = headSha(projectPath);
+    // A snapshot that throws must not cost the run: no diff event then, as for a non-repository.
+    let gitBase: CheckoutSnapshot | null = null;
+    try {
+      gitBase = snapshotCheckout(projectPath);
+    } catch (err) {
+      log.warn("git snapshot failed", { runId, err: err instanceof Error ? err.message : String(err) });
+    }
     let handle: ExecutionHandle;
     try {
       handle = this.executor.execute(request, (event) => this.onEvent(runId, event));
@@ -1325,9 +1336,10 @@ export class RunManager {
    * Written before the final status so a reader that sees the run ended also sees its diff.
    * A git failure is a note, never a reason to lose the run's result.
    */
-  private recordDiff(runId: string, projectPath: string, base: string): void {
+  private recordDiff(runId: string, projectPath: string, before: CheckoutSnapshot): void {
     try {
-      const diff = captureRunDiff(projectPath, base, path.join(this.config.dataDir, "logs", `${runId}.diff`));
+      const patchPath = path.join(this.config.dataDir, "logs", `${runId}.diff`);
+      const diff = captureRunDiff(projectPath, before.base, patchPath, undefined, before);
       if (diff) this.runs.addEvent(runId, "diff", diff);
       else this.runs.addEvent(runId, "note", { message: "git diff of the run could not be read" });
     } catch (err) {
