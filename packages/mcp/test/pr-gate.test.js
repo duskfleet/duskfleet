@@ -116,6 +116,37 @@ test("bumpLevel: patch, minor, major, with 0.x breaking changes one place right"
   assert.equal(bumpLevel("2.0.0-beta.1", "2.0.0"), "unknown");
 });
 
+test("bumpLevel: pre-release, downgrade and equal versions are unknown, never patch or minor", () => {
+  assert.equal(bumpLevel("1.2.3", "1.2.4-rc.1"), "unknown");
+  assert.equal(bumpLevel("2.0.0-beta.1", "2.0.0-beta.2"), "unknown");
+  assert.equal(bumpLevel("1.5.0", "1.4.0"), "unknown");
+  assert.equal(bumpLevel("1.2.1", "1.2.0"), "unknown");
+  assert.equal(bumpLevel("1.2.3", "1.2.3"), "unknown");
+});
+
+test("bumpLevel: one- and two-part versions count missing parts as 0; leading zeros and build pairs stay strict", () => {
+  assert.equal(bumpLevel("1.2", "1.2.1"), "patch");
+  assert.equal(bumpLevel("1.2", "1.3"), "minor");
+  assert.equal(bumpLevel("0.4", "0.5"), "major");
+  assert.equal(bumpLevel("1.02.0", "1.2.1"), "unknown");
+  assert.equal(bumpLevel("1.2.0+build.1", "1.2.0+build.2"), "unknown");
+  assert.equal(bumpLevel("1.2.0-beta.1", "1.2.0+build.2"), "unknown");
+  assert.equal(bumpLevel("1.2.0", "1.2.1+build.2"), "patch");
+});
+
+test("isDependabotPr: an author spelling from either API counts, a fork branch does not", () => {
+  assert.equal(isDependabotPr(dependabotPr({ author: { login: "dependabot" } })), true);
+  assert.equal(isDependabotPr(dependabotPr({ isCrossRepository: true })), false);
+  assert.equal(isDependabotPr(dependabotPr({ headRefName: "fix/dependabot/x" })), false);
+});
+
+test("dependabotDecision: pre-release and downgrade bumps stay with the owner, even when approved", () => {
+  const rc = dependabotPr({ title: "Build(deps): Bump zod from 1.2.3 to 1.2.4-rc.1", body: "" });
+  assert.equal(dependabotDecision(rc, { verdict: "approve" }).action, "owner");
+  const downgrade = dependabotPr({ title: "Build(deps): Bump zod from 1.5.0 to 1.4.0", body: "" });
+  assert.equal(dependabotDecision(downgrade, { verdict: "approve" }).action, "owner");
+});
+
 test("bumpScope: single bump with an 'in the group' tail and an 'in /dir' tail", () => {
   assert.deepEqual(bumpScope(dependabotPr().title, dependabotPr().body), {
     ok: true,
