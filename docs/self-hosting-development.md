@@ -133,9 +133,8 @@ conflicting or red PR gets `VERDICT: changes` without a review.
 
 Dependabot patch and minor bumps are the only PRs that merge without the owner; every other
 PR, an agent's or a contributor's, keeps the human merge. With `--auto-merge` (the workflow
-passes it only with `PR_GATE_TOKEN`) a PR qualifies when its author is `dependabot[bot]` on a
-`dependabot/` branch whose head repository owner is this repository's owner (not a fork), it is
-labelled `flow: ready-to-merge`,
+passes it only with `PR_GATE_TOKEN`) a PR qualifies when its author is Dependabot on a
+`dependabot/` branch of this repository (not a fork), it is labelled `flow: ready-to-merge`,
 the reviewer's newest comment for its current head (first line `Reviewed <sha>`, posted by the
 token's own account; the last `VERDICT:` line of that comment decides) approves, and every
 bump in the title and body is semver patch or minor (on `0.x` a minor counts as major; a
@@ -152,11 +151,11 @@ base) on top of one, and its bumps must still be patch or minor. Otherwise (a De
 force-push to a new version, any other commit, the label removed) the gate disables
 auto-merge with one `[pr-gate]` comment per head, and the head needs a new review. A major or unparsable bump with the
 same label is never merged: it gets one `[pr-gate]` comment per head and waits for the owner.
-Versions must be complete valid SemVer values; unreadable or incomplete bumps are left for the
-owner. `--dry-run` lists only actions available to the current run after the same merge-state
-checks: it does not preview an update or auto-merge when `PR_GATE_TOKEN` / `--update-branch` is
-unavailable, and a behind branch is only previewed for update (it cannot be auto-merged until a
-new review approves the updated head).
+A pre-release, a downgrade or an equal version is never patch or minor. A PR behind its base is
+only updated with `--update-branch`; without it an approved PR behind its base is left alone.
+`--dry-run` lists the candidates and what a real run would do, after the same merge-state
+checks, and it does not preview an update or auto-merge that a run without `--update-branch`
+cannot do.
 
 The gate also expires stale locks. `flow: in-progress` and `flow: in-review` are swapped in
 first as a lock against a second run; a run that dies after that (timeout, killed child, an
