@@ -8,7 +8,7 @@ All notable changes to Duskfleet are listed here. The format follows
 
 ## [Unreleased]
 
-## [0.4.0] - 2026-11-11
+## [0.4.0] - 2026-11-12
 
 One schema migration (29) runs on the first open of an existing database; nothing to do by hand.
 
@@ -55,7 +55,12 @@ CLI's stdout must add `--json`**; stderr is unchanged. Colour follows the termin
 
 ### Fixed
 
-- Subagents: the task lines Claude Code now prints around plain Bash calls (`task_type: "local_bash"`) were recorded as subagents of type `unknown`; they open no subagent row any more ([#435](https://github.com/duskfleet/duskfleet/issues/435)).
+- Subagents: the task lines Claude Code now prints around plain Bash calls (`task_type: "local_bash"`) were recorded as subagents of type `unknown`; they open no subagent row any more ([#438](https://github.com/duskfleet/duskfleet/pull/438)).
+- Run diff: the changes recorded for a run no longer include what was already uncommitted in the
+  checkout before it started (counted as pre-existing instead), and they now include the git
+  worktrees the run created or moved, each with its commits and its patch, also when the worktree
+  was removed before the run ended. `run-info` and the run page's Changes section show both. The
+  event only gains optional fields: no migration, older runs still render ([#439](https://github.com/duskfleet/duskfleet/pull/439)).
 
 ## [0.3.1] - 2026-11-07
 
