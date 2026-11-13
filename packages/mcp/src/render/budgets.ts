@@ -11,6 +11,7 @@ import {
   type Column,
   emptyState,
   fmtCents,
+  fmtCost,
   followUp,
   jsonLine,
   kv,
@@ -64,7 +65,7 @@ function standInText(b: BudgetStatus): string | null {
   if (parts.length === 0) return null;
   return b.unpricedPolicy === "allow"
     ? `allow: ${parts.join(", ")} not counted`
-    : `stand-ins: ${fmtCents(b.standInUsd)} for ${parts.join(", ")}${b.overByRunning ? " · over only by running runs: schedules not paused" : ""}`;
+    : `stand-ins: ${fmtCost(b.standInUsd)} for ${parts.join(", ")}${b.overByRunning ? " · over only by running runs: schedules not paused" : ""}`;
 }
 
 export function renderBudgets(statuses: readonly BudgetStatus[], opts: RenderOpts): string[] {
@@ -76,7 +77,7 @@ export function renderBudgets(statuses: readonly BudgetStatus[], opts: RenderOpt
   ];
   const rows = statuses.map((b): Cell[] => [
     { text: budgetLabel(b), role: "accent" },
-    fmtCents(b.countedUsd),
+    fmtCost(b.countedUsd),
     fmtCents(b.amountUsd),
     `${Math.round(b.percent)}%`,
     meter(b),
@@ -107,7 +108,7 @@ export function renderBudgetSet(b: BudgetStatus, opts: RenderOpts): string[] {
         ["warn at", `${b.warnPercent}%`],
         ["hard stop", b.hardStop ? "yes: refuses new runs and pauses the scope's schedules" : "no: warn only"],
         ["unpriced", standInText(b) ?? b.unpricedPolicy],
-        ["this month", `${fmtCents(b.countedUsd)} counted, ${Math.round(b.percent)}%`],
+        ["this month", `${fmtCost(b.countedUsd)} counted, ${Math.round(b.percent)}%`],
         ["state", stateCell(b)],
       ],
       opts,

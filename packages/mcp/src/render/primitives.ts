@@ -291,21 +291,27 @@ export function fmtUsd(usd: number | null | undefined): string {
   return Math.abs(usd) < 0.1 ? `$${usd.toFixed(4)}` : `$${usd.toFixed(2)}`;
 }
 
-/** Cents, for tables: `$0.08`, `$12.40`; `-` when unknown. */
+/**
+ * Cents, for amounts a human set (a budget's amount, an agent's `max_budget_usd`, caps): `$0.08`,
+ * `$12.40`, `$0.00` when zero was configured; `-` when unknown. Measured costs use `fmtCost`.
+ */
 export function fmtCents(usd: number | null | undefined): string {
   if (usd === null || usd === undefined || !Number.isFinite(usd)) return "-";
   return `$${usd.toFixed(2)}`;
 }
 
 /**
- * One run's cost: `$0.08` from a cent up, `<$0.01` for a non-zero cost under a cent (decided on
- * the value: 0.0099 rounds to `0.01` but is still under a cent), `$0.00` for exactly 0, `-` when
- * unknown. Totals, budgets and caps keep `fmtCents`.
+ * A measured cost, one run's or a sum of runs' (the `runs` total, a budget's counted spend and
+ * stand-ins): `$0.08` from a cent up, `<$0.01` for a non-zero cost under a cent (decided on the
+ * value: 0.0099 rounds to `0.01` but is still under a cent), `$0.00` for exactly 0, `-` when
+ * unknown. Amounts a human set keep `fmtCents`.
  */
-export function fmtRunCost(usd: number | null | undefined): string {
+export function fmtCost(usd: number | null | undefined): string {
   if (usd === null || usd === undefined || !Number.isFinite(usd)) return "-";
-  if (usd > 0 && usd < 0.01) return "<$0.01";
-  return fmtCents(usd);
+  // A sum of floats can land a hair under a cent (0.003 + 0.007): compare at a micro-dollar.
+  const value = Math.round(usd * 1e6) / 1e6;
+  if (value > 0 && value < 0.01) return "<$0.01";
+  return fmtCents(value);
 }
 
 /** A ratio as a whole percent: 0.8 -> `80%`; `-` when unknown. */
