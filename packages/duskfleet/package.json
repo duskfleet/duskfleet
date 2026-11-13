@@ -1,6 +1,6 @@
 {
   "name": "duskfleet",
-  "version": "0.3.1",
+  "version": "0.4.0",
   "description": "A fleet of agents for your own machine",
   "keywords": ["claude-code", "claude", "agents", "scheduler", "cron", "mcp", "local-first", "cli"],
   "homepage": "https://duskfleet.com",
