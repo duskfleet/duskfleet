@@ -178,6 +178,15 @@ test("renderSchedules at 80 columns drops FIRE/SKIP then CRON, below 70 LAST RUN
   assert.match(at68[4], /^NAME +AGENT +STATE +NEXT +LAST$/);
 });
 
+test("renderSchedules: a last run under one cent reads <$0.01, never $0.00", () => {
+  const subCent = [{ ...SCHEDULES[0], lastRun: { ...SCHEDULES[0].lastRun, costUsd: 0.0038 } }];
+  const lines = renderSchedules({ scheduler: TICKING, schedules: subCent }, plain());
+  assert.equal(
+    lines[4],
+    "pr review       reviewer        0 9 * * *    ✓ on         21h  started         ! <$0.01          5/1",
+  );
+});
+
 test("renderSchedules: disabled, nothing ticking, a scheduler pause with its reason, no schedules", () => {
   const status = {
     ...TICKING,

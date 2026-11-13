@@ -297,6 +297,17 @@ export function fmtCents(usd: number | null | undefined): string {
   return `$${usd.toFixed(2)}`;
 }
 
+/**
+ * One run's cost: `$0.08` from a cent up, `<$0.01` for a non-zero cost under a cent (decided on
+ * the value: 0.0099 rounds to `0.01` but is still under a cent), `$0.00` for exactly 0, `-` when
+ * unknown. Totals, budgets and caps keep `fmtCents`.
+ */
+export function fmtRunCost(usd: number | null | undefined): string {
+  if (usd === null || usd === undefined || !Number.isFinite(usd)) return "-";
+  if (usd > 0 && usd < 0.01) return "<$0.01";
+  return fmtCents(usd);
+}
+
 /** A ratio as a whole percent: 0.8 -> `80%`; `-` when unknown. */
 export function fmtPercent(ratio: number | null | undefined): string {
   if (ratio === null || ratio === undefined || !Number.isFinite(ratio)) return "-";

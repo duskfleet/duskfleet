@@ -10,8 +10,8 @@ import {
   type Column,
   emptyState,
   fmtAge,
-  fmtCents,
   fmtRelative,
+  fmtRunCost,
   followUp,
   jsonLine,
   paintCell,
@@ -119,7 +119,7 @@ function lastRunCell(s: ScheduleWithLastRun): Cell {
   const role = review ? "warn" : STATUS_ROLE[run.status];
   return [
     { text: glyph, role },
-    { text: ` ${fmtCents(run.costUsd)}`, role: null },
+    { text: ` ${fmtRunCost(run.costUsd)}`, role: null },
   ];
 }
 
