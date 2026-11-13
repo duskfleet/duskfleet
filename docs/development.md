@@ -62,6 +62,7 @@ npm test               # packages/core/test, packages/mcp/test, then apps/web/te
 npm test -w @duskfleet/core   # core unit tests alone, under a second
 npm test -w @duskfleet/web    # dashboard helpers and component render tests (after npm run build), a few seconds
 npm run check          # everything CI runs, in the same order (hygiene, lint, build, pack, typecheck, tests)
+npm run up             # after a pull: install, build, install-service (restarts the service on the new build), then the dashboard
 ```
 
 ## Published packages
