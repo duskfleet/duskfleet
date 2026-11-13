@@ -426,8 +426,12 @@ usage` when both kinds are listed. `runs --json` prints the same total as one li
 your Claude subscription`. The human table ends with `total $x · ~ estimated · ? unpriced, not
 in the total (n)`: in its COST column `$0.08` is reported, `~$0.21` estimated (an API value, not
 billed), `<$0.01` (or `~<$0.01`) a run that cost something but less than a cent, and `?` unpriced
-(ended without a cost). The total sums the real values. The same notation is used for one run's
-cost in `run`, in the LAST RUN column of `schedules` and in the `doctor` probe.
+(ended without a cost). The total sums the real values and follows the same rule: `total <$0.01`
+when the listed runs cost something but less than a cent together, `total $0.00` only when they
+cost nothing (estimates are marked by `· ~ estimated`, not on the number). The same notation is
+used for one run's cost in `run`, in the LAST RUN column of `schedules`, in the `doctor` probe,
+and for a budget's counted spend and stand-ins in `budgets` and `doctor`; amounts you set (a
+budget's limit, an agent's `max_budget_usd`) keep plain cents.
 
 `contextExhausted` comes only from structured signals (termination reason, result subtype,
 stop reason, or the error text of a failed run), never from scanning the result's prose.

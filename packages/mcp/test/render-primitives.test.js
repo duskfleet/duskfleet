@@ -10,10 +10,10 @@ import {
   cutMiddle,
   fmtAge,
   fmtCents,
+  fmtCost,
   fmtDuration,
   fmtPercent,
   fmtRelative,
-  fmtRunCost,
   fmtUsd,
   kv,
   oneLine,
@@ -106,13 +106,14 @@ test("formatting helpers", () => {
   assert.equal(fmtUsd(1.25), "$1.25");
   assert.equal(fmtUsd(0), "$0.00");
   assert.equal(fmtUsd(null), "-");
-  assert.equal(fmtRunCost(0), "$0.00");
-  assert.equal(fmtRunCost(0.0038), "<$0.01");
-  assert.equal(fmtRunCost(0.0099), "<$0.01", "decided on the value, not on the rounded text");
-  assert.equal(fmtRunCost(0.01), "$0.01");
-  assert.equal(fmtRunCost(0.084), "$0.08");
-  assert.equal(fmtRunCost(null), "-");
-  assert.equal(fmtCents(0.0038), "$0.00", "totals keep two decimals");
+  assert.equal(fmtCost(0), "$0.00");
+  assert.equal(fmtCost(0.0038), "<$0.01");
+  assert.equal(fmtCost(0.0099), "<$0.01", "decided on the value, not on the rounded text");
+  assert.equal(fmtCost(0.01), "$0.01");
+  assert.equal(fmtCost(0.003 + 0.007), "$0.01", "a float sum a hair under a cent is a cent");
+  assert.equal(fmtCost(0.084), "$0.08");
+  assert.equal(fmtCost(null), "-");
+  assert.equal(fmtCents(0.0038), "$0.00", "amounts a human set keep two decimals");
   assert.equal(costCell({ costUsd: 0, costStatus: "reported" }), "$0.00");
   assert.equal(costCell({ costUsd: 0.0038, costStatus: "estimated" }), "~<$0.01");
   assert.equal(costCell({ costUsd: 0.0099, costStatus: "reported" }), "<$0.01");

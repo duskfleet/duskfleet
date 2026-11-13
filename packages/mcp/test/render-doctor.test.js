@@ -146,6 +146,13 @@ test("doctor: advice, duplicates, unpriced runs and orphans are warnings with th
     "",
     "json: add --json · one real run on haiku: duskfleet doctor --probe",
   ]);
+  const subCent = { ...report, unpricedRuns: [{ ...report.unpricedRuns[0], countedUsd: 0.004 }] };
+  assert.ok(
+    renderDoctor(subCent, plain).includes(
+      `${PAD}global: counted <$0.01 / $5.00 (warn) · 1 run(s) without a recorded cost count against the global budget`,
+    ),
+    "a sub-cent counted figure reads <$0.01; the amount keeps cents",
+  );
 });
 
 test("doctor: a missing binary is the only error, `not found` in bright red", () => {

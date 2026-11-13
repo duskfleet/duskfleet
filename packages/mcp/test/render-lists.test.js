@@ -293,6 +293,19 @@ test("renderBudgets: month and policy header, a meter per scope, stand-ins on �
   ]);
 });
 
+test("renderBudgets / renderBudgetSet: a sub-cent counted spend reads <$0.01, the amount a human set keeps cents", () => {
+  const subCent = { ...GLOBAL, spentUsd: 0.0038, countedUsd: 0.0038, percent: 0 };
+  assert.equal(
+    renderBudgets([subCent], plain())[3],
+    "global                    <$0.01    $50.00     0%  ··········  ✓ ok        80%  ✓ yes",
+  );
+  assert.equal(renderBudgetSet(subCent, plain())[7], "this month  <$0.01 counted, 0%");
+  const zero = { ...GLOBAL, spentUsd: 0, countedUsd: 0, percent: 0 };
+  assert.equal(renderBudgetSet(zero, plain())[7], "this month  $0.00 counted, 0%");
+  const standIn = { ...AGENT, standInUsd: 0.004, runningRuns: 0, overByRunning: false };
+  assert.equal(renderBudgets([standIn], plain())[4], "  └ stand-ins: <$0.01 for 1 unpriced");
+});
+
 test("renderBudgets: the empty state names the command that sets one", () => {
   assert.deepEqual(renderBudgets([], plain()), ["no budgets yet", `  ${COMMAND_HELP.budgets.example}`]);
 });
