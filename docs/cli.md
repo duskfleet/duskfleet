@@ -425,7 +425,9 @@ usage` when both kinds are listed. `runs --json` prints the same total as one li
 (stdout stays the JSON array), for example `Usage (API value): $3.2 over 20 runs, included in
 your Claude subscription`. The human table ends with `total $x · ~ estimated · ? unpriced, not
 in the total (n)`: in its COST column `$0.08` is reported, `~$0.21` estimated (an API value, not
-billed) and `?` unpriced (ended without a cost).
+billed), `<$0.01` (or `~<$0.01`) a run that cost something but less than a cent, and `?` unpriced
+(ended without a cost). The total sums the real values. The same notation is used for one run's
+cost in `run`, in the LAST RUN column of `schedules` and in the `doctor` probe.
 
 `contextExhausted` comes only from structured signals (termination reason, result subtype,
 stop reason, or the error text of a failed run), never from scanning the result's prose.

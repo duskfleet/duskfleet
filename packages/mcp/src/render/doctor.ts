@@ -8,7 +8,7 @@ import type { BudgetState, ConfigSource, DataSource } from "@duskfleet/core";
 import type { ProbeReport } from "../probe.js";
 import type { KeepAwakeStatus, ServiceStatus } from "../service.js";
 import { AGENT_CREATE } from "./agents.js";
-import { fmtCents, fmtDuration, jsonLine, oneLine, type RenderOpts } from "./primitives.js";
+import { fmtCents, fmtDuration, fmtRunCost, jsonLine, oneLine, type RenderOpts } from "./primitives.js";
 import { GLYPH, paint } from "./theme.js";
 
 export interface DoctorReport {
@@ -111,7 +111,7 @@ function probeCheck(p: ProbeReport, opts: RenderOpts): Check {
     p.ok ? `${p.outcome}, ok` : p.outcome,
     p.model,
     p.durationMs ? fmtDuration(p.durationMs) : null,
-    p.costUsd === null ? null : fmtCents(p.costUsd),
+    p.costUsd === null ? null : fmtRunCost(p.costUsd),
   ].filter(Boolean);
   const advice = [
     ...(p.error ? [oneLine(p.error)] : []),

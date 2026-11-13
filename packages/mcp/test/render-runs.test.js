@@ -103,6 +103,25 @@ test("renderRuns at 80 columns drops TOOLS then PROJECT, below 72 MODEL; ID, STA
   assert.match(at60[2], /^5e6f7a8b {2}! needs review {2}a-very-long… {2}/, "AGENT stops at its 12-column floor");
 });
 
+test("renderRuns: runs under one cent read <$0.01 / ~<$0.01 in COST, the total sums the real values", () => {
+  const subCent = [
+    { ...RUN, costUsd: 0.0038, costStatus: "estimated" },
+    { ...RUN, id: "5e6f7a8b-0000-4000-8000-000000000002", costUsd: 0.0099 },
+    { ...RUN, id: "9c0d1e2f-0000-4000-8000-000000000003", costUsd: 0 },
+  ];
+  const lines = renderRuns(subCent, plain());
+  assert.deepEqual(lines.slice(1, 4), [
+    "1a2b3c4d  ✓ completed     fixer               demo          haiku       2m     12.3s  ~<$0.01     14",
+    "5e6f7a8b  ✓ completed     fixer               demo          haiku       2m     12.3s   <$0.01     14",
+    "9c0d1e2f  ✓ completed     fixer               demo          haiku       2m     12.3s    $0.00     14",
+  ]);
+  assert.equal(lines[5], "total $0.01 · ~ estimated");
+  assert.ok(
+    renderRuns(subCent, plain(80)).every((l) => l.length <= 80),
+    "~<$0.01 fits the 7-column COST at 80 columns",
+  );
+});
+
 test("renderRuns: a filter is named in the footer; the empty state names the command", () => {
   assert.equal(
     renderRuns([RUN], plain(), "status=completed, limit=1").at(-2),
