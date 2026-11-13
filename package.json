@@ -20,6 +20,7 @@
     "mcp": "node packages/mcp/dist/index.js",
     "cli": "node packages/mcp/dist/cli.js",
     "web": "npm run dev -w @duskfleet/web",
+    "up": "npm install && npm run build && npm run cli -- install-service && npm run web",
     "lint": "biome ci .",
     "lint:fix": "biome check --write .",
     "check:public": "node scripts/check-public.mjs",

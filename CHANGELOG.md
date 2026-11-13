@@ -8,6 +8,10 @@ All notable changes to Duskfleet are listed here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- `npm run up` in a checkout: install, build, `install-service` (which restarts the service on the new build) and the dashboard, in one command after a pull.
+
 ## [0.4.0] - 2026-11-12
 
 One schema migration (29) runs on the first open of an existing database; nothing to do by hand.
