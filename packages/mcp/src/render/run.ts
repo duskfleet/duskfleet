@@ -7,7 +7,7 @@
  * core's hint table (`runFixHint`), the same one `doctor --probe` uses.
  */
 import { FAILURE_LABELS, REVIEW_REASON_LABELS, type Run, runFixHint } from "@duskfleet/core";
-import { type Cell, fmtDuration, fmtRunCost, oneLine, paintCell, type RenderOpts, statusCell } from "./primitives.js";
+import { type Cell, fmtCost, fmtDuration, oneLine, paintCell, type RenderOpts, statusCell } from "./primitives.js";
 import { paint } from "./theme.js";
 
 /** Longest cause line; the full error stays in the record and in `run-info`. */
@@ -81,7 +81,7 @@ export function runReportLines(run: Run): string[] | null {
 export function costCell(run: { costUsd: number | null; costStatus?: string | null | undefined }): Cell {
   if (run.costStatus === "unpriced") return "?";
   if (run.costUsd === null) return "-";
-  return `${run.costStatus === "estimated" ? "~" : ""}${fmtRunCost(run.costUsd)}`;
+  return `${run.costStatus === "estimated" ? "~" : ""}${fmtCost(run.costUsd)}`;
 }
 
 /** Human stdout of `duskfleet run`: header, then the failure block when there is one, then the log path. */

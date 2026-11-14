@@ -122,6 +122,26 @@ test("renderRuns: runs under one cent read <$0.01 / ~<$0.01 in COST, the total s
   );
 });
 
+test("renderRuns: the total follows the same rule, never $0.00 over non-zero rows", () => {
+  const total = (costs, extra = {}) =>
+    renderRuns(
+      costs.map((costUsd, i) => ({ ...RUN, ...extra, id: `${i}a2b3c4d-0000`, costUsd })),
+      plain(),
+    ).at(-3);
+  assert.equal(total([0.0038]), "total <$0.01", "one sub-cent run");
+  assert.equal(total([0.0038], { costStatus: "estimated" }), "total <$0.01 · ~ estimated", "no ~ on the number");
+  assert.equal(total([0.0012, 0.0021, 0.0038]), "total <$0.01", "several sub-cent runs, sum under a cent");
+  assert.equal(total([0.0049, 0.005]), "total <$0.01", "0.0099: rounds to a cent, still under one");
+  assert.equal(total([0.0038, 0.0062]), "total $0.01", "a sum of exactly a cent");
+  assert.equal(total([0.0038, 0.0099]), "total $0.01", "a sum over a cent");
+  assert.equal(total([0, 0]), "total $0.00", "all zero");
+  assert.equal(
+    total([null], { costStatus: "unpriced" }),
+    "total $0.00 · ? unpriced, not in the total (1)",
+    "no cost data",
+  );
+});
+
 test("renderRuns: a filter is named in the footer; the empty state names the command", () => {
   assert.equal(
     renderRuns([RUN], plain(), "status=completed, limit=1").at(-2),

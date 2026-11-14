@@ -12,7 +12,7 @@ import {
   type Column,
   emptyState,
   fmtAge,
-  fmtCents,
+  fmtCost,
   fmtDuration,
   followUp,
   jsonLine,
@@ -63,7 +63,7 @@ function followUpText(r: RunListItem): string | null {
 function totalLine(runs: readonly RunListItem[]): string {
   const total = runs.reduce((n, r) => n + (r.costUsd ?? 0), 0);
   const unpriced = runs.filter((r) => r.costStatus === "unpriced").length;
-  const parts = [`total ${fmtCents(total)}`];
+  const parts = [`total ${fmtCost(total)}`];
   if (runs.some((r) => r.costStatus === "estimated")) parts.push("~ estimated");
   if (unpriced > 0) parts.push(`? unpriced, not in the total (${unpriced})`);
   return parts.join(" · ");
