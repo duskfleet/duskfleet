@@ -199,6 +199,16 @@ test("agents can be created, updated, run and deleted over MCP without touching 
     assert.equal(updated.agent.maxBudgetUsd, 5, "cleared field falls back to the global default");
     assert.equal(updated.agent.systemPrompt, "Fix the tests. Never edit them.");
 
+    // an explicit harness can be cleared back to unset (the default, out of the agent hash)
+    const fixerFile = path.join(userDir, "test-fixer.md");
+    ok(await client.callTool({ name: "update_agent", arguments: { id: "test-fixer", harness: "claude" } }));
+    assert.match(readFileSync(fixerFile, "utf8"), /^harness: claude$/m);
+    const unset = ok(
+      await client.callTool({ name: "update_agent", arguments: { id: "test-fixer", clear: ["harness"] } }),
+    );
+    assert.doesNotMatch(readFileSync(fixerFile, "utf8"), /^harness:/m);
+    assert.equal(unset.agent.harness ?? "claude", "claude");
+
     // builtin agents are protected
     fails(
       await client.callTool({ name: "update_agent", arguments: { id: "coder", description: "x" } }),

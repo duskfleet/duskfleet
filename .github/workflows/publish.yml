@@ -4,20 +4,23 @@
 # hand. Every pull request runs the `dry-run` job, the same steps ending in
 # `npm publish --dry-run`, so a broken pack is caught before the tag.
 #
-# The `publish` job authenticates with the NPM_TOKEN repository secret: a granular access token
-# with "Read and write (publish and stage)" on `duskfleet` and `@duskfleet/web` only and "Bypass
-# two-factor authentication" on, the only kind that can run `npm publish` unattended (npm expires
-# it after 90 days at most: recreate it when a release fails with E401/E403). npm removes direct
-# publishing from such tokens in January 2027; by then the trusted publishing below should work.
+# The `publish` job authenticates with npm trusted publishing (OIDC), the path 0.2.0 shipped
+# through on 2026-11-05: on npmjs.com each package names this repository and `release.yml` (the
+# workflow that starts the run; this file runs as a reusable workflow it calls) as its trusted
+# publisher, environment empty, "Allow npm publish" ticked. Three npm settings decide the
+# outcome: the publisher configuration expires (then the exchange fails with "package not
+# found": delete it and create it again); "Allow npm publish" unticked lets it only stage; and
+# the package's Publishing access must be "Require two-factor authentication or a granular
+# access token with bypass 2fa enabled", because the "recommended" option accepts an OIDC publish
+# with 202 but keeps it staged until a 2FA approval, and a later publish of the same version is
+# refused as "previously staged version" (the check below reports that case).
 #
-# npm trusted publishing (OIDC) stays configured on both packages (`release.yml`, the workflow
-# that starts the run, since this file runs as a reusable workflow it calls): npm tries the OIDC
-# exchange first and falls back to the token. Today the registry refuses this repository's OIDC
-# token with "package not found" (npm/cli#9969: GitHub's immutable `sub` claim, forced on
-# repositories created after 2026-07-15, is not understood by the registry). Once that is fixed
-# the token can be deleted. `id-token: write` is what lets npm sign the provenance statement in
-# either case; each package.json `repository` must name this repository or the registry refuses
-# the provenance.
+# npm tries the OIDC exchange first and falls back to the NPM_TOKEN repository secret: a granular
+# access token with "Read and write (publish and stage)" on `duskfleet` and `@duskfleet/web`
+# only and "Bypass two-factor authentication" on (90 days at most). It can be deleted once OIDC
+# has carried a release; npm removes direct publishing from such tokens in January 2027 anyway.
+# `id-token: write` is what lets npm sign the provenance statement in either case; each
+# package.json `repository` must name this repository or the registry refuses the provenance.
 name: Publish to npm
 run-name: "${{ github.event_name == 'pull_request' && format('npm publish dry-run for PR #{0}', github.event.pull_request.number) || format('npm publish {0}', inputs.tag || github.ref_name) }}"
 

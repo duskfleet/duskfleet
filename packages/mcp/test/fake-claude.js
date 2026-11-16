@@ -15,6 +15,8 @@
  *                 hand-back tool_result), shapes from a real run of 2026-10-12; its result
  *                 line has a main-session-only `usage` and a two-model `modelUsage`
  *   "subagent-hang" -> same, but the process is killed before the hand-back
+ *   "subagent-bash" -> like "subagent", after a main-session Bash call wrapped in
+ *                 `task_type: "local_bash"` task lines (2026-11-10): not a subagent
  *   "env"      -> like "ok", result text says whether CLAUDE_BIN reached the child
  *   "env-secret" -> like "ok", result text says what DF_TEST_SECRET is in the child and
  *                 whether PATH and HOME reached it (the environment allow-list)
@@ -38,6 +40,12 @@
  *   "mcp-missing-once" -> like "ok", but the first spawn's init lists no claude.ai connector
  *                 (only the project's "duskfleet" server); later spawns list Figma
  *   "mcp-missing" -> like "ok", every spawn's init lists no claude.ai connector
+ *   "add-dirs" -> like "ok", result text is `add-dirs <JSON array of every --add-dir received>`
+ *   "sandbox"  -> like "ok", after two Bash calls the sandbox blocked (shapes from real runs on
+ *                 2.1.325, 2026-11-16): a network block carrying `tool_result_meta[].remedy.kind
+ *                 "sandbox_violation"`, and a file write outside the project (EPERM, no marker).
+ *                 The result line is still `success` with no denial; its text is
+ *                 `settings <the --settings value, or none>`
  *
  * With `--resume <id>` (the wrap-up pass) the prompt is Duskfleet's fixed text, so the
  * behaviour comes from FAKE_CLAUDE_RESUME instead: unset = a short successful pass that
@@ -75,6 +83,11 @@ const modelIdx = args.indexOf("--model");
 const model = modelIdx >= 0 ? args[modelIdx + 1] : "claude-haiku-4-5-20251001";
 const budgetIdx = args.indexOf("--max-budget-usd");
 const maxBudget = budgetIdx >= 0 ? Number(args[budgetIdx + 1]) : 5;
+const settingsIdx = args.indexOf("--settings");
+/** The --settings value (the sandbox switch), for the "sandbox" prompt; null when absent. */
+const settingsSeen = settingsIdx >= 0 ? (args[settingsIdx + 1] ?? null) : null;
+/** Every --add-dir value, in order, for the "add-dirs" prompt (skills bundles). */
+const addDirsSeen = args.flatMap((a, i) => (a === "--add-dir" && args[i + 1] !== undefined ? [args[i + 1]] : []));
 
 if (args[0] === "--version") {
   if (process.env.FAKE_CLAUDE_MODE === "no-version") {
@@ -315,7 +328,53 @@ if (resumeIdx >= 0) {
     stop_reason: "end_turn",
   });
   process.exit(0);
-} else if (prompt === "subagent" || prompt === "subagent-hang") {
+} else if (prompt === "subagent" || prompt === "subagent-hang" || prompt === "subagent-bash") {
+  if (prompt === "subagent-bash") {
+    // A plain Bash call in the main session: Claude Code wraps it in task lines of type
+    // `local_bash` (shape verified on a run of 2026-11-10, claude-opus-5-5). Not a subagent.
+    const bashCall = "toolu_bash_1";
+    out({
+      type: "assistant",
+      message: {
+        id: "msg_main_0",
+        model,
+        role: "assistant",
+        content: [{ type: "tool_use", id: bashCall, name: "Bash", input: { command: "npm test" } }],
+        usage: { input_tokens: 1, output_tokens: 1 },
+      },
+      parent_tool_use_id: null,
+      session_id: sessionId,
+      timestamp: "2026-10-12T20:27:40.000Z",
+    });
+    out({
+      type: "system",
+      subtype: "task_started",
+      task_id: "bks4b6ifo",
+      run_id: "r1",
+      tool_use_id: bashCall,
+      description: "Run the test suite",
+      is_backgrounded: false,
+      task_type: "local_bash",
+      uuid: "u1",
+      session_id: sessionId,
+    });
+    out({
+      type: "system",
+      subtype: "task_notification",
+      task_id: "bks4b6ifo",
+      tool_use_id: bashCall,
+      status: "completed",
+      summary: "Run the test suite",
+      session_id: sessionId,
+    });
+    out({
+      type: "user",
+      message: { role: "user", content: [{ tool_use_id: bashCall, type: "tool_result", content: "ok" }] },
+      parent_tool_use_id: null,
+      session_id: sessionId,
+      timestamp: "2026-10-12T20:27:44.000Z",
+    });
+  }
   const agentId = "a6b73b2ad14bf09f8";
   const agentCall = "toolu_agent_1";
   const nested = {
@@ -536,6 +595,69 @@ if (resumeIdx >= 0) {
       message: { role: "user", content: [{ tool_use_id: "toolu_m1", type: "tool_result", content: "[]" }] },
     });
   }
+  if (prompt === "sandbox") {
+    // Network block: the structured marker is tool_result_meta[].remedy.kind (verified 2026-11-16).
+    const curl = "toolu_sbx_net";
+    const netText =
+      "Exit code 56\ncurl: (56) CONNECT tunnel failed, response 403\nHTTP 000\n\n<sandbox_violations>\ndeny network-outbound example.org:443 (user denied)\n</sandbox_violations>";
+    out({
+      type: "assistant",
+      message: {
+        model,
+        role: "assistant",
+        content: [{ type: "tool_use", id: curl, name: "Bash", input: { command: "curl https://example.org" } }],
+        usage: { input_tokens: 10, output_tokens: 5 },
+      },
+      parent_tool_use_id: null,
+      session_id: sessionId,
+    });
+    out({
+      type: "user",
+      message: {
+        role: "user",
+        content: [{ type: "tool_result", content: netText, is_error: true, tool_use_id: curl }],
+      },
+      parent_tool_use_id: null,
+      session_id: sessionId,
+      timestamp: "2026-11-16T10:30:32.858Z",
+      tool_use_result: `Error: ${netText}`,
+      tool_result_meta: [
+        {
+          id: curl,
+          remedy: { kind: "sandbox_violation" },
+          permission_decision: { decision: "accept", source: "config", reason_type: "subcommandResults" },
+        },
+      ],
+    });
+    // Filesystem block: an ordinary failed command, no remedy, no <sandbox_violations>.
+    const write = "toolu_sbx_fs";
+    const fsText =
+      "Exit code 1\nnode:fs:2482\nError: EPERM: operation not permitted, open '../sbx-outside/probe-a.txt'";
+    out({
+      type: "assistant",
+      message: {
+        model,
+        role: "assistant",
+        content: [{ type: "tool_use", id: write, name: "Bash", input: { command: "node -e 'write outside'" } }],
+        usage: { input_tokens: 10, output_tokens: 5 },
+      },
+      parent_tool_use_id: null,
+      session_id: sessionId,
+    });
+    out({
+      type: "user",
+      message: {
+        role: "user",
+        content: [{ type: "tool_result", content: fsText, is_error: true, tool_use_id: write }],
+      },
+      parent_tool_use_id: null,
+      session_id: sessionId,
+      tool_use_result: `Error: ${fsText}`,
+      tool_result_meta: [
+        { id: write, permission_decision: { decision: "accept", source: "config", reason_type: "subcommandResults" } },
+      ],
+    });
+  }
   if (prompt === "big-tool-result") {
     // One 200 KiB tool_result (a large file read): the log caps (claude.max_event_bytes / max_log_bytes).
     out({
@@ -596,7 +718,11 @@ if (resumeIdx >= 0) {
                 ? "Found SL-9 in Ready, so this is not NO_WORK"
                 : prompt === "prose-exit"
                   ? "The 503 retry test now passes; the not logged in banner is fixed."
-                  : "Done: created hello.txt";
+                  : prompt === "add-dirs"
+                    ? `add-dirs ${JSON.stringify(addDirsSeen)}`
+                    : prompt === "sandbox"
+                      ? `settings ${settingsSeen ?? "none"}`
+                      : "Done: created hello.txt";
   out({
     type: "result",
     subtype: isError ? "error_during_execution" : "success",

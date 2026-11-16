@@ -5,6 +5,7 @@
 import type { EffortLevel, PermissionMode } from "../config/types.js";
 import type { FailureClassification } from "../observability/failure.js";
 import type { BillingType, RecordedCommand } from "../observability/run.js";
+import type { HarnessCapabilities } from "./harness.js";
 
 export interface ExecutionRequest {
   /** Working directory for the child process. Must already be validated. */
@@ -43,6 +44,12 @@ export interface ExecutionRequest {
    * (`DEFAULT_ENV_ALLOW` in child-env.ts). Everything else in our environment is dropped.
    */
   envPassthrough?: string[];
+  /**
+   * Run Bash inside Claude Code's native sandbox (`--settings` with `sandbox.enabled`, see
+   * sandbox.ts), reaching only `allowedDomains`. `weakerNetworkIsolation` adds
+   * `enableWeakerNetworkIsolation` (macOS TLS for `gh`). Absent = no `--settings` at all.
+   */
+  sandbox?: { allowedDomains: string[]; weakerNetworkIsolation?: boolean };
   timeoutMs?: number;
   /** Absolute path of the file that receives every raw event line. */
   logPath?: string;
@@ -81,6 +88,12 @@ export type ExecutionEvent =
    * At most once per run; the second process is kept whatever its init says.
    */
   | { type: "mcp_restart"; missing: string[]; mounted: string[]; pid: number | null; sessionId: string }
+  /**
+   * Claude Code's sandbox blocked a tool call (`tool_result_meta[].remedy.kind ==
+   * "sandbox_violation"`; network blocks only, a blocked file write has no marker). `violations`
+   * are the lines of the result's `<sandbox_violations>` block, for display only.
+   */
+  | { type: "sandbox_violation"; toolUseId: string | null; violations: string[]; agentId: string | null }
   | { type: "parse_error"; line: string };
 
 export type SubagentStatus = "running" | "completed" | "failed" | "interrupted";
@@ -179,6 +192,8 @@ export interface ExecutionResult {
   costUsd: number | null;
   permissionDenials: number;
   deniedTools: DeniedTool[];
+  /** Tool calls Claude Code's sandbox blocked (`sandbox_violation` events). Executors that cannot tell leave it out. */
+  sandboxViolations?: number;
   /** Heuristic: the run stopped because the context window was exhausted. */
   contextExhausted: boolean;
   /**
@@ -205,10 +220,39 @@ export interface ExecutionHandle {
   cancel(): void;
 }
 
+/** What `RunManager` hands an adapter's `prepare` besides the request. */
+export interface PrepareContext {
+  /** Names of the skills the run's bundle holds (already in `request.addDirs`); empty when none. */
+  skills: string[];
+}
+
+/** What `prepare` adds: notes for the run's timeline. A refusal is a thrown Error, before any row exists. */
+export interface PrepareResult {
+  notes: string[];
+}
+
+/**
+ * One harness adapter (issue #445): an agent CLI behind the one run path. `RunManager` keeps the
+ * guards, budgets, transitions, log, diff and events; everything that names a CLI flag, a folder
+ * such as `.claude/` or an event type of one stream lives behind this interface.
+ */
 export interface Executor {
   readonly name: string;
+  /**
+   * The harness name agents select with `harness:` (`claude`). Optional only for test doubles
+   * written before #445: the registry takes an executor without one as the Claude harness.
+   */
+  readonly harness?: string;
+  /** What this adapter can honour; agent fields beyond it are refused (`assertAgentFitsHarness`). */
+  readonly capabilities?: HarnessCapabilities;
   /** Resolved binary path, for diagnostics and for recording in the Run. */
   readonly binary: string;
   version(): Promise<string>;
+  /**
+   * The adapter's own pre-flight checks and request additions, before the run row is written
+   * (Claude: the project agent of a link exists, required MCP servers, skills the project shadows).
+   * May mutate `request`. Throws to refuse the run.
+   */
+  prepare?(request: ExecutionRequest, context: PrepareContext): PrepareResult;
   execute(request: ExecutionRequest, onEvent?: (event: ExecutionEvent) => void): ExecutionHandle;
 }

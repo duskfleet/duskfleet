@@ -1,4 +1,5 @@
 import type { DatabaseSync } from "node:sqlite";
+import { DEFAULT_HARNESS } from "../config/types.js";
 import { capEventJson, DEFAULT_MAX_EVENT_BYTES } from "../execution/log-caps.js";
 import type { DeniedTool, RunMcpInfo, SubagentRecord, SubagentStatus, UsageByModel } from "../execution/types.js";
 import type { RunDiff } from "../git/diff.js";
@@ -73,6 +74,9 @@ interface RunRow {
   log_bytes?: number | null;
   log_sha256?: string | null;
   log_truncated?: number | null;
+  skills_bundle: string | null;
+  sandbox_violations?: number | null;
+  harness?: string | null;
 }
 
 function rowToRun(r: RunRow): Run {
@@ -107,6 +111,7 @@ function rowToRun(r: RunRow): Run {
     costUsd: r.cost_usd,
     permissionDenials: r.permission_denials,
     deniedTools: safeParse(r.denied_tools_json),
+    sandboxViolations: r.sandbox_violations ?? null,
     mcp: parseMcp(r.mcp_json),
     humanIntervention: r.human_intervention === 1,
     contextExhausted: r.context_exhausted === 1,
@@ -132,6 +137,8 @@ function rowToRun(r: RunRow): Run {
     logBytes: r.log_bytes ?? null,
     logSha256: r.log_sha256 ?? null,
     logTruncated: r.log_truncated === null || r.log_truncated === undefined ? null : r.log_truncated === 1,
+    skillsBundle: r.skills_bundle ?? null,
+    harness: r.harness ?? DEFAULT_HARNESS,
   };
 }
 
@@ -227,6 +234,7 @@ export type RunPatch = Partial<
     | "costUsd"
     | "permissionDenials"
     | "deniedTools"
+    | "sandboxViolations"
     | "mcp"
     | "humanIntervention"
     | "contextExhausted"
@@ -271,6 +279,7 @@ const PATCH_COLUMNS: Record<keyof RunPatch, string> = {
   costUsd: "cost_usd",
   permissionDenials: "permission_denials",
   deniedTools: "denied_tools_json",
+  sandboxViolations: "sandbox_violations",
   mcp: "mcp_json",
   humanIntervention: "human_intervention",
   contextExhausted: "context_exhausted",
@@ -341,8 +350,8 @@ export class RunRepository {
            cache_read_tokens, cache_creation_tokens, cost_usd, permission_denials, denied_tools_json, mcp_json, human_intervention,
            context_exhausted, retries, log_path, raw_result_json, schedule_id, owner, phases_json, review_reasons_json, resumed_from_run_id, kind,
            usage_by_model_json, billing_type, error_code, error_family, error_detail_json, agent_hash, claude_code_version,
-           last_event_at, continued_from_run_id, title, cost_status, max_budget_usd)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+           last_event_at, continued_from_run_id, title, cost_status, max_budget_usd, skills_bundle, harness)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         run.id,
@@ -397,6 +406,8 @@ export class RunRepository {
         run.title ?? null,
         run.costStatus ?? null,
         run.maxBudgetUsd ?? null,
+        run.skillsBundle ?? null,
+        run.harness ?? DEFAULT_HARNESS,
       );
   }
 
@@ -419,6 +430,26 @@ export class RunRepository {
          ORDER BY created_at DESC LIMIT 1`,
       )
       .get(scheduleId) as unknown as RunRow | undefined;
+    return row ? rowToRun(row) : null;
+  }
+
+  /**
+   * The newest run owned by a process on `host` that says something about the account's usage
+   * limit: one that failed on it (error_code provider_quota) or one that completed (the limit had
+   * lifted by then). Other failures prove nothing either way and are skipped. The host is matched
+   * in SQL on the owner `role@host:pid` (as `parseHolder` reads it), so other hosts' runs sharing
+   * the DB cannot hide this one's. NULL owners (older builds) never match.
+   */
+  lastQuotaSignalOnHost(host: string): Run | null {
+    const row = this.db
+      .prepare(
+        `SELECT * FROM runs
+         WHERE owner IS NOT NULL
+           AND substr(owner, instr(owner, '@') + 1, length(?) + 1) = ? || ':'
+           AND (status = 'completed' OR error_code = 'provider_quota')
+         ORDER BY created_at DESC, rowid DESC LIMIT 1`,
+      )
+      .get(host, host) as unknown as RunRow | undefined;
     return row ? rowToRun(row) : null;
   }
 
@@ -485,6 +516,15 @@ export class RunRepository {
   get(id: string): Run | null {
     const row = this.db.prepare("SELECT * FROM runs WHERE id = ?").get(id) as unknown as RunRow | undefined;
     return row ? rowToRun(row) : null;
+  }
+
+  /** Ids starting with `prefix` (the short ids lists show), at most `limit`. */
+  idsWithPrefix(prefix: string, limit = 2): string[] {
+    if (prefix === "") return [];
+    const rows = this.db
+      .prepare("SELECT id FROM runs WHERE substr(id, 1, length(?)) = ? ORDER BY created_at DESC LIMIT ?")
+      .all(prefix, prefix, limit) as unknown as { id: string }[];
+    return rows.map((r) => r.id);
   }
 
   list(filter: ListRunsFilter = {}): Run[] {

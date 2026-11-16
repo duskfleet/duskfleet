@@ -62,6 +62,7 @@ npm test               # packages/core/test, packages/mcp/test, then apps/web/te
 npm test -w @duskfleet/core   # core unit tests alone, under a second
 npm test -w @duskfleet/web    # dashboard helpers and component render tests (after npm run build), a few seconds
 npm run check          # everything CI runs, in the same order (hygiene, lint, build, pack, typecheck, tests)
+npm run up             # after a pull: install, build, install-service (restarts the service on the new build), then the dashboard
 ```
 
 ## Published packages
@@ -112,24 +113,26 @@ Re-running it is safe: an existing tag or release is kept, a published version i
   packages (`v0.1.0` and `"0.1.0"`) and fails before anything else otherwise, then runs `npm ci`,
   `npm run check`, `npm run build:web` and `npm run check:pack -- --require-web-build`, and
   publishes `duskfleet`, then `@duskfleet/web`, with `npm publish --provenance --access public`
-  from their package directories. The job authenticates with the `NPM_TOKEN` repository secret:
-  a granular access token with "Read and write (publish and stage)" on those two packages only
-  and "Bypass two-factor authentication" on, the only kind of token that can publish unattended,
-  90 days at most (recreate it when a release fails with E401 or E403). npm removes direct
-  publishing from such tokens in January 2027; the trusted publishing below is meant to have
-  taken over by then. Before each publish the same command runs as `npm publish --dry-run` and
-  the step fails if npm reports an auto-corrected manifest, whatever the tag's code says. A
-  version already on the registry is skipped, so re-running a release whose second package
-  failed finishes it. Provenance requires `id-token: write` and each `package.json` `repository`
-  naming this repository.
-
-  npm trusted publishing (OIDC) is configured too: both packages name this repository and
-  `release.yml` (the workflow that starts the run; publish.yml runs as a reusable workflow it
-  calls) as their trusted publisher, and npm tries that exchange before the token. The registry
-  refuses this repository's OIDC token with "package not found"
-  ([npm/cli#9969](https://github.com/npm/cli/issues/9969): GitHub's immutable `sub` claim,
-  forced on repositories created after 2026-07-15, is not understood by the registry yet). When
-  that is fixed, the token can be deleted and nothing else changes.
+  from their package directories. The job authenticates with **npm trusted publishing (OIDC)**,
+  the path 0.2.0 shipped through on 2026-11-05: on npmjs.com each package names this repository
+  and `release.yml` (the workflow that starts the run; publish.yml runs as a reusable workflow it
+  calls) as its trusted publisher, with the environment left empty and **"Allow npm publish"
+  ticked** (without it the publisher may only stage). Two npm settings decide whether that
+  publish goes live or waits: the trusted publisher configuration **expires** (npm showed the
+  0.1.0-era one as "Expired" four days later; a release that fails with `OIDC token exchange
+  error - package not found` means delete it and create it again), and the package's
+  **Publishing access must be "Require two-factor authentication or a granular access token with
+  bypass 2fa enabled"**: with the "recommended" option (disallow bypass tokens) the registry
+  accepts an OIDC publish with `202` but keeps it **staged** until someone approves it with 2FA,
+  and a later `npm publish` of the same number fails with "previously staged version". The
+  `NPM_TOKEN` secret (a granular token with "Read and write (publish and stage)" on the two
+  packages and "Bypass two-factor authentication", 90 days at most) is only the fallback npm
+  reaches when the OIDC exchange fails; it can be deleted once it has stayed unused, and npm
+  removes direct publishing from such tokens in January 2027 anyway. Before each publish the
+  same command runs as `npm publish --dry-run` and the step fails if npm reports an
+  auto-corrected manifest, whatever the tag's code says. A version already on the registry is
+  skipped, so re-running a release whose second package failed finishes it. Provenance requires
+  `id-token: write` and each `package.json` `repository` naming this repository.
 - `publish dry-run`, on every pull request: the same steps without publishing, ending in
   `npm publish --dry-run` for both packages, so a broken pack shows up before the tag. Instead of
   the tag guard it checks that the two versions are equal. Between releases the manifest still
@@ -285,6 +288,20 @@ local run-data handling, and recommended configuration.
   checks all of it, and fails when `config/agents` is empty.
 - **Schema change**: append a migration in `packages/core/src/storage/db.ts`; never edit an existing one. Then pin its digest in `packages/mcp/test/migrations.test.js` (the failing test prints it).
 - **Run status changes**: only `RunManager`, through `assertTransition`.
+- **Adding a harness** (a second agent CLI, issue #445; the design is [Harnesses](harnesses.md)):
+  an adapter PR follows this checklist, fixtures first, because a CLI's stream is the contract.
+  1. Verify every flag against the CLI's `--help`.
+  2. Capture real runs as fixtures: an edit, a denial, a failure.
+  3. Write the fake CLI under `packages/mcp/test/` that replays them (tests never launch a real CLI;
+     `fake-harness.js` is the in-process shape of an adapter).
+  4. Declare the capabilities honestly (`HarnessCapabilities`, `packages/core/src/execution/harness.ts`):
+     `false` is a valid answer, and a field behind it is refused, never approximated.
+  5. Implement `Executor` (`harness`, `capabilities`, `binary`, `version()`, `prepare()`, `execute()`):
+     argv, pre-flight, the stream parser and how a run ends. Nothing that names the CLI's flags,
+     folders or event types goes into `RunManager`; it never contains `if (harness === ...)`.
+  6. Register it in `packages/mcp/src/bootstrap.ts` (the `HarnessRegistry`); `doctor` then reports it.
+  7. Docs: [Agents](agents.md#harness), this page, [Security](security.md).
+  8. One real run on the cheapest model, its cost stated in the PR.
 - **New dashboard view**: add a route under `apps/web/app/` and a query in `apps/web/lib/data.ts`.
 - **Evals**: implement the `Evaluator` interface in `packages/core/src/evals/types.ts`; the run pipeline does not need to change.
   An evaluator returns `evals.details` in the schema of `packages/core/src/evals/score.ts` (version 1:
@@ -320,8 +337,9 @@ local run-data handling, and recommended configuration.
   | `--max-budget-usd <amount>` | Hard cost cap per run |
   | `--effort <level>` | Optional per-agent effort |
   | `--strict-mcp-config` | Isolate the child from user-level MCP servers (default on, configurable) |
-  | `--add-dir <dir>` | `add_dirs`: extra directories the run may touch |
+  | `--add-dir <dir>` | `add_dirs`: extra directories the run may touch. Also delivers `skills:`: Claude Code 2.1.318 lists the skills in `<dir>/.claude/skills/` of an added directory (verified 2026-11-04 with `--setting-sources project,local`; passing the `.claude/skills` folder itself lists nothing), so the run gets the bundle directory that contains `.claude/skills/` |
   | `--setting-sources <list>` | Restrict which settings files the child loads (`claude.setting_sources`) |
+  | `--settings <json>` | Only for a `sandbox: true` agent: `{"sandbox":{"enabled":true,"allowUnsandboxedCommands":false,"network":{"allowedDomains":[...]}}}`. Verified with real haiku runs on 2.1.325 (2026-11-16, issue #447): it turns the sandbox on next to `--setting-sources project,local` and wins over the project's `.claude/settings.json` in both directions; `sandbox.network.allowedDomains` is the network allow-list. See [security](security.md#opt-in-sandbox-sandbox-true) |
   | `-r, --resume <id>` | Passed instead of `--session-id` when a pass continues a session: the wrap-up pass after a budget exhaustion and a `resume_once` retry; also surfaced as the "resume this run" command |
 
   `duskfleet mcp register --target claude-code` runs one more command, `claude mcp add`, with

@@ -106,6 +106,8 @@ npx duskfleet runs
 npx duskfleet dashboard        # installs the dashboard on first use, opens http://localhost:4777
 ```
 
+`run` and `runs` print a human view; scripts add `--json` ([CLI output](docs/cli.md#output)).
+
 Before running agents unattended, review the [security boundaries](docs/security.md) and set
 [`allowed_project_roots`](docs/configuration.md#configduskfleetyaml) to the project directories you intend to expose.
 
@@ -144,22 +146,76 @@ the clone's `data/` (git-ignored). Setup, rules and checks: [CONTRIBUTING.md](CO
 **Before**: `claude -p` started by hand or from a crontab, the output in a terminal, and no
 record of what happened overnight.
 
-**After**: agents are Markdown files ([Agents](docs/agents.md)); cron schedules skip a tick when
-the agent is busy, never queue and never catch up ([Schedules](docs/schedules.md#policies));
+**After**: agents are Markdown files ([Agents](docs/agents.md)); cron schedules keep a busy tick as
+one pending fire, retried until the agent is free or the next occurrence comes, and never catch
+up after sleep ([Schedules](docs/schedules.md#busy-ticks-one-deferred-fire));
 every event, tool call, permission denial, token and dollar lands in SQLite plus a JSONL log per
 run ([What a run records](docs/cli.md#what-a-run-records)); and in the dashboard a run that hit a
 permission denial is "needs review", never green ([Needs review](docs/dashboard.md#needs-review)).
 
 ## How it works
 
-<picture>
-  <source media="(max-width: 767px) and (prefers-color-scheme: dark)" srcset="docs/assets/how-a-run-works-mobile-dark.png">
-  <source media="(max-width: 767px)" srcset="docs/assets/how-a-run-works-mobile-light.png">
-  <source media="(prefers-color-scheme: dark)" srcset="docs/assets/how-a-run-works-dark.png">
-  <img alt="How a run works" src="docs/assets/how-a-run-works-light.png" width="100%">
-</picture>
+Every run starts as a call to `RunManager.startRun`, from a chat, the CLI or a cron schedule.
+The child is Claude Code in your project; everything it does is recorded.
 
-On a phone? Open the stacked version ([dark](docs/assets/how-a-run-works-mobile-dark.png) / [light](docs/assets/how-a-run-works-mobile-light.png)).
+```mermaid
+%%{init: {"flowchart": {"wrappingWidth": 420}}}%%
+flowchart TB
+    subgraph entry ["1 · Entry points"]
+        chat["Chat host<br/>run_agent over MCP"]
+        cli["CLI<br/>duskfleet run"]
+        sched["Scheduler tick<br/>due cron"]
+    end
+
+    subgraph rm ["2 · RunManager"]
+        guards["Concurrency guards: busy is refused, a scheduled tick is deferred, never queued<br/>pass: run row recorded (pending)"]
+    end
+
+    subgraph child ["3 · Claude Code child"]
+        claude["claude -p --output-format stream-json<br/>in the target project, allow-lists only, no prompts"]
+    end
+
+    subgraph rec ["4 · What gets recorded, from the stream-json events"]
+        db[("SQLite<br/>runs, run_agents")]
+        logs["data/logs/<br/>raw stream, patch"]
+    end
+
+    chat --> guards
+    cli --> guards
+    sched --> guards
+    guards --> claude
+    claude --> db
+    claude --> logs
+```
+
+Whatever the entry point, the request lands in `RunManager`, the only thing that creates runs and
+changes their status. Its concurrency guards run first (one run per project directory and one per
+agent by default): a busy guard refuses, nothing is ever queued, and a schedule keeps that tick as its
+one pending fire until the next cron occurrence. When the guards pass the run row is recorded and the
+executor spawns Claude Code in the target project with the agent's allow-lists, model and budget, no
+permission prompts and no MCP servers unless the agent opts in. Every JSON event the child prints is
+parsed as it arrives: the row in SQLite holds status, timings, tokens, cost, tool calls, permission
+denials and the termination reason, one `run_agents` row per subagent, while the raw stream and the
+patch of what changed land in `data/logs/`. The dashboard only reads that database.
+
+A run moves through these states; the transitions below are the only ones allowed:
+
+```mermaid
+stateDiagram-v2
+    direction LR
+    [*] --> pending : startRun, guards pass
+    pending --> running : claude spawned
+    pending --> failed : spawn error / orphaned
+    running --> completed : result event
+    running --> cancelled : cancel_run
+    running --> failed : error / non-zero exit / orphaned
+    completed --> [*]
+    cancelled --> [*]
+    failed --> [*]
+```
+
+"Needs review" is not a status but how the dashboard shows a completed run that hit a permission
+denial, a timeout, an exhausted budget or did nothing: amber, never plain green.
 
 You describe *what should happen* in `config/` (agents, projects) and in schedules. Duskfleet
 runs `claude -p` unattended with a target project as working directory, owns the unattended
@@ -172,10 +228,11 @@ with diagrams: [How it works](docs/how-it-works.md).
 |---|---|
 | **Agents** | Markdown files: a persona of your own, or a link to an agent the project already defines in `.claude/agents/`. [Agents](docs/agents.md) |
 | **Runs** | Every event, tool call, permission denial, token and dollar, in SQLite and a JSONL log per run. [CLI](docs/cli.md) |
-| **Schedules** | Cron schedules that skip when the agent is busy, never queue and never catch up. [Schedules](docs/schedules.md) |
+| **Schedules** | Cron schedules that defer a busy tick as one pending fire, retried until the agent is free or the next occurrence; no queue, no catch-up after sleep. [Schedules](docs/schedules.md) |
 | **Dashboard** | Runs with cost, timeline and issues; a run that hit a permission denial is "needs review", never green. [Dashboard](docs/dashboard.md) |
 | **MCP tools** | 19 tools to create agents, start and inspect runs and manage schedules from a chat. [MCP server](docs/mcp-server.md) |
 | **CLI** | The same operations from a terminal, plus `serve` and `install-service` for the scheduler. [CLI](docs/cli.md) |
+| **Harnesses** | One run path, one adapter per agent CLI: Claude Code today, Codex and Copilot planned; an agent field a CLI cannot honour is refused, never approximated. [Harnesses](docs/harnesses.md) |
 
 ## Commands
 

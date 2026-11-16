@@ -40,7 +40,7 @@
 //
 // Then the gate re-reads the head (an approval only ever lands on the reviewed SHA), approves
 // that SHA, enables auto-merge (squash; the repository deletes merged branches) and, when the
-// PR is behind its base, updates the branch: the approval survives that merge commit, since the
+// PR is behind its base, updates the branch (with --update-branch only): the approval survives that merge commit, since the
 // ruleset does not dismiss stale reviews. The merge request carries --match-head-commit, so it
 // binds to the reviewed SHA. One `[pr-gate]` comment per head says so. A PR that already has
 // auto-merge on is re-verified every run (label, approval of its head or of the head an
@@ -122,17 +122,23 @@ export function isDependabotPr(pr) {
   );
 }
 
-const VERSION = /^v?(\d+)(?:\.(\d+))?(?:\.(\d+))?$/;
+// One to three numeric parts (GitHub Actions bumps are written "4 to 7"); a missing part is 0.
+// Pre-release and build parts are captured to refuse them in bumpLevel.
+const VERSION =
+  /^v?(0|[1-9]\d*)(?:\.(0|[1-9]\d*))?(?:\.(0|[1-9]\d*))?(?:-((?:0|[1-9]\d*|\d*[A-Za-z-][0-9A-Za-z-]*)(?:\.(?:0|[1-9]\d*|\d*[A-Za-z-][0-9A-Za-z-]*))*))?(?:\+([0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?$/;
 
-// "patch", "minor", "major" or "unknown" (a SHA, a pre-release, anything not plain semver).
+// "patch", "minor", "major" or "unknown" (a SHA, pre-release, non-increasing or invalid version).
 // Under the caret rule of npm, 0.x moves its breaking changes one place right: a 0.x minor and
 // a 0.0.x patch count as major.
 export function bumpLevel(from, to) {
   const a = VERSION.exec(from ?? "");
   const b = VERSION.exec(to ?? "");
   if (!a || !b) return "unknown";
-  const [aMajor, aMinor, aPatch] = a.slice(1).map((part) => Number(part ?? 0));
-  const [bMajor, bMinor, bPatch] = b.slice(1).map((part) => Number(part ?? 0));
+  if (a[4] || b[4]) return "unknown";
+  const [aMajor, aMinor, aPatch] = a.slice(1, 4).map((part) => Number(part ?? 0));
+  const [bMajor, bMinor, bPatch] = b.slice(1, 4).map((part) => Number(part ?? 0));
+  const comparison = [bMajor - aMajor, bMinor - aMinor, bPatch - aPatch].find((delta) => delta !== 0) ?? 0;
+  if (comparison <= 0) return "unknown";
   if (aMajor !== bMajor) return "major";
   if (aMajor === 0 && aMinor !== bMinor) return "major";
   if (aMajor === 0 && aMinor === 0 && aPatch !== bPatch) return "major";
@@ -454,10 +460,15 @@ function ownLogin() {
   return gateLogin;
 }
 
-// A clean Dependabot PR behind its base gets the update-branch (the ruleset requires an
-// up-to-date head). True when it was (or, in a dry run, would be) requested.
+// A Dependabot PR behind its base gets the update-branch (the ruleset requires an up-to-date
+// head), only with --update-branch: the token that can push. True when it was (or, in a dry run,
+// would be) requested.
 function keepCurrent(pr, mergeStateStatus) {
   if (mergeStateStatus !== "BEHIND") return false;
+  if (!updateBranch) {
+    console.log(`PR #${pr.number}: behind ${pr.baseRefName}, branch update requires --update-branch`);
+    return false;
+  }
   console.log(`PR #${pr.number}: behind ${pr.baseRefName}, updating the branch`);
   if (!dryRun) gh(["api", "-X", "PUT", `repos/{owner}/{repo}/pulls/${pr.number}/update-branch`]);
   return true;
@@ -550,6 +561,17 @@ function dependabot(pr) {
   const { mergeable, mergeStateStatus } = mergeState(pr);
   if (mergeable !== "MERGEABLE") {
     console.log(`PR #${pr.number}: Dependabot, merge state ${mergeable}, next run`);
+    return "skipped";
+  }
+  // Auto-merge needs --auto-merge (the PR_GATE_TOKEN run), and a PR behind its base needs
+  // --update-branch to be kept current. Without them the preview and the real run both leave the
+  // PR alone: no approval, no auto-merge that nothing then keeps current.
+  if (!autoMerge) {
+    console.log(`PR #${pr.number}: approved, auto-merge needs the PR_GATE_TOKEN run (--auto-merge), left alone`);
+    return "skipped";
+  }
+  if (mergeStateStatus === "BEHIND" && !updateBranch) {
+    console.log(`PR #${pr.number}: approved but behind ${pr.baseRefName}; branch update requires --update-branch`);
     return "skipped";
   }
   console.log(`PR #${pr.number}: Dependabot ${decision.why}: approve ${pr.headRefOid.slice(0, 7)}, enable auto-merge`);

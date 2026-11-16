@@ -170,7 +170,10 @@ function main() {
       }
       const command = args[0] === "agents" ? `agents ${args[1]}` : args[0];
       process.stdout.write(`run   ${line}\n`);
-      const result = spawnSync(process.execPath, [cliEntry, ...args], {
+      // The README shows what a human types (the human view); this script parses the record, so it
+      // adds the global --json to the steps it reads (taken anywhere before a `--`).
+      const parsed = command === "run" || command === "runs";
+      const result = spawnSync(process.execPath, [cliEntry, ...(parsed ? ["--json"] : []), ...args], {
         cwd: root,
         env,
         encoding: "utf8",

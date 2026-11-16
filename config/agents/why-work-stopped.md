@@ -55,7 +55,7 @@ Tables you need (columns that matter):
 - `schedules`: `id`, `name`, `agent_id`, `project_id`, `cron`, `time_zone`, `enabled`,
   `paused_reason`, `auto_paused_at`, `last_outcome`, `last_error`, `last_run_id`, `fires`, `skips`.
 - `schedule_firings`: `schedule_id`, `fired_at`, `outcome` (`started`, `resumed`,
-  `skipped_busy`, `skipped_daily_cap`, `skipped_budget`, `skipped_gate`, `skipped_disabled`,
+  `skipped_busy`, `skipped_daily_cap`, `skipped_budget`, `skipped_quota`, `skipped_gate`, `skipped_disabled`,
   `auto_paused`, `error`), `run_id`, `error` (gate reason, budget refusal, pause reason or
   error text).
 - `budgets`: `scope` (`global`, `agent`, `project`), `scope_id` (agent or project id, NULL for
@@ -103,6 +103,9 @@ Use what the database stores; do not recompute needs-review yourself.
   Find the budget in `budgets`, sum `cost_usd` of the scope's runs since the first of the month
   (UTC), name the runs that spent most, and suggest raising `amount_usd`, setting `hard_stop`
   to 0, or a cheaper model, then resuming the schedules.
+- **skipped_quota**: the account was on its usage limit (`error_code = 'provider_quota'` on the
+  last run of that host, its reset time still ahead): an outage, not the agent's fault. Say
+  when it reset and whether the first tick after it fired.
 - **skipped_daily_cap**, **skipped_gate**, **error**: quote the firing's `error` text and
   explain it.
 

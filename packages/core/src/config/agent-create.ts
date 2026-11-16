@@ -4,16 +4,20 @@
  * *before* a file lands on disk, write it, reload the config and roll the file back when it no
  * longer loads. One bad agent file would otherwise break every later config reload.
  */
+
+import { assertAgentFitsHarness, builtinHarnesses, type HarnessLookup } from "../execution/harness.js";
 import {
   type AgentKind,
   type AgentSpec,
   agentSpecSchema,
   assertAgentKind,
+  assertSandboxSpec,
   assertWrapUpReserve,
   deleteAgentFile,
   writeAgentFile,
 } from "./agent-files.js";
 import { assertAgentSpecClean } from "./agent-lint.js";
+import { assertSkillsAvailable } from "./skills.js";
 import type { AgentDefinition, DuskFleetConfig } from "./types.js";
 
 /** Validate what the loader would reject, *before* a file lands on disk and breaks every later config load. */
@@ -25,10 +29,27 @@ export function assertSpecLoadable(spec: AgentSpec, config: DuskFleetConfig): vo
   }
 }
 
-/** The kind combination (`assertAgentKind`) and the wrap-up reserve cap, against the current config. */
-export function assertAgentWritable(kind: AgentKind, spec: AgentSpec, config: DuskFleetConfig): void {
+/**
+ * The kind combination (`assertAgentKind`), the wrap-up reserve cap and the declared skills (each
+ * one found in data/skills or config/skills, its files clean), against the current config.
+ * `storedSkills` (update only) are the names the agent file already declares: they are not
+ * re-checked, so a skill deleted since the agent was written (tolerated by the loader and at run
+ * start) does not make an unrelated update fail. Only the names new against the stored spec are.
+ */
+export function assertAgentWritable(
+  kind: AgentKind,
+  spec: AgentSpec,
+  config: DuskFleetConfig,
+  storedSkills: readonly string[] = [],
+  harnesses: HarnessLookup = builtinHarnesses,
+): void {
+  // The harness first: an unknown one, or a field it cannot honour, is refused with the field named.
+  assertAgentFitsHarness(spec, harnesses);
   assertAgentKind(kind, spec, (id) => config.projects.get(id)?.path ?? null);
   assertWrapUpReserve(spec, config.claude.defaultMaxBudgetUsd);
+  assertSandboxSpec(spec);
+  const added = (spec.skills ?? []).filter((name) => !storedSkills.includes(name));
+  if (added.length) assertSkillsAvailable(added, config);
 }
 
 /**
@@ -81,8 +102,9 @@ export function createAgentFromFields(
   fields: unknown,
   config: DuskFleetConfig,
   reload: () => DuskFleetConfig,
+  harnesses: HarnessLookup = builtinHarnesses,
 ): AgentDefinition {
   const spec = assertAgentSpecClean(agentSpecSchema.parse(fields));
-  assertAgentWritable(kind, spec, config);
+  assertAgentWritable(kind, spec, config, [], harnesses);
   return writeAgentAndVerify(config, spec, reload);
 }

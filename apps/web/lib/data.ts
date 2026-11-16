@@ -3,8 +3,9 @@
  * data/duskfleet.db the MCP server uses. The dashboard never mutates runs;
  * cancelling goes through the MCP server (cancel_run) or the CLI. Its writes
  * are server actions on user agent files (app/agents/actions.ts), on
- * schedule rows (app/schedules/actions.ts) and on config/duskfleet.yaml
- * (app/settings/actions.ts), all on the core API.
+ * schedule rows (app/schedules/actions.ts), on config/duskfleet.yaml
+ * (app/settings/actions.ts) and on the Alerts "seen" marks (app/attention/actions.ts),
+ * all on the core API.
  */
 import "server-only";
 import { existsSync, readFileSync } from "node:fs";
@@ -12,6 +13,7 @@ import { homedir } from "node:os";
 import path from "node:path";
 import type { DatabaseSync } from "node:sqlite";
 import {
+  AttentionAckRepository,
   type BudgetStatus,
   budgetForScope,
   budgetPlan,
@@ -55,8 +57,15 @@ import {
   utcDayStart,
   utcMonthStart,
 } from "@duskfleet/core";
+import {
+  ATTENTION_WINDOW_MS,
+  type AttentionSection,
+  type AttentionView,
+  applySeen,
+  attentionSections,
+} from "./attention";
 import { cliCommand, detectInstall, type Install, usableMcpEntry } from "./cli";
-import { ACTIVE_SQL, ACTIVE_STATUSES } from "./running";
+import { ACTIVE_SQL, ACTIVE_STATUSES, RUNNING_COUNT_SQL } from "./running";
 import { costModel, listScoped, scopeList } from "./scope";
 import { mergeSeries } from "./trends";
 
@@ -306,6 +315,12 @@ export function activeRuns(filter: Omit<RunsFilter, "status"> = {}): RunWithProj
     .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
     .slice(0, limit);
 }
+
+/** How many runs are running now, across every project: the nav's Runs badge (same count as the Runs page's KPI). */
+export function runningCount(): number {
+  return (services().db.prepare(RUNNING_COUNT_SQL).get() as { n: number }).n;
+}
+
 const BUCKET_SQL: Record<RunBucket, string> = {
   running: `(${ACTIVE_SQL})`,
   review: `(NOT ${ACTIVE_SQL} AND ${NEEDS_REVIEW_SQL})`,
@@ -1012,6 +1027,60 @@ export function scheduleFiringsWithRuns(ids: readonly string[], limit = 10) {
 /** Firing counts over the last `days` days, across every schedule. */
 export function firingTotals(days = 7): { started: number; skippedBusy: number } {
   return services().schedules.firingTotals(new Date(Date.now() - days * 24 * 3600_000).toISOString());
+}
+
+/** Most runs the attention window reads (48 h of a busy fleet stays far below it). */
+const ATTENTION_RUN_LIMIT = 500;
+/**
+ * Firings read per schedule for the busy streak. Under `scheduler.defer_busy` each
+ * `skipped_busy` row comes with a `deferred` one, so a streak counts up to about half of this.
+ */
+const ATTENTION_FIRINGS = 20;
+
+/**
+ * The /attention sections (lib/attention.ts): ended real runs of the window, every schedule with
+ * its last firings, every budget with its status. A pure read; the nav badge counts the same items.
+ */
+export function attention(now = Date.now()): AttentionSection[] {
+  const { db, runs, schedules } = services();
+  const since = new Date(now - ATTENTION_WINDOW_MS).toISOString();
+  const ids = db
+    .prepare(
+      `SELECT id FROM runs WHERE kind = 'run' AND NOT ${ACTIVE_SQL} AND COALESCE(ended_at, created_at) >= ?
+       ORDER BY COALESCE(ended_at, created_at) DESC LIMIT ?`,
+    )
+    .all(since, ATTENTION_RUN_LIMIT) as Array<{ id: string }>;
+  const label = projectLabeller();
+  const list = ids
+    .map((r) => runs.get(r.id))
+    .filter((r): r is Run => r !== null)
+    .map((r) => ({ ...r, projectLabel: label(r) }));
+  const date = new Date(now);
+  const scheduleRows = schedules.list().map((s) => {
+    let theoreticalNextAt: string | null = null;
+    try {
+      theoreticalNextAt = nextFire(parseCron(s.cron), date, s.timeZone)?.toISOString() ?? null;
+    } catch {
+      // an unparsable cron has no next fire
+    }
+    return { ...s, theoreticalNextAt, firings: schedules.firings(s.id, ATTENTION_FIRINGS) };
+  });
+  return attentionSections({
+    now,
+    runs: list,
+    schedules: scheduleRows,
+    budgets: budgetStatuses(runs.budgets, config()),
+  });
+}
+
+/** The "seen" marks of the Alerts items (migration 29); written only by app/attention/actions.ts. */
+export function attentionAcks(): AttentionAckRepository {
+  return new AttentionAckRepository(services().db);
+}
+
+/** The /attention items split into unseen sections and the Seen group; the nav badge counts the unseen. */
+export function attentionView(now = Date.now()): AttentionView {
+  return applySeen(attention(now), attentionAcks().list());
 }
 
 export function schedulerLease() {

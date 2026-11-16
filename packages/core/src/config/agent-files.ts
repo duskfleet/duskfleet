@@ -17,7 +17,15 @@ import path from "node:path";
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 import { z } from "zod";
 import { ENV_PASSTHROUGH_PATTERN } from "../execution/child-env.js";
-import { type AgentDefinition, EFFORT_LEVELS, ON_FAILURE_POLICIES, PERMISSION_MODES } from "./types.js";
+import { SANDBOX_DOMAIN_MESSAGE, SANDBOX_DOMAIN_PATTERN } from "../execution/sandbox.js";
+import { SKILL_NAME_MESSAGE, SKILL_NAME_PATTERN } from "./skills.js";
+import {
+  type AgentDefinition,
+  DEFAULT_HARNESS,
+  EFFORT_LEVELS,
+  ON_FAILURE_POLICIES,
+  PERMISSION_MODES,
+} from "./types.js";
 
 export const AGENT_ID_PATTERN = /^[a-z0-9][a-z0-9-_]*$/;
 
@@ -45,6 +53,20 @@ export const envPassthroughSchema = z.array(
     .regex(ENV_PASSTHROUGH_PATTERN, "env_passthrough entries are variable names or PREFIX_* (letters, digits, _)"),
 );
 
+/** `skills:` (agent frontmatter): names of Duskfleet skills, resolved in data/skills then config/skills. */
+export const skillsSchema = z.array(z.string().regex(SKILL_NAME_PATTERN, SKILL_NAME_MESSAGE));
+
+/** `sandbox_allowed_domains:` (agent frontmatter): exact host names a sandboxed run may reach. */
+export const sandboxAllowedDomainsSchema = z.array(z.string().regex(SANDBOX_DOMAIN_PATTERN, SANDBOX_DOMAIN_MESSAGE));
+
+/**
+ * `harness:` (agent frontmatter): a harness name. Whether an executor is registered under it is
+ * checked on create / update and at run start (`assertAgentFitsHarness`), never on load.
+ */
+export const harnessNameSchema = z
+  .string()
+  .regex(/^[a-z0-9][a-z0-9-_]*$/, "harness must be lowercase letters, digits, - or _ (e.g. claude)");
+
 /** Everything an agent file can contain, flattened (frontmatter + body). */
 export const agentSpecSchema = z.object({
   id: z.string().regex(AGENT_ID_PATTERN, "agent id must be lowercase letters, digits, - or _"),
@@ -69,6 +91,11 @@ export const agentSpecSchema = z.object({
   max_daily_runs: maxDailyRunsSchema.optional(),
   max_daily_cost_usd: maxDailyCostUsdSchema.optional(),
   env_passthrough: envPassthroughSchema.optional(),
+  skills: skillsSchema.optional(),
+  sandbox: z.boolean().optional(),
+  sandbox_allowed_domains: sandboxAllowedDomainsSchema.optional(),
+  sandbox_weaker_network_isolation: z.boolean().optional(),
+  harness: harnessNameSchema.optional(),
   system_prompt: z.string().default(""),
 });
 export type AgentSpec = z.infer<typeof agentSpecSchema>;
@@ -128,7 +155,34 @@ export function agentToSpec(a: AgentDefinition): AgentSpec {
   if (a.maxDailyRuns !== undefined) spec.max_daily_runs = a.maxDailyRuns;
   if (a.maxDailyCostUsd !== undefined) spec.max_daily_cost_usd = a.maxDailyCostUsd;
   if (a.envPassthrough !== undefined) spec.env_passthrough = a.envPassthrough;
+  if (a.skills !== undefined) spec.skills = a.skills;
+  if (a.sandbox !== undefined) spec.sandbox = a.sandbox;
+  if (a.sandboxAllowedDomains !== undefined) spec.sandbox_allowed_domains = a.sandboxAllowedDomains;
+  if (a.sandboxWeakerNetworkIsolation !== undefined)
+    spec.sandbox_weaker_network_isolation = a.sandboxWeakerNetworkIsolation;
+  if (a.harness !== undefined) spec.harness = a.harness;
   return spec;
+}
+
+/**
+ * `sandbox_allowed_domains` only means something with `sandbox: true`: without it the run has no
+ * sandbox and every host is reachable, so a list there would read as a restriction that is not
+ * applied. Create / update refuse it. Same for `sandbox_weaker_network_isolation`: it loosens a
+ * sandbox that would not exist.
+ */
+export function assertSandboxSpec(
+  spec: Pick<AgentSpec, "sandbox" | "sandbox_allowed_domains" | "sandbox_weaker_network_isolation">,
+): void {
+  if (spec.sandbox_allowed_domains?.length && spec.sandbox !== true) {
+    throw new Error(
+      "sandbox_allowed_domains needs sandbox: true: without the sandbox the run can reach every host, so the list would restrict nothing.",
+    );
+  }
+  if (spec.sandbox_weaker_network_isolation === true && spec.sandbox !== true) {
+    throw new Error(
+      "sandbox_weaker_network_isolation needs sandbox: true: it loosens the sandbox's network isolation, and without the sandbox there is none.",
+    );
+  }
 }
 
 /** A Claude Code agent defined by a project in `.claude/agents/<name>.md`. */
@@ -205,6 +259,9 @@ export function projectAgentDefinitionHash(projectPath: string, name: string): s
  */
 export function agentDefinitionHash(agent: AgentDefinition, projectPath: string): string {
   const { source: _source, sourcePath: _sourcePath, ...spec } = agent;
+  // An explicit `harness: claude` is the same agent as no harness line: same hash, so a
+  // continuation (continueMismatch) still resumes the session of an existing agent.
+  if (spec.harness === DEFAULT_HARNESS) delete spec.harness;
   const h = createHash("sha256").update(stableJson(spec));
   if (agent.claudeAgent) {
     h.update("\0");

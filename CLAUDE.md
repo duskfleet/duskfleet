@@ -24,6 +24,7 @@ npm run cli -- serve  # long-running scheduler process; the MCP server also tick
 npm run cli -- install-service [--print] [--no-keep-awake] | uninstall-service   # register `serve` with launchd / systemd --user / Task Scheduler (macOS: under caffeinate)
 npm run cli -- run --project <project id or abs path> --agent <agent id> --model haiku -- "task"
 npm run web          # Next.js dashboard, http://localhost:4777
+npm run up           # install, build, install-service (restarts the service), then the dashboard: one command after a pull
 npm run check        # what CI runs, same order: check:public, lint (biome ci), build, check:docs, check:quickstart, check:pack, typecheck, test
 npm run check:quickstart  # replays the README Quick start's `npm run cli --` lines against fake-claude.js (after build)
 npm run lint:fix     # Biome: format + safe fixes
@@ -58,7 +59,9 @@ npm workspaces, one `config/` and one SQLite database shared by three deliverabl
   `updateSchedule` / `requestRun`; run now only stamps `run_requested_at`, the lease holder
   fires it on its next tick) and on the editable keys of `config/duskfleet.yaml`
   (`app/settings/actions.ts`, through core's `writeGlobalFile`: comments kept, rolled back when
-  `loadConfig` refuses the result; `scheduler.enabled` only through its own action). No auth,
+  `loadConfig` refuses the result; `scheduler.enabled` only through its own action) and on the
+  Alerts "seen" marks (`app/attention/actions.ts`, `attention_acks`, migration 29, through core's
+  `AttentionAckRepository`; login/quota and spent hard-stop items are refused). No auth,
   localhost only.
 - `config/`: `duskfleet.yaml`, `agents/*.md` (where a checkout may commit agents, "builtin":
   YAML frontmatter + system prompt body; only specialised patterns here, never a starter or
@@ -70,6 +73,11 @@ npm workspaces, one `config/` and one SQLite database shared by three deliverabl
 - `data/`: `duskfleet.db`, `logs/<run_id>.jsonl` and `agents/*.md` (user agents written by
   `create_agent` or the CLI's `agents create`; same id as a builtin overrides it). Git-ignored runtime state. Code must
   never write into `config/agents`; agent file I/O lives in `core/src/config/agent-files.ts`.
+- Skills (`skills:` in agent frontmatter, `core/src/config/skills.ts`): `data/skills/<name>/`
+  (private, git-ignored) wins over `config/skills/<name>/` (committable skills of a *user's own*
+  checkout). The skills this repo uses to develop itself never go into `config/skills/`: they
+  stay private, in the git-ignored `data/skills/` (today `.claude/skills/`), same rule as our
+  agents. Neither folder is ever shipped in the npm packages.
 - `playground/`: ignored scratch directory for a local run target when trying things out.
   Not part of the repo; register it in the private `data/projects.yaml` if needed.
 - `notes/`: private, never committed (`.gitignore`, like `.obsidian/`). Nothing in `notes/` may
@@ -95,6 +103,11 @@ npm workspaces, one `config/` and one SQLite database shared by three deliverabl
   Auto-pause (`autoPauseReason`, migration 16): before a scheduled fire, the last
   `scheduler.auto_pause_after` ended runs all empty (0 tool calls) or needs review = pause with
   `paused_reason`, outcome `auto_paused`; resume clears it, `auto_paused_at` bounds the next streak.
+  `provider_quota` runs with a `retryNotBefore` are left out of the streak (`recentEndedRuns`): an
+  account outage is not the agent's fault, and `skipped_quota` covers them; every other failure
+  counts (nothing else stops it). A scheduled fire while the last `provider_quota` run on this host
+  has a `retryNotBefore` still ahead, with no completed run on this host after it, is `skipped_quota`
+  (`RunManager.quotaResetAt`, host matched in SQL), not deferred.
   `scheduler.auto_pause: false` (read every tick) skips the check and keeps the threshold.
   Continuing a session (`run_agent { resume_run_id }`, a schedule's `continue`, migration 23) is
   `continued_from_run_id`, never `resumed_from_run_id` (that one is the single `resume_once` retry,
@@ -198,6 +211,18 @@ npm workspaces, one `config/` and one SQLite database shared by three deliverabl
   `SubagentRecord` per Agent call; `RunManager` writes them on `subagent_start` / `subagent_end`
   and marks the open ones `interrupted` when the run ends. Per-message `output_tokens` of nested
   lines undercount; use `totalTokens`. Only main-session lines set the run's model and last text.
+- **Harnesses: one run path, one adapter per agent CLI** (`execution/harness.ts`, issue #445,
+  docs/harnesses.md): `harness:` in agent frontmatter (default `claude`, the only one shipped),
+  `runs.harness` (migration 31). `RunManager` picks the executor from the `HarnessRegistry` built in
+  `bootstrap.ts`; `assertAgentFitsHarness` refuses (create / update and `startRun`, field named) any
+  field the adapter's `capabilities` cannot honour, never drops or approximates it. CLI-specific
+  pre-flight (link's project agent, required MCP servers, shadowed skills) is the adapter's
+  `prepare`; `RunManager` never names a harness.
+- **Opt-in sandbox** (`sandbox: true`, `execution/sandbox.ts`, issue #447): the only `--settings`
+  Duskfleet passes; agents without it keep today's argv. A host without the sandbox refuses the run
+  in `startRun` (never unsandboxed). Only network blocks are detectable (`remedy.kind:
+  "sandbox_violation"` → `runs.sandbox_violations`, migration 30, reason `sandbox_blocked`); a
+  blocked file write has no marker and is never guessed from `EPERM` text.
 - **`contextExhausted` is structured-only** (terminal reason / subtype / stop reason, or
   the error text of a failed run). Never scan a successful result's prose: it produced a
   false positive.

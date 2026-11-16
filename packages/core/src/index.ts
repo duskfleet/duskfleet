@@ -20,16 +20,26 @@ export {
   agentSpecSchema,
   agentToSpec,
   assertAgentKind,
+  assertSandboxSpec,
   assertWrapUpReserve,
   deleteAgentFile,
   envPassthroughSchema,
+  harnessNameSchema,
   listProjectAgents,
   type ProjectAgentInfo,
   projectAgentDefinitionHash,
   renderAgentMarkdown,
+  sandboxAllowedDomainsSchema,
+  skillsSchema,
   writeAgentFile,
 } from "./config/agent-files.js";
-export { type AgentLintProblem, assertAgentSpecClean, collapseHome, lintAgentSpec } from "./config/agent-lint.js";
+export {
+  type AgentLintProblem,
+  assertAgentSpecClean,
+  collapseHome,
+  lintAgentSpec,
+  lintText,
+} from "./config/agent-lint.js";
 export {
   EDITABLE_GLOBAL_KEYS,
   type EditableGlobalKey,
@@ -84,6 +94,17 @@ export {
   type UserProjectEntry,
   upsertUserProject,
 } from "./config/project-files.js";
+export {
+  assertSkillsAvailable,
+  prepareSkillBundle,
+  type ResolvedSkill,
+  resolveSkill,
+  SKILL_NAME_PATTERN,
+  type SkillBundle,
+  type SkillSource,
+  skillSearchDirs,
+  skillsShadowedByProject,
+} from "./config/skills.js";
 export * from "./config/types.js";
 export * from "./evals/llm-judge.js";
 export * from "./evals/score.js";
@@ -102,6 +123,17 @@ export {
   resolveClaudeBinary,
 } from "./execution/claude-code.js";
 export {
+  assertAgentFitsHarness,
+  builtinHarnesses,
+  CLAUDE_CAPABILITIES,
+  HARNESS_CAPABILITY_KEYS,
+  type HarnessCapabilities,
+  type HarnessLookup,
+  HarnessRegistry,
+  harnessOf,
+  harnessRefusal,
+} from "./execution/harness.js";
+export {
   CappedLogWriter,
   capEventJson,
   DEFAULT_MAX_EVENT_BYTES,
@@ -114,6 +146,13 @@ export {
 } from "./execution/log-caps.js";
 export { mergeSubagent, needsRepair, sameSubagent, subagentsFromLog } from "./execution/log-replay.js";
 export { allowListedMcpPrefixes, mcpToolPrefix, missingMcpServers } from "./execution/mcp.js";
+export {
+  SANDBOX_DOMAIN_PATTERN,
+  SANDBOX_VIOLATION_KIND,
+  type SandboxSupport,
+  sandboxSettings,
+  sandboxSupport,
+} from "./execution/sandbox.js";
 export {
   DEFAULT_PATH_DIRS,
   effectivePath,
@@ -133,7 +172,9 @@ export {
 } from "./execution/stream-json.js";
 export * from "./execution/types.js";
 export {
+  type CheckoutSnapshot,
   captureRunDiff,
+  DIFF_MAX_COMMITS,
   DIFF_MAX_COUNTED_BYTES,
   DIFF_MAX_COUNTED_FILES,
   DIFF_MAX_FILES,
@@ -145,7 +186,10 @@ export {
   headSha,
   parseNameStatus,
   parseNumstat,
+  parseWorktreeList,
   type RunDiff,
+  snapshotCheckout,
+  type WorktreeDiff,
 } from "./git/diff.js";
 export * from "./observability/billing.js";
 export * from "./observability/failure.js";
@@ -240,6 +284,7 @@ export {
 export { attachLastRun, type RunSummarySource, type ScheduleWithLastRun } from "./scheduler/last-run.js";
 export { type FireResult, Scheduler, type SchedulerOptions, type SchedulerStatus } from "./scheduler/scheduler.js";
 export * from "./scheduler/types.js";
+export { type AttentionAck, AttentionAckRepository } from "./storage/attention-acks.js";
 export { BudgetRepository } from "./storage/budgets.js";
 export {
   COST_SPLITS,

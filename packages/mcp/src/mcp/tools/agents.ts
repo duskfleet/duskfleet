@@ -15,11 +15,15 @@ import {
   deleteAgentFile,
   EFFORT_LEVELS,
   envPassthroughSchema,
+  harnessNameSchema,
+  harnessOf,
   listProjectAgents,
   loadAgents,
   ON_FAILURE_POLICIES,
   PERMISSION_MODES,
   projectIdFromPath,
+  sandboxAllowedDomainsSchema,
+  skillsSchema,
   upsertUserProject,
   validateProjectPath,
   writeAgentAndVerify,
@@ -110,6 +114,15 @@ function presentAgent(a: AgentDefinition, config: DuskFleetConfig) {
     maxDailyCostUsd: a.maxDailyCostUsd ?? null,
     /** Variables this agent's runs get beyond the default allow-list (claude.env_passthrough adds to them). */
     envPassthrough: a.envPassthrough ?? [],
+    /** Duskfleet skills (data/skills, config/skills) bundled into every run. */
+    skills: a.skills ?? [],
+    /** Bash runs inside Claude Code's sandbox: no writes outside the project and addDirs, network only to sandboxAllowedDomains. */
+    sandbox: a.sandbox ?? false,
+    sandboxAllowedDomains: a.sandboxAllowedDomains ?? [],
+    /** enableWeakerNetworkIsolation in the sandbox settings: gh can verify TLS on macOS, isolation is weaker. */
+    sandboxWeakerNetworkIsolation: a.sandboxWeakerNetworkIsolation ?? false,
+    /** The agent CLI that runs it (`harness:`); claude unless the file says otherwise. */
+    harness: harnessOf(a),
     systemPrompt: a.systemPrompt,
     path: a.sourcePath,
   };
@@ -117,6 +130,11 @@ function presentAgent(a: AgentDefinition, config: DuskFleetConfig) {
 
 const agentFields = {
   name: z.string().min(1).optional().describe("Display name; defaults to the id"),
+  harness: harnessNameSchema
+    .optional()
+    .describe(
+      "Agent CLI that runs the agent: claude (default, the only harness that ships). A field the harness cannot honour is refused",
+    ),
   description: z.string().optional().describe("One or two sentences: what the agent is for. Shown by list_agents"),
   model: z
     .string()
@@ -230,6 +248,28 @@ const agentFields = {
     .describe(
       'Environment variables (exact names or PREFIX_*) the runs get on top of the default allow-list (PATH, HOME, ANTHROPIC_*, CLAUDE_*...), e.g. ["GH_TOKEN"] for an agent that uses gh. Everything else in the server\'s environment is dropped',
     ),
+  skills: skillsSchema
+    .optional()
+    .describe(
+      "Duskfleet skills the runs get: names of folders with a SKILL.md in data/skills/ (private, wins) or config/skills/. Unknown names refuse the create/update. Delivered as a bundle passed with --add-dir; the project is never written. The project's own .claude/skills need nothing here",
+    ),
+  sandbox: z
+    .boolean()
+    .optional()
+    .describe(
+      "true = run the agent's Bash commands inside Claude Code's native sandbox (macOS Seatbelt, Linux bubblewrap): no writes outside the project and add_dirs, no network except sandbox_allowed_domains. A host without the sandbox refuses the run, never runs it unsandboxed. Default false",
+    ),
+  sandbox_allowed_domains: sandboxAllowedDomainsSchema
+    .optional()
+    .describe(
+      'Exact host names a sandboxed run may reach, e.g. ["github.com", "api.github.com", "registry.npmjs.org"]. Needs sandbox: true. Omit for no network at all',
+    ),
+  sandbox_weaker_network_isolation: z
+    .boolean()
+    .optional()
+    .describe(
+      "true = add enableWeakerNetworkIsolation to the sandbox settings: on macOS, gh (and other Go tools) can then verify TLS inside the sandbox; without it every gh call fails with an x509 error. Weakens the network isolation for every command of the run. Needs sandbox: true. Default false",
+    ),
   system_prompt: z.string().optional().describe("Appended to Claude Code's system prompt for every run of this agent"),
 };
 
@@ -294,7 +334,7 @@ export function registerAgentTools(server: McpServer, ctx: ToolContext): void {
           registeredProject = fields.project;
         }
         const cfg = ctx.config;
-        const fresh = createAgentFromFields(kind, fields, cfg, () => ctx.config);
+        const fresh = createAgentFromFields(kind, fields, cfg, () => ctx.config, ctx.runs.harnesses.lookup);
         return jsonResult({
           created: true,
           kind,
@@ -343,6 +383,11 @@ export function registerAgentTools(server: McpServer, ctx: ToolContext): void {
               "max_daily_runs",
               "max_daily_cost_usd",
               "env_passthrough",
+              "skills",
+              "sandbox",
+              "sandbox_allowed_domains",
+              "sandbox_weaker_network_isolation",
+              "harness",
             ]),
           )
           .optional()
@@ -372,12 +417,13 @@ export function registerAgentTools(server: McpServer, ctx: ToolContext): void {
             changes.claude_agent ?? existing.claudeAgent,
           );
         const cfgNow = ctx.config;
-        const merged: AgentSpec = { ...agentToSpec(existing) };
+        const stored = agentToSpec(existing);
+        const merged: AgentSpec = { ...stored };
         for (const [k, v] of Object.entries(changes)) if (v !== undefined) (merged as Record<string, unknown>)[k] = v;
         for (const k of clear ?? []) delete (merged as Record<string, unknown>)[k];
         const spec = assertAgentSpecClean(agentSpecSchema.parse(merged));
         const kind = requestedKind ?? agentKind(spec);
-        assertAgentWritable(kind, spec, cfgNow);
+        assertAgentWritable(kind, spec, cfgNow, stored.skills ?? [], ctx.runs.harnesses.lookup);
         const fresh = writeAgentAndVerify(cfgNow, spec, () => ctx.config);
         return jsonResult({ updated: true, kind, agent: presentAgent(fresh, ctx.config) });
       } catch (err) {
