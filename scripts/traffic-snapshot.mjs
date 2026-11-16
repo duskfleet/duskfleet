@@ -2,7 +2,7 @@
 // Saves a repository's GitHub traffic before GitHub forgets it: the traffic API keeps views,
 // clones, referrers and popular paths for 14 days only. One run writes one dated JSON file with
 // the four endpoints' answers; a weekly schedule therefore keeps every day (docs/development.md
-// "Traffic snapshots"). Reads through the local `gh` login only: no token in the repo or config.
+// "Issue and review flow by agents"). Reads through the local `gh` login only: no token in the repo or config.
 //
 //   node scripts/traffic-snapshot.mjs [--repo <owner/name>] [--out <dir>]
 //
