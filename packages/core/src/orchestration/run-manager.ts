@@ -35,6 +35,12 @@ import {
   type UsageByModel,
 } from "../execution/types.js";
 import { type CheckoutSnapshot, captureRunDiff, snapshotCheckout } from "../git/diff.js";
+import {
+  extractArtifacts,
+  isPrCreateCommand,
+  type PrCreateResult,
+  type RunArtifact,
+} from "../observability/artifacts.js";
 import { costStatusOf } from "../observability/billing.js";
 import {
   continueRefusal,
@@ -186,6 +192,10 @@ interface ActiveRun {
   lastEventWriteMs: number;
   /** Why the row could not be marked `running` after the spawn (the child was then stopped); null when it was. */
   startError: string | null;
+  /** Results of the main session's `gh pr create` Bash calls (both passes): the run's PR artifacts. */
+  prCreateResults: PrCreateResult[];
+  /** Tool use ids of main-session `gh pr create` calls still waiting for their tool_result. */
+  pendingPrCreates: Set<string>;
   /** The run whose session the main pass resumes (a continuation); cleared once it fell back to a fresh session. */
   continuedFromRunId: string | null;
 }
@@ -422,6 +432,11 @@ export class RunManager {
   /** What the run changed in its git checkout (the `diff` event), or null. A pure read. */
   diff(runId: string) {
     return this.runs.diff(runId);
+  }
+
+  /** What the run produced (`run_artifacts`: today the PRs it opened). A pure read. */
+  artifacts(runId: string): RunArtifact[] {
+    return this.runs.listArtifacts(runId);
   }
 
   /** Subagent invocations recorded for a run (see RunAgent). A pure read. */
@@ -766,6 +781,8 @@ export class RunManager {
       gitBase,
       lastEventWriteMs: 0,
       startError: null,
+      prCreateResults: [],
+      pendingPrCreates: new Set(),
       continuedFromRunId: continued?.id ?? null,
     });
     // Listen for the end before anything else can throw: a child nobody listens to runs to its
@@ -1346,6 +1363,7 @@ export class RunManager {
         return;
       }
       if (active?.gitBase) this.recordDiff(runId, active.projectPath, active.gitBase);
+      if (active) this.recordArtifacts(runId, active, result.resultText);
       // A run whose start failed after the spawn (see startRun) ends failed with that reason
       // whatever the child did: it was stopped by Duskfleet, not cancelled by anyone. Keyed on
       // startError, not on the row: the lock can hit after the row was already stored running.
@@ -1416,6 +1434,26 @@ export class RunManager {
       log.warn("log metadata could not be read", { runId, err: message });
       this.runs.addEvent(runId, "note", { message: `log size and hash could not be read: ${message}` });
       return null;
+    }
+  }
+
+  /**
+   * The `run_artifacts` rows (observability/artifacts.ts): PR URLs printed by the main session's
+   * `gh pr create` calls, then those of the final text when the rule allows it. Written before the
+   * final status, like the diff; a failure is a note, never a lost result.
+   */
+  private recordArtifacts(runId: string, active: ActiveRun, resultText: string | null): void {
+    try {
+      const findings = extractArtifacts({
+        prCreateResults: active.prCreateResults,
+        unansweredPrCreates: active.pendingPrCreates.size,
+        resultText,
+      });
+      if (findings.length) this.runs.addArtifacts(runId, findings);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      log.warn("artifact recording failed", { runId, err: message });
+      this.runs.addEvent(runId, "note", { message: `run artifacts could not be recorded: ${message}` });
     }
   }
 
@@ -1550,12 +1588,27 @@ export class RunManager {
       case "tool_use": {
         const m = /^(mcp__[^_].*?)__/.exec(event.name);
         if (m) this.active.get(runId)?.usedServers.add(m[1]!);
+        const command =
+          typeof event.input === "object" && event.input !== null
+            ? (event.input as { command?: unknown }).command
+            : undefined;
+        // Only the main session's calls count, as for the run's model and last text.
+        if (event.name === "Bash" && event.agentId === null && event.id && typeof command === "string") {
+          if (isPrCreateCommand(command)) this.active.get(runId)?.pendingPrCreates.add(event.id);
+        }
         this.runs.addEvent(
           runId,
           "tool_use",
           { name: event.name, summary: summarizeToolInput(event.name, event.input) },
           event.agentId,
         );
+        break;
+      }
+      case "bash_result": {
+        const active = this.active.get(runId);
+        if (!active || event.agentId !== null || !isPrCreateCommand(event.command)) break;
+        active.pendingPrCreates.delete(event.toolUseId);
+        active.prCreateResults.push({ output: event.output, isError: event.isError });
         break;
       }
       case "subagent_start": {

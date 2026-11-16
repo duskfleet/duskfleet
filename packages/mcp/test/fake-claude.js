@@ -46,6 +46,11 @@
  *                 "sandbox_violation"`, and a file write outside the project (EPERM, no marker).
  *                 The result line is still `success` with no denial; its text is
  *                 `settings <the --settings value, or none>`
+ *   "git-pr"   -> like "ok", after two main-session Bash calls: `git push -u origin <branch>` (its
+ *                 report has the `/pull/new/<branch>` hint) and `gh pr create` printing a PR URL;
+ *                 the result text repeats the URL
+ *   "git-pr-failed" -> same, but gh pr create fails (is_error, no URL); the result text still
+ *                 claims the PR URL
  *
  * With `--resume <id>` (the wrap-up pass) the prompt is Duskfleet's fixed text, so the
  * behaviour comes from FAKE_CLAUDE_RESUME instead: unset = a short successful pass that
@@ -658,6 +663,44 @@ if (resumeIdx >= 0) {
       ],
     });
   }
+  if (prompt === "git-pr" || prompt === "git-pr-failed") {
+    // A developer run's tail (run artifacts, issue #382): push the branch, then gh pr create. A
+    // Bash tool_result carries stdout + stderr as one string; git push's report is on stderr and
+    // its `/pull/new/<branch>` hint is not a PR. "git-pr-failed": gh pr create fails, no URL.
+    const bash = (id, command, output, isError) => {
+      out({
+        type: "assistant",
+        message: {
+          model,
+          role: "assistant",
+          content: [{ type: "tool_use", id, name: "Bash", input: { command, description: "git" } }],
+          usage: { input_tokens: 10, output_tokens: 5 },
+        },
+        parent_tool_use_id: null,
+        session_id: sessionId,
+      });
+      out({
+        type: "user",
+        message: {
+          role: "user",
+          content: [{ tool_use_id: id, type: "tool_result", content: output, is_error: isError }],
+        },
+        parent_tool_use_id: null,
+        session_id: sessionId,
+        tool_use_result: { stdout: output, stderr: "", interrupted: false, isImage: false },
+      });
+    };
+    bash(
+      "toolu_g1",
+      "git push -u origin issue/7-fix-login",
+      "remote: \nremote: Create a pull request for 'issue/7-fix-login' on GitHub by visiting:\nremote:      https://github.com/example/demo/pull/new/issue/7-fix-login\nremote: \nTo github.com:example/demo.git\n * [new branch]      issue/7-fix-login -> issue/7-fix-login",
+      false,
+    );
+    const create =
+      "gh pr create --head issue/7-fix-login --base main --title 'Fix login (#7)' --body-file tmp/7-body.md";
+    if (prompt === "git-pr") bash("toolu_g2", create, "https://github.com/example/demo/pull/8\n", false);
+    else bash("toolu_g2", create, "Exit code 1\npull request create failed: GraphQL: Head sha can't be blank", true);
+  }
   if (prompt === "big-tool-result") {
     // One 200 KiB tool_result (a large file read): the log caps (claude.max_event_bytes / max_log_bytes).
     out({
@@ -722,7 +765,9 @@ if (resumeIdx >= 0) {
                     ? `add-dirs ${JSON.stringify(addDirsSeen)}`
                     : prompt === "sandbox"
                       ? `settings ${settingsSeen ?? "none"}`
-                      : "Done: created hello.txt";
+                      : prompt === "git-pr" || prompt === "git-pr-failed"
+                        ? "Opened https://github.com/example/demo/pull/8 from issue/7-fix-login."
+                        : "Done: created hello.txt";
   out({
     type: "result",
     subtype: isError ? "error_during_execution" : "success",

@@ -3,6 +3,7 @@ import { DEFAULT_HARNESS } from "../config/types.js";
 import { capEventJson, DEFAULT_MAX_EVENT_BYTES } from "../execution/log-caps.js";
 import type { DeniedTool, RunMcpInfo, SubagentRecord, SubagentStatus, UsageByModel } from "../execution/types.js";
 import type { RunDiff } from "../git/diff.js";
+import type { ArtifactFinding, ArtifactKind, ArtifactSource, RunArtifact } from "../observability/artifacts.js";
 import { COST_STATUSES, type CostStatus } from "../observability/billing.js";
 import { FAILURE_CODES, FAILURE_FAMILY, type FailureCode, type FailureDetail } from "../observability/failure.js";
 import type {
@@ -686,6 +687,37 @@ export class RunRepository {
       )
       .all() as Array<{ id: string }>;
     return rows.map((r) => r.id);
+  }
+
+  /** Store what a run produced (observability/artifacts.ts). A (kind, value) already stored for the run is skipped. */
+  addArtifacts(runId: string, findings: ArtifactFinding[]): void {
+    const insert = this.db.prepare(
+      "INSERT INTO run_artifacts (run_id, kind, value, source, created_at) VALUES (?, ?, ?, ?, ?) ON CONFLICT (run_id, kind, value) DO NOTHING",
+    );
+    const now = new Date().toISOString();
+    for (const f of findings) insert.run(runId, f.kind, f.value, f.source, now);
+  }
+
+  /** What a run produced, in the order it was recorded. */
+  listArtifacts(runId: string): RunArtifact[] {
+    const rows = this.db
+      .prepare("SELECT id, run_id, kind, value, source, created_at FROM run_artifacts WHERE run_id = ? ORDER BY id ASC")
+      .all(runId) as Array<{
+      id: number;
+      run_id: string;
+      kind: ArtifactKind;
+      value: string;
+      source: ArtifactSource;
+      created_at: string;
+    }>;
+    return rows.map((r) => ({
+      id: r.id,
+      runId: r.run_id,
+      kind: r.kind,
+      value: r.value,
+      source: r.source,
+      createdAt: r.created_at,
+    }));
   }
 
   /** Subagent invocations of a run, in start order. */

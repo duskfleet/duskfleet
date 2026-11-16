@@ -978,12 +978,15 @@ async function main(): Promise<void> {
       const def = app.config.agents.get(run.agentId);
       const subagents = app.runs.agents(id).map((s) => subagentView(s)); // same names as get_run
       const diff = app.runs.diff(id); // same field as get_run
+      const artifacts = app.runs.artifacts(id).map(({ kind, value, source }) => ({ kind, value, source })); // same field as get_run
       const costLabel = runCostLabel(run.billingType); // same field as get_run
       const label = runLabel(run); // same field as get_run
       const events = values.events ? app.runs.events(id) : undefined;
       // The renderer reads the same pieces the JSON flattens into one object.
       print(
-        events ? { ...run, label, costLabel, diff, subagents, events } : { ...run, label, costLabel, diff, subagents },
+        events
+          ? { ...run, label, costLabel, diff, artifacts, subagents, events }
+          : { ...run, label, costLabel, diff, artifacts, subagents },
         (_v, opts) =>
           renderRunInfo(
             {
@@ -991,6 +994,7 @@ async function main(): Promise<void> {
               label,
               costLabel,
               diff,
+              artifacts,
               subagents,
               agent: def ? { kind: agentKind(def), source: def.source } : null,
               ...(events ? { events } : {}),
