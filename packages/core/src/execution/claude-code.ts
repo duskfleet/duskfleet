@@ -18,6 +18,7 @@ import { logger } from "../util/log.js";
 import { childEnv } from "./child-env.js";
 import { CappedLogWriter, DEFAULT_MAX_LOG_BYTES } from "./log-caps.js";
 import { missingMcpServers } from "./mcp.js";
+import { sandboxSettings } from "./sandbox.js";
 import { effectivePath } from "./search-path.js";
 import { createStreamState, ingestLine, isSessionNotFound, looksLikeContextExhaustion } from "./stream-json.js";
 import {
@@ -119,6 +120,10 @@ export class ClaudeCodeExecutor implements Executor {
     if (this.options.settingSources && this.options.settingSources.length > 0) {
       argv.push("--setting-sources", this.options.settingSources.join(","));
     }
+    // `--settings <json>` turns the sandbox on and wins over the project's own settings (verified
+    // with real runs on 2.1.325, issue #447). Only for a sandboxed agent: anything else keeps
+    // today's argv, so a project that enables the sandbox itself keeps it.
+    if (req.sandbox) argv.push("--settings", sandboxSettings(req.sandbox.allowedDomains));
     if (req.model) argv.push("--model", req.model);
     if (req.effort) argv.push("--effort", req.effort);
     if (req.maxBudgetUsd !== undefined) argv.push("--max-budget-usd", String(req.maxBudgetUsd));
@@ -432,6 +437,7 @@ function finalResult(input: {
     costUsd: r?.costUsd ?? null,
     permissionDenials: r?.permissionDenials ?? 0,
     deniedTools: r?.deniedTools ?? [],
+    sandboxViolations: input.state.sandboxViolations,
     contextExhausted: looksLikeContextExhaustion(r),
     sessionNotFound: isSessionNotFound(r),
     failure: classifyFailure({

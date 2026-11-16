@@ -74,6 +74,8 @@ permission_mode: acceptEdits      # acceptEdits | dontAsk | auto | manual  (plan
 # max_daily_cost_usd: 10          # spend of this agent per UTC day; default no cap
 # env_passthrough: ["GH_TOKEN"]   # variables its runs get beyond the default allow-list (see "Environment of a run")
 # skills: [review-checklist]      # Duskfleet skills in data/skills/ or config/skills/ (see "Skills")
+# sandbox: true                   # Bash inside Claude Code's sandbox: no writes outside the project and add_dirs (see "Sandbox")
+# sandbox_allowed_domains: [github.com, api.github.com, registry.npmjs.org]   # hosts a sandboxed run may reach; default none
 timeout_minutes: 30
 max_budget_usd: 5
 # wrap_up_reserve_usd: 0.5     # part of max_budget_usd kept for the wrap-up pass; default 10%, min $0.50, 0 = off
@@ -85,6 +87,24 @@ You are running unattended. Finish the task end to end and summarise what you ch
 
 An agent without `model` uses the Claude Code default, which can be far more expensive than
 `haiku` or `sonnet`. The dashboard warns when a model is not set.
+
+## Sandbox
+
+`sandbox: true` runs the agent's Bash commands inside Claude Code's native sandbox (macOS
+Seatbelt, Linux bubblewrap): writes outside the project and `add_dirs` fail, and the network is
+closed except for the exact host names in `sandbox_allowed_domains` (no list = no network).
+Use it for agents that read untrusted input (public issues, web pages) or carry a broad
+allow-list such as `Bash(node:*)`. Off by default; an agent without it runs exactly as before.
+
+- `sandbox_allowed_domains` without `sandbox: true` is refused by `create_agent` / `update_agent`.
+- A host without the sandbox (Windows; Linux without `bwrap` and `socat`) refuses every run of
+  the agent before spawning it; `duskfleet doctor` shows whether the sandbox is available.
+- A blocked network connection makes the run **needs review** (`sandbox_blocked`, with a note
+  naming the host). A blocked file write is not detected: it reads as an ordinary failed command.
+- Git worktrees, the npm cache and `gh` credentials live outside the project: give them an
+  `add_dirs` entry or expect those commands to fail.
+
+Details, what was verified and the limits: [security](security.md#opt-in-sandbox-sandbox-true).
 
 ## Budget reserve and wrap-up pass
 

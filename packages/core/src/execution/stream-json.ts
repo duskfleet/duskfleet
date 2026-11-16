@@ -6,6 +6,8 @@
  *   {"type":"assistant","message":{"id","model","usage",content:[{type:"text"|"tool_use",...}]},
  *      "parent_tool_use_id":null|string,"agent_id"?,"subagent_type"?,"timestamp"}
  *   {"type":"user", ...}                                     (tool results; same nesting fields)
+ *   {"type":"user", ..., "tool_result_meta":[{"id","remedy":{"kind":"sandbox_violation"}}]}
+ *                                                            (a sandbox network block, 2.1.325, 2026-11-16)
  *   {"type":"system","subtype":"task_started","task_id","tool_use_id","description","subagent_type","prompt",
  *      "task_type":"local_agent"}
  *   {"type":"system","subtype":"task_started","task_id","tool_use_id","description","is_backgrounded",
@@ -24,6 +26,7 @@
  * Unknown fields and unknown line types are ignored so CLI upgrades degrade gracefully.
  */
 import { summarizeToolInput } from "../orchestration/tool-summary.js";
+import { SANDBOX_VIOLATION_KIND } from "./sandbox.js";
 import {
   type DeniedTool,
   type ExecutionEvent,
@@ -87,6 +90,8 @@ export interface StreamState {
   background: Set<string>;
   /** Subagents whose endedAt is the wall clock at parse time (the closing line had no timestamp). */
   wallClockEnd: Set<string>;
+  /** Tool results Claude Code's sandbox blocked (`remedy.kind == "sandbox_violation"`), subagents included. */
+  sandboxViolations: number;
 }
 
 interface AgentCallInput {
@@ -114,6 +119,7 @@ export function createStreamState(): StreamState {
     measured: new Set(),
     background: new Set(),
     wallClockEnd: new Set(),
+    sandboxViolations: 0,
   };
 }
 
@@ -300,6 +306,14 @@ export function ingestLine(state: StreamState, line: string): ExecutionEvent[] {
       const message = msg["message"];
       if (!isObject(message)) break;
       const content = message["content"];
+      for (const toolUseId of sandboxViolationIds(msg)) {
+        state.sandboxViolations += 1;
+        const block = Array.isArray(content)
+          ? content.find((b) => isObject(b) && b["type"] === "tool_result" && b["tool_use_id"] === toolUseId)
+          : undefined;
+        const violations = sandboxViolationLines(isObject(block) ? toolResultText(block["content"]) : null);
+        events.push({ type: "sandbox_violation", toolUseId, violations, agentId });
+      }
       if (!Array.isArray(content)) break;
       for (const block of content) {
         if (!isObject(block)) continue;
@@ -531,6 +545,31 @@ function toolResultText(content: unknown): string | null {
     .map((b) => (b["type"] === "text" ? str(b["text"]) : null))
     .filter((t): t is string => !!t);
   return parts.length ? parts.join("\n") : null;
+}
+
+/**
+ * Tool use ids of the results on a `user` line that Claude Code's sandbox blocked: the structured
+ * `tool_result_meta[].remedy.kind == "sandbox_violation"` (verified 2026-11-16 on 2.1.325, network
+ * blocks). Never the result prose: a blocked file write has no marker and is not counted.
+ */
+function sandboxViolationIds(msg: Json): Array<string | null> {
+  const meta = msg["tool_result_meta"];
+  if (!Array.isArray(meta)) return [];
+  return meta
+    .filter(isObject)
+    .filter((m) => isObject(m["remedy"]) && m["remedy"]["kind"] === SANDBOX_VIOLATION_KIND)
+    .map((m) => str(m["id"]));
+}
+
+/** The lines of a `<sandbox_violations>` block (`deny network-outbound host:443 ...`), for the run's note only. */
+function sandboxViolationLines(text: string | null): string[] {
+  const block = text ? /<sandbox_violations>([\s\S]*?)<\/sandbox_violations>/.exec(text) : null;
+  return (block?.[1] ?? "")
+    .split("\n")
+    .map((l) => l.trim())
+    .filter(Boolean)
+    .slice(0, 10)
+    .map((l) => l.slice(0, 200));
 }
 
 function parseResult(msg: Json): ParsedResult {

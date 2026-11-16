@@ -52,6 +52,7 @@ import {
   resolveConfigDir,
   runCostLabel,
   runLabel,
+  sandboxSupport,
   setDefaultLogLevel,
   subagentView,
   summarizeRun,
@@ -92,6 +93,7 @@ import {
   renderServiceInstalled,
   renderServiceUninstalled,
   runReportLines,
+  sandboxReport,
   scheduleRequestedLine,
   trimmedRun,
 } from "./render/index.js";
@@ -708,6 +710,11 @@ async function main(): Promise<void> {
         dataSource: app.config.dataSource,
         agents: [...app.config.agents.keys()],
         scheduler,
+        // Claude Code's native sandbox on this host, and the agents that need it (sandbox: true).
+        sandbox: sandboxReport(
+          sandboxSupport(),
+          [...app.config.agents.values()].filter((a) => a.sandbox).map((a) => a.id),
+        ),
         // Runs of this UTC month that ended without a cost, per budget: under unpriced_policy count
         // each stands in at the cap it started with (runs.max_budget_usd, else the agent's or the default cap).
         unpricedRuns: app.runs.unpricedRunsByBudget().map(({ budget, runs }) => ({

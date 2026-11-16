@@ -9,6 +9,7 @@ import {
   type AgentSpec,
   agentSpecSchema,
   assertAgentKind,
+  assertSandboxSpec,
   assertWrapUpReserve,
   deleteAgentFile,
   writeAgentFile,
@@ -41,6 +42,7 @@ export function assertAgentWritable(
 ): void {
   assertAgentKind(kind, spec, (id) => config.projects.get(id)?.path ?? null);
   assertWrapUpReserve(spec, config.claude.defaultMaxBudgetUsd);
+  assertSandboxSpec(spec);
   const added = (spec.skills ?? []).filter((name) => !storedSkills.includes(name));
   if (added.length) assertSkillsAvailable(added, config);
 }

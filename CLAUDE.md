@@ -212,6 +212,11 @@ npm workspaces, one `config/` and one SQLite database shared by three deliverabl
   `SubagentRecord` per Agent call; `RunManager` writes them on `subagent_start` / `subagent_end`
   and marks the open ones `interrupted` when the run ends. Per-message `output_tokens` of nested
   lines undercount; use `totalTokens`. Only main-session lines set the run's model and last text.
+- **Opt-in sandbox** (`sandbox: true`, `execution/sandbox.ts`, issue #447): the only `--settings`
+  Duskfleet passes; agents without it keep today's argv. A host without the sandbox refuses the run
+  in `startRun` (never unsandboxed). Only network blocks are detectable (`remedy.kind:
+  "sandbox_violation"` → `runs.sandbox_violations`, migration 30, reason `sandbox_blocked`); a
+  blocked file write has no marker and is never guessed from `EPERM` text.
 - **`contextExhausted` is structured-only** (terminal reason / subtype / stop reason, or
   the error text of a failed run). Never scan a successful result's prose: it produced a
   false positive.

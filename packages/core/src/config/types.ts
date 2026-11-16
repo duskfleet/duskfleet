@@ -98,6 +98,15 @@ export interface AgentDefinition {
    * delivered as a content-addressed bundle under `data/skill-bundles/` passed with --add-dir.
    */
   skills?: string[];
+  /**
+   * Run the agent's Bash commands inside Claude Code's native sandbox (`--settings` with
+   * `sandbox.enabled`): no writes outside the project and `add_dirs`, no network except
+   * `sandboxAllowedDomains`. A host without the sandbox refuses the run. Default false: no
+   * `--settings` at all, today's argv.
+   */
+  sandbox?: boolean;
+  /** Hosts a sandboxed run may reach (`sandbox.network.allowedDomains`). Empty = no network. */
+  sandboxAllowedDomains?: string[];
   /** Markdown body of the agent file. Sent via --append-system-prompt when non-empty. */
   systemPrompt: string;
   /** Absolute path of the file this agent was loaded from. */

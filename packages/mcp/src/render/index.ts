@@ -8,7 +8,14 @@ export {
   renderAgents,
 } from "./agents.js";
 export { renderBudgetSet, renderBudgets } from "./budgets.js";
-export { type DoctorReport, renderDoctor, WARN_MARK, warnLine } from "./doctor.js";
+export {
+  type DoctorReport,
+  renderDoctor,
+  type SandboxReport,
+  sandboxReport,
+  WARN_MARK,
+  warnLine,
+} from "./doctor.js";
 export { renderMcpStatus } from "./mcp-status.js";
 export * from "./primitives.js";
 export { type ProjectList, renderProjects } from "./projects.js";

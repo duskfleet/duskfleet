@@ -41,6 +41,11 @@
  *                 (only the project's "duskfleet" server); later spawns list Figma
  *   "mcp-missing" -> like "ok", every spawn's init lists no claude.ai connector
  *   "add-dirs" -> like "ok", result text is `add-dirs <JSON array of every --add-dir received>`
+ *   "sandbox"  -> like "ok", after two Bash calls the sandbox blocked (shapes from real runs on
+ *                 2.1.325, 2026-11-16): a network block carrying `tool_result_meta[].remedy.kind
+ *                 "sandbox_violation"`, and a file write outside the project (EPERM, no marker).
+ *                 The result line is still `success` with no denial; its text is
+ *                 `settings <the --settings value, or none>`
  *
  * With `--resume <id>` (the wrap-up pass) the prompt is Duskfleet's fixed text, so the
  * behaviour comes from FAKE_CLAUDE_RESUME instead: unset = a short successful pass that
@@ -78,6 +83,9 @@ const modelIdx = args.indexOf("--model");
 const model = modelIdx >= 0 ? args[modelIdx + 1] : "claude-haiku-4-5-20251001";
 const budgetIdx = args.indexOf("--max-budget-usd");
 const maxBudget = budgetIdx >= 0 ? Number(args[budgetIdx + 1]) : 5;
+const settingsIdx = args.indexOf("--settings");
+/** The --settings value (the sandbox switch), for the "sandbox" prompt; null when absent. */
+const settingsSeen = settingsIdx >= 0 ? (args[settingsIdx + 1] ?? null) : null;
 /** Every --add-dir value, in order, for the "add-dirs" prompt (skills bundles). */
 const addDirsSeen = args.flatMap((a, i) => (a === "--add-dir" && args[i + 1] !== undefined ? [args[i + 1]] : []));
 
@@ -587,6 +595,69 @@ if (resumeIdx >= 0) {
       message: { role: "user", content: [{ tool_use_id: "toolu_m1", type: "tool_result", content: "[]" }] },
     });
   }
+  if (prompt === "sandbox") {
+    // Network block: the structured marker is tool_result_meta[].remedy.kind (verified 2026-11-16).
+    const curl = "toolu_sbx_net";
+    const netText =
+      "Exit code 56\ncurl: (56) CONNECT tunnel failed, response 403\nHTTP 000\n\n<sandbox_violations>\ndeny network-outbound example.org:443 (user denied)\n</sandbox_violations>";
+    out({
+      type: "assistant",
+      message: {
+        model,
+        role: "assistant",
+        content: [{ type: "tool_use", id: curl, name: "Bash", input: { command: "curl https://example.org" } }],
+        usage: { input_tokens: 10, output_tokens: 5 },
+      },
+      parent_tool_use_id: null,
+      session_id: sessionId,
+    });
+    out({
+      type: "user",
+      message: {
+        role: "user",
+        content: [{ type: "tool_result", content: netText, is_error: true, tool_use_id: curl }],
+      },
+      parent_tool_use_id: null,
+      session_id: sessionId,
+      timestamp: "2026-11-16T10:30:32.858Z",
+      tool_use_result: `Error: ${netText}`,
+      tool_result_meta: [
+        {
+          id: curl,
+          remedy: { kind: "sandbox_violation" },
+          permission_decision: { decision: "accept", source: "config", reason_type: "subcommandResults" },
+        },
+      ],
+    });
+    // Filesystem block: an ordinary failed command, no remedy, no <sandbox_violations>.
+    const write = "toolu_sbx_fs";
+    const fsText =
+      "Exit code 1\nnode:fs:2482\nError: EPERM: operation not permitted, open '../sbx-outside/probe-a.txt'";
+    out({
+      type: "assistant",
+      message: {
+        model,
+        role: "assistant",
+        content: [{ type: "tool_use", id: write, name: "Bash", input: { command: "node -e 'write outside'" } }],
+        usage: { input_tokens: 10, output_tokens: 5 },
+      },
+      parent_tool_use_id: null,
+      session_id: sessionId,
+    });
+    out({
+      type: "user",
+      message: {
+        role: "user",
+        content: [{ type: "tool_result", content: fsText, is_error: true, tool_use_id: write }],
+      },
+      parent_tool_use_id: null,
+      session_id: sessionId,
+      tool_use_result: `Error: ${fsText}`,
+      tool_result_meta: [
+        { id: write, permission_decision: { decision: "accept", source: "config", reason_type: "subcommandResults" } },
+      ],
+    });
+  }
   if (prompt === "big-tool-result") {
     // One 200 KiB tool_result (a large file read): the log caps (claude.max_event_bytes / max_log_bytes).
     out({
@@ -649,7 +720,9 @@ if (resumeIdx >= 0) {
                   ? "The 503 retry test now passes; the not logged in banner is fixed."
                   : prompt === "add-dirs"
                     ? `add-dirs ${JSON.stringify(addDirsSeen)}`
-                    : "Done: created hello.txt";
+                    : prompt === "sandbox"
+                      ? `settings ${settingsSeen ?? "none"}`
+                      : "Done: created hello.txt";
   out({
     type: "result",
     subtype: isError ? "error_during_execution" : "success",

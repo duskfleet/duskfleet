@@ -336,6 +336,7 @@ the agent chose to stop, or when something silently narrowed what it could do:
 | `permission_denied` | a tool call was refused: the allow-list is incomplete; fix: [troubleshooting](troubleshooting.md#permission-denial) |
 | `context_exhausted` | structured signal that the context window ran out; see [troubleshooting](troubleshooting.md#context-exhausted-and-orphaned-runs) |
 | `mcp_missing` | an allow-listed MCP server never mounted; fix: [troubleshooting](troubleshooting.md#permission-denial) |
+| `sandbox_blocked` | Claude Code's sandbox blocked a network connection (structured `sandbox_violation` marker; the run note names the host). A blocked file write has no marker and is not detected; see [security](security.md#opt-in-sandbox-sandbox-true) |
 | `empty_run` | the run completed with zero tool calls ("no work done"; the same signal the schedule auto-pause counts as empty). Structured only: the result text is never read |
 
 A run that used tools but never edited a file (a read-only reviewer, a planner) is not empty

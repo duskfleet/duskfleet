@@ -408,6 +408,15 @@ const MIGRATIONS: ReadonlyArray<{ version: number; sql: string; backfill?: (db: 
       CREATE INDEX IF NOT EXISTS idx_attention_acks_subject ON attention_acks(kind, subject_id);
     `,
   },
+  {
+    // Tool calls Claude Code's sandbox blocked (issue #447): the structured `sandbox_violation`
+    // marker counted by the parser, main pass plus wrap-up, set at the terminal transition. A
+    // count above 0 is the `sandbox_blocked` review reason. NULL for older rows and running runs.
+    version: 30,
+    sql: `
+      ALTER TABLE runs ADD COLUMN sandbox_violations INTEGER;
+    `,
+  },
 ];
 
 /**

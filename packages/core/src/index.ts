@@ -20,6 +20,7 @@ export {
   agentSpecSchema,
   agentToSpec,
   assertAgentKind,
+  assertSandboxSpec,
   assertWrapUpReserve,
   deleteAgentFile,
   envPassthroughSchema,
@@ -27,6 +28,7 @@ export {
   type ProjectAgentInfo,
   projectAgentDefinitionHash,
   renderAgentMarkdown,
+  sandboxAllowedDomainsSchema,
   skillsSchema,
   writeAgentFile,
 } from "./config/agent-files.js";
@@ -132,6 +134,13 @@ export {
 } from "./execution/log-caps.js";
 export { mergeSubagent, needsRepair, sameSubagent, subagentsFromLog } from "./execution/log-replay.js";
 export { allowListedMcpPrefixes, mcpToolPrefix, missingMcpServers } from "./execution/mcp.js";
+export {
+  SANDBOX_DOMAIN_PATTERN,
+  SANDBOX_VIOLATION_KIND,
+  type SandboxSupport,
+  sandboxSettings,
+  sandboxSupport,
+} from "./execution/sandbox.js";
 export {
   DEFAULT_PATH_DIRS,
   effectivePath,

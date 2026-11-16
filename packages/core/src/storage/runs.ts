@@ -74,6 +74,7 @@ interface RunRow {
   log_sha256?: string | null;
   log_truncated?: number | null;
   skills_bundle: string | null;
+  sandbox_violations?: number | null;
 }
 
 function rowToRun(r: RunRow): Run {
@@ -108,6 +109,7 @@ function rowToRun(r: RunRow): Run {
     costUsd: r.cost_usd,
     permissionDenials: r.permission_denials,
     deniedTools: safeParse(r.denied_tools_json),
+    sandboxViolations: r.sandbox_violations ?? null,
     mcp: parseMcp(r.mcp_json),
     humanIntervention: r.human_intervention === 1,
     contextExhausted: r.context_exhausted === 1,
@@ -229,6 +231,7 @@ export type RunPatch = Partial<
     | "costUsd"
     | "permissionDenials"
     | "deniedTools"
+    | "sandboxViolations"
     | "mcp"
     | "humanIntervention"
     | "contextExhausted"
@@ -273,6 +276,7 @@ const PATCH_COLUMNS: Record<keyof RunPatch, string> = {
   costUsd: "cost_usd",
   permissionDenials: "permission_denials",
   deniedTools: "denied_tools_json",
+  sandboxViolations: "sandbox_violations",
   mcp: "mcp_json",
   humanIntervention: "human_intervention",
   contextExhausted: "context_exhausted",

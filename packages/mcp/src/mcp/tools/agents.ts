@@ -20,6 +20,7 @@ import {
   ON_FAILURE_POLICIES,
   PERMISSION_MODES,
   projectIdFromPath,
+  sandboxAllowedDomainsSchema,
   skillsSchema,
   upsertUserProject,
   validateProjectPath,
@@ -113,6 +114,9 @@ function presentAgent(a: AgentDefinition, config: DuskFleetConfig) {
     envPassthrough: a.envPassthrough ?? [],
     /** Duskfleet skills (data/skills, config/skills) bundled into every run. */
     skills: a.skills ?? [],
+    /** Bash runs inside Claude Code's sandbox: no writes outside the project and addDirs, network only to sandboxAllowedDomains. */
+    sandbox: a.sandbox ?? false,
+    sandboxAllowedDomains: a.sandboxAllowedDomains ?? [],
     systemPrompt: a.systemPrompt,
     path: a.sourcePath,
   };
@@ -238,6 +242,17 @@ const agentFields = {
     .describe(
       "Duskfleet skills the runs get: names of folders with a SKILL.md in data/skills/ (private, wins) or config/skills/. Unknown names refuse the create/update. Delivered as a bundle passed with --add-dir; the project is never written. The project's own .claude/skills need nothing here",
     ),
+  sandbox: z
+    .boolean()
+    .optional()
+    .describe(
+      "true = run the agent's Bash commands inside Claude Code's native sandbox (macOS Seatbelt, Linux bubblewrap): no writes outside the project and add_dirs, no network except sandbox_allowed_domains. A host without the sandbox refuses the run, never runs it unsandboxed. Default false",
+    ),
+  sandbox_allowed_domains: sandboxAllowedDomainsSchema
+    .optional()
+    .describe(
+      'Exact host names a sandboxed run may reach, e.g. ["github.com", "api.github.com", "registry.npmjs.org"]. Needs sandbox: true. Omit for no network at all',
+    ),
   system_prompt: z.string().optional().describe("Appended to Claude Code's system prompt for every run of this agent"),
 };
 
@@ -352,6 +367,8 @@ export function registerAgentTools(server: McpServer, ctx: ToolContext): void {
               "max_daily_cost_usd",
               "env_passthrough",
               "skills",
+              "sandbox",
+              "sandbox_allowed_domains",
             ]),
           )
           .optional()
