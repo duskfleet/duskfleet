@@ -542,3 +542,21 @@ test("a task_started without subagent_type takes it from the Agent call", () => 
   assert.equal(s.description, "Audit");
   assert.equal(s.prompt, "Audit it.");
 });
+
+test("task lines of a plain Bash call (task_type local_bash) open no subagent", () => {
+  const state = createStreamState();
+  const bash = { task_id: "bks4b6ifo", tool_use_id: "t_bash", description: "Push the branch" };
+  const events = feed(state, [
+    { type: "system", subtype: "task_started", ...bash, is_backgrounded: false, task_type: "local_bash" },
+    { type: "system", subtype: "task_progress", task_id: "bks4b6ifo", usage: { total_tokens: 5 } },
+    { type: "system", subtype: "task_notification", ...bash, status: "completed", summary: "done" },
+    // A real subagent (local_agent) and an older CLI's line without task_type still count.
+    { type: "system", subtype: "task_started", task_id: "A", tool_use_id: "t_a", task_type: "local_agent" },
+    { type: "system", subtype: "task_started", task_id: "O", tool_use_id: "t_o", subagent_type: "x" },
+  ]);
+  assert.deepEqual([...state.subagents.keys()], ["A", "O"]);
+  assert.deepEqual(
+    events.filter((e) => e.type === "subagent_start").map((e) => e.subagent.agentId),
+    ["A", "O"],
+  );
+});

@@ -1,6 +1,6 @@
 {
   "name": "duskfleet-workspace",
-  "version": "0.1.0",
+  "version": "0.4.0",
   "private": true,
   "description": "A fleet of agents for your own machine.",
   "license": "MIT",
@@ -20,6 +20,7 @@
     "mcp": "node packages/mcp/dist/index.js",
     "cli": "node packages/mcp/dist/cli.js",
     "web": "npm run dev -w @duskfleet/web",
+    "up": "npm install && npm run build && npm run cli -- install-service && npm run web",
     "lint": "biome ci .",
     "lint:fix": "biome check --write .",
     "check:public": "node scripts/check-public.mjs",
@@ -30,7 +31,7 @@
     "check": "npm run check:public && npm run lint && npm run build && npm run check:docs && npm run check:quickstart && npm run check:pack && npm run typecheck && npm run typecheck -w @duskfleet/web && npm test"
   },
   "devDependencies": {
-    "@biomejs/biome": "^2.6.4",
+    "@biomejs/biome": "^2.6.7",
     "@types/node": "^24.19.2",
     "typescript": "^7.0.2"
   }

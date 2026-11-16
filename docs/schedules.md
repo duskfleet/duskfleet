@@ -1,8 +1,10 @@
 # Schedules (cron)
 
 Schedules live in the database and are managed over MCP (`create_schedule`, `update_schedule`,
-`delete_schedule`, `run_schedule_now`, `list_schedules`) or read on the dashboard's **Schedules**
-page and with `duskfleet schedules` on the CLI. A schedule is: agent, prompt, 5-field cron,
+`delete_schedule`, `run_schedule_now`, `list_schedules`). Creating one is MCP only. The
+dashboard's **Schedules** page pauses and resumes, edits the cron and time zone, deletes and
+runs now; the CLI lists them (`duskfleet schedules`) and fires one
+(`duskfleet schedules run-now <id or name>`). A schedule is: agent, prompt, 5-field cron,
 IANA time zone (default `Europe/London`), optional project (not needed when the agent is bound
 to one) and model override.
 
@@ -52,7 +54,7 @@ the dashboard's Schedules page and `duskfleet doctor` show it. That page groups 
 the project they run on: the schedule's own `project_id`, else the project its agent is bound
 to (projects alphabetically, "no project" last, normally empty: only a schedule whose agent was
 deleted lands there). Each group is headed by the project link, its schedule count and how
-many are paused. `list_schedules` and `duskfleet schedules` return the same value as
+many are paused. `list_schedules` and `duskfleet schedules --json` return the same value as
 `effectiveProjectId`; `projectId` stays the stored one (null for a bound agent).
 
 **Relying on the MCP server alone means schedules stop when Claude Desktop or Claude Code
@@ -112,7 +114,15 @@ Things to know:
   hybrid-sleep.target`; `install-service` prints this hint.
 - Windows: the task does not keep the PC awake either; set Sleep to "Never" on AC power
   (`powercfg /change standby-timeout-ac 0`); `install-service` prints this hint.
-- Linux: `loginctl enable-linger $USER` keeps the unit alive when you are logged out.
+- Linux: `loginctl enable-linger $USER` keeps the unit alive when you are logged out;
+  `install-service` prints this hint.
+- Linux without a systemd user bus (containers, WSL without systemd, some SSH sessions):
+  `install-service` checks the bus first (`systemctl --user show-environment`) and refuses
+  without writing anything; if `daemon-reload` fails anyway, the unit file it wrote is removed
+  again (or the previous one put back). Over SSH on a systemd machine, `loginctl enable-linger
+  $USER` starts your user manager; elsewhere keep `duskfleet serve` running in a terminal,
+  tmux or your own supervisor. `doctor` then reports `installed: false` with the reason, and a
+  unit file systemd has not loaded is `unit present, not loaded`, never `installed: true`.
 - Windows (experimental, see the note above): check `data/logs/serve.log` if `doctor` reports
   the task running but nothing fires, and report what you find as an issue.
 - The MCP server keeps ticking as a fallback: stop the service and it takes over after three
@@ -315,7 +325,12 @@ counted). When every one of them either completed with 0 tool calls or ended
 empty, how many needed review, the last run's id) is stored as `pausedReason`. It shows in
 `list_schedules` and `duskfleet schedules`, and as an **auto-paused** badge on the
 **Schedules** page. A cancelled or clean run breaks the streak; a run still going is not
-counted yet.
+counted yet. A run that failed on the subscription's usage limit with a known reset time
+(`errorCode` `provider_quota` with `retryNotBefore`) is not the agent's fault: it is left out, so
+it neither breaks nor extends the streak, and an outage of the whole account does not pause
+every schedule (the ticks until the reset are `skipped_quota` instead). Every other failure
+counts, a usage-limit failure without a reset time and `max_turns_exhausted` included: nothing
+else would stop those from starting a run on every tick.
 
 Resume it as any paused schedule (`update_schedule` with `enabled: true`, or **Resume** on the
 dashboard): the reason is cleared, and only runs created after the pause count towards the
@@ -380,7 +395,7 @@ on the row (`concurrencyPolicy`, `catchUpPolicy`, `triggerKind` in `list_schedul
 | `trigger_kind` | `cron` (the only one for now; the field leaves room for other triggers, such as an API call, and the tick only fires `cron` schedules) | `cron` |
 
 What to change when a schedule keeps skipping (`skipped_busy`, `skipped_daily_cap`,
-`skipped_budget`, `auto_paused`, or nothing recorded at all) is in
+`skipped_budget`, `skipped_quota`, `auto_paused`, or nothing recorded at all) is in
 [troubleshooting](troubleshooting.md#runs-skipped-by-gates).
 
 - A tick whose agent or project is still busy is never queued (checked before any
@@ -394,6 +409,12 @@ What to change when a schedule keeps skipping (`skipped_busy`, `skipped_daily_ca
   agent's or its project's) is recorded as `skipped_budget`, also before any gate, and every
   schedule of that budget's scope is paused: it stays paused after the month turns, until you
   resume it (`update_schedule enabled: true` or the dashboard).
+- A scheduled tick while the account is on its usage limit is recorded as `skipped_quota`
+  (before auto-pause and any gate), with "usage limit until <reset time>" as its message: the
+  last `provider_quota` run started on this host gave a reset time (`errorDetail.retryNotBefore`)
+  that is still ahead. Not deferred: the first tick after the reset fires as usual. A manual
+  trigger (**Run now**, `run_schedule_now`) is not held back. The dashboard shows "usage limit
+  until 15:40" on the schedule's card.
 - Missed ticks (nobody running) are not caught up (`skip_missed`): the schedule fires once when
   it is next considered and its next tick is computed from then.
 - `scheduler.enabled: false` in `duskfleet.yaml` is the kill switch, re-read every tick. For a

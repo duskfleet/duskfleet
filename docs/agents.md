@@ -73,17 +73,75 @@ permission_mode: acceptEdits      # acceptEdits | dontAsk | auto | manual  (plan
 # max_daily_runs: 24              # runs of this agent per UTC day (whole number >= 1); default no cap
 # max_daily_cost_usd: 10          # spend of this agent per UTC day; default no cap
 # env_passthrough: ["GH_TOKEN"]   # variables its runs get beyond the default allow-list (see "Environment of a run")
+# skills: [review-checklist]      # Duskfleet skills in data/skills/ or config/skills/ (see "Skills")
+# sandbox: true                   # Bash inside Claude Code's sandbox: no writes outside the project and add_dirs (see "Sandbox")
+# sandbox_allowed_domains: [github.com, api.github.com, registry.npmjs.org]   # hosts a sandboxed run may reach; default none
+# sandbox_weaker_network_isolation: true   # macOS: lets gh verify TLS inside the sandbox; weaker isolation (see "Sandbox")
 timeout_minutes: 30
 max_budget_usd: 5
 # wrap_up_reserve_usd: 0.5     # part of max_budget_usd kept for the wrap-up pass; default 10%, min $0.50, 0 = off
 # on_failure: resume_once      # a schedule's next tick resumes a budget-exhausted / timed-out run, once (default none)
 # resume_budget_usd: 3         # budget of that resumed run (default max_budget_usd)
+# harness: claude              # the agent CLI that runs it; claude (default) is the only one that ships (see "Harness")
 ---
 You are running unattended. Finish the task end to end and summarise what you changed.
 ```
 
 An agent without `model` uses the Claude Code default, which can be far more expensive than
 `haiku` or `sonnet`. The dashboard warns when a model is not set.
+
+## Harness
+
+`harness:` names the agent CLI that runs the agent. Leave it out: `claude` (Claude Code) is the
+default and, today, the only harness that ships. The field exists so a second CLI (Codex, Copilot)
+can be added as one more adapter behind the same run path; see [Harnesses](harnesses.md).
+
+Each harness declares what it can honour (its *capabilities*). An agent that sets a field its
+harness cannot honour is **refused**, at create / update and again when a run starts, with the
+field named (`allowed_tools is not supported by harness codex`). A field is never dropped
+silently and never approximated: an allow-list a CLI ignored would be a permission nobody granted.
+
+| Capability | Fields it covers |
+|---|---|
+| `toolAllowList` | `allowed_tools`, `disallowed_tools` |
+| `permissionModes` | the `permission_mode` values the harness accepts |
+| `resumeSession` | `on_failure: resume_once`, `resume_budget_usd`; a continued run starts a fresh session (with a note) without it |
+| `hardBudgetUsd` | `max_budget_usd`, `wrap_up_reserve_usd`, `resume_budget_usd`, a gate's `budget_usd`, a resume budget (the CLI stops itself at the budget) |
+| `reportsCostUsd` | `max_daily_cost_usd`; without it every run is `unpriced` and [budgets](#unknown-costs-fail-closed) count it as its cap |
+| `mcpInherit` | `inherit_mcp` (agent or project) |
+| `projectAgents` | `claude_agent` (link agents) |
+| `addDirs` | `add_dirs` (agent or project) |
+| `skills`, `effort`, `sandbox` | the fields of the same name (`sandbox_*` with `sandbox`) |
+| `subagents` | informational: nested agents are reported as rows |
+
+Claude Code has every capability, so a Claude agent runs exactly as before the field existed. The
+run records its harness (`harness` in `get_run` / `run-info --json`, a line on the run page).
+
+## Sandbox
+
+`sandbox: true` runs the agent's Bash commands inside Claude Code's native sandbox (macOS
+Seatbelt, Linux bubblewrap): writes outside the project and `add_dirs` fail, and the network is
+closed except for the exact host names in `sandbox_allowed_domains` (no list = no network).
+Use it for agents that read untrusted input (public issues, web pages) or carry a broad
+allow-list such as `Bash(node:*)`. Off by default; an agent without it runs exactly as before.
+
+- `sandbox_allowed_domains` and `sandbox_weaker_network_isolation: true` without `sandbox: true`
+  are refused by `create_agent` / `update_agent`.
+- **`gh` on macOS needs `sandbox_weaker_network_isolation: true`**, next to `github.com` and
+  `api.github.com` in `sandbox_allowed_domains`. Without it every `gh` call fails with
+  `tls: failed to verify certificate: x509: OSStatus -26276` (Go tools verify TLS through a macOS
+  service the sandbox closes); an `add_dirs` entry does not fix that. The key weakens the
+  sandbox's network isolation for every command of the run, not only `gh`. A TLS failure is not
+  detected: the run is not needs review, so try the agent once before scheduling it.
+- A host without the sandbox (Windows; Linux without `bwrap` and `socat`) refuses every run of
+  the agent before spawning it; `duskfleet doctor` shows whether the sandbox is available.
+- A blocked network connection makes the run **needs review** (`sandbox_blocked`, with a note
+  naming the host). A blocked file write is not detected: it reads as an ordinary failed command.
+- Git worktrees and the npm cache live outside the project: give them an `add_dirs` entry or
+  expect those commands to fail. `gh` read its token from the keychain without one (macOS, with
+  the key above).
+
+Details, what was verified and the limits: [security](security.md#opt-in-sandbox-sandbox-true).
 
 ## Budget reserve and wrap-up pass
 
@@ -294,6 +352,45 @@ env_passthrough: ["GH_TOKEN"]     # exact names or PREFIX_*
 are merged. `GH_TOKEN` is the one most agents need (for `gh`). Anything passed is readable by the
 agent, so list only what it may use.
 
+## Skills
+
+`skills:` gives an agent's runs Claude Code skills that Duskfleet owns, by name:
+
+```markdown
+---
+id: reviewer
+skills: [review-checklist, release-notes]
+---
+```
+
+A name is a folder holding a `SKILL.md` (the Claude Code skill format), looked up in two places,
+the way agents are: `data/skills/<name>/` (private, git-ignored) wins over `config/skills/<name>/`
+(committable). Names are lowercase letters, digits and `-`; paths, URLs and git refs are not
+accepted. `create_agent` and `update_agent` refuse a name found in neither
+directory, and a skill whose files contain a home path or a secret-looking value (the same check
+as the agent file). Loading the config never checks them: a skill deleted later is skipped at run
+start with a note on the run's timeline, the run still starts.
+
+`config/skills/` is for the skills of *your* checkout that you want to commit; `data/skills/`
+is for private ones. The Duskfleet repository itself ships no skills: the ones it uses to
+develop itself stay private (git-ignored), and neither folder is part of the npm packages.
+
+The target project is never written. Each run gets a bundle,
+`data/skill-bundles/<id>/.claude/skills/<name>` (a copy of the skill's files, never a link to
+the live folder), passed with `--add-dir`. `<id>` is a hash of the skills' names and contents: an
+edited skill gives the next run a new bundle while a running one keeps what it started with, and
+the run records the id it got (`skillsBundle` in `get_run` / `list_runs`) so you can tell which
+skills were available. Old bundles stay in `data/skill-bundles/`; deleting the directory is safe,
+it is rebuilt when needed.
+
+Symlinks inside a skill folder are refused: `create_agent` / `update_agent` reject a skill that
+contains one, and a `SKILL.md` that is a symlink is not found. The skill folder itself may be a
+symlink.
+
+The project's own `.claude/skills/` need nothing from here: the run's working directory is the
+project, so Claude Code loads them anyway. When a project skill and a bundled one share a name,
+Claude Code uses the project's, and the run gets a note saying so.
+
 ## Grouping agents by project
 
 `project: <id>` on an agent binds it to an entry of `projects.yaml`. Bound agents are grouped
@@ -420,6 +517,9 @@ Tool-use
 events in the timeline carry the `agentId` they belong to (null for the main session).
 Nothing is spawned differently: the data comes from the `task_started` /
 `task_notification` lines and the `agent_id` field of nested messages in Claude Code's
-stream, so it works for `own` and `link` agents alike. Remember that a subagent's own
+stream, so it works for `own` and `link` agents alike. Claude Code also wraps plain Bash calls
+in task lines (`task_type: "local_bash"`, seen 2026-11-10): those are not subagents and open no
+row. A task line counts when its `task_type` is an agent type (`local_agent`, any `*_agent`), when
+it names a `subagent_type`, or when it has no `task_type` at all (older CLIs). Remember that a subagent's own
 `tools:` list is a hard filter: a name that does not exist in the run (for instance a
 `mcp__plugin_*` prefix) leaves it without that tool, and only the recorded row shows it.

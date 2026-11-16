@@ -83,6 +83,8 @@ export interface ServiceStatus {
   running: boolean | null;
   pid: number | null;
   detail: string;
+  /** What to do instead of install-service, when it cannot work here (Linux without a user bus). */
+  advice?: string;
 }
 
 const LAUNCHD_LABEL = "com.duskfleet.scheduler";
@@ -94,6 +96,10 @@ export const CAFFEINATE_ARGS = ["-i", "-s"];
 
 const LINUX_SLEEP_HINT =
   "While the machine sleeps nothing runs and missed ticks are not caught up. To keep it awake, disable sleep in the desktop's power settings or with `sudo systemctl mask sleep.target suspend.target hibernate.target hybrid-sleep.target`.";
+const LINUX_LINGER_HINT =
+  "Run `loginctl enable-linger $USER` once, or the service stops when you log out and only starts again at your next login.";
+const LINUX_NO_BUS_HINT =
+  "On a systemd machine reached over SSH, `loginctl enable-linger $USER` starts your user manager (log in again afterwards). In a container, WSL without systemd or any box without a user manager, keep `duskfleet serve` running in a terminal, tmux or your own supervisor instead.";
 const WINDOWS_SLEEP_HINT =
   'While the PC sleeps nothing runs and missed ticks are not caught up. To keep it awake on AC power, set Settings > System > Power > Sleep to "Never" (or `powercfg /change standby-timeout-ac 0`).';
 
@@ -253,7 +259,7 @@ export function renderService(t: ServiceTarget): ServiceUnit {
       ],
       notes: [
         "A systemd user unit runs in your login session, so the service sees the same `claude` login as your terminal.",
-        "To keep it running when you are logged out: `loginctl enable-linger $USER`.",
+        LINUX_LINGER_HINT,
         LINUX_SLEEP_HINT,
         `After every \`npm run build\` run install-service again (or \`systemctl --user restart ${SYSTEMD_UNIT}\`) to load the new code.`,
       ],
@@ -383,10 +389,34 @@ export function writeUnit(unit: ServiceUnit): void {
   }
 }
 
+/**
+ * systemd --user needs a user manager and its bus (missing in containers, WSL without systemd,
+ * some SSH sessions). `show-environment` is the cheapest call that talks to it.
+ */
+function userBusError(exec: Exec): string | null {
+  const r = exec("systemctl", ["--user", "show-environment"]);
+  return r.status === 0 ? null : (r.stderr || r.stdout).trim() || `exit ${r.status}`;
+}
+
+function assertUserBus(exec: Exec): void {
+  const err = userBusError(exec);
+  if (err) {
+    throw new Error(`install-service: no systemd user bus (${err}); nothing was written. ${LINUX_NO_BUS_HINT}`);
+  }
+}
+
+/** Put back the unit file an install overwrote, or remove the one it created. */
+function restoreUnit(unitPath: string, previous: Buffer | null): void {
+  if (previous) writeFileSync(unitPath, previous, { mode: 0o644 });
+  else rmSync(unitPath, { force: true });
+}
+
 /** Write the unit and (re)start the service. Idempotent: a loaded service is restarted with the new unit. */
 export function installService(t: ServiceTarget, exec: Exec = realExec): { unit: ServiceUnit; ran: string[] } {
   const unit = renderService(t);
+  if (unit.platform === "linux") assertUserBus(exec);
   mkdirSync(path.dirname(t.logPath), { recursive: true });
+  const previous = existsSync(unit.unitPath) ? readFileSync(unit.unitPath) : null;
   writeUnit(unit);
   const ran: string[] = [];
   if (unit.platform === "darwin") {
@@ -396,7 +426,13 @@ export function installService(t: ServiceTarget, exec: Exec = realExec): { unit:
     must(exec, "launchctl", ["bootstrap", d, unit.unitPath], "launchctl bootstrap");
     ran.push(`launchctl bootstrap ${d} ${unit.unitPath}`);
   } else if (unit.platform === "linux") {
-    must(exec, "systemctl", ["--user", "daemon-reload"], "systemctl daemon-reload");
+    try {
+      must(exec, "systemctl", ["--user", "daemon-reload"], "systemctl daemon-reload");
+    } catch (err) {
+      // A unit systemd never loaded would make doctor report a service that cannot run.
+      restoreUnit(unit.unitPath, previous);
+      throw new Error(`${(err as Error).message}. ${LINUX_NO_BUS_HINT}`);
+    }
     must(exec, "systemctl", ["--user", "enable", unit.label], "systemctl enable");
     must(exec, "systemctl", ["--user", "restart", unit.label], "systemctl restart");
     ran.push(
@@ -487,23 +523,32 @@ export function serviceStatus(platform: NodeJS.Platform, exec: Exec = realExec, 
   }
   if (platform === "linux") {
     const r = exec("systemctl", ["--user", "show", label, "--property=ActiveState,SubState,MainPID,LoadState"]);
-    if (r.status !== 0)
+    // A unit file systemd cannot load is not an installed service: it never runs.
+    const present = existsSync(unitPath);
+    if (r.status !== 0) {
+      const err = (r.stderr || r.stdout).trim() || `exit ${r.status}`;
       return {
         ...base,
-        installed: existsSync(unitPath),
+        installed: false,
         running: null,
         pid: null,
-        detail: `systemctl unavailable: ${(r.stderr || r.stdout).trim()}`,
+        detail: `${present ? "unit present, not loaded: " : ""}systemd user bus unreachable (${err})`,
+        advice: LINUX_NO_BUS_HINT,
       };
+    }
     const prop = (k: string) => new RegExp(`^${k}=(.*)$`, "m").exec(r.stdout)?.[1]?.trim() ?? "";
     const loaded = prop("LoadState") === "loaded";
     const pid = Number(prop("MainPID"));
     return {
       ...base,
-      installed: loaded || existsSync(unitPath),
+      installed: loaded,
       running: prop("ActiveState") === "active",
       pid: pid > 0 ? pid : null,
-      detail: loaded ? `systemd: ${prop("ActiveState")} (${prop("SubState")})` : "not installed",
+      detail: loaded
+        ? `systemd: ${prop("ActiveState")} (${prop("SubState")})`
+        : present
+          ? "unit present, not loaded: run install-service"
+          : "not installed",
     };
   }
   const r = exec("schtasks", ["/Query", "/TN", label, "/FO", "LIST", "/V"]);

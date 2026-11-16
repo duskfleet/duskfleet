@@ -14,6 +14,12 @@ export type EffortLevel = (typeof EFFORT_LEVELS)[number];
 export const ON_FAILURE_POLICIES = ["none", "resume_once"] as const;
 export type OnFailurePolicy = (typeof ON_FAILURE_POLICIES)[number];
 
+/**
+ * The agent CLI an agent runs on when its frontmatter sets no `harness:` (issue #445). Claude Code
+ * is the only harness that ships; another one is an executor registered next to it.
+ */
+export const DEFAULT_HARNESS = "claude";
+
 /** Where an agent definition was loaded from. Only "user" agents are writable by tools. */
 export type AgentSource = "builtin" | "user";
 
@@ -93,6 +99,32 @@ export interface AgentDefinition {
    * allow-list and `claude.env_passthrough` (e.g. `GH_TOKEN` for an agent that uses `gh`).
    */
   envPassthrough?: string[];
+  /**
+   * Duskfleet skills the runs get (`skills:`, names of `data/skills/<name>/` or `config/skills/<name>/`),
+   * delivered as a content-addressed bundle under `data/skill-bundles/` passed with --add-dir.
+   */
+  skills?: string[];
+  /**
+   * Run the agent's Bash commands inside Claude Code's native sandbox (`--settings` with
+   * `sandbox.enabled`): no writes outside the project and `add_dirs`, no network except
+   * `sandboxAllowedDomains`. A host without the sandbox refuses the run. Default false: no
+   * `--settings` at all, today's argv.
+   */
+  sandbox?: boolean;
+  /** Hosts a sandboxed run may reach (`sandbox.network.allowedDomains`). Empty = no network. */
+  sandboxAllowedDomains?: string[];
+  /**
+   * `sandbox.enableWeakerNetworkIsolation` in the `--settings` value: lets Go tools (`gh`) verify
+   * TLS inside the sandbox on macOS, at the cost of a weaker network isolation for every command
+   * of the run. Needs `sandbox`. Absent = today's `--settings` byte for byte.
+   */
+  sandboxWeakerNetworkIsolation?: boolean;
+  /**
+   * The agent CLI that runs this agent (`harness:`): the name of a registered executor. Unset =
+   * `DEFAULT_HARNESS` (Claude Code). Left out of the definition when the file does not set it, so
+   * the agent hash of every existing agent stays what it was.
+   */
+  harness?: string;
   /** Markdown body of the agent file. Sent via --append-system-prompt when non-empty. */
   systemPrompt: string;
   /** Absolute path of the file this agent was loaded from. */

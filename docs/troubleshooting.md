@@ -23,7 +23,8 @@ the guide [Run Claude Code on a schedule on your own machine](guides/run-claude-
   `/usr/bin`, `/bin`, `/usr/sbin`, `/sbin`, or none): DuskFleet then puts
   `/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin` in front, to find `claude` and for every
   process it starts (runs, schedule gate commands, the git reads of a run's diff). `doctor`
-  prints the effective `path` and `pathDefaulted: true` when that happened. On Linux and
+  says so under Paths ("PATH was missing or minimal"); `doctor --json` prints the effective
+  `path` and `pathDefaulted: true`. On Linux and
   Windows (experimental, [platform support](../README.md#platform-support)) the `PATH` is used
   as it is, even a minimal one. Such hosts also do not expand `~` in
   `claude_desktop_config.json` ("No executable file at ~/..."): use absolute paths.
@@ -64,7 +65,8 @@ the guide [Run Claude Code on a schedule on your own machine](guides/run-claude-
   A run failed that way with no start time was left `pending`: its process died after
   recording it and before spawning claude (the host restarted, a crash). Such a row used to
   show as running on the dashboard forever; it is swept like a `running` one now. `doctor`
-  lists the rows its own startup sweep failed (`orphans.recovered`, with the status each `was`).
+  lists the rows its own startup sweep failed under Orphans (`orphans.recovered` in
+  `doctor --json`, with the status each `was`).
 - **A run stays `running` although nothing is running**: recovery only fails a run when its
   owner (`role@host:pid`) is provably gone. Two cases it cannot see: the owner's pid was
   reused by an unrelated live process, or the machine's hostname changed since the run
@@ -166,9 +168,15 @@ outcome is recorded on the firing: `lastOutcome` / `lastError` in `list_schedule
   schedules are paused too and stay paused. Fix: raise the budget, then resume the schedules by
   hand ([monthly budgets](agents.md#monthly-budgets)). When the message says "standing in for
   N unpriced run(s)", runs without a recorded cost (crashes, timeouts, cancels) fill the budget
-  at their stand-in: `duskfleet doctor` lists them under `unpricedRuns`; set a `max_budget_usd`
+  at their stand-in: `duskfleet doctor` lists them under Budgets (`unpricedRuns` in `doctor --json`); set a `max_budget_usd`
   on those agents, or `unpriced_policy: allow` on the budget
   ([unknown costs fail closed](agents.md#unknown-costs-fail-closed)).
+- **`skipped_quota`**: the account is on its usage limit (`usage limit until <reset time>`):
+  the last `provider_quota` run on this host said when the limit resets, and that time is still
+  ahead. Nothing to fix: the first tick after the reset fires as usual, and so does every tick
+  once a run on this host (a Run now, say) has completed since. Runs that failed on the limit
+  with a reset time do not count towards [auto-pause](schedules.md#auto-pause); without one
+  they do.
 - **`skipped_gate`**: the schedule's gate found no work; its reason is `lastError`
   ([gates](schedules.md#gates-skip-cheaply-when-there-is-no-work)).
 - **`auto_paused`**: the last `scheduler.auto_pause_after` runs were all empty or needed
@@ -199,7 +207,7 @@ outcome is recorded on the firing: `lastOutcome` / `lastError` in `list_schedule
   `index.js` processes or restart the hosts that spawned them.
 - **Schedules stop when Claude Desktop closes**: only the MCP server was ticking. Install the
   service once: `npm i -g duskfleet`, then `duskfleet install-service` (it refuses npx's
-  temporary cache; in a clone, `npm run cli -- install-service`); `doctor` reports `scheduler.service`.
+  temporary cache; in a clone, `npm run cli -- install-service`); `doctor` reports it on the Scheduler `service` line (`scheduler.service` in `doctor --json`).
   If the service is running but nothing fires, read `data/logs/serve.log` (the service writes
   there, not to the terminal); a `claude` not found there means the unit's PATH / `CLAUDE_BIN`
   are stale, re-run `install-service`.
@@ -209,7 +217,7 @@ outcome is recorded on the firing: `lastOutcome` / `lastError` in `list_schedule
   `pmset -g log | grep -E "Sleep|Wake"` (macOS): sleep entries during the gap confirm it. Fix:
   re-run `install-service` (on macOS it wraps `serve` in `caffeinate -i -s` unless
   `--no-keep-awake` was passed), keep a laptop on AC power (`caffeinate -s` holds only there),
-  then resume the auto-paused schedules. `doctor`'s `scheduler.keepAwake` says whether the unit
+  then resume the auto-paused schedules. `doctor`'s Scheduler `keep awake` line (`scheduler.keepAwake` in `doctor --json`) says whether the unit
   keeps the Mac awake and after how many idle minutes it would sleep; `data/logs/serve.log`
   shows "not running under caffeinate" when it does not. On Linux and Windows disable sleep in
   the power settings ([Schedules](schedules.md#who-ticks)).

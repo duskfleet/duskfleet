@@ -14,6 +14,9 @@ import type { OnFailurePolicy } from "../config/types.js";
  * `skipped_daily_cap` = the agent (or its gate agent) reached `max_daily_runs` / `max_daily_cost_usd` for the UTC day.
  * `skipped_budget` = a hard-stop budget covering the run (global, agent or project) is spent this UTC month;
  * the schedules of that scope were paused.
+ * `skipped_quota` = the last run on this host hit the account's usage limit (provider_quota) and its
+ *   reset time (`retryNotBefore`) is still ahead; the firing's error text says until when. Not
+ *   deferred: the next tick after the reset fires as usual. Scheduled fires only.
  * `auto_paused` = its last `scheduler.auto_pause_after` runs were all empty or needs review: the
  *   scheduler paused it instead of firing; the reason is kept as the firing's error text.
  * `deferred` = a scheduled tick found the agent or project busy and `scheduler.defer_busy` is on:
@@ -28,6 +31,7 @@ export type ScheduleOutcome =
   | "skipped_busy"
   | "skipped_daily_cap"
   | "skipped_budget"
+  | "skipped_quota"
   | "skipped_gate"
   | "skipped_disabled"
   | "auto_paused"

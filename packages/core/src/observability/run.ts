@@ -97,6 +97,12 @@ export interface Run {
   permissionDenials: number | null;
   /** Tool calls refused by the permission system. Non-empty = the agent's allow-list is incomplete. */
   deniedTools: DeniedTool[];
+  /**
+   * Tool calls Claude Code's sandbox blocked (network; migration 30), main pass plus wrap-up. Set
+   * at the terminal transition; null while running and for older rows. Counted for every run, not
+   * only `sandbox: true` agents: a project may turn the sandbox on itself.
+   */
+  sandboxViolations?: number | null;
   /** MCP servers mounted / used in this run and allow-list entries that matched none of them. */
   mcp: RunMcpInfo;
   /**
@@ -188,6 +194,17 @@ export interface Run {
   logBytes?: number | null;
   logSha256?: string | null;
   logTruncated?: boolean | null;
+  /**
+   * Id of the skills bundle the run got (`data/skill-bundles/<id>`, passed with --add-dir;
+   * migration 28): a content hash of the agent's `skills:` that resolved at start. Null when the
+   * agent declares none, and for older rows.
+   */
+  skillsBundle?: string | null;
+  /**
+   * The agent CLI that ran (migration 31, the agent's `harness:`); `claude` for every older row.
+   * `claudeSessionId` and `claudeCodeVersion` hold that harness's session id and version.
+   */
+  harness?: string;
 }
 
 /** Longest accepted run / schedule title, in characters (after trimming). */
@@ -318,6 +335,7 @@ export type ReviewReason =
   | "permission_denied"
   | "context_exhausted"
   | "mcp_missing"
+  | "sandbox_blocked"
   | "empty_run";
 
 export const REVIEW_REASON_LABELS: Record<ReviewReason, string> = {
@@ -329,6 +347,7 @@ export const REVIEW_REASON_LABELS: Record<ReviewReason, string> = {
   permission_denied: "permission denied",
   context_exhausted: "context exhausted",
   mcp_missing: "allow-listed MCP server not mounted",
+  sandbox_blocked: "sandbox blocked a command",
   empty_run: "no work done",
 };
 
@@ -343,6 +362,8 @@ export const REVIEW_REASON_FIXES: Record<ReviewReason, string> = {
     "unattended runs get no permission prompts: add the denied tools to the agent's allowed_tools (or disallow them)",
   context_exhausted: "the context window filled up: split the task or narrow the prompt",
   mcp_missing: "an allow-listed MCP server was not mounted: check the mcp__ names in allowed_tools, then run again",
+  sandbox_blocked:
+    "the sandbox blocked a network connection: add the host to the agent's sandbox_allowed_domains if the run needs it (see the run's notes)",
   empty_run: "the run made no tool call: check the prompt and the agent's allowed_tools",
 };
 
@@ -393,6 +414,8 @@ type ReviewInput = Pick<
   mcp?: Pick<RunMcpInfo, "allowListedMissing"> | null;
   /** Main session plus wrap-up. Absent or null = unknown (rows backfilled before `empty_run`): never empty. */
   toolCalls?: number | null;
+  /** Calls the sandbox blocked (structured marker only). Absent or null = none known. */
+  sandboxViolations?: number | null;
 };
 
 /** The rule. Call it on a terminal run; the stored `Run.reviewReasons` is what readers use. */
@@ -409,6 +432,8 @@ export function reviewReasons(run: ReviewInput): ReviewReason[] {
   if (run.humanIntervention || (run.permissionDenials ?? 0) > 0) reasons.push("permission_denied");
   if (run.contextExhausted) reasons.push("context_exhausted");
   if ((run.mcp?.allowListedMissing ?? []).length > 0) reasons.push("mcp_missing");
+  // A blocked command still ends `success` with no permission denial: without this the run is green.
+  if ((run.sandboxViolations ?? 0) > 0) reasons.push("sandbox_blocked");
   // Completed without a single tool call: the same "empty run" signal as the schedule auto-pause.
   // Structured only; the result prose is never read (it may claim work it did not do, or the reverse).
   if (run.status === "completed" && run.toolCalls === 0) reasons.push("empty_run");
@@ -462,9 +487,13 @@ export function summarizeRun(run: Run) {
     label: runLabel(run),
     prompt: run.prompt.length > 140 ? run.prompt.slice(0, 137) + "..." : run.prompt,
     model: run.modelUsed ?? run.modelRequested,
-    /** Eval bundle: the agent definition and Claude Code version this run used; null when unknown. */
+    /** The agent CLI that ran (`claude` unless the agent sets another `harness:`). */
+    harness: run.harness ?? "claude",
+    /** Eval bundle: the agent definition and harness (Claude Code) version this run used; null when unknown. */
     agentHash: run.agentHash,
     claudeCodeVersion: run.claudeCodeVersion,
+    /** The skills bundle (data/skill-bundles/<id>) the run got; null when the agent declares no skills. */
+    skillsBundle: run.skillsBundle ?? null,
     claudeSessionId: run.claudeSessionId,
     createdAt: run.createdAt,
     durationMs: run.durationMs,

@@ -10,9 +10,12 @@ import { logger } from "../util/log.js";
 import {
   AGENT_ID_PATTERN,
   envPassthroughSchema,
+  harnessNameSchema,
   maxConcurrentSchema,
   maxDailyCostUsdSchema,
   maxDailyRunsSchema,
+  sandboxAllowedDomainsSchema,
+  skillsSchema,
 } from "./agent-files.js";
 import { dataDirFromEnv, type LocationContext, userConfigDir, userDataDir } from "./locations.js";
 import {
@@ -169,6 +172,15 @@ const agentFrontmatterSchema = z.object({
   max_daily_runs: maxDailyRunsSchema.optional(),
   max_daily_cost_usd: maxDailyCostUsdSchema.optional(),
   env_passthrough: envPassthroughSchema.optional(),
+  // Names only; whether they exist is checked on create / update, never on load (a deleted skill
+  // must not break every config reload) and skipped with a note at run start.
+  skills: skillsSchema.optional(),
+  sandbox: z.boolean().optional(),
+  sandbox_allowed_domains: sandboxAllowedDomainsSchema.optional(),
+  sandbox_weaker_network_isolation: z.boolean().optional(),
+  // A name only; whether a harness of that name is registered is checked on create / update and at
+  // run start, never on load (the loader does not know the executors).
+  harness: harnessNameSchema.optional(),
 });
 
 const projectsSchema = z.object({
@@ -337,6 +349,12 @@ export function loadAgents(agentsDir: string, source: AgentSource = "builtin"): 
     if (fm.max_daily_runs !== undefined) agent.maxDailyRuns = fm.max_daily_runs;
     if (fm.max_daily_cost_usd !== undefined) agent.maxDailyCostUsd = fm.max_daily_cost_usd;
     if (fm.env_passthrough !== undefined) agent.envPassthrough = fm.env_passthrough;
+    if (fm.skills !== undefined) agent.skills = fm.skills;
+    if (fm.sandbox !== undefined) agent.sandbox = fm.sandbox;
+    if (fm.sandbox_allowed_domains !== undefined) agent.sandboxAllowedDomains = fm.sandbox_allowed_domains;
+    if (fm.sandbox_weaker_network_isolation !== undefined)
+      agent.sandboxWeakerNetworkIsolation = fm.sandbox_weaker_network_isolation;
+    if (fm.harness !== undefined) agent.harness = fm.harness;
     agents.set(id, agent);
   }
   return agents;

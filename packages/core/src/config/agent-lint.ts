@@ -78,20 +78,25 @@ function stringFields(spec: AgentSpec): [string, string][] {
 /** Problems that would make the agent file unfit for a public repo. Empty = clean. */
 export function lintAgentSpec(spec: AgentSpec, home: string = homedir()): AgentLintProblem[] {
   const problems: AgentLintProblem[] = [];
-  for (const [field, text] of stringFields(spec)) {
-    for (const { re, why } of HOME_PATTERNS) {
-      for (const m of text.matchAll(re)) {
-        if (PLACEHOLDER.test(m[0])) continue;
-        problems.push({ field, why, excerpt: m[0] });
-      }
+  for (const [field, text] of stringFields(spec)) problems.push(...lintText(field, text, home));
+  return problems;
+}
+
+/** Home paths and secret-looking values in one text (a spec field, or a skill file: `assertSkillsAvailable`). */
+export function lintText(field: string, text: string, home: string = homedir()): AgentLintProblem[] {
+  const problems: AgentLintProblem[] = [];
+  for (const { re, why } of HOME_PATTERNS) {
+    for (const m of text.matchAll(re)) {
+      if (PLACEHOLDER.test(m[0])) continue;
+      problems.push({ field, why, excerpt: m[0] });
     }
-    // A home directory outside the usual roots (e.g. /var/users/x); skip "/" and short roots like "/root".
-    if (home.length > 5 && text.includes(home) && !problems.some((p) => p.field === field)) {
-      problems.push({ field, why: "home directory path", excerpt: home });
-    }
-    for (const { re, why } of SECRET_PATTERNS) {
-      for (const m of text.matchAll(re)) problems.push({ field, why, excerpt: mask(m[0]) });
-    }
+  }
+  // A home directory outside the usual roots (e.g. /var/users/x); skip "/" and short roots like "/root".
+  if (home.length > 5 && text.includes(home) && !problems.length) {
+    problems.push({ field, why: "home directory path", excerpt: home });
+  }
+  for (const { re, why } of SECRET_PATTERNS) {
+    for (const m of text.matchAll(re)) problems.push({ field, why, excerpt: mask(m[0]) });
   }
   return problems;
 }

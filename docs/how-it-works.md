@@ -44,7 +44,16 @@ queued. A schedule keeps that tick as its one pending fire, retried every tick u
 or the next cron occurrence comes (`deferred`, then `skipped_busy` if it never started; see
 [busy ticks](schedules.md#busy-ticks-one-deferred-fire)).
 
-The executor then spawns the Claude Code CLI:
+Before anything is written, the run manager picks the executor of the agent's
+[harness](agents.md#harness) (Claude Code unless the agent says otherwise) and checks that the
+agent fits it: a field the harness cannot honour refuses the run, field named. The executor is
+an *adapter*: its `prepare` step does the CLI's own pre-flight checks (for Claude Code: the
+project agent of a link exists, the MCP connectors the allow-list needs, project skills that
+shadow bundled ones), and everything else (guards, budgets, status transitions, log, diff,
+events, needs-review) stays in the one run path, whatever CLI runs. The adapter boundary, with
+diagrams: [Harnesses](harnesses.md).
+
+The Claude Code executor then spawns the CLI:
 
 ```bash
 claude -p --output-format stream-json ...   # cwd = the target project
@@ -66,13 +75,29 @@ they arrive and keeps the raw stream in `data/logs/<run_id>.jsonl`:
   termination reason;
 - one `run_agents` row per subagent the run delegated to (type, brief, report, duration);
 - the final message and the resume command for the Claude session;
-- when the project is a git checkout, what the run changed: HEAD is recorded before the
-  spawn, and when the run ends a `diff` event lists the changed files with lines added and
-  deleted (commits made during the run, uncommitted edits and untracked files, scoped to the
-  project directory; at most 200 files listed) and the patch goes to
-  `data/logs/<run_id>.diff` (cut at 1 MB). `get_run` and `run-info` return it as `diff`, the
-  run page shows it under "Changes". A project that is not a git checkout gets no diff.
-  Edits that were already uncommitted before the run are part of the diff too. Lines of
+- when the project is a git checkout, what the run changed: the checkout is snapshotted before
+  the spawn (HEAD, the files already changed or untracked with a fingerprint of each, a
+  `git stash create` commit of the tracked edits, which adds no stash entry and touches neither
+  the files nor the index, and the repository's worktrees and branches), and when the run ends a
+  `diff` event lists the changed files with lines added and deleted (commits made during the
+  run, uncommitted edits and untracked files, scoped to the project directory; at most 200
+  files listed) and the patch goes to `data/logs/<run_id>.diff` (cut at 1 MB). `get_run` and
+  `run-info` return it as `diff`, the run page shows it under "Changes". A project that is not
+  a git checkout gets no diff.
+  Changes that were already there before the run are left out when the run leaves them as they
+  were: `preexisting` counts them, and a run that touches nothing on a dirty checkout shows an
+  empty diff. A file already changed before and changed again by the run stays listed, marked
+  `preexisting` ("also changed before the run"); for a tracked file the lines and the patch are
+  the run's own delta, for a file that was untracked they cover the whole file.
+  Work done in a git worktree is listed under `worktrees`, one entry per worktree created during
+  the run or whose HEAD moved: its committed and uncommitted changes against its base (HEAD at
+  the start for a worktree that existed, else the tip of the branch it was created from, local
+  or remote-tracking) and its commits (`git log base..head`, 50 at most). A worktree removed
+  before the run ended leaves its branch: a branch that appeared or moved during the run with no
+  worktree on it is listed with `removed: true` and its `base...branch` diff. Their patches are
+  appended to the same `.diff` file after a `# worktree <path>` or `# branch <name>` line. The
+  checkout's own worktree and branch are never in that list; another process working in a
+  worktree of the same repository at the same time would show up there too. Lines of
   untracked files are counted for the first 1000 files / 64 MB only; past that a file is listed
   as "not counted" and the totals are marked partial (`totalsPartial`). An untracked symlink
   counts as one line (its target is never read); a nested repository or anything else that is

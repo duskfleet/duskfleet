@@ -383,6 +383,48 @@ const MIGRATIONS: ReadonlyArray<{ version: number; sql: string; backfill?: (db: 
       ALTER TABLE runs ADD COLUMN log_truncated INTEGER;
     `,
   },
+  {
+    // Skills an agent declares (`skills:`, issue #48): the id of the content-addressed bundle under
+    // data/skill-bundles/ the run got with --add-dir, so get_run shows which skills were available.
+    // NULL = the agent declares none (or none of them resolved).
+    version: 28,
+    sql: `
+      ALTER TABLE runs ADD COLUMN skills_bundle TEXT;
+    `,
+  },
+  {
+    // The dashboard's "seen" state of an Alerts item (DS-32, issue #430). item_key = kind + subject
+    // id + the id of the latest event of the item, so a new event is a new key and the item comes
+    // back by itself. Rows that match no current item are inert (attention-acks.ts prunes them).
+    version: 29,
+    sql: `
+      CREATE TABLE IF NOT EXISTS attention_acks (
+        item_key TEXT PRIMARY KEY,
+        kind TEXT NOT NULL,
+        subject_id TEXT NOT NULL,
+        event_id TEXT NOT NULL,
+        seen_at TEXT NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS idx_attention_acks_subject ON attention_acks(kind, subject_id);
+    `,
+  },
+  {
+    // Tool calls Claude Code's sandbox blocked (issue #447): the structured `sandbox_violation`
+    // marker counted by the parser, main pass plus wrap-up, set at the terminal transition. A
+    // count above 0 is the `sandbox_blocked` review reason. NULL for older rows and running runs.
+    version: 30,
+    sql: `
+      ALTER TABLE runs ADD COLUMN sandbox_violations INTEGER;
+    `,
+  },
+  {
+    // The agent CLI that ran (issue #445, `harness:` in agent frontmatter): one run path, one
+    // adapter per harness. Every row before this one ran Claude Code.
+    version: 31,
+    sql: `
+      ALTER TABLE runs ADD COLUMN harness TEXT NOT NULL DEFAULT 'claude';
+    `,
+  },
 ];
 
 /**

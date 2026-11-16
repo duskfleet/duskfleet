@@ -26,12 +26,13 @@ export const COMMAND_HELP: Readonly<Record<string, CommandHelp>> = {
   },
   agents: {
     usage: [
-      "duskfleet agents",
+      "duskfleet agents [--json]",
       "duskfleet agents create <id> [--model <m>] [--budget <usd>] [--permission-mode <mode>]",
       "                       [--allowed-tools <a,b>] [--disallowed-tools <a,b>] [--timeout <minutes>]",
-      '                       [--description <text>] [--force] (-- "<system prompt>" | --prompt-file <file>)',
+      '                       [--description <text>] [--force] [--json] (-- "<system prompt>" | --prompt-file <file>)',
     ],
     options: [
+      "--json                      the agents (or { created, overrode, agent }) as JSON on stdout",
       "-m, --model <m>             model of the agent (none: the Claude Code default)",
       "--budget <usd>              max_budget_usd per run (default 0.5)",
       "--permission-mode <mode>    default dontAsk",
@@ -46,13 +47,14 @@ export const COMMAND_HELP: Readonly<Record<string, CommandHelp>> = {
     doc: `${DOCS}/cli.md#agents-create`,
   },
   projects: {
-    usage: ["duskfleet projects"],
+    usage: ["duskfleet projects [--json]"],
+    options: ["--json   { allowedProjectRoots, projects } as JSON on stdout"],
     example: "duskfleet projects",
     doc: `${DOCS}/configuration.md`,
   },
   run: {
     usage: [
-      'duskfleet run --project <id or path> [--agent <id>] [--model <m>] [--title <text>] [--no-wait] -- "<prompt>"',
+      'duskfleet run --project <id or path> [--agent <id>] [--model <m>] [--title <text>] [--no-wait] [--json [--full]] -- "<prompt>"',
     ],
     options: [
       "-p, --project <id or path>   registered project id or absolute path",
@@ -61,23 +63,26 @@ export const COMMAND_HELP: Readonly<Record<string, CommandHelp>> = {
       "-m, --model <m>              override the agent's model",
       "--title <text>               what the run is for, listed instead of the first prompt line (max 120)",
       "--no-wait                    print the run id and exit (the run is not recorded once the CLI exits)",
+      "--json                       the run record as JSON on stdout (trimmed: no argv, no raw result)",
+      "--full                       the whole run record as JSON (implies --json)",
     ],
     example: 'duskfleet run --project my-app --agent fixer --model haiku -- "Fix the failing test"',
     doc: `${DOCS}/cli.md#first-run`,
   },
   runs: {
-    usage: ["duskfleet runs [--status <status>] [--limit <n>] [--agent <id>]"],
+    usage: ["duskfleet runs [--status <status>] [--limit <n>] [--agent <id>] [--json]"],
     options: [
       "--status <status>   pending, running, completed, failed, cancelled or timed_out",
       "--limit <n>         at most n runs",
       "--agent <id>        runs of one agent",
+      "--json              the runs as a JSON array on stdout, the cost total on stderr",
     ],
     example: "duskfleet runs --status completed --limit 10",
     doc: `${DOCS}/cli.md#what-a-run-records`,
   },
   "run-info": {
-    usage: ["duskfleet run-info <run_id> [--events]"],
-    options: ["--events   add the event timeline"],
+    usage: ["duskfleet run-info <run_id> [--events] [--json]"],
+    options: ["--events   add the event timeline", "--json     the run record as JSON on stdout"],
     example: "duskfleet run-info <run_id> --events",
     doc: `${DOCS}/cli.md#what-a-run-records`,
   },
@@ -87,17 +92,22 @@ export const COMMAND_HELP: Readonly<Record<string, CommandHelp>> = {
     doc: `${DOCS}/cli.md`,
   },
   schedules: {
-    usage: ["duskfleet schedules", "duskfleet schedules run-now <schedule id or name>"],
+    usage: ["duskfleet schedules [--json]", "duskfleet schedules run-now <schedule id or name> [--json]"],
+    options: [
+      "--json   { scheduler, schedules } (run-now: the schedule row) as JSON on stdout; run-now's",
+      "         confirmation line goes to stderr",
+    ],
     example: 'duskfleet schedules run-now "pr review"',
     doc: `${DOCS}/schedules.md`,
   },
   budgets: {
     usage: [
-      "duskfleet budgets",
-      "duskfleet budgets set <global | agent <id> | project <id>> --amount <usd> [--warn <percent>] [--no-hard-stop] [--unpriced count|allow]",
-      "duskfleet budgets delete <budget id>",
+      "duskfleet budgets [--json]",
+      "duskfleet budgets set <global | agent <id> | project <id>> --amount <usd> [--warn <percent>] [--no-hard-stop] [--unpriced count|allow] [--json]",
+      "duskfleet budgets delete <budget id> [--json]",
     ],
     options: [
+      "--json               the budget statuses (set: the budget, delete: { deleted }) as JSON on stdout",
       "--amount <usd>       monthly amount (UTC month)",
       "--warn <percent>     warn at this share of the amount",
       "--no-hard-stop       warn only, never pause the scope's schedules",
@@ -127,33 +137,42 @@ export const COMMAND_HELP: Readonly<Record<string, CommandHelp>> = {
     doc: `${DOCS}/schedules.md#who-ticks`,
   },
   "install-service": {
-    usage: ["duskfleet install-service [--print] [--keep-awake | --no-keep-awake]"],
+    usage: ["duskfleet install-service [--print] [--keep-awake | --no-keep-awake] [--json]"],
     options: [
       "--print           print the unit and its install commands, change nothing",
       "--keep-awake      macOS: run serve under caffeinate -i -s, no sleep while on AC (default)",
       "--no-keep-awake   macOS: render the unit without caffeinate; the Mac may sleep",
+      "--json            { installed, platform, label, unitPath, logPath, keepAwake, ran, status, notes } as JSON",
     ],
     example: "duskfleet install-service --print",
     doc: `${DOCS}/schedules.md#who-ticks`,
   },
   "uninstall-service": {
-    usage: ["duskfleet uninstall-service"],
+    usage: ["duskfleet uninstall-service [--json]"],
+    options: ["--json   { uninstalled, removed, ran } as JSON on stdout"],
     example: "duskfleet uninstall-service",
     doc: `${DOCS}/schedules.md#who-ticks`,
   },
   mcp: {
-    usage: ["duskfleet mcp register --target claude-code|claude-desktop [--dry-run] [--yes]", "duskfleet mcp status"],
+    usage: [
+      "duskfleet mcp register --target claude-code|claude-desktop [--dry-run] [--yes]",
+      "duskfleet mcp status [--json]",
+    ],
     options: [
       "--target <host>   claude-code or claude-desktop",
       "--dry-run         show the change, write nothing",
       "--yes             apply without asking",
+      "--json            status: one entry per host as JSON (env values included)",
     ],
     example: "duskfleet mcp register --target claude-desktop --dry-run",
     doc: `${DOCS}/mcp-server.md`,
   },
   doctor: {
-    usage: ["duskfleet doctor [--probe]"],
-    options: ["--probe   plus one real hello run on haiku (costs cents)"],
+    usage: ["duskfleet doctor [--probe] [--json]"],
+    options: [
+      "--probe   plus one real hello run on haiku (costs cents)",
+      "--json    the whole report as JSON on stdout (the sections are its keys)",
+    ],
     example: "duskfleet doctor --probe",
     doc: `${DOCS}/cli.md#doctor-logs-and-diffs`,
   },

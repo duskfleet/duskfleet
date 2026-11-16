@@ -151,8 +151,11 @@ base) on top of one, and its bumps must still be patch or minor. Otherwise (a De
 force-push to a new version, any other commit, the label removed) the gate disables
 auto-merge with one `[pr-gate]` comment per head, and the head needs a new review. A major or unparsable bump with the
 same label is never merged: it gets one `[pr-gate]` comment per head and waits for the owner.
+A pre-release, a downgrade or an equal version is never patch or minor. A PR behind its base is
+only updated with `--update-branch`; without it an approved PR behind its base is left alone.
 `--dry-run` lists the candidates and what a real run would do, after the same merge-state
-checks.
+checks, and it does not preview an update or auto-merge that a run without `--update-branch`
+cannot do.
 
 The gate also expires stale locks. `flow: in-progress` and `flow: in-review` are swapped in
 first as a lock against a second run; a run that dies after that (timeout, killed child, an

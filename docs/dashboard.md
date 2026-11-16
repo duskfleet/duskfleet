@@ -51,7 +51,9 @@ to `1` on every platform. `bin/start.mjs` also drops the `- Network:` line of Ne
 the server answers on `127.0.0.1` only, so that address is not reachable from the network.
 
 Five views, plus the [trend](#trends) of the runs. The runs list and a running run's detail auto-refresh every 3 seconds (pause button
-in the nav); the other pages are static.
+in the nav); the other pages are static. On every page the nav's **Runs** tab shows a badge with the
+number of runs running now (every agent and project, the same definition as **Running now** below,
+no badge when nothing runs); it re-reads the count every 5 seconds and on every navigation.
 
 - **Runs** (the home page, `/`; `/runs` redirects there and keeps its query string): KPI cards (clean runs, needs review, spend) computed on the current project / agent
   filter; a Project and an Agent multi-select on the search line (repeated params,
@@ -97,7 +99,9 @@ in the nav); the other pages are static.
   half, the same line as the title of the agent page's "wrap-up" limit; the wrap-up's own tool
   calls sit between `wrap-up started` / `wrap-up ended` rows of the timeline), a **Changes** section when the project is a git checkout (files the
   run changed with lines added / deleted, the base commit, a link to the patch at
-  `/runs/<id>/diff`), event timeline with legend and grouped repeats,
+  `/runs/<id>/diff`; changes already there before the run are left out and counted in the
+  footer, a file changed again is marked "also changed before the run", and each worktree the
+  run created or moved, or the branch of one it removed, gets its own list with its commit count), event timeline with legend and grouped repeats,
   previous / next run of the same agent, a "run again" CLI command, the `claude --resume`
   command and the exact command executed. Home paths print as `~/…`; Copy buttons give the
   full value. Every CLI command the dashboard shows (run again, `budgets set` on Costs,
@@ -195,6 +199,40 @@ in the nav); the other pages are static.
   `user_projects_file`, `scheduler.default_time_zone`, `noop_pattern`, `allow_command_gates`,
   `claude.allow_bypass_permissions`, `env_passthrough`) stay hand edits of the file. The header
   shows when the file last changed and whether that was a hand edit.
+
+## Alerts
+
+`/attention`, the Alerts tab, last in the nav (first in the wrapped tab row on narrow screens, so its
+badge stays in view), lists everything that needs a human, grouped by kind
+in a fixed order. Empty sections are hidden:
+
+1. **Login and quota errors**: one item per cause (`auth_required`, `provider_quota`, a
+   `claude` binary not found), with the runs it failed folded in. "How to fix" opens the fix
+   line in place (the same text as the CLI's hint, core's `FAILURE_FIXES`).
+2. **Failed runs**: failed, timed-out and orphaned runs, one item per agent with a count.
+3. **Needs review**: completed runs with a stored [review reason](#needs-review), one item per agent.
+4. **Schedules paused or in error**: auto-paused schedules (`paused_reason`) and schedules whose
+   last firing errored. A schedule paused by hand is not listed.
+5. **Budget warnings**: monthly budgets at or past `warn_percent`; a spent hard stop is coral.
+6. **Repeated skipped busy**: a schedule whose last 3 or more firings were all `skipped_busy`
+   (the `deferred` rows `scheduler.defer_busy` writes in between do not break the streak).
+
+An item leaves when its cause is fixed: the agent ends a clean run, or its schedule is paused by
+hand (run items); a later run ends without the login code; the schedule is resumed or fires again;
+the spend drops below the warning or the month changes. Run and schedule items older than 48 hours
+are dropped too.
+
+**Seen.** Each item has a check button that marks it seen; "Mark section seen" and "Mark all seen"
+mark every item shown, and a toast offers Undo for about 8 seconds. A seen item moves to the
+collapsible **Seen** group at the bottom ("seen hh:mm"); its pressed button un-sees it. The mark is
+stored in the database (`attention_acks`), so it is the same in every browser and survives a
+reload. It belongs to the item's latest event (the newest run of the agent, the newest firing of
+the schedule, the budget's month and threshold): a new event brings the item back by itself, with
+a "New since seen hh:mm" pill. Login and quota errors and a spent hard-stop budget cannot be marked
+seen; they leave only when fixed.
+
+The tab's badge counts unseen items, not runs. It is coral when a login or quota error or a spent
+hard stop is present, amber otherwise, and absent at 0.
 
 ## Trends
 
@@ -298,6 +336,7 @@ the agent chose to stop, or when something silently narrowed what it could do:
 | `permission_denied` | a tool call was refused: the allow-list is incomplete; fix: [troubleshooting](troubleshooting.md#permission-denial) |
 | `context_exhausted` | structured signal that the context window ran out; see [troubleshooting](troubleshooting.md#context-exhausted-and-orphaned-runs) |
 | `mcp_missing` | an allow-listed MCP server never mounted; fix: [troubleshooting](troubleshooting.md#permission-denial) |
+| `sandbox_blocked` | Claude Code's sandbox blocked a network connection (structured `sandbox_violation` marker; the run note names the host). A blocked file write has no marker and is not detected; see [security](security.md#opt-in-sandbox-sandbox-true) |
 | `empty_run` | the run completed with zero tool calls ("no work done"; the same signal the schedule auto-pause counts as empty). Structured only: the result text is never read |
 
 A run that used tools but never edited a file (a read-only reviewer, a planner) is not empty
