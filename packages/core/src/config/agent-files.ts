@@ -80,6 +80,7 @@ export const agentSpecSchema = z.object({
   skills: skillsSchema.optional(),
   sandbox: z.boolean().optional(),
   sandbox_allowed_domains: sandboxAllowedDomainsSchema.optional(),
+  sandbox_weaker_network_isolation: z.boolean().optional(),
   system_prompt: z.string().default(""),
 });
 export type AgentSpec = z.infer<typeof agentSpecSchema>;
@@ -142,18 +143,28 @@ export function agentToSpec(a: AgentDefinition): AgentSpec {
   if (a.skills !== undefined) spec.skills = a.skills;
   if (a.sandbox !== undefined) spec.sandbox = a.sandbox;
   if (a.sandboxAllowedDomains !== undefined) spec.sandbox_allowed_domains = a.sandboxAllowedDomains;
+  if (a.sandboxWeakerNetworkIsolation !== undefined)
+    spec.sandbox_weaker_network_isolation = a.sandboxWeakerNetworkIsolation;
   return spec;
 }
 
 /**
  * `sandbox_allowed_domains` only means something with `sandbox: true`: without it the run has no
  * sandbox and every host is reachable, so a list there would read as a restriction that is not
- * applied. Create / update refuse it.
+ * applied. Create / update refuse it. Same for `sandbox_weaker_network_isolation`: it loosens a
+ * sandbox that would not exist.
  */
-export function assertSandboxSpec(spec: Pick<AgentSpec, "sandbox" | "sandbox_allowed_domains">): void {
+export function assertSandboxSpec(
+  spec: Pick<AgentSpec, "sandbox" | "sandbox_allowed_domains" | "sandbox_weaker_network_isolation">,
+): void {
   if (spec.sandbox_allowed_domains?.length && spec.sandbox !== true) {
     throw new Error(
       "sandbox_allowed_domains needs sandbox: true: without the sandbox the run can reach every host, so the list would restrict nothing.",
+    );
+  }
+  if (spec.sandbox_weaker_network_isolation === true && spec.sandbox !== true) {
+    throw new Error(
+      "sandbox_weaker_network_isolation needs sandbox: true: it loosens the sandbox's network isolation, and without the sandbox there is none.",
     );
   }
 }

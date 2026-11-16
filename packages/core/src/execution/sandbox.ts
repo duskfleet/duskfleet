@@ -33,9 +33,20 @@ export const SANDBOX_DOMAIN_PATTERN = /^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]
 export const SANDBOX_DOMAIN_MESSAGE =
   "sandbox_allowed_domains entries are exact host names such as api.github.com (lowercase, no scheme, port, path or wildcard)";
 
-/** The `--settings` value of a sandboxed run: sandbox on, no unsandboxed fallback, the listed hosts reachable. */
-export function sandboxSettings(allowedDomains: readonly string[]): string {
+/**
+ * The `--settings` value of a sandboxed run: sandbox on, no unsandboxed fallback, the listed hosts
+ * reachable. `weakerNetworkIsolation` adds `enableWeakerNetworkIsolation: true` (agent frontmatter
+ * `sandbox_weaker_network_isolation`, issue #449): on macOS it lets Go tools such as `gh` verify TLS
+ * inside the sandbox (verified with real haiku runs on 2.1.325: `x509: OSStatus -26276` without it),
+ * at the cost of a weaker network isolation for every command of the run. Without the flag the
+ * value is exactly what it was before the option existed.
+ */
+export function sandboxSettings(
+  allowedDomains: readonly string[],
+  options: { weakerNetworkIsolation?: boolean } = {},
+): string {
   const sandbox: Record<string, unknown> = { enabled: true, allowUnsandboxedCommands: false };
+  if (options.weakerNetworkIsolation === true) sandbox["enableWeakerNetworkIsolation"] = true;
   if (allowedDomains.length > 0) sandbox["network"] = { allowedDomains: [...new Set(allowedDomains)] };
   return JSON.stringify({ sandbox });
 }
