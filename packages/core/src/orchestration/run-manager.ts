@@ -14,6 +14,7 @@ import { mergeEnvPassthrough } from "../execution/child-env.js";
 import { type LogMetadata, logMetadata } from "../execution/log-caps.js";
 import { mergeSubagent, needsRepair, sameSubagent, subagentsFromLog } from "../execution/log-replay.js";
 import { allowListedMcpPrefixes, mcpToolPrefix } from "../execution/mcp.js";
+import { type SandboxSupport, sandboxSupport } from "../execution/sandbox.js";
 import { mergeUsageByModel } from "../execution/stream-json.js";
 import {
   type ExecutionEvent,
@@ -132,6 +133,8 @@ export function resumePrompt(reason: string): string {
 export interface RunManagerOptions {
   /** Owner recorded on every run, `role@host:pid` (processIdentity); defaults to role `unknown`. */
   owner?: string;
+  /** Whether Claude Code's sandbox can run on this host (`sandboxSupport`); tests replace it. */
+  sandboxSupport?: () => SandboxSupport;
 }
 
 interface ActiveRun {
@@ -225,6 +228,9 @@ export class RunManager {
   /** This process as `role@host:pid`, recorded as the owner of every run it starts. */
   readonly owner: string;
 
+  /** Asked before every run of a `sandbox: true` agent: a host without the sandbox refuses it. */
+  private readonly sandboxSupport: () => SandboxSupport;
+
   constructor(
     config: DuskFleetConfig,
     private readonly runs: RunRepository,
@@ -234,6 +240,7 @@ export class RunManager {
     this._config = config;
     this.syncEventCap();
     this.owner = options.owner ?? processIdentity();
+    this.sandboxSupport = options.sandboxSupport ?? (() => sandboxSupport());
   }
 
   /** claude.max_event_bytes follows the config (a test may build the manager without a repository). */
@@ -454,6 +461,15 @@ export class RunManager {
     const prompt = input.prompt?.trim();
     if (!prompt) throw new Error("prompt is empty");
     const title = normalizeRunTitle(input.title);
+    if (agent.sandbox) {
+      // Never run a sandboxed agent unsandboxed: no row, no spawn, a clear reason.
+      const support = this.sandboxSupport();
+      if (!support.available) {
+        throw new Error(
+          `agent "${agent.id}" sets sandbox: true, but Claude Code's sandbox is not available on this host (${support.detail}); the run was refused, not started unsandboxed`,
+        );
+      }
+    }
 
     const busy = this.capacityError(agent, projectPath);
     if (busy) throw new BusyError(busy);
@@ -545,6 +561,7 @@ export class RunManager {
     if (addDirs.length) request.addDirs = addDirs;
     const envPassthrough = mergeEnvPassthrough(this.config.claude.envPassthrough, agent.envPassthrough);
     if (envPassthrough.length) request.envPassthrough = envPassthrough;
+    if (agent.sandbox) request.sandbox = { allowedDomains: agent.sandboxAllowedDomains ?? [] };
 
     // Record the run (with the exact command) *before* launching it.
     const run: Run = {
@@ -1288,6 +1305,7 @@ export class RunManager {
         costUsd: result.costUsd,
         permissionDenials: result.permissionDenials,
         deniedTools: result.deniedTools,
+        sandboxViolations: result.sandboxViolations ?? 0,
         mcp,
         humanIntervention: result.permissionDenials > 0,
         contextExhausted: result.contextExhausted,
@@ -1487,6 +1505,17 @@ export class RunManager {
       case "parse_error":
         this.runs.addEvent(runId, "error", { parseError: event.line });
         break;
+      case "sandbox_violation":
+        this.runs.addEvent(
+          runId,
+          "note",
+          {
+            message: `sandbox blocked a command${event.violations.length ? `: ${event.violations.join("; ")}` : ""}`,
+            sandboxViolation: { toolUseId: event.toolUseId, violations: event.violations },
+          },
+          event.agentId,
+        );
+        break;
       case "grace_kill":
         this.runs.addEvent(runId, "note", {
           message: `${event.childAlive ? "process" : "a descendant of the process"} still running ${event.afterMs / 1000} s after the result line: SIGTERM sent to its process group`,
@@ -1594,6 +1623,7 @@ export function mergeResults(main: ExecutionResult, wrapUp: ExecutionResult): Ex
     costUsd: main.costUsd === null || wrapUp.costUsd === null ? null : main.costUsd + wrapUp.costUsd,
     permissionDenials: main.permissionDenials + wrapUp.permissionDenials,
     deniedTools: [...main.deniedTools, ...wrapUp.deniedTools],
+    sandboxViolations: (main.sandboxViolations ?? 0) + (wrapUp.sandboxViolations ?? 0),
     contextExhausted: main.contextExhausted || wrapUp.contextExhausted,
     // A run cancelled during its wrap-up is stored as cancelled: no failure code, as for any cancel.
     failure: wrapUp.outcome === "cancelled" ? null : (main.failure ?? wrapUp.failure),

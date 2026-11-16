@@ -1,10 +1,10 @@
 /**
  * `duskfleet doctor` for a human (DS-33): a `doctor · n warnings · n errors` header, then one check
  * per line (glyph, a 16-column name, the value) in a fixed order: node, claude, PATH, config, data,
- * agents, scheduler, schedules, unpriced runs, orphans, probe. Advice lines are indented under their
+ * agents, scheduler, schedules, unpriced runs, orphans, sandbox, probe. Advice lines are indented under their
  * check. A missing binary is the only error. Pure: the exit code stays the CLI's business.
  */
-import type { BudgetState, ConfigSource, DataSource } from "@duskfleet/core";
+import type { BudgetState, ConfigSource, DataSource, SandboxSupport } from "@duskfleet/core";
 import type { ProbeReport } from "../probe.js";
 import type { KeepAwakeStatus, ServiceStatus } from "../service.js";
 import { AGENT_CREATE } from "./agents.js";
@@ -48,7 +48,38 @@ export interface DoctorReport {
     recovered: { id: string; agentId: string; was: string; owner: string | null; createdAt: string }[];
     advice: string | null;
   };
+  /** Claude Code's native sandbox on this host (absent in reports built before it existed). */
+  sandbox?: SandboxReport;
   probe?: ProbeReport | null;
+}
+
+export interface SandboxReport {
+  available: boolean;
+  detail: string;
+  /** Agents with `sandbox: true`: refused on this host when the sandbox is not available. */
+  agents: string[];
+  advice: string | null;
+}
+
+/** The doctor's sandbox entry from `sandboxSupport()` and the ids of the `sandbox: true` agents. */
+export function sandboxReport(support: Pick<SandboxSupport, "available" | "detail">, agents: string[]): SandboxReport {
+  return {
+    available: support.available,
+    detail: support.detail,
+    agents,
+    advice:
+      !support.available && agents.length > 0
+        ? `${agents.join(", ")} set${agents.length === 1 ? "s" : ""} sandbox: true: every run of ${agents.length === 1 ? "it" : "them"} is refused on this host`
+        : null,
+  };
+}
+
+function sandboxCheck(s: SandboxReport): Check {
+  const using = s.agents.length ? ` · used by ${s.agents.join(", ")}` : "";
+  if (s.available) return ok("sandbox", `available, ${s.detail}${using}`);
+  return s.advice
+    ? warn("sandbox", `not available${using}`, [s.detail, s.advice])
+    : ok("sandbox", "not available here, no agent uses it");
 }
 
 /** Prefix of a warning line. */
@@ -164,6 +195,7 @@ function checks(r: DoctorReport, opts: RenderOpts): Check[] {
         ])
       : ok("orphans", "none recovered"),
   ];
+  if (r.sandbox) list.push(sandboxCheck(r.sandbox));
   if (r.probe) list.push(probeCheck(r.probe, opts));
   return list;
 }

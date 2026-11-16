@@ -43,6 +43,11 @@ export interface ExecutionRequest {
    * (`DEFAULT_ENV_ALLOW` in child-env.ts). Everything else in our environment is dropped.
    */
   envPassthrough?: string[];
+  /**
+   * Run Bash inside Claude Code's native sandbox (`--settings` with `sandbox.enabled`, see
+   * sandbox.ts), reaching only `allowedDomains`. Absent = no `--settings` at all.
+   */
+  sandbox?: { allowedDomains: string[] };
   timeoutMs?: number;
   /** Absolute path of the file that receives every raw event line. */
   logPath?: string;
@@ -81,6 +86,12 @@ export type ExecutionEvent =
    * At most once per run; the second process is kept whatever its init says.
    */
   | { type: "mcp_restart"; missing: string[]; mounted: string[]; pid: number | null; sessionId: string }
+  /**
+   * Claude Code's sandbox blocked a tool call (`tool_result_meta[].remedy.kind ==
+   * "sandbox_violation"`; network blocks only, a blocked file write has no marker). `violations`
+   * are the lines of the result's `<sandbox_violations>` block, for display only.
+   */
+  | { type: "sandbox_violation"; toolUseId: string | null; violations: string[]; agentId: string | null }
   | { type: "parse_error"; line: string };
 
 export type SubagentStatus = "running" | "completed" | "failed" | "interrupted";
@@ -179,6 +190,8 @@ export interface ExecutionResult {
   costUsd: number | null;
   permissionDenials: number;
   deniedTools: DeniedTool[];
+  /** Tool calls Claude Code's sandbox blocked (`sandbox_violation` events). Executors that cannot tell leave it out. */
+  sandboxViolations?: number;
   /** Heuristic: the run stopped because the context window was exhausted. */
   contextExhausted: boolean;
   /**

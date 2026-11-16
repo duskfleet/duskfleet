@@ -13,6 +13,7 @@ import {
   maxConcurrentSchema,
   maxDailyCostUsdSchema,
   maxDailyRunsSchema,
+  sandboxAllowedDomainsSchema,
   skillsSchema,
 } from "./agent-files.js";
 import { dataDirFromEnv, type LocationContext, userConfigDir, userDataDir } from "./locations.js";
@@ -173,6 +174,8 @@ const agentFrontmatterSchema = z.object({
   // Names only; whether they exist is checked on create / update, never on load (a deleted skill
   // must not break every config reload) and skipped with a note at run start.
   skills: skillsSchema.optional(),
+  sandbox: z.boolean().optional(),
+  sandbox_allowed_domains: sandboxAllowedDomainsSchema.optional(),
 });
 
 const projectsSchema = z.object({
@@ -342,6 +345,8 @@ export function loadAgents(agentsDir: string, source: AgentSource = "builtin"): 
     if (fm.max_daily_cost_usd !== undefined) agent.maxDailyCostUsd = fm.max_daily_cost_usd;
     if (fm.env_passthrough !== undefined) agent.envPassthrough = fm.env_passthrough;
     if (fm.skills !== undefined) agent.skills = fm.skills;
+    if (fm.sandbox !== undefined) agent.sandbox = fm.sandbox;
+    if (fm.sandbox_allowed_domains !== undefined) agent.sandboxAllowedDomains = fm.sandbox_allowed_domains;
     agents.set(id, agent);
   }
   return agents;
