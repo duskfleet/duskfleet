@@ -24,6 +24,7 @@ export {
   assertWrapUpReserve,
   deleteAgentFile,
   envPassthroughSchema,
+  harnessNameSchema,
   listProjectAgents,
   type ProjectAgentInfo,
   projectAgentDefinitionHash,
@@ -121,6 +122,17 @@ export {
   type ClaudeCodeExecutorOptions,
   resolveClaudeBinary,
 } from "./execution/claude-code.js";
+export {
+  assertAgentFitsHarness,
+  builtinHarnesses,
+  CLAUDE_CAPABILITIES,
+  HARNESS_CAPABILITY_KEYS,
+  type HarnessCapabilities,
+  type HarnessLookup,
+  HarnessRegistry,
+  harnessOf,
+  harnessRefusal,
+} from "./execution/harness.js";
 export {
   CappedLogWriter,
   capEventJson,

@@ -1,7 +1,7 @@
 /**
  * `duskfleet doctor` for a human (DS-33): a `doctor · n warnings · n errors` header, then one check
  * per line (glyph, a 16-column name, the value) in a fixed order: node, claude, PATH, config, data,
- * agents, scheduler, schedules, unpriced runs, orphans, sandbox, probe. Advice lines are indented under their
+ * agents, scheduler, schedules, unpriced runs, orphans, sandbox, harnesses, probe. Advice lines are indented under their
  * check. A missing binary is the only error. Pure: the exit code stays the CLI's business.
  */
 import type { BudgetState, ConfigSource, DataSource, SandboxSupport } from "@duskfleet/core";
@@ -50,6 +50,8 @@ export interface DoctorReport {
   };
   /** Claude Code's native sandbox on this host (absent in reports built before it existed). */
   sandbox?: SandboxReport;
+  /** One entry per registered harness (issue #445); absent in reports built before it existed. */
+  harnesses?: HarnessReport;
   probe?: ProbeReport | null;
 }
 
@@ -72,6 +74,39 @@ export function sandboxReport(support: Pick<SandboxSupport, "available" | "detai
         ? `${agents.join(", ")} set${agents.length === 1 ? "s" : ""} sandbox: true: every run of ${agents.length === 1 ? "it" : "them"} is refused on this host`
         : null,
   };
+}
+
+export interface HarnessReport {
+  registered: {
+    name: string;
+    binary: string;
+    version: string | null;
+    /** Why the version could not be read (binary missing, ...); null when it was. */
+    error: string | null;
+    /** Agents that run on this harness. */
+    agents: string[];
+  }[];
+  /** Agents whose `harness:` names no registered executor: every run of them is refused. */
+  unknown: { agentId: string; harness: string }[];
+}
+
+/**
+ * A harness whose binary is missing is a problem only when an agent uses it; an agent on a harness
+ * nobody registered is always one. The Claude binary keeps its own check (an error when missing).
+ */
+function harnessCheck(h: HarnessReport): Check {
+  const value = h.registered
+    .map((r) => `${r.name} ${r.error ? "missing" : (r.version ?? "version unknown")}`)
+    .join(" · ");
+  const advice = [
+    ...h.registered
+      .filter((r) => r.error && r.agents.length)
+      .map((r) => `${r.name} (${r.binary}) is not usable, but ${r.agents.join(", ")} run on it: ${oneLine(r.error!)}`),
+    ...h.unknown.map(
+      (u) => `agent ${u.agentId} sets harness: ${u.harness}, which is not registered: its runs are refused`,
+    ),
+  ];
+  return advice.length ? warn("harnesses", value, advice) : ok("harnesses", value);
 }
 
 function sandboxCheck(s: SandboxReport): Check {
@@ -196,6 +231,7 @@ function checks(r: DoctorReport, opts: RenderOpts): Check[] {
       : ok("orphans", "none recovered"),
   ];
   if (r.sandbox) list.push(sandboxCheck(r.sandbox));
+  if (r.harnesses) list.push(harnessCheck(r.harnesses));
   if (r.probe) list.push(probeCheck(r.probe, opts));
   return list;
 }

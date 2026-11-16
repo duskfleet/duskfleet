@@ -417,6 +417,14 @@ const MIGRATIONS: ReadonlyArray<{ version: number; sql: string; backfill?: (db: 
       ALTER TABLE runs ADD COLUMN sandbox_violations INTEGER;
     `,
   },
+  {
+    // The agent CLI that ran (issue #445, `harness:` in agent frontmatter): one run path, one
+    // adapter per harness. Every row before this one ran Claude Code.
+    version: 31,
+    sql: `
+      ALTER TABLE runs ADD COLUMN harness TEXT NOT NULL DEFAULT 'claude';
+    `,
+  },
 ];
 
 /**

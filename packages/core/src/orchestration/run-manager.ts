@@ -6,14 +6,20 @@
  */
 import { randomUUID } from "node:crypto";
 import path from "node:path";
-import { agentDefinitionHash, listProjectAgents, projectAgentDefinitionHash } from "../config/agent-files.js";
+import { agentDefinitionHash, projectAgentDefinitionHash } from "../config/agent-files.js";
 import { loadConfig } from "../config/loader.js";
-import { prepareSkillBundle, skillsShadowedByProject } from "../config/skills.js";
-import type { AgentDefinition, DuskFleetConfig, ProjectDefinition } from "../config/types.js";
+import { prepareSkillBundle } from "../config/skills.js";
+import {
+  type AgentDefinition,
+  DEFAULT_HARNESS,
+  type DuskFleetConfig,
+  type ProjectDefinition,
+} from "../config/types.js";
 import { mergeEnvPassthrough } from "../execution/child-env.js";
+import { assertAgentFitsHarness, type HarnessCapabilities, HarnessRegistry, harnessOf } from "../execution/harness.js";
 import { type LogMetadata, logMetadata } from "../execution/log-caps.js";
 import { mergeSubagent, needsRepair, sameSubagent, subagentsFromLog } from "../execution/log-replay.js";
-import { allowListedMcpPrefixes, mcpToolPrefix } from "../execution/mcp.js";
+import { mcpToolPrefix } from "../execution/mcp.js";
 import { type SandboxSupport, sandboxSupport } from "../execution/sandbox.js";
 import { mergeUsageByModel } from "../execution/stream-json.js";
 import {
@@ -139,6 +145,8 @@ export interface RunManagerOptions {
 
 interface ActiveRun {
   handle: ExecutionHandle;
+  /** The adapter of the agent's harness; a wrap-up pass or a fresh-session fallback goes through it too. */
+  executor: Executor;
   agentId: string;
   projectPath: string;
   /** The agent promised not to edit the project checkout: ignored by the per-project guard. */
@@ -231,12 +239,26 @@ export class RunManager {
   /** Asked before every run of a `sandbox: true` agent: a host without the sandbox refuses it. */
   private readonly sandboxSupport: () => SandboxSupport;
 
+  /** The executors this manager can spawn, by harness name (one adapter per agent CLI). */
+  readonly harnesses: HarnessRegistry;
+
+  /** The default harness's executor (Claude Code); kept for callers from before the registry. */
+  get executor(): Executor | undefined {
+    return this.harnesses.get(DEFAULT_HARNESS);
+  }
+
+  /**
+   * `executors`: one executor (taken as its own harness, `claude` when it names none), a list of
+   * them, or a ready registry. Each run goes through the executor of its agent's harness.
+   */
   constructor(
     config: DuskFleetConfig,
     private readonly runs: RunRepository,
-    private readonly executor: Executor,
+    executors: Executor | readonly Executor[] | HarnessRegistry,
     options: RunManagerOptions = {},
   ) {
+    // A test that never starts a run may pass no executor at all: an empty registry then.
+    this.harnesses = executors instanceof HarnessRegistry ? executors : new HarnessRegistry(executors ?? []);
     this._config = config;
     this.syncEventCap();
     this.owner = options.owner ?? processIdentity();
@@ -461,6 +483,14 @@ export class RunManager {
     const prompt = input.prompt?.trim();
     if (!prompt) throw new Error("prompt is empty");
     const title = normalizeRunTitle(input.title);
+    // One run path, one adapter per harness: an unknown harness, or a field the harness cannot
+    // honour, is refused here (no row, no spawn), as it was at create time.
+    const harness = harnessOf(agent);
+    assertAgentFitsHarness(agent, this.harnesses.lookup, project);
+    const executor = this.harnesses.get(harness) as Executor;
+    const caps = this.harnesses.capabilities(harness) as HarnessCapabilities;
+    if (input.resume && !caps.resumeSession)
+      throw new Error(`agent "${agent.id}": resuming a session is not supported by harness ${harness}`);
     if (agent.sandbox) {
       // Never run a sandboxed agent unsandboxed: no row, no spawn, a clear reason.
       const support = this.sandboxSupport();
@@ -486,7 +516,9 @@ export class RunManager {
     // directory, with the same definition; anything else starts a fresh session (noted below).
     const continueFrom = input.continueFrom ?? null;
     const notContinued = continueFrom
-      ? (continueRefusal(continueFrom) ?? continueMismatch(continueFrom, agent.id, projectPath, agentHash))
+      ? caps.resumeSession
+        ? (continueRefusal(continueFrom) ?? continueMismatch(continueFrom, agent.id, projectPath, agentHash))
+        : `harness ${harness} cannot continue a session`
       : null;
     const continued = continueFrom && !notContinued ? continueFrom : null;
     // A resumed run continues the earlier run's session under its own run id and log.
@@ -499,8 +531,10 @@ export class RunManager {
       : input.maxBudgetUsd !== undefined
         ? { ...agent, maxBudgetUsd: input.maxBudgetUsd }
         : agent;
-    // A gate is a quick yes/no: no reserve, no wrap-up pass.
-    const budget = budgetPlan(kind === "gate" ? { ...budgetAgent, wrapUpReserveUsd: 0 } : budgetAgent, this.config);
+    // A gate is a quick yes/no: no reserve, no wrap-up pass. Neither for a harness that does not stop
+    // itself at a budget: it never ends budget_exhausted, so nothing would ever use the reserve.
+    const noReserve = kind === "gate" || !caps.hardBudgetUsd;
+    const budget = budgetPlan(noReserve ? { ...budgetAgent, wrapUpReserveUsd: 0 } : budgetAgent, this.config);
     const logPath = path.join(this.config.dataDir, "logs", `${runId}.jsonl`);
 
     const request: ExecutionRequest = {
@@ -509,32 +543,18 @@ export class RunManager {
       sessionId,
       permissionMode: agent.permissionMode,
       timeoutMs: timeoutMinutes * 60_000,
-      maxBudgetUsd: budget.main,
       logPath,
       maxLogBytes: this.config.claude.maxLogBytes,
     };
+    if (caps.hardBudgetUsd) request.maxBudgetUsd = budget.main;
     if (resume || continued) request.resumeSessionId = sessionId;
     if (model) request.model = model;
     if (agent.allowedTools) request.allowedTools = agent.allowedTools;
     if (agent.disallowedTools) request.disallowedTools = agent.disallowedTools;
     if (agent.effort) request.effort = agent.effort;
     if (agent.systemPrompt) request.appendSystemPrompt = agent.systemPrompt;
-    if (agent.inheritMcp || project?.inheritMcp) {
-      request.inheritMcp = true;
-      // Connectors load at start or not at all: a child whose init lacks one is restarted once.
-      const required = allowListedMcpPrefixes(agent.allowedTools ?? []);
-      if (required.length) request.requiredMcpServers = required;
-    }
-    if (agent.claudeAgent) {
-      // Only project-level agents load under --setting-sources project,local; fail early with the real list.
-      const available = listProjectAgents(projectPath).map((a) => a.name);
-      if (!available.includes(agent.claudeAgent)) {
-        throw new Error(
-          `agent "${agent.id}" runs as project agent "${agent.claudeAgent}", but ${projectPath}/.claude/agents has ${available.length ? available.join(", ") : "no agents"}`,
-        );
-      }
-      request.claudeAgent = agent.claudeAgent;
-    }
+    if (agent.inheritMcp || project?.inheritMcp) request.inheritMcp = true;
+    if (agent.claudeAgent) request.claudeAgent = agent.claudeAgent;
     const addDirs = [...new Set([...(project?.addDirs ?? []), ...(agent.addDirs ?? [])])];
     // Declared skills: a content-addressed bundle under data/skill-bundles/, one more --add-dir.
     // A skill deleted since the agent was written is skipped with a note, never a refused run.
@@ -547,23 +567,22 @@ export class RunManager {
           `skill${missing.length > 1 ? "s" : ""} ${missing.join(", ")} not found in data/skills or config/skills; the run starts without ${missing.length > 1 ? "them" : "it"}`,
         );
     }
-    if (bundle) {
-      addDirs.push(bundle.dir);
-      const shadowed = skillsShadowedByProject(
-        projectPath,
-        bundle.skills.map((s) => s.name),
-      );
-      if (shadowed.length)
-        skillNotes.push(
-          `the project defines .claude/skills/ ${shadowed.join(", ")} too; Claude Code uses the project's ${shadowed.length > 1 ? "copies" : "copy"}, not the bundled one`,
-        );
-    }
+    if (bundle) addDirs.push(bundle.dir);
     if (addDirs.length) request.addDirs = addDirs;
     const envPassthrough = mergeEnvPassthrough(this.config.claude.envPassthrough, agent.envPassthrough);
     if (envPassthrough.length) request.envPassthrough = envPassthrough;
     if (agent.sandbox) {
       request.sandbox = { allowedDomains: agent.sandboxAllowedDomains ?? [] };
       if (agent.sandboxWeakerNetworkIsolation) request.sandbox.weakerNetworkIsolation = true;
+    }
+    // The adapter's own pre-flight (Claude: the link's project agent, MCP servers, shadowed skills).
+    if (executor.prepare) {
+      try {
+        const prepared = executor.prepare(request, { skills: bundle ? bundle.skills.map((s) => s.name) : [] });
+        skillNotes.push(...prepared.notes);
+      } catch (err) {
+        throw new Error(`agent "${agent.id}": ${err instanceof Error ? err.message : String(err)}`);
+      }
     }
 
     // Record the run (with the exact command) *before* launching it.
@@ -583,7 +602,7 @@ export class RunManager {
       durationMs: null,
       claudeSessionId: sessionId,
       permissionMode: agent.permissionMode,
-      command: { binary: this.executor.binary, argv: [], cwd: projectPath },
+      command: { binary: executor.binary, argv: [], cwd: projectPath },
       exitCode: null,
       terminationReason: null,
       error: null,
@@ -621,6 +640,7 @@ export class RunManager {
       lastEventAt: null,
       continuedFromRunId: continued?.id ?? null,
       skillsBundle: bundle?.id ?? null,
+      harness,
     };
 
     // Insert first so that events emitted by the executor always find the row. For a resume the
@@ -672,7 +692,7 @@ export class RunManager {
     }
     let handle: ExecutionHandle;
     try {
-      handle = this.executor.execute(request, (event) => this.onEvent(runId, event));
+      handle = executor.execute(request, (event) => this.onEvent(runId, event));
     } catch (err) {
       // e.g. bypassPermissions requested while disabled, or binary missing
       const message = err instanceof Error ? err.message : String(err);
@@ -695,6 +715,7 @@ export class RunManager {
 
     this.active.set(runId, {
       handle,
+      executor,
       agentId: agent.id,
       projectPath,
       isolated: agent.isolated === true,
@@ -1182,7 +1203,7 @@ export class RunManager {
     };
     let handle: ExecutionHandle;
     try {
-      handle = this.executor.execute(request, (event) => this.onEvent(runId, event));
+      handle = active.executor.execute(request, (event) => this.onEvent(runId, event));
     } catch (err) {
       return couldNotStart(err instanceof Error ? err.message : String(err));
     }
@@ -1221,7 +1242,7 @@ export class RunManager {
     };
     let handle: ExecutionHandle;
     try {
-      handle = this.executor.execute(request, (event) => this.onEvent(runId, event));
+      handle = active.executor.execute(request, (event) => this.onEvent(runId, event));
     } catch (err) {
       // Executors may throw before spawning (startRun handles the same case).
       return couldNotStart(err instanceof Error ? err.message : String(err));

@@ -5,6 +5,7 @@
  * agent's kind and source when the agent still loads (shown, never printed as JSON).
  */
 import {
+  DEFAULT_HARNESS,
   REVIEW_REASON_LABELS,
   type Run,
   type RunAgentView,
@@ -57,6 +58,9 @@ const needsReview = (run: Run) => run.reviewReasons.length > 0;
 function runBlock(info: RunInfo, opts: RenderOpts): string[] {
   const { run } = info;
   const model = run.modelUsed ?? run.modelRequested;
+  // The version is the harness's own (`claude_code_version` holds it for every harness).
+  const harness = run.harness ?? DEFAULT_HARNESS;
+  const versionOf = harness === DEFAULT_HARNESS ? "claude code" : harness;
   return section(
     "Run",
     kv(
@@ -65,12 +69,14 @@ function runBlock(info: RunInfo, opts: RenderOpts): string[] {
         ["project", run.projectId ? `${run.projectId} (${run.projectPath})` : run.projectPath],
         ["label", info.label],
         ["schedule", run.scheduleId],
+        // Only a harness other than Claude Code gets its own line: a Claude run reads as before.
+        ["harness", harness === DEFAULT_HARNESS ? null : harness],
         [
           "model",
           model
-            ? `${model}${run.claudeCodeVersion ? ` (claude code ${run.claudeCodeVersion})` : ""}`
+            ? `${model}${run.claudeCodeVersion ? ` (${versionOf} ${run.claudeCodeVersion})` : ""}`
             : run.claudeCodeVersion
-              ? `default (claude code ${run.claudeCodeVersion})`
+              ? `default (${versionOf} ${run.claudeCodeVersion})`
               : null,
         ],
         ["session", run.claudeSessionId],

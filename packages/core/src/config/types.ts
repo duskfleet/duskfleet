@@ -14,6 +14,12 @@ export type EffortLevel = (typeof EFFORT_LEVELS)[number];
 export const ON_FAILURE_POLICIES = ["none", "resume_once"] as const;
 export type OnFailurePolicy = (typeof ON_FAILURE_POLICIES)[number];
 
+/**
+ * The agent CLI an agent runs on when its frontmatter sets no `harness:` (issue #445). Claude Code
+ * is the only harness that ships; another one is an executor registered next to it.
+ */
+export const DEFAULT_HARNESS = "claude";
+
 /** Where an agent definition was loaded from. Only "user" agents are writable by tools. */
 export type AgentSource = "builtin" | "user";
 
@@ -113,6 +119,12 @@ export interface AgentDefinition {
    * of the run. Needs `sandbox`. Absent = today's `--settings` byte for byte.
    */
   sandboxWeakerNetworkIsolation?: boolean;
+  /**
+   * The agent CLI that runs this agent (`harness:`): the name of a registered executor. Unset =
+   * `DEFAULT_HARNESS` (Claude Code). Left out of the definition when the file does not set it, so
+   * the agent hash of every existing agent stays what it was.
+   */
+  harness?: string;
   /** Markdown body of the agent file. Sent via --append-system-prompt when non-empty. */
   systemPrompt: string;
   /** Absolute path of the file this agent was loaded from. */

@@ -439,6 +439,11 @@ export default async function RunPage({
                 <dd className="mono" title={run.projectPath}>
                   {tildePath(run.projectPath, home)}
                 </dd>
+                <dt>harness</dt>
+                <dd className="mono">
+                  {run.harness ?? "claude"}
+                  {run.claudeCodeVersion ? ` ${run.claudeCodeVersion}` : ""}
+                </dd>
                 <dt>permissions</dt>
                 <dd className="mono">{run.permissionMode}</dd>
                 <dt>model used</dt>
