@@ -212,6 +212,13 @@ npm workspaces, one `config/` and one SQLite database shared by three deliverabl
   `SubagentRecord` per Agent call; `RunManager` writes them on `subagent_start` / `subagent_end`
   and marks the open ones `interrupted` when the run ends. Per-message `output_tokens` of nested
   lines undercount; use `totalTokens`. Only main-session lines set the run's model and last text.
+- **Harnesses: one run path, one adapter per agent CLI** (`execution/harness.ts`, issue #445,
+  docs/harnesses.md): `harness:` in agent frontmatter (default `claude`, the only one shipped),
+  `runs.harness` (migration 31). `RunManager` picks the executor from the `HarnessRegistry` built in
+  `bootstrap.ts`; `assertAgentFitsHarness` refuses (create / update and `startRun`, field named) any
+  field the adapter's `capabilities` cannot honour, never drops or approximates it. CLI-specific
+  pre-flight (link's project agent, required MCP servers, shadowed skills) is the adapter's
+  `prepare`; `RunManager` never names a harness.
 - **Opt-in sandbox** (`sandbox: true`, `execution/sandbox.ts`, issue #447): the only `--settings`
   Duskfleet passes; agents without it keep today's argv. A host without the sandbox refuses the run
   in `startRun` (never unsandboxed). Only network blocks are detectable (`remedy.kind:

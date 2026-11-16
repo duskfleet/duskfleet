@@ -3,7 +3,7 @@
  * filling the rest of the line, and the `✓` acknowledgement of the agent just written. The values
  * are what `--json` prints (the agents without their system prompt).
  */
-import type { AgentDefinition, AgentSource } from "@duskfleet/core";
+import { type AgentDefinition, type AgentSource, DEFAULT_HARNESS } from "@duskfleet/core";
 import {
   type Cell,
   type Column,
@@ -50,7 +50,8 @@ export function renderAgents(agents: readonly AgentView[], opts: RenderOpts): st
   if (agents.length === 0) return emptyState("no agents yet", AGENT_CREATE, opts);
   const rows = agents.map((a): Cell[] => [
     { text: a.id, role: "accent" },
-    agentKind(a),
+    // The harness only when it is not the default one: a Claude agent's row reads as before.
+    a.harness && a.harness !== DEFAULT_HARNESS ? `${agentKind(a)}/${a.harness}` : agentKind(a),
     a.source,
     modelText(a),
     a.project ?? "none",

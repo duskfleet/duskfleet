@@ -302,6 +302,20 @@ local run-data handling, and recommended configuration.
   checks all of it, and fails when `config/agents` is empty.
 - **Schema change**: append a migration in `packages/core/src/storage/db.ts`; never edit an existing one. Then pin its digest in `packages/mcp/test/migrations.test.js` (the failing test prints it).
 - **Run status changes**: only `RunManager`, through `assertTransition`.
+- **Adding a harness** (a second agent CLI, issue #445; the design is [Harnesses](harnesses.md)):
+  an adapter PR follows this checklist, fixtures first, because a CLI's stream is the contract.
+  1. Verify every flag against the CLI's `--help`.
+  2. Capture real runs as fixtures: an edit, a denial, a failure.
+  3. Write the fake CLI under `packages/mcp/test/` that replays them (tests never launch a real CLI;
+     `fake-harness.js` is the in-process shape of an adapter).
+  4. Declare the capabilities honestly (`HarnessCapabilities`, `packages/core/src/execution/harness.ts`):
+     `false` is a valid answer, and a field behind it is refused, never approximated.
+  5. Implement `Executor` (`harness`, `capabilities`, `binary`, `version()`, `prepare()`, `execute()`):
+     argv, pre-flight, the stream parser and how a run ends. Nothing that names the CLI's flags,
+     folders or event types goes into `RunManager`; it never contains `if (harness === ...)`.
+  6. Register it in `packages/mcp/src/bootstrap.ts` (the `HarnessRegistry`); `doctor` then reports it.
+  7. Docs: [Agents](agents.md#harness), this page, [Security](security.md).
+  8. One real run on the cheapest model, its cost stated in the PR.
 - **New dashboard view**: add a route under `apps/web/app/` and a query in `apps/web/lib/data.ts`.
 - **Evals**: implement the `Evaluator` interface in `packages/core/src/evals/types.ts`; the run pipeline does not need to change.
   An evaluator returns `evals.details` in the schema of `packages/core/src/evals/score.ts` (version 1:

@@ -4,6 +4,8 @@
  * *before* a file lands on disk, write it, reload the config and roll the file back when it no
  * longer loads. One bad agent file would otherwise break every later config reload.
  */
+
+import { assertAgentFitsHarness, builtinHarnesses, type HarnessLookup } from "../execution/harness.js";
 import {
   type AgentKind,
   type AgentSpec,
@@ -39,7 +41,10 @@ export function assertAgentWritable(
   spec: AgentSpec,
   config: DuskFleetConfig,
   storedSkills: readonly string[] = [],
+  harnesses: HarnessLookup = builtinHarnesses,
 ): void {
+  // The harness first: an unknown one, or a field it cannot honour, is refused with the field named.
+  assertAgentFitsHarness(spec, harnesses);
   assertAgentKind(kind, spec, (id) => config.projects.get(id)?.path ?? null);
   assertWrapUpReserve(spec, config.claude.defaultMaxBudgetUsd);
   assertSandboxSpec(spec);
@@ -97,8 +102,9 @@ export function createAgentFromFields(
   fields: unknown,
   config: DuskFleetConfig,
   reload: () => DuskFleetConfig,
+  harnesses: HarnessLookup = builtinHarnesses,
 ): AgentDefinition {
   const spec = assertAgentSpecClean(agentSpecSchema.parse(fields));
-  assertAgentWritable(kind, spec, config);
+  assertAgentWritable(kind, spec, config, [], harnesses);
   return writeAgentAndVerify(config, spec, reload);
 }

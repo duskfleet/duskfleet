@@ -23,13 +23,7 @@ import type { RunManager } from "../orchestration/run-manager.js";
 // crud.ts imports validateGate from here: a cycle, safe because both sides only call
 // functions at run time, never at module evaluation.
 import { commandGateRefusal, scheduleProjectId } from "./crud.js";
-import {
-  DEFAULT_GATE_BUDGET_USD,
-  DEFAULT_GATE_MARKER,
-  DEFAULT_GATE_TIMEOUT_SECONDS,
-  type Schedule,
-  type ScheduleGate,
-} from "./types.js";
+import { DEFAULT_GATE_MARKER, DEFAULT_GATE_TIMEOUT_SECONDS, type Schedule, type ScheduleGate } from "./types.js";
 
 /**
  * What the gate decided. `busy` = the gate agent's run was refused by the WIP guards (the
@@ -193,8 +187,9 @@ export async function runAgentGate(
     agentId: gate.agentId,
     scheduleId: s.id,
     kind: "gate",
-    maxBudgetUsd: gate.budgetUsd ?? DEFAULT_GATE_BUDGET_USD,
   };
+  // Unset: startRun applies DEFAULT_GATE_BUDGET_USD on a harness that stops at a budget.
+  if (gate.budgetUsd !== undefined) input.maxBudgetUsd = gate.budgetUsd;
   const projectId = scheduleProjectId(s, runs.config.agents.get(s.agentId));
   if (projectId) input.projectId = projectId;
   if (gate.model) input.model = gate.model;

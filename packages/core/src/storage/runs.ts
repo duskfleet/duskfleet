@@ -1,4 +1,5 @@
 import type { DatabaseSync } from "node:sqlite";
+import { DEFAULT_HARNESS } from "../config/types.js";
 import { capEventJson, DEFAULT_MAX_EVENT_BYTES } from "../execution/log-caps.js";
 import type { DeniedTool, RunMcpInfo, SubagentRecord, SubagentStatus, UsageByModel } from "../execution/types.js";
 import type { RunDiff } from "../git/diff.js";
@@ -75,6 +76,7 @@ interface RunRow {
   log_truncated?: number | null;
   skills_bundle: string | null;
   sandbox_violations?: number | null;
+  harness?: string | null;
 }
 
 function rowToRun(r: RunRow): Run {
@@ -136,6 +138,7 @@ function rowToRun(r: RunRow): Run {
     logSha256: r.log_sha256 ?? null,
     logTruncated: r.log_truncated === null || r.log_truncated === undefined ? null : r.log_truncated === 1,
     skillsBundle: r.skills_bundle ?? null,
+    harness: r.harness ?? DEFAULT_HARNESS,
   };
 }
 
@@ -347,8 +350,8 @@ export class RunRepository {
            cache_read_tokens, cache_creation_tokens, cost_usd, permission_denials, denied_tools_json, mcp_json, human_intervention,
            context_exhausted, retries, log_path, raw_result_json, schedule_id, owner, phases_json, review_reasons_json, resumed_from_run_id, kind,
            usage_by_model_json, billing_type, error_code, error_family, error_detail_json, agent_hash, claude_code_version,
-           last_event_at, continued_from_run_id, title, cost_status, max_budget_usd, skills_bundle)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+           last_event_at, continued_from_run_id, title, cost_status, max_budget_usd, skills_bundle, harness)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         run.id,
@@ -404,6 +407,7 @@ export class RunRepository {
         run.costStatus ?? null,
         run.maxBudgetUsd ?? null,
         run.skillsBundle ?? null,
+        run.harness ?? DEFAULT_HARNESS,
       );
   }
 

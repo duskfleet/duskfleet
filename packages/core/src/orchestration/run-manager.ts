@@ -6,14 +6,20 @@
  */
 import { randomUUID } from "node:crypto";
 import path from "node:path";
-import { agentDefinitionHash, listProjectAgents, projectAgentDefinitionHash } from "../config/agent-files.js";
+import { agentDefinitionHash, projectAgentDefinitionHash } from "../config/agent-files.js";
 import { loadConfig } from "../config/loader.js";
-import { prepareSkillBundle, skillsShadowedByProject } from "../config/skills.js";
-import type { AgentDefinition, DuskFleetConfig, ProjectDefinition } from "../config/types.js";
+import { prepareSkillBundle } from "../config/skills.js";
+import {
+  type AgentDefinition,
+  DEFAULT_HARNESS,
+  type DuskFleetConfig,
+  type ProjectDefinition,
+} from "../config/types.js";
 import { mergeEnvPassthrough } from "../execution/child-env.js";
+import { assertAgentFitsHarness, type HarnessCapabilities, HarnessRegistry, harnessOf } from "../execution/harness.js";
 import { type LogMetadata, logMetadata } from "../execution/log-caps.js";
 import { mergeSubagent, needsRepair, sameSubagent, subagentsFromLog } from "../execution/log-replay.js";
-import { allowListedMcpPrefixes, mcpToolPrefix } from "../execution/mcp.js";
+import { mcpToolPrefix } from "../execution/mcp.js";
 import { type SandboxSupport, sandboxSupport } from "../execution/sandbox.js";
 import { mergeUsageByModel } from "../execution/stream-json.js";
 import {
@@ -47,6 +53,7 @@ import {
   reviewReasons,
 } from "../observability/run.js";
 import { parseHolder, processIdentity, scheduleProjectId } from "../scheduler/crud.js";
+import { DEFAULT_GATE_BUDGET_USD } from "../scheduler/types.js";
 import type { ListRunsFilter, RunPatch, RunRepository } from "../storage/runs.js";
 import { logger } from "../util/log.js";
 import {
@@ -79,7 +86,12 @@ export interface StartRunInput {
   /** Set by the scheduler. */
   scheduleId?: string;
   /** Internal: continue the session of an earlier run instead of starting a new one (see resumeRun). */
-  resume?: { fromRun: Run; budgetUsd: number };
+  resume?: {
+    fromRun: Run;
+    budgetUsd: number;
+    /** The field the budget came from when it was set explicitly (refused on a harness without hardBudgetUsd). */
+    budgetField?: string;
+  };
   /**
    * Internal: continue the session of `fromRun` (see continueRun) with this prompt. Only when the
    * agent, project path and agent hash all match the original run; otherwise a fresh session plus a note.
@@ -87,7 +99,10 @@ export interface StartRunInput {
   continueFrom?: Run;
   /** `gate` for a schedule's gate agent (no wrap-up reserve, cost counted apart). Default `run`. */
   kind?: RunKind;
-  /** Overrides the agent's max_budget_usd (gate runs). */
+  /**
+   * Overrides the agent's max_budget_usd (gate runs; a gate without one gets DEFAULT_GATE_BUDGET_USD
+   * on a harness that stops at a budget). Refused on a harness without hardBudgetUsd.
+   */
   maxBudgetUsd?: number;
   /**
    * What the run is for (run_agent `title`, `run --title`, a schedule's title): trimmed, empty =
@@ -139,6 +154,10 @@ export interface RunManagerOptions {
 
 interface ActiveRun {
   handle: ExecutionHandle;
+  /** The adapter of the agent's harness; a wrap-up pass or a fresh-session fallback goes through it too. */
+  executor: Executor;
+  /** The harness reports dollars; when false every pass's cost is stored as unknown (null), whatever the adapter returned. */
+  reportsCostUsd: boolean;
   agentId: string;
   projectPath: string;
   /** The agent promised not to edit the project checkout: ignored by the per-project guard. */
@@ -231,12 +250,26 @@ export class RunManager {
   /** Asked before every run of a `sandbox: true` agent: a host without the sandbox refuses it. */
   private readonly sandboxSupport: () => SandboxSupport;
 
+  /** The executors this manager can spawn, by harness name (one adapter per agent CLI). */
+  readonly harnesses: HarnessRegistry;
+
+  /** The default harness's executor (Claude Code); kept for callers from before the registry. */
+  get executor(): Executor | undefined {
+    return this.harnesses.get(DEFAULT_HARNESS);
+  }
+
+  /**
+   * `executors`: one executor (taken as its own harness, `claude` when it names none), a list of
+   * them, or a ready registry. Each run goes through the executor of its agent's harness.
+   */
   constructor(
     config: DuskFleetConfig,
     private readonly runs: RunRepository,
-    private readonly executor: Executor,
+    executors: Executor | readonly Executor[] | HarnessRegistry,
     options: RunManagerOptions = {},
   ) {
+    // A test that never starts a run may pass no executor at all: an empty registry then.
+    this.harnesses = executors instanceof HarnessRegistry ? executors : new HarnessRegistry(executors ?? []);
     this._config = config;
     this.syncEventCap();
     this.owner = options.owner ?? processIdentity();
@@ -461,6 +494,34 @@ export class RunManager {
     const prompt = input.prompt?.trim();
     if (!prompt) throw new Error("prompt is empty");
     const title = normalizeRunTitle(input.title);
+    // One run path, one adapter per harness: an unknown harness, or a field the harness cannot
+    // honour, is refused here (no row, no spawn), as it was at create time.
+    const harness = harnessOf(agent);
+    assertAgentFitsHarness(agent, this.harnesses.lookup, project);
+    const executor = this.harnesses.get(harness) as Executor;
+    const caps = this.harnesses.capabilities(harness) as HarnessCapabilities;
+    if (input.resume && !caps.resumeSession)
+      throw new Error(`agent "${agent.id}": resuming a session is not supported by harness ${harness}`);
+    // A session belongs to the harness that created it: never hand it to another one.
+    const resumeHarness = input.resume ? (input.resume.fromRun.harness ?? DEFAULT_HARNESS) : null;
+    if (resumeHarness && resumeHarness !== harness)
+      throw new Error(
+        `run ${input.resume?.fromRun.id} cannot be resumed: it ran on harness ${resumeHarness}, agent "${agent.id}" now uses harness ${harness}; start a new run instead`,
+      );
+    // A budget given for this run only (a gate's budget_usd, a resume budget) is refused like the
+    // agent's own max_budget_usd when the harness cannot stop itself at it: never dropped silently.
+    if (!caps.hardBudgetUsd) {
+      const field =
+        input.maxBudgetUsd !== undefined
+          ? input.kind === "gate"
+            ? "gate.agent.budget_usd"
+            : "max_budget_usd"
+          : (input.resume?.budgetField ?? null);
+      if (field)
+        throw new Error(
+          `agent "${agent.id}": ${field} is not supported by harness ${harness} (it cannot stop a run at a dollar budget)`,
+        );
+    }
     if (agent.sandbox) {
       // Never run a sandboxed agent unsandboxed: no row, no spawn, a clear reason.
       const support = this.sandboxSupport();
@@ -486,7 +547,9 @@ export class RunManager {
     // directory, with the same definition; anything else starts a fresh session (noted below).
     const continueFrom = input.continueFrom ?? null;
     const notContinued = continueFrom
-      ? (continueRefusal(continueFrom) ?? continueMismatch(continueFrom, agent.id, projectPath, agentHash))
+      ? caps.resumeSession
+        ? (continueRefusal(continueFrom) ?? continueMismatch(continueFrom, agent.id, projectPath, agentHash))
+        : `harness ${harness} cannot continue a session`
       : null;
     const continued = continueFrom && !notContinued ? continueFrom : null;
     // A resumed run continues the earlier run's session under its own run id and log.
@@ -494,13 +557,17 @@ export class RunManager {
     const model = input.model ?? agent.model;
     const timeoutMinutes = agent.timeoutMinutes ?? this.config.claude.defaultTimeoutMinutes;
     const kind: RunKind = input.kind ?? "run";
+    const runBudgetUsd =
+      input.maxBudgetUsd ?? (kind === "gate" && caps.hardBudgetUsd ? DEFAULT_GATE_BUDGET_USD : undefined);
     const budgetAgent = resume
       ? { ...agent, maxBudgetUsd: resume.budgetUsd }
-      : input.maxBudgetUsd !== undefined
-        ? { ...agent, maxBudgetUsd: input.maxBudgetUsd }
+      : runBudgetUsd !== undefined
+        ? { ...agent, maxBudgetUsd: runBudgetUsd }
         : agent;
-    // A gate is a quick yes/no: no reserve, no wrap-up pass.
-    const budget = budgetPlan(kind === "gate" ? { ...budgetAgent, wrapUpReserveUsd: 0 } : budgetAgent, this.config);
+    // A gate is a quick yes/no: no reserve, no wrap-up pass. Neither for a harness that does not stop
+    // itself at a budget: it never ends budget_exhausted, so nothing would ever use the reserve.
+    const noReserve = kind === "gate" || !caps.hardBudgetUsd;
+    const budget = budgetPlan(noReserve ? { ...budgetAgent, wrapUpReserveUsd: 0 } : budgetAgent, this.config);
     const logPath = path.join(this.config.dataDir, "logs", `${runId}.jsonl`);
 
     const request: ExecutionRequest = {
@@ -509,32 +576,18 @@ export class RunManager {
       sessionId,
       permissionMode: agent.permissionMode,
       timeoutMs: timeoutMinutes * 60_000,
-      maxBudgetUsd: budget.main,
       logPath,
       maxLogBytes: this.config.claude.maxLogBytes,
     };
+    if (caps.hardBudgetUsd) request.maxBudgetUsd = budget.main;
     if (resume || continued) request.resumeSessionId = sessionId;
     if (model) request.model = model;
     if (agent.allowedTools) request.allowedTools = agent.allowedTools;
     if (agent.disallowedTools) request.disallowedTools = agent.disallowedTools;
     if (agent.effort) request.effort = agent.effort;
     if (agent.systemPrompt) request.appendSystemPrompt = agent.systemPrompt;
-    if (agent.inheritMcp || project?.inheritMcp) {
-      request.inheritMcp = true;
-      // Connectors load at start or not at all: a child whose init lacks one is restarted once.
-      const required = allowListedMcpPrefixes(agent.allowedTools ?? []);
-      if (required.length) request.requiredMcpServers = required;
-    }
-    if (agent.claudeAgent) {
-      // Only project-level agents load under --setting-sources project,local; fail early with the real list.
-      const available = listProjectAgents(projectPath).map((a) => a.name);
-      if (!available.includes(agent.claudeAgent)) {
-        throw new Error(
-          `agent "${agent.id}" runs as project agent "${agent.claudeAgent}", but ${projectPath}/.claude/agents has ${available.length ? available.join(", ") : "no agents"}`,
-        );
-      }
-      request.claudeAgent = agent.claudeAgent;
-    }
+    if (agent.inheritMcp || project?.inheritMcp) request.inheritMcp = true;
+    if (agent.claudeAgent) request.claudeAgent = agent.claudeAgent;
     const addDirs = [...new Set([...(project?.addDirs ?? []), ...(agent.addDirs ?? [])])];
     // Declared skills: a content-addressed bundle under data/skill-bundles/, one more --add-dir.
     // A skill deleted since the agent was written is skipped with a note, never a refused run.
@@ -547,23 +600,22 @@ export class RunManager {
           `skill${missing.length > 1 ? "s" : ""} ${missing.join(", ")} not found in data/skills or config/skills; the run starts without ${missing.length > 1 ? "them" : "it"}`,
         );
     }
-    if (bundle) {
-      addDirs.push(bundle.dir);
-      const shadowed = skillsShadowedByProject(
-        projectPath,
-        bundle.skills.map((s) => s.name),
-      );
-      if (shadowed.length)
-        skillNotes.push(
-          `the project defines .claude/skills/ ${shadowed.join(", ")} too; Claude Code uses the project's ${shadowed.length > 1 ? "copies" : "copy"}, not the bundled one`,
-        );
-    }
+    if (bundle) addDirs.push(bundle.dir);
     if (addDirs.length) request.addDirs = addDirs;
     const envPassthrough = mergeEnvPassthrough(this.config.claude.envPassthrough, agent.envPassthrough);
     if (envPassthrough.length) request.envPassthrough = envPassthrough;
     if (agent.sandbox) {
       request.sandbox = { allowedDomains: agent.sandboxAllowedDomains ?? [] };
       if (agent.sandboxWeakerNetworkIsolation) request.sandbox.weakerNetworkIsolation = true;
+    }
+    // The adapter's own pre-flight (Claude: the link's project agent, MCP servers, shadowed skills).
+    if (executor.prepare) {
+      try {
+        const prepared = executor.prepare(request, { skills: bundle ? bundle.skills.map((s) => s.name) : [] });
+        skillNotes.push(...prepared.notes);
+      } catch (err) {
+        throw new Error(`agent "${agent.id}": ${err instanceof Error ? err.message : String(err)}`);
+      }
     }
 
     // Record the run (with the exact command) *before* launching it.
@@ -583,7 +635,7 @@ export class RunManager {
       durationMs: null,
       claudeSessionId: sessionId,
       permissionMode: agent.permissionMode,
-      command: { binary: this.executor.binary, argv: [], cwd: projectPath },
+      command: { binary: executor.binary, argv: [], cwd: projectPath },
       exitCode: null,
       terminationReason: null,
       error: null,
@@ -621,6 +673,7 @@ export class RunManager {
       lastEventAt: null,
       continuedFromRunId: continued?.id ?? null,
       skillsBundle: bundle?.id ?? null,
+      harness,
     };
 
     // Insert first so that events emitted by the executor always find the row. For a resume the
@@ -672,7 +725,7 @@ export class RunManager {
     }
     let handle: ExecutionHandle;
     try {
-      handle = this.executor.execute(request, (event) => this.onEvent(runId, event));
+      handle = executor.execute(request, (event) => this.onEvent(runId, event));
     } catch (err) {
       // e.g. bypassPermissions requested while disabled, or binary missing
       const message = err instanceof Error ? err.message : String(err);
@@ -695,6 +748,8 @@ export class RunManager {
 
     this.active.set(runId, {
       handle,
+      executor,
+      reportsCostUsd: caps.reportsCostUsd,
       agentId: agent.id,
       projectPath,
       isolated: agent.isolated === true,
@@ -777,6 +832,15 @@ export class RunManager {
     const agent = this.resolveAgent(fromRun.agentId);
     const budgetUsd =
       input.budgetUsd ?? agent.resumeBudgetUsd ?? agent.maxBudgetUsd ?? this.config.claude.defaultMaxBudgetUsd;
+    // Named when set explicitly: startRun refuses it on a harness that cannot stop at a budget.
+    const budgetField =
+      input.budgetUsd !== undefined
+        ? "budget_usd (resume budget)"
+        : agent.resumeBudgetUsd !== undefined
+          ? "resume_budget_usd"
+          : undefined;
+    const resume: NonNullable<StartRunInput["resume"]> = { fromRun, budgetUsd };
+    if (budgetField) resume.budgetField = budgetField;
     const reason = fromRun.status === "timed_out" ? "timed out" : "budget exhausted";
     // The original run's project: by id when it had one (the registry path may be a symlink of the resolved one).
     const startInput: StartRunInput = fromRun.projectId
@@ -784,13 +848,13 @@ export class RunManager {
           prompt: resumePrompt(reason),
           agentId: fromRun.agentId,
           projectId: fromRun.projectId,
-          resume: { fromRun, budgetUsd },
+          resume,
         }
       : {
           prompt: resumePrompt(reason),
           agentId: fromRun.agentId,
           projectPath: fromRun.projectPath,
-          resume: { fromRun, budgetUsd },
+          resume,
         };
     if (fromRun.modelRequested) startInput.model = fromRun.modelRequested;
     if (input.scheduleId) startInput.scheduleId = input.scheduleId;
@@ -1114,8 +1178,11 @@ export class RunManager {
    * closes the run. The run's status is always the main pass's outcome, except that a
    * wrap-up pass cancelled by the user records the run as cancelled.
    */
-  private onPhaseFinished(runId: string, result: ExecutionResult): void {
+  private onPhaseFinished(runId: string, reported: ExecutionResult): void {
     const active = this.active.get(runId);
+    // A harness without reportsCostUsd never sets a cost: a 0 from its adapter would read as a
+    // free, reported run and bypass the unpriced budget path. Applies to every pass (and the merge).
+    const result = active && !active.reportsCostUsd ? { ...reported, costUsd: null } : reported;
     if (!active) {
       this.onFinished(runId, result, [phaseOf("main", result, null)]);
       return;
@@ -1182,7 +1249,7 @@ export class RunManager {
     };
     let handle: ExecutionHandle;
     try {
-      handle = this.executor.execute(request, (event) => this.onEvent(runId, event));
+      handle = active.executor.execute(request, (event) => this.onEvent(runId, event));
     } catch (err) {
       return couldNotStart(err instanceof Error ? err.message : String(err));
     }
@@ -1221,7 +1288,7 @@ export class RunManager {
     };
     let handle: ExecutionHandle;
     try {
-      handle = this.executor.execute(request, (event) => this.onEvent(runId, event));
+      handle = active.executor.execute(request, (event) => this.onEvent(runId, event));
     } catch (err) {
       // Executors may throw before spawning (startRun handles the same case).
       return couldNotStart(err instanceof Error ? err.message : String(err));
