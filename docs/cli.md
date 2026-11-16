@@ -223,6 +223,9 @@ npx duskfleet agents create fixer --model haiku -- "You fix the failing test in 
 npx duskfleet run --project /abs/path/to/scratch-project --agent fixer -- "Fix the failing test"
 ```
 
+From there to a schedule, the dashboard and the service, step by step:
+[Your first scheduled run](quickstart.md).
+
 A run with no agent, when none exists, fails with
 `Known agents: (none: no agent file in <config>/agents or <user agents dir>; create one with "agents create <id>")`.
 
