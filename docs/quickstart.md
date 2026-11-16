@@ -51,11 +51,31 @@ asks whether to register the MCP server (step 5 here) and offers a guided first 
 npx duskfleet doctor
 ```
 
-A healthy output is JSON with the `claude` binary and its version found, `configSource: "user"`,
-`dataSource: "user"`, the two directories of step 1, and a `scheduler` block that says nothing is
-ticking yet. `npx duskfleet doctor --probe` adds one real hello run on haiku (a few cents, capped
-at $0.05) and tells you, before step 5, whether the login works headless
-([`doctor`](cli.md#doctor-logs-and-diffs)).
+One line per check, trimmed here to the ones that matter now:
+
+```text
+doctor · 2 warnings · 0 errors
+
+✓ node            v24.x.y
+✓ claude          2.x.y (Claude Code) · /home/<you>/.local/bin/claude
+✓ PATH            inherited
+✓ config          /home/<you>/.config/duskfleet (user)
+✓ data            /home/<you>/.local/share/duskfleet (user)
+! agents          none yet
+                  duskfleet agents create <id> --model haiku -- "<system prompt>"
+! scheduler       enabled · nothing ticking · service not installed
+                  schedules fire only while an MCP host keeps the server alive (nothing is ticking right now); run "duskfleet install-service" to run them unattended
+...
+json: add --json · one real run on haiku: duskfleet doctor --probe
+```
+
+`claude` must be found with its version, `config` and `data` must be the two directories of step
+1, both `(user)`. The two warnings are expected on a new setup: step 4 creates the agent, step 7
+the service. A `✗ claude  not found` is the only error and stops everything: fix the install
+first. `npx duskfleet doctor --probe` adds one real hello run on haiku (a few cents, capped at
+$0.05) and tells you, before step 5, whether the login works headless
+([`doctor`](cli.md#doctor-logs-and-diffs)). Add `--json` to any command for the JSON form
+([output](cli.md#output)).
 
 ## 3. A scratch project (1 min)
 
@@ -89,7 +109,7 @@ EOF
 npx duskfleet projects
 ```
 
-`projects` lists `scratch` with its absolute path. If the file already had a `projects:` key, add
+`projects` lists `scratch` with its path (your home shown as `~`). If the file already had a `projects:` key, add
 the `scratch:` entry under it instead of appending a second one
 ([projects](configuration.md#projects-configprojectsyaml-optional)).
 
@@ -99,11 +119,10 @@ the `scratch:` entry under it instead of appending a second one
 npx duskfleet agents create fixer --model haiku --budget 0.25 -- "You fix the failing test in this project. Use the Read, Glob and Grep tools to look at files; use Bash only to run npm test. Run the tests, read the failure, change the minimum code, run them again. No git, no installs."
 ```
 
-After the agent as JSON, the last two lines are:
-
 ```text
-agent "fixer" written to /home/<you>/.local/share/duskfleet/agents/fixer.md
-next: duskfleet run --project <id or path> --agent fixer -- "<task>"
+✓ agent fixer created
+  duskfleet run --project <id or path> --agent fixer -- "<task>"
+  wrote /home/<you>/.local/share/duskfleet/agents/fixer.md
 ```
 
 The file is an ordinary agent ([Agents](agents.md)): `model: haiku`, `max_budget_usd: 0.25`, no
@@ -163,11 +182,13 @@ Then, back in the first terminal:
 npx duskfleet schedules run-now "fixer nightly"
 ```
 
-After the schedule as JSON:
-
 ```text
-schedule "fixer nightly" requested; serve@<host>:<pid> fires it within 30s
+✓ schedule fixer nightly requested
+  serve@<host>:<pid> fires it within 30s
 ```
+
+`nothing is ticking: start a scheduler with duskfleet serve` on the second line means `serve` is
+not running (or not yet holding the lease): the request is kept, and the run starts once it is.
 
 Within 30 seconds the run starts, and haiku usually finishes it within a minute or two:
 
@@ -176,17 +197,25 @@ npx duskfleet runs --limit 1
 npx duskfleet run-info <run_id>
 ```
 
-`runs` lists the run with `agentId: "fixer"`, its `status` (`running`, then `completed`), cost
-and `needsReview`; `run-info` with the `id` from it shows the run in full: model, tokens, tool
-calls, the agent's last message and, in a git repository, the diff (the scratch project is not
-one, so `diff` is `null`). `npx duskfleet schedules` shows the schedule with how its last run
-ended. In `~/duskfleet-scratch`, `npm test` now passes and `sum.js` adds.
+`runs` is a table: ID (the first 8 characters), STATUS, AGENT `fixer`, PROJECT `scratch`, MODEL,
+AGE, DURATION, COST and TOOLS (the number of tool calls). STATUS is `● running` while the run
+works, then `✓ completed`. `run-info` takes that 8-character ID and shows the run in sections:
+**Run** (agent, project, label, schedule, model with the Claude Code version, duration),
+**Usage** (cost, turns, tool calls and any denied tools), **Outcome** (status, plus the reasons
+and the fix when it needs review or failed) and, in a git repository, **Diff** (the scratch
+project is not one, so there is no Diff section). The agent's last message is in
+`run-info <id> --json` (`resultText`). `npx duskfleet schedules` lists "fixer nightly" with its
+LAST outcome and, under LAST RUN, how the run ended and its cost. In `~/duskfleet-scratch`,
+`npm test` now passes and `sum.js` adds.
 
-`needsReview: true` with `permission_denied` means the agent tried a shell command its
-allow-list does not hold (`ls`, `cat`): it was refused, the run went on, and it usually still
-fixes `sum.js`, but the agent may report that it could not run the tests. Run `npm test` in the
-scratch folder yourself to check. `status: "failed"` with a login error means Claude Code is
-not logged in for headless runs: `claude auth login`, then `run-now` again.
+STATUS `! needs review` means the run completed but needs a look. `runs` gives the reason on a
+`└` line under the row, and `run-info` gives it on the `reasons` line. On a first run that line
+is usually `permission denied · 1 denied: Bash`: the agent tried a shell command its allow-list
+does not hold (`ls`, `cat`). It was refused and the run went on. The agent usually still fixes
+`sum.js`, but it may report that it could not run the tests, so run `npm test` in the scratch
+folder yourself to check. `✗ failed` with `setup` and `Claude Code is not authenticated` on the
+`└` line means Claude Code is not logged in for headless runs: `claude auth login`, then
+`run-now` again.
 
 ## 6. The dashboard (1 min)
 
@@ -220,8 +249,9 @@ duskfleet doctor
 If `npm i -g` fails with `EACCES` (a system Node whose global prefix is under `/usr`), do not use
 `sudo`: install Node with a version manager (nvm, fnm) or set an npm prefix in your home.
 
-`doctor` now reports the service installed and running, and the scheduler lease held by
-`serve@<host>:<pid>`: "fixer nightly" fires at 03:00 UTC without any terminal or Claude host
+`doctor`'s scheduler line now reads `✓ scheduler  enabled · ticking serve@<host> pid <pid> ·
+service ...` with the service running (the service detail names launchd or systemd), and its
+advice is gone: "fixer nightly" fires at 03:00 UTC without any terminal or Claude host
 open. On macOS the unit keeps the Mac awake on AC power, because a sleeping Mac skips scheduled
 runs ([who ticks](schedules.md#who-ticks)). On Linux a user unit stops when you log out: run
 `loginctl enable-linger $USER` so it keeps firing. If `install-service` says it cannot connect to
