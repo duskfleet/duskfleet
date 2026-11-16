@@ -42,6 +42,7 @@ import {
   type DataSource,
   effectivePath,
   findRepoRoot,
+  harnessOf,
   type LogLevel,
   loadConfig,
   mcpServerConfig,
@@ -61,6 +62,7 @@ import { bootstrap } from "./bootstrap.js";
 import { commandHelp, isCommand, unknownCommandText, wantsHelp } from "./cli-help.js";
 import { assertPortFree, ensureWeb, findWeb, parsePort, startDashboard } from "./dashboard.js";
 import { runFirstRun, stdinPrompter } from "./first-run.js";
+import { harnessReport } from "./harness-report.js";
 import { runInit } from "./init.js";
 import {
   applyDesktop,
@@ -599,7 +601,7 @@ async function main(): Promise<void> {
         const app = await open();
         const config = app.config;
         const existing = assertAgentIdFree(config, id, force, "--force", null);
-        const agent = createAgentFromFields("own", fields, config, () => app.runs.reloadConfig());
+        const agent = createAgentFromFields("own", fields, config, () => app.runs.reloadConfig(), app.harnesses.lookup);
         const { systemPrompt: _p, ...shown } = agent;
         // Human: the acknowledgement on stdout says it. --json: on stderr, stdout stays the object.
         if (jsonOutput) {
@@ -612,7 +614,10 @@ async function main(): Promise<void> {
       }
       if (sub) commandUsage("agents", `unknown agents subcommand: ${sub}`);
       const app = await open();
-      const agents = [...app.config.agents.values()].map(({ systemPrompt: _p, ...a }) => a);
+      const agents = [...app.config.agents.values()].map(({ systemPrompt: _p, ...a }) => ({
+        ...a,
+        harness: harnessOf(a),
+      }));
       // Human: the empty state is on stdout. --json: the hint on stderr, stdout stays `[]`.
       if (agents.length === 0 && jsonOutput) {
         process.stderr.write(`no agents yet: Duskfleet ships none. Create your first one with\n  ${AGENT_CREATE}\n`);
@@ -715,6 +720,9 @@ async function main(): Promise<void> {
           sandboxSupport(),
           [...app.config.agents.values()].filter((a) => a.sandbox).map((a) => a.id),
         ),
+        // One line per registered harness (binary, version or why it is missing) and the agents on
+        // a harness nobody registered. The claude version above is reused, not asked twice.
+        harnesses: await harnessReport(app, { version, error }),
         // Runs of this UTC month that ended without a cost, per budget: under unpriced_policy count
         // each stands in at the cap it started with (runs.max_budget_usd, else the agent's or the default cap).
         unpricedRuns: app.runs.unpricedRunsByBudget().map(({ budget, runs }) => ({

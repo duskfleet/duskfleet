@@ -44,7 +44,16 @@ queued. A schedule keeps that tick as its one pending fire, retried every tick u
 or the next cron occurrence comes (`deferred`, then `skipped_busy` if it never started; see
 [busy ticks](schedules.md#busy-ticks-one-deferred-fire)).
 
-The executor then spawns the Claude Code CLI:
+Before anything is written, the run manager picks the executor of the agent's
+[harness](agents.md#harness) (Claude Code unless the agent says otherwise) and checks that the
+agent fits it: a field the harness cannot honour refuses the run, field named. The executor is
+an *adapter*: its `prepare` step does the CLI's own pre-flight checks (for Claude Code: the
+project agent of a link exists, the MCP connectors the allow-list needs, project skills that
+shadow bundled ones), and everything else (guards, budgets, status transitions, log, diff,
+events, needs-review) stays in the one run path, whatever CLI runs. The adapter boundary, with
+diagrams: [Harnesses](harnesses.md).
+
+The Claude Code executor then spawns the CLI:
 
 ```bash
 claude -p --output-format stream-json ...   # cwd = the target project

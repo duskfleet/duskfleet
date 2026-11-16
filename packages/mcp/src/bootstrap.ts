@@ -6,6 +6,7 @@
 import type { ConfigLocation, DuskFleetConfig, Run, SchedulerRole } from "@duskfleet/core";
 import {
   ClaudeCodeExecutor,
+  HarnessRegistry,
   loadConfig,
   locateConfig,
   logger,
@@ -25,7 +26,10 @@ export interface App {
   location: ConfigLocation;
   runs: RunManager;
   scheduler: Scheduler;
+  /** The Claude Code adapter (setup, probe, service units); every harness is in `harnesses`. */
   executor: ClaudeCodeExecutor;
+  /** The executors runs can use, by harness name (`claude`); `doctor` reports each one. */
+  harnesses: HarnessRegistry;
   /**
    * Runs the startup sweep failed as orphans (owner gone), as they were before: `running`
    * rows, and `pending` rows whose process died before the spawn. `doctor` reports them.
@@ -60,9 +64,12 @@ export async function bootstrap(entryFileUrl: string, options: BootstrapOptions 
     envPassthrough: config.claude.envPassthrough,
   });
   log.info("executor ready", { binary: executor.binary });
+  // One adapter per harness (issue #445): Claude Code is the only one that ships. A second one is
+  // one more entry here; RunManager picks per run from the agent's `harness:`.
+  const harnesses = new HarnessRegistry([executor]);
 
   // One identity for the runs this process owns and for the scheduler lease it may hold.
-  const runs = new RunManager(config, repo, executor, { owner: processIdentity(options.role ?? "unknown") });
+  const runs = new RunManager(config, repo, harnesses, { owner: processIdentity(options.role ?? "unknown") });
   const recoveredAtStartup = runs.recoverOrphanRuns();
   const scheduler = new Scheduler(new ScheduleRepository(db), runs, {
     tickMs: config.scheduler.tickSeconds * 1000,
@@ -75,6 +82,7 @@ export async function bootstrap(entryFileUrl: string, options: BootstrapOptions 
     runs,
     scheduler,
     executor,
+    harnesses,
     recoveredAtStartup,
     close: () => {
       scheduler.stop();

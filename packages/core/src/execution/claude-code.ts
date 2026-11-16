@@ -12,12 +12,16 @@ import { existsSync } from "node:fs";
 import { homedir } from "node:os";
 import path from "node:path";
 import { createInterface } from "node:readline";
+import { listProjectAgents } from "../config/agent-files.js";
+import { skillsShadowedByProject } from "../config/skills.js";
+import { DEFAULT_HARNESS } from "../config/types.js";
 import { classifyFailure } from "../observability/failure.js";
 import type { BillingType, RecordedCommand } from "../observability/run.js";
 import { logger } from "../util/log.js";
 import { childEnv } from "./child-env.js";
+import { CLAUDE_CAPABILITIES } from "./harness.js";
 import { CappedLogWriter, DEFAULT_MAX_LOG_BYTES } from "./log-caps.js";
-import { missingMcpServers } from "./mcp.js";
+import { allowListedMcpPrefixes, missingMcpServers } from "./mcp.js";
 import { sandboxSettings } from "./sandbox.js";
 import { effectivePath } from "./search-path.js";
 import { createStreamState, ingestLine, isSessionNotFound, looksLikeContextExhaustion } from "./stream-json.js";
@@ -28,6 +32,8 @@ import {
   type ExecutionResult,
   type Executor,
   MIXED_MODEL,
+  type PrepareContext,
+  type PrepareResult,
 } from "./types.js";
 
 const log = logger("execution");
@@ -67,10 +73,44 @@ const RESTART = Symbol("restart");
 
 export class ClaudeCodeExecutor implements Executor {
   readonly name = "claude-code";
+  readonly harness = DEFAULT_HARNESS;
+  readonly capabilities = CLAUDE_CAPABILITIES;
   readonly binary: string;
 
   constructor(private readonly options: ClaudeCodeExecutorOptions) {
     this.binary = resolveClaudeBinary(options.binary);
+  }
+
+  /**
+   * Claude-only pre-flight, before the run row exists: a link's project agent must exist (only
+   * project-level agents load under `--setting-sources project,local`; fail early with the real
+   * list), a run that inherits MCP lists the connectors its allow-list needs (`requiredMcpServers`,
+   * restarted once when one is missing), and a bundled skill the project also defines under
+   * `.claude/skills/` gets a note: Claude Code uses the project's copy.
+   */
+  prepare(request: ExecutionRequest, context: PrepareContext): PrepareResult {
+    const notes: string[] = [];
+    if (request.claudeAgent) {
+      const available = listProjectAgents(request.cwd).map((a) => a.name);
+      if (!available.includes(request.claudeAgent)) {
+        throw new Error(
+          `runs as project agent "${request.claudeAgent}", but ${request.cwd}/.claude/agents has ${available.length ? available.join(", ") : "no agents"}`,
+        );
+      }
+    }
+    if (request.inheritMcp) {
+      // Connectors load at start or not at all: a child whose init lacks one is restarted once.
+      const required = allowListedMcpPrefixes(request.allowedTools ?? []);
+      if (required.length) request.requiredMcpServers = required;
+    }
+    if (context.skills.length) {
+      const shadowed = skillsShadowedByProject(request.cwd, context.skills);
+      if (shadowed.length)
+        notes.push(
+          `the project defines .claude/skills/ ${shadowed.join(", ")} too; Claude Code uses the project's ${shadowed.length > 1 ? "copies" : "copy"}, not the bundled one`,
+        );
+    }
+    return { notes };
   }
 
   version(): Promise<string> {

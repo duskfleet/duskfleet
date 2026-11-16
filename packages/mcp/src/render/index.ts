@@ -10,6 +10,7 @@ export {
 export { renderBudgetSet, renderBudgets } from "./budgets.js";
 export {
   type DoctorReport,
+  type HarnessReport,
   renderDoctor,
   type SandboxReport,
   sandboxReport,

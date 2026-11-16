@@ -200,6 +200,11 @@ export interface Run {
    * agent declares none, and for older rows.
    */
   skillsBundle?: string | null;
+  /**
+   * The agent CLI that ran (migration 31, the agent's `harness:`); `claude` for every older row.
+   * `claudeSessionId` and `claudeCodeVersion` hold that harness's session id and version.
+   */
+  harness?: string;
 }
 
 /** Longest accepted run / schedule title, in characters (after trimming). */
@@ -482,7 +487,9 @@ export function summarizeRun(run: Run) {
     label: runLabel(run),
     prompt: run.prompt.length > 140 ? run.prompt.slice(0, 137) + "..." : run.prompt,
     model: run.modelUsed ?? run.modelRequested,
-    /** Eval bundle: the agent definition and Claude Code version this run used; null when unknown. */
+    /** The agent CLI that ran (`claude` unless the agent sets another `harness:`). */
+    harness: run.harness ?? "claude",
+    /** Eval bundle: the agent definition and harness (Claude Code) version this run used; null when unknown. */
     agentHash: run.agentHash,
     claudeCodeVersion: run.claudeCodeVersion,
     /** The skills bundle (data/skill-bundles/<id>) the run got; null when the agent declares no skills. */

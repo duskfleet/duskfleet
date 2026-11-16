@@ -82,12 +82,40 @@ max_budget_usd: 5
 # wrap_up_reserve_usd: 0.5     # part of max_budget_usd kept for the wrap-up pass; default 10%, min $0.50, 0 = off
 # on_failure: resume_once      # a schedule's next tick resumes a budget-exhausted / timed-out run, once (default none)
 # resume_budget_usd: 3         # budget of that resumed run (default max_budget_usd)
+# harness: claude              # the agent CLI that runs it; claude (default) is the only one that ships (see "Harness")
 ---
 You are running unattended. Finish the task end to end and summarise what you changed.
 ```
 
 An agent without `model` uses the Claude Code default, which can be far more expensive than
 `haiku` or `sonnet`. The dashboard warns when a model is not set.
+
+## Harness
+
+`harness:` names the agent CLI that runs the agent. Leave it out: `claude` (Claude Code) is the
+default and, today, the only harness that ships. The field exists so a second CLI (Codex, Copilot)
+can be added as one more adapter behind the same run path; see [Harnesses](harnesses.md).
+
+Each harness declares what it can honour (its *capabilities*). An agent that sets a field its
+harness cannot honour is **refused**, at create / update and again when a run starts, with the
+field named (`allowed_tools is not supported by harness codex`). A field is never dropped
+silently and never approximated: an allow-list a CLI ignored would be a permission nobody granted.
+
+| Capability | Fields it covers |
+|---|---|
+| `toolAllowList` | `allowed_tools`, `disallowed_tools` |
+| `permissionModes` | the `permission_mode` values the harness accepts |
+| `resumeSession` | `on_failure: resume_once`, `resume_budget_usd`; a continued run starts a fresh session (with a note) without it |
+| `hardBudgetUsd` | `max_budget_usd`, `wrap_up_reserve_usd`, `resume_budget_usd`, a gate's `budget_usd`, a resume budget (the CLI stops itself at the budget) |
+| `reportsCostUsd` | `max_daily_cost_usd`; without it every run is `unpriced` and [budgets](#unknown-costs-fail-closed) count it as its cap |
+| `mcpInherit` | `inherit_mcp` (agent or project) |
+| `projectAgents` | `claude_agent` (link agents) |
+| `addDirs` | `add_dirs` (agent or project) |
+| `skills`, `effort`, `sandbox` | the fields of the same name (`sandbox_*` with `sandbox`) |
+| `subagents` | informational: nested agents are reported as rows |
+
+Claude Code has every capability, so a Claude agent runs exactly as before the field existed. The
+run records its harness (`harness` in `get_run` / `run-info --json`, a line on the run page).
 
 ## Sandbox
 

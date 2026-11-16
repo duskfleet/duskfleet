@@ -15,6 +15,8 @@ import {
   deleteAgentFile,
   EFFORT_LEVELS,
   envPassthroughSchema,
+  harnessNameSchema,
+  harnessOf,
   listProjectAgents,
   loadAgents,
   ON_FAILURE_POLICIES,
@@ -119,6 +121,8 @@ function presentAgent(a: AgentDefinition, config: DuskFleetConfig) {
     sandboxAllowedDomains: a.sandboxAllowedDomains ?? [],
     /** enableWeakerNetworkIsolation in the sandbox settings: gh can verify TLS on macOS, isolation is weaker. */
     sandboxWeakerNetworkIsolation: a.sandboxWeakerNetworkIsolation ?? false,
+    /** The agent CLI that runs it (`harness:`); claude unless the file says otherwise. */
+    harness: harnessOf(a),
     systemPrompt: a.systemPrompt,
     path: a.sourcePath,
   };
@@ -126,6 +130,11 @@ function presentAgent(a: AgentDefinition, config: DuskFleetConfig) {
 
 const agentFields = {
   name: z.string().min(1).optional().describe("Display name; defaults to the id"),
+  harness: harnessNameSchema
+    .optional()
+    .describe(
+      "Agent CLI that runs the agent: claude (default, the only harness that ships). A field the harness cannot honour is refused",
+    ),
   description: z.string().optional().describe("One or two sentences: what the agent is for. Shown by list_agents"),
   model: z
     .string()
@@ -325,7 +334,7 @@ export function registerAgentTools(server: McpServer, ctx: ToolContext): void {
           registeredProject = fields.project;
         }
         const cfg = ctx.config;
-        const fresh = createAgentFromFields(kind, fields, cfg, () => ctx.config);
+        const fresh = createAgentFromFields(kind, fields, cfg, () => ctx.config, ctx.runs.harnesses.lookup);
         return jsonResult({
           created: true,
           kind,
@@ -378,6 +387,7 @@ export function registerAgentTools(server: McpServer, ctx: ToolContext): void {
               "sandbox",
               "sandbox_allowed_domains",
               "sandbox_weaker_network_isolation",
+              "harness",
             ]),
           )
           .optional()
@@ -413,7 +423,7 @@ export function registerAgentTools(server: McpServer, ctx: ToolContext): void {
         for (const k of clear ?? []) delete (merged as Record<string, unknown>)[k];
         const spec = assertAgentSpecClean(agentSpecSchema.parse(merged));
         const kind = requestedKind ?? agentKind(spec);
-        assertAgentWritable(kind, spec, cfgNow, stored.skills ?? []);
+        assertAgentWritable(kind, spec, cfgNow, stored.skills ?? [], ctx.runs.harnesses.lookup);
         const fresh = writeAgentAndVerify(cfgNow, spec, () => ctx.config);
         return jsonResult({ updated: true, kind, agent: presentAgent(fresh, ctx.config) });
       } catch (err) {

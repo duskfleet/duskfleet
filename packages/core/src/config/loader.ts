@@ -10,6 +10,7 @@ import { logger } from "../util/log.js";
 import {
   AGENT_ID_PATTERN,
   envPassthroughSchema,
+  harnessNameSchema,
   maxConcurrentSchema,
   maxDailyCostUsdSchema,
   maxDailyRunsSchema,
@@ -177,6 +178,9 @@ const agentFrontmatterSchema = z.object({
   sandbox: z.boolean().optional(),
   sandbox_allowed_domains: sandboxAllowedDomainsSchema.optional(),
   sandbox_weaker_network_isolation: z.boolean().optional(),
+  // A name only; whether a harness of that name is registered is checked on create / update and at
+  // run start, never on load (the loader does not know the executors).
+  harness: harnessNameSchema.optional(),
 });
 
 const projectsSchema = z.object({
@@ -350,6 +354,7 @@ export function loadAgents(agentsDir: string, source: AgentSource = "builtin"): 
     if (fm.sandbox_allowed_domains !== undefined) agent.sandboxAllowedDomains = fm.sandbox_allowed_domains;
     if (fm.sandbox_weaker_network_isolation !== undefined)
       agent.sandboxWeakerNetworkIsolation = fm.sandbox_weaker_network_isolation;
+    if (fm.harness !== undefined) agent.harness = fm.harness;
     agents.set(id, agent);
   }
   return agents;
