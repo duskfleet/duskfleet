@@ -26,7 +26,7 @@ import {
 } from "@duskfleet/core";
 import { harnessReport } from "../dist/harness-report.js";
 import { renderDoctor } from "../dist/render/index.js";
-import { FakeHarness } from "./fake-harness.js";
+import { FAKE_CAPABILITIES, FakeHarness } from "./fake-harness.js";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const fakeClaude = path.join(here, "fake-claude.js");
@@ -45,7 +45,7 @@ class CountingClaude extends ClaudeCodeExecutor {
   }
 }
 
-function setup(agents = {}) {
+function setup(agents = {}, extra = []) {
   const root = mkdtempSync(path.join(tmpdir(), "duskfleet-harness-"));
   const configDir = path.join(root, "config");
   mkdirSync(path.join(configDir, "agents"), { recursive: true });
@@ -62,7 +62,7 @@ function setup(agents = {}) {
   const db = openDatabase(config.dataDir);
   const claude = new CountingClaude({ binary: fakeClaude, strictMcpConfig: true, allowBypassPermissions: false });
   const fake = new FakeHarness();
-  const registry = new HarnessRegistry([claude, fake]);
+  const registry = new HarnessRegistry([claude, fake, ...extra]);
   const runs = new RunManager(config, new RunRepository(db), registry);
   const cleanup = () => {
     runs.shutdown();
@@ -260,6 +260,35 @@ test("a claude agent next to another harness runs on the Claude adapter, exactly
     assert.equal(t.claude.executes, 1);
     assert.equal(t.fake.calls.length, 0);
     assert.ok(run.command.argv.includes("--max-budget-usd"), "the Claude adapter keeps its budget flag");
+  } finally {
+    t.cleanup();
+  }
+});
+
+test("a resume never hands a session to another harness than the one that created it", async () => {
+  const resumer = new FakeHarness({
+    harness: "fake-resume",
+    capabilities: { ...FAKE_CAPABILITIES, resumeSession: true },
+  });
+  const t = setup({ switcher: "permission_mode: acceptEdits" }, [resumer]);
+  try {
+    const started = await t.runs.startRun({ agentId: "switcher", projectPath: t.project, prompt: "budget" });
+    const first = await t.runs.waitForRun(started.id, 15_000);
+    assert.equal(first.harness, "claude");
+    assert.equal(first.terminationReason, "budget_exhausted");
+
+    // The agent file moves to another harness that can resume sessions: the Claude session is not its.
+    writeFileSync(
+      path.join(t.configDir, "agents", "switcher.md"),
+      "---\nharness: fake-resume\npermission_mode: acceptEdits\n---\nBe brief.\n",
+    );
+    const before = t.runs.listRuns({ limit: 10 }).length;
+    await assert.rejects(
+      t.runs.resumeRun({ runId: first.id }),
+      /ran on harness claude, agent "switcher" now uses harness fake-resume/,
+    );
+    assert.equal(t.runs.listRuns({ limit: 10 }).length, before, "no run row");
+    assert.equal(resumer.prepared.length + resumer.calls.length, 0, "nothing prepared or spawned");
   } finally {
     t.cleanup();
   }

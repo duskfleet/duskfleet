@@ -25,16 +25,16 @@ export const FAKE_CAPABILITIES = Object.freeze({
 
 export class FakeHarness {
   name = "fake-harness";
-  harness = "fake";
-  capabilities = FAKE_CAPABILITIES;
   binary = "/opt/fake-harness/bin/fake";
   /** Requests `execute` received, in order. */
   calls = [];
   /** Requests `prepare` received, in order. */
   prepared = [];
 
-  constructor({ versionError = null } = {}) {
+  constructor({ versionError = null, harness = "fake", capabilities = FAKE_CAPABILITIES } = {}) {
     this.versionError = versionError;
+    this.harness = harness;
+    this.capabilities = capabilities;
   }
 
   version() {

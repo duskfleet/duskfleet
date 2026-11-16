@@ -387,6 +387,7 @@ export function registerAgentTools(server: McpServer, ctx: ToolContext): void {
               "sandbox",
               "sandbox_allowed_domains",
               "sandbox_weaker_network_isolation",
+              "harness",
             ]),
           )
           .optional()

@@ -491,6 +491,12 @@ export class RunManager {
     const caps = this.harnesses.capabilities(harness) as HarnessCapabilities;
     if (input.resume && !caps.resumeSession)
       throw new Error(`agent "${agent.id}": resuming a session is not supported by harness ${harness}`);
+    // A session belongs to the harness that created it: never hand it to another one.
+    const resumeHarness = input.resume ? (input.resume.fromRun.harness ?? DEFAULT_HARNESS) : null;
+    if (resumeHarness && resumeHarness !== harness)
+      throw new Error(
+        `run ${input.resume?.fromRun.id} cannot be resumed: it ran on harness ${resumeHarness}, agent "${agent.id}" now uses harness ${harness}; start a new run instead`,
+      );
     if (agent.sandbox) {
       // Never run a sandboxed agent unsandboxed: no row, no spawn, a clear reason.
       const support = this.sandboxSupport();
