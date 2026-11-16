@@ -561,7 +561,10 @@ export class RunManager {
     if (addDirs.length) request.addDirs = addDirs;
     const envPassthrough = mergeEnvPassthrough(this.config.claude.envPassthrough, agent.envPassthrough);
     if (envPassthrough.length) request.envPassthrough = envPassthrough;
-    if (agent.sandbox) request.sandbox = { allowedDomains: agent.sandboxAllowedDomains ?? [] };
+    if (agent.sandbox) {
+      request.sandbox = { allowedDomains: agent.sandboxAllowedDomains ?? [] };
+      if (agent.sandboxWeakerNetworkIsolation) request.sandbox.weakerNetworkIsolation = true;
+    }
 
     // Record the run (with the exact command) *before* launching it.
     const run: Run = {

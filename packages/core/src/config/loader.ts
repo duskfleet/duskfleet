@@ -176,6 +176,7 @@ const agentFrontmatterSchema = z.object({
   skills: skillsSchema.optional(),
   sandbox: z.boolean().optional(),
   sandbox_allowed_domains: sandboxAllowedDomainsSchema.optional(),
+  sandbox_weaker_network_isolation: z.boolean().optional(),
 });
 
 const projectsSchema = z.object({
@@ -347,6 +348,8 @@ export function loadAgents(agentsDir: string, source: AgentSource = "builtin"): 
     if (fm.skills !== undefined) agent.skills = fm.skills;
     if (fm.sandbox !== undefined) agent.sandbox = fm.sandbox;
     if (fm.sandbox_allowed_domains !== undefined) agent.sandboxAllowedDomains = fm.sandbox_allowed_domains;
+    if (fm.sandbox_weaker_network_isolation !== undefined)
+      agent.sandboxWeakerNetworkIsolation = fm.sandbox_weaker_network_isolation;
     agents.set(id, agent);
   }
   return agents;

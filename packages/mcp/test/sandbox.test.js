@@ -29,10 +29,14 @@ import {
   sandboxSettings,
   sandboxSupport,
 } from "@duskfleet/core";
+import { Client } from "@modelcontextprotocol/sdk/client/index.js";
+import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import { renderDoctor, sandboxReport } from "../dist/render/index.js";
+import { testEnv } from "./helpers.js";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const fakeBinary = path.join(here, "fake-claude.js");
+const serverEntry = path.join(here, "..", "dist", "index.js");
 
 const AVAILABLE = () => ({ available: true, platform: "darwin", detail: "Seatbelt (sandbox-exec)", missing: [] });
 const MISSING = () => ({
@@ -56,6 +60,10 @@ function makeApp({ support = AVAILABLE } = {}) {
   writeFileSync(
     path.join(configDir, "agents", "boxed.md"),
     `---\npermission_mode: dontAsk\nsandbox: true\nsandbox_allowed_domains: [registry.npmjs.org, api.github.com]\n---\nBe brief.\n`,
+  );
+  writeFileSync(
+    path.join(configDir, "agents", "ghbox.md"),
+    `---\npermission_mode: dontAsk\nsandbox: true\nsandbox_allowed_domains: [github.com, api.github.com]\nsandbox_weaker_network_isolation: true\n---\nUse gh.\n`,
   );
   writeFileSync(
     path.join(configDir, "agents", "offline.md"),
@@ -90,6 +98,19 @@ test("sandboxSettings: sandbox on, no unsandboxed fallback, the hosts under netw
   });
   // No list: the verified "every host denied" shape, without a network key.
   assert.deepEqual(JSON.parse(sandboxSettings([])), { sandbox: { enabled: true, allowUnsandboxedCommands: false } });
+});
+
+test("sandboxSettings: weaker network isolation only when asked, otherwise the exact earlier string", () => {
+  const before =
+    '{"sandbox":{"enabled":true,"allowUnsandboxedCommands":false,"network":{"allowedDomains":["github.com"]}}}';
+  assert.equal(sandboxSettings(["github.com"]), before);
+  assert.equal(sandboxSettings(["github.com"], {}), before);
+  assert.equal(sandboxSettings(["github.com"], { weakerNetworkIsolation: false }), before);
+  // The value verified with real runs in issue #449, byte for byte.
+  assert.equal(
+    sandboxSettings(["github.com", "api.github.com"], { weakerNetworkIsolation: true }),
+    '{"sandbox":{"enabled":true,"allowUnsandboxedCommands":false,"enableWeakerNetworkIsolation":true,"network":{"allowedDomains":["github.com","api.github.com"]}}}',
+  );
 });
 
 test("sandboxSupport: Seatbelt on macOS, bwrap and socat on Linux, nothing on Windows", () => {
@@ -166,6 +187,104 @@ test("create refuses sandbox_allowed_domains without sandbox: true; a sandboxed 
   }
 });
 
+test("sandbox_weaker_network_isolation: loaded, refused without sandbox: true, round-trips through create", () => {
+  const app = makeApp();
+  try {
+    const ghbox = app.config.agents.get("ghbox");
+    assert.equal(ghbox.sandboxWeakerNetworkIsolation, true);
+    assert.equal(agentToSpec(ghbox).sandbox_weaker_network_isolation, true);
+    assert.equal(app.config.agents.get("boxed").sandboxWeakerNetworkIsolation, undefined);
+    assert.equal("sandbox_weaker_network_isolation" in agentToSpec(app.config.agents.get("boxed")), false);
+
+    const reload = () => loadConfig(app.configDir);
+    const file = path.join(app.config.userAgentsDir, "gh.md");
+    for (const fields of [
+      { id: "gh", system_prompt: "Hi.", sandbox_weaker_network_isolation: true },
+      { id: "gh", system_prompt: "Hi.", sandbox: false, sandbox_weaker_network_isolation: true },
+    ]) {
+      assert.throws(
+        () => createAgentFromFields("own", fields, app.config, reload),
+        /sandbox_weaker_network_isolation needs sandbox: true/,
+      );
+      assert.equal(existsSync(file), false, "nothing written");
+    }
+    // false without the sandbox loosens nothing: accepted.
+    assert.doesNotThrow(() =>
+      createAgentFromFields(
+        "own",
+        { id: "gh-off", system_prompt: "Hi.", sandbox_weaker_network_isolation: false },
+        app.config,
+        reload,
+      ),
+    );
+
+    const agent = createAgentFromFields(
+      "own",
+      {
+        id: "gh",
+        system_prompt: "Hi.",
+        sandbox: true,
+        sandbox_allowed_domains: ["github.com"],
+        sandbox_weaker_network_isolation: true,
+      },
+      app.config,
+      reload,
+    );
+    assert.equal(agent.sandboxWeakerNetworkIsolation, true);
+    assert.match(readFileSync(file, "utf8"), /sandbox_weaker_network_isolation: true\n/);
+    assert.equal(reload().agents.get("gh").sandboxWeakerNetworkIsolation, true);
+  } finally {
+    rmSync(app.root, { recursive: true, force: true });
+    app.db.close();
+  }
+});
+
+test("update_agent over MCP: sets, refuses and clears sandbox_weaker_network_isolation; list_agents shows it", async () => {
+  const app = makeApp();
+  const transport = new StdioClientTransport({
+    command: process.execPath,
+    args: [serverEntry],
+    env: testEnv({ DUSKFLEET_CONFIG: app.configDir, DUSKFLEET_LOG_LEVEL: "warn" }),
+    stderr: "pipe",
+  });
+  const client = new Client({ name: "sandbox-test", version: "0.0.0" });
+  const call = async (name, args) => {
+    const r = await client.callTool({ name, arguments: args });
+    return { error: r.isError ?? false, text: r.content[0].text };
+  };
+  try {
+    await client.connect(transport);
+    // No domain list: dropping the sandbox below must trip this key's own check, not the domains'.
+    const created = await call("create_agent", { id: "gh", kind: "own", system_prompt: "Hi.", sandbox: true });
+    assert.equal(created.error, false, created.text);
+    assert.equal(JSON.parse(created.text).agent.sandboxWeakerNetworkIsolation, false);
+
+    const set = await call("update_agent", { id: "gh", sandbox_weaker_network_isolation: true });
+    assert.equal(set.error, false, set.text);
+    assert.equal(JSON.parse(set.text).agent.sandboxWeakerNetworkIsolation, true);
+
+    const listed = JSON.parse((await call("list_agents", {})).text).agents.find((a) => a.id === "gh");
+    assert.equal(listed.sandboxWeakerNetworkIsolation, true);
+
+    // Dropping the sandbox while the key stays is refused, and the file is left as it was.
+    const file = path.join(app.config.userAgentsDir, "gh.md");
+    const before = readFileSync(file, "utf8");
+    const refused = await call("update_agent", { id: "gh", sandbox: false });
+    assert.equal(refused.error, true);
+    assert.match(refused.text, /sandbox_weaker_network_isolation needs sandbox: true/);
+    assert.equal(readFileSync(file, "utf8"), before);
+
+    const cleared = await call("update_agent", { id: "gh", clear: ["sandbox_weaker_network_isolation"] });
+    assert.equal(cleared.error, false, cleared.text);
+    assert.equal(JSON.parse(cleared.text).agent.sandboxWeakerNetworkIsolation, false);
+    assert.doesNotMatch(readFileSync(file, "utf8"), /sandbox_weaker_network_isolation/);
+  } finally {
+    await client.close();
+    rmSync(app.root, { recursive: true, force: true });
+    app.db.close();
+  }
+});
+
 test("an agent without the switch gets no --settings: today's argv", async () => {
   const app = makeApp();
   try {
@@ -206,6 +325,23 @@ test("a sandboxed agent runs with --settings; a network block is needs review, a
       .filter((e) => e.type === "note")
       .map((e) => e.payload.message);
     assert.deepEqual(notes, ["sandbox blocked a command: deny network-outbound example.org:443 (user denied)"]);
+  } finally {
+    await app.cleanup();
+  }
+});
+
+test("a sandboxed agent with sandbox_weaker_network_isolation gets enableWeakerNetworkIsolation in --settings", async () => {
+  const app = makeApp();
+  try {
+    const started = await app.runs.startRun({ prompt: "sandbox", projectPath: app.project, agentId: "ghbox" });
+    const argv = started.command.argv;
+    const settings = argv[argv.indexOf("--settings") + 1];
+    assert.equal(
+      settings,
+      '{"sandbox":{"enabled":true,"allowUnsandboxedCommands":false,"enableWeakerNetworkIsolation":true,"network":{"allowedDomains":["github.com","api.github.com"]}}}',
+    );
+    const run = await app.runs.waitForRun(started.id, 10_000);
+    assert.equal(run.resultText, `settings ${settings}`, "the child received the same --settings value");
   } finally {
     await app.cleanup();
   }

@@ -117,6 +117,8 @@ function presentAgent(a: AgentDefinition, config: DuskFleetConfig) {
     /** Bash runs inside Claude Code's sandbox: no writes outside the project and addDirs, network only to sandboxAllowedDomains. */
     sandbox: a.sandbox ?? false,
     sandboxAllowedDomains: a.sandboxAllowedDomains ?? [],
+    /** enableWeakerNetworkIsolation in the sandbox settings: gh can verify TLS on macOS, isolation is weaker. */
+    sandboxWeakerNetworkIsolation: a.sandboxWeakerNetworkIsolation ?? false,
     systemPrompt: a.systemPrompt,
     path: a.sourcePath,
   };
@@ -253,6 +255,12 @@ const agentFields = {
     .describe(
       'Exact host names a sandboxed run may reach, e.g. ["github.com", "api.github.com", "registry.npmjs.org"]. Needs sandbox: true. Omit for no network at all',
     ),
+  sandbox_weaker_network_isolation: z
+    .boolean()
+    .optional()
+    .describe(
+      "true = add enableWeakerNetworkIsolation to the sandbox settings: on macOS, gh (and other Go tools) can then verify TLS inside the sandbox; without it every gh call fails with an x509 error. Weakens the network isolation for every command of the run. Needs sandbox: true. Default false",
+    ),
   system_prompt: z.string().optional().describe("Appended to Claude Code's system prompt for every run of this agent"),
 };
 
@@ -369,6 +377,7 @@ export function registerAgentTools(server: McpServer, ctx: ToolContext): void {
               "skills",
               "sandbox",
               "sandbox_allowed_domains",
+              "sandbox_weaker_network_isolation",
             ]),
           )
           .optional()

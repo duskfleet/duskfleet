@@ -45,9 +45,10 @@ export interface ExecutionRequest {
   envPassthrough?: string[];
   /**
    * Run Bash inside Claude Code's native sandbox (`--settings` with `sandbox.enabled`, see
-   * sandbox.ts), reaching only `allowedDomains`. Absent = no `--settings` at all.
+   * sandbox.ts), reaching only `allowedDomains`. `weakerNetworkIsolation` adds
+   * `enableWeakerNetworkIsolation` (macOS TLS for `gh`). Absent = no `--settings` at all.
    */
-  sandbox?: { allowedDomains: string[] };
+  sandbox?: { allowedDomains: string[]; weakerNetworkIsolation?: boolean };
   timeoutMs?: number;
   /** Absolute path of the file that receives every raw event line. */
   logPath?: string;

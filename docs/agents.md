@@ -76,6 +76,7 @@ permission_mode: acceptEdits      # acceptEdits | dontAsk | auto | manual  (plan
 # skills: [review-checklist]      # Duskfleet skills in data/skills/ or config/skills/ (see "Skills")
 # sandbox: true                   # Bash inside Claude Code's sandbox: no writes outside the project and add_dirs (see "Sandbox")
 # sandbox_allowed_domains: [github.com, api.github.com, registry.npmjs.org]   # hosts a sandboxed run may reach; default none
+# sandbox_weaker_network_isolation: true   # macOS: lets gh verify TLS inside the sandbox; weaker isolation (see "Sandbox")
 timeout_minutes: 30
 max_budget_usd: 5
 # wrap_up_reserve_usd: 0.5     # part of max_budget_usd kept for the wrap-up pass; default 10%, min $0.50, 0 = off
@@ -96,13 +97,21 @@ closed except for the exact host names in `sandbox_allowed_domains` (no list = n
 Use it for agents that read untrusted input (public issues, web pages) or carry a broad
 allow-list such as `Bash(node:*)`. Off by default; an agent without it runs exactly as before.
 
-- `sandbox_allowed_domains` without `sandbox: true` is refused by `create_agent` / `update_agent`.
+- `sandbox_allowed_domains` and `sandbox_weaker_network_isolation: true` without `sandbox: true`
+  are refused by `create_agent` / `update_agent`.
+- **`gh` on macOS needs `sandbox_weaker_network_isolation: true`**, next to `github.com` and
+  `api.github.com` in `sandbox_allowed_domains`. Without it every `gh` call fails with
+  `tls: failed to verify certificate: x509: OSStatus -26276` (Go tools verify TLS through a macOS
+  service the sandbox closes); an `add_dirs` entry does not fix that. The key weakens the
+  sandbox's network isolation for every command of the run, not only `gh`. A TLS failure is not
+  detected: the run is not needs review, so try the agent once before scheduling it.
 - A host without the sandbox (Windows; Linux without `bwrap` and `socat`) refuses every run of
   the agent before spawning it; `duskfleet doctor` shows whether the sandbox is available.
 - A blocked network connection makes the run **needs review** (`sandbox_blocked`, with a note
   naming the host). A blocked file write is not detected: it reads as an ordinary failed command.
-- Git worktrees, the npm cache and `gh` credentials live outside the project: give them an
-  `add_dirs` entry or expect those commands to fail.
+- Git worktrees and the npm cache live outside the project: give them an `add_dirs` entry or
+  expect those commands to fail. `gh` read its token from the keychain without one (macOS, with
+  the key above).
 
 Details, what was verified and the limits: [security](security.md#opt-in-sandbox-sandbox-true).
 

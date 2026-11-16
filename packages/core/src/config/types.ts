@@ -107,6 +107,12 @@ export interface AgentDefinition {
   sandbox?: boolean;
   /** Hosts a sandboxed run may reach (`sandbox.network.allowedDomains`). Empty = no network. */
   sandboxAllowedDomains?: string[];
+  /**
+   * `sandbox.enableWeakerNetworkIsolation` in the `--settings` value: lets Go tools (`gh`) verify
+   * TLS inside the sandbox on macOS, at the cost of a weaker network isolation for every command
+   * of the run. Needs `sandbox`. Absent = today's `--settings` byte for byte.
+   */
+  sandboxWeakerNetworkIsolation?: boolean;
   /** Markdown body of the agent file. Sent via --append-system-prompt when non-empty. */
   systemPrompt: string;
   /** Absolute path of the file this agent was loaded from. */

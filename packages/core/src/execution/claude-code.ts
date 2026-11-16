@@ -123,7 +123,7 @@ export class ClaudeCodeExecutor implements Executor {
     // `--settings <json>` turns the sandbox on and wins over the project's own settings (verified
     // with real runs on 2.1.325, issue #447). Only for a sandboxed agent: anything else keeps
     // today's argv, so a project that enables the sandbox itself keeps it.
-    if (req.sandbox) argv.push("--settings", sandboxSettings(req.sandbox.allowedDomains));
+    if (req.sandbox) argv.push("--settings", sandboxSettings(req.sandbox.allowedDomains, req.sandbox));
     if (req.model) argv.push("--model", req.model);
     if (req.effort) argv.push("--effort", req.effort);
     if (req.maxBudgetUsd !== undefined) argv.push("--max-budget-usd", String(req.maxBudgetUsd));
