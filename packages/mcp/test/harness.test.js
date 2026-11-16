@@ -12,6 +12,7 @@ import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 import "./helpers.js";
 import {
+  agentDefinitionHash,
   BudgetError,
   builtinHarnesses,
   CLAUDE_CAPABILITIES,
@@ -113,6 +114,17 @@ test("harnessRefusal names the field; claude accepts every field it accepted bef
     /inherit_mcp is not supported by harness fake \(set by project p\)/,
   );
   assert.match(harnessRefusal({ harness: "ghost" }, registry.lookup), /unknown harness "ghost"/);
+  const resumesNoCap = new HarnessRegistry([
+    new FakeHarness({ harness: "fake-resume", capabilities: { ...FAKE_CAPABILITIES, resumeSession: true } }),
+  ]);
+  assert.match(
+    harnessRefusal(
+      { harness: "fake-resume", permission_mode: "acceptEdits", resume_budget_usd: 1 },
+      resumesNoCap.lookup,
+    ),
+    /^resume_budget_usd is not supported by harness fake-resume$/,
+    "a resume budget needs a hard budget too",
+  );
 
   const everything = {
     allowed_tools: ["Read"],
@@ -289,6 +301,83 @@ test("a resume never hands a session to another harness than the one that create
     );
     assert.equal(t.runs.listRuns({ limit: 10 }).length, before, "no run row");
     assert.equal(resumer.prepared.length + resumer.calls.length, 0, "nothing prepared or spawned");
+  } finally {
+    t.cleanup();
+  }
+});
+
+test("a budget for one run is refused, never dropped, on a harness that cannot stop at a budget", async () => {
+  const resumer = new FakeHarness({
+    harness: "fake-resume",
+    capabilities: { ...FAKE_CAPABILITIES, resumeSession: true },
+    result: { outcome: "timed_out", terminationReason: "timed_out" },
+  });
+  const t = setup({ other: "harness: fake", slow: "harness: fake-resume" }, [resumer]);
+  try {
+    await assert.rejects(
+      t.runs.startRun({ agentId: "other", projectPath: t.project, prompt: "go", maxBudgetUsd: 1 }),
+      /agent "other": max_budget_usd is not supported by harness fake/,
+    );
+    await assert.rejects(
+      t.runs.startRun({ agentId: "other", projectPath: t.project, prompt: "go", kind: "gate", maxBudgetUsd: 1 }),
+      /agent "other": gate\.agent\.budget_usd is not supported by harness fake/,
+    );
+    assert.equal(t.runs.listRuns({ limit: 10 }).length, 0, "no run row");
+    assert.equal(t.fake.calls.length + t.fake.prepared.length, 0, "nothing prepared or spawned");
+
+    // A gate without its own budget runs: no Claude gate default is put on the request.
+    const gate = await t.runs.startRun({ agentId: "other", projectPath: t.project, prompt: "go", kind: "gate" });
+    await t.runs.waitForRun(gate.id, 10_000);
+    assert.equal(t.fake.calls[0].maxBudgetUsd, undefined);
+
+    // A timed-out run of a harness that resumes sessions but has no hard budget: an explicit resume
+    // budget is refused with the field named; without one the resume starts.
+    const first = await t.runs.startRun({ agentId: "slow", projectPath: t.project, prompt: "go" });
+    const ended = await t.runs.waitForRun(first.id, 10_000);
+    assert.equal(ended.status, "timed_out");
+    const before = t.runs.listRuns({ limit: 10 }).length;
+    await assert.rejects(
+      t.runs.resumeRun({ runId: first.id, budgetUsd: 1 }),
+      /agent "slow": budget_usd \(resume budget\) is not supported by harness fake-resume/,
+    );
+    assert.equal(t.runs.listRuns({ limit: 10 }).length, before, "no run row");
+    const resumed = await t.runs.resumeRun({ runId: first.id });
+    assert.equal(resumed.resumedFromRunId, first.id);
+    await t.runs.waitForRun(resumed.id, 10_000);
+  } finally {
+    t.cleanup();
+  }
+});
+
+test("a harness without reportsCostUsd stores no cost, even when its adapter returns 0", async () => {
+  const zero = new FakeHarness({ harness: "fake-zero", result: { costUsd: 0 } });
+  const t = setup({ cheap: "harness: fake-zero" }, [zero]);
+  try {
+    const started = await t.runs.startRun({ agentId: "cheap", projectPath: t.project, prompt: "go" });
+    const run = await t.runs.waitForRun(started.id, 10_000);
+    assert.equal(run.costUsd, null, "a 0 from the adapter is not a reported cost");
+    assert.equal(run.costStatus, "unpriced");
+  } finally {
+    t.cleanup();
+  }
+});
+
+test("an explicit harness: claude hashes like no harness line", () => {
+  const t = setup({ plain: "permission_mode: acceptEdits", explicit: "harness: claude\npermission_mode: acceptEdits" });
+  try {
+    const plain = t.config.agents.get("plain");
+    const explicit = t.config.agents.get("explicit");
+    assert.equal(explicit.harness, "claude");
+    assert.equal(
+      agentDefinitionHash({ ...explicit, id: "plain", name: "plain" }, t.project),
+      agentDefinitionHash(plain, t.project),
+      "the default harness is left out of the hash",
+    );
+    assert.notEqual(
+      agentDefinitionHash({ ...plain, harness: "fake" }, t.project),
+      agentDefinitionHash(plain, t.project),
+      "another harness changes it",
+    );
   } finally {
     t.cleanup();
   }

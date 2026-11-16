@@ -53,6 +53,7 @@ import {
   reviewReasons,
 } from "../observability/run.js";
 import { parseHolder, processIdentity, scheduleProjectId } from "../scheduler/crud.js";
+import { DEFAULT_GATE_BUDGET_USD } from "../scheduler/types.js";
 import type { ListRunsFilter, RunPatch, RunRepository } from "../storage/runs.js";
 import { logger } from "../util/log.js";
 import {
@@ -85,7 +86,12 @@ export interface StartRunInput {
   /** Set by the scheduler. */
   scheduleId?: string;
   /** Internal: continue the session of an earlier run instead of starting a new one (see resumeRun). */
-  resume?: { fromRun: Run; budgetUsd: number };
+  resume?: {
+    fromRun: Run;
+    budgetUsd: number;
+    /** The field the budget came from when it was set explicitly (refused on a harness without hardBudgetUsd). */
+    budgetField?: string;
+  };
   /**
    * Internal: continue the session of `fromRun` (see continueRun) with this prompt. Only when the
    * agent, project path and agent hash all match the original run; otherwise a fresh session plus a note.
@@ -93,7 +99,10 @@ export interface StartRunInput {
   continueFrom?: Run;
   /** `gate` for a schedule's gate agent (no wrap-up reserve, cost counted apart). Default `run`. */
   kind?: RunKind;
-  /** Overrides the agent's max_budget_usd (gate runs). */
+  /**
+   * Overrides the agent's max_budget_usd (gate runs; a gate without one gets DEFAULT_GATE_BUDGET_USD
+   * on a harness that stops at a budget). Refused on a harness without hardBudgetUsd.
+   */
   maxBudgetUsd?: number;
   /**
    * What the run is for (run_agent `title`, `run --title`, a schedule's title): trimmed, empty =
@@ -147,6 +156,8 @@ interface ActiveRun {
   handle: ExecutionHandle;
   /** The adapter of the agent's harness; a wrap-up pass or a fresh-session fallback goes through it too. */
   executor: Executor;
+  /** The harness reports dollars; when false every pass's cost is stored as unknown (null), whatever the adapter returned. */
+  reportsCostUsd: boolean;
   agentId: string;
   projectPath: string;
   /** The agent promised not to edit the project checkout: ignored by the per-project guard. */
@@ -497,6 +508,20 @@ export class RunManager {
       throw new Error(
         `run ${input.resume?.fromRun.id} cannot be resumed: it ran on harness ${resumeHarness}, agent "${agent.id}" now uses harness ${harness}; start a new run instead`,
       );
+    // A budget given for this run only (a gate's budget_usd, a resume budget) is refused like the
+    // agent's own max_budget_usd when the harness cannot stop itself at it: never dropped silently.
+    if (!caps.hardBudgetUsd) {
+      const field =
+        input.maxBudgetUsd !== undefined
+          ? input.kind === "gate"
+            ? "gate.agent.budget_usd"
+            : "max_budget_usd"
+          : (input.resume?.budgetField ?? null);
+      if (field)
+        throw new Error(
+          `agent "${agent.id}": ${field} is not supported by harness ${harness} (it cannot stop a run at a dollar budget)`,
+        );
+    }
     if (agent.sandbox) {
       // Never run a sandboxed agent unsandboxed: no row, no spawn, a clear reason.
       const support = this.sandboxSupport();
@@ -532,10 +557,12 @@ export class RunManager {
     const model = input.model ?? agent.model;
     const timeoutMinutes = agent.timeoutMinutes ?? this.config.claude.defaultTimeoutMinutes;
     const kind: RunKind = input.kind ?? "run";
+    const runBudgetUsd =
+      input.maxBudgetUsd ?? (kind === "gate" && caps.hardBudgetUsd ? DEFAULT_GATE_BUDGET_USD : undefined);
     const budgetAgent = resume
       ? { ...agent, maxBudgetUsd: resume.budgetUsd }
-      : input.maxBudgetUsd !== undefined
-        ? { ...agent, maxBudgetUsd: input.maxBudgetUsd }
+      : runBudgetUsd !== undefined
+        ? { ...agent, maxBudgetUsd: runBudgetUsd }
         : agent;
     // A gate is a quick yes/no: no reserve, no wrap-up pass. Neither for a harness that does not stop
     // itself at a budget: it never ends budget_exhausted, so nothing would ever use the reserve.
@@ -722,6 +749,7 @@ export class RunManager {
     this.active.set(runId, {
       handle,
       executor,
+      reportsCostUsd: caps.reportsCostUsd,
       agentId: agent.id,
       projectPath,
       isolated: agent.isolated === true,
@@ -804,6 +832,15 @@ export class RunManager {
     const agent = this.resolveAgent(fromRun.agentId);
     const budgetUsd =
       input.budgetUsd ?? agent.resumeBudgetUsd ?? agent.maxBudgetUsd ?? this.config.claude.defaultMaxBudgetUsd;
+    // Named when set explicitly: startRun refuses it on a harness that cannot stop at a budget.
+    const budgetField =
+      input.budgetUsd !== undefined
+        ? "budget_usd (resume budget)"
+        : agent.resumeBudgetUsd !== undefined
+          ? "resume_budget_usd"
+          : undefined;
+    const resume: NonNullable<StartRunInput["resume"]> = { fromRun, budgetUsd };
+    if (budgetField) resume.budgetField = budgetField;
     const reason = fromRun.status === "timed_out" ? "timed out" : "budget exhausted";
     // The original run's project: by id when it had one (the registry path may be a symlink of the resolved one).
     const startInput: StartRunInput = fromRun.projectId
@@ -811,13 +848,13 @@ export class RunManager {
           prompt: resumePrompt(reason),
           agentId: fromRun.agentId,
           projectId: fromRun.projectId,
-          resume: { fromRun, budgetUsd },
+          resume,
         }
       : {
           prompt: resumePrompt(reason),
           agentId: fromRun.agentId,
           projectPath: fromRun.projectPath,
-          resume: { fromRun, budgetUsd },
+          resume,
         };
     if (fromRun.modelRequested) startInput.model = fromRun.modelRequested;
     if (input.scheduleId) startInput.scheduleId = input.scheduleId;
@@ -1141,8 +1178,11 @@ export class RunManager {
    * closes the run. The run's status is always the main pass's outcome, except that a
    * wrap-up pass cancelled by the user records the run as cancelled.
    */
-  private onPhaseFinished(runId: string, result: ExecutionResult): void {
+  private onPhaseFinished(runId: string, reported: ExecutionResult): void {
     const active = this.active.get(runId);
+    // A harness without reportsCostUsd never sets a cost: a 0 from its adapter would read as a
+    // free, reported run and bypass the unpriced budget path. Applies to every pass (and the merge).
+    const result = active && !active.reportsCostUsd ? { ...reported, costUsd: null } : reported;
     if (!active) {
       this.onFinished(runId, result, [phaseOf("main", result, null)]);
       return;

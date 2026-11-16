@@ -106,7 +106,7 @@ silently and never approximated: an allow-list a CLI ignored would be a permissi
 | `toolAllowList` | `allowed_tools`, `disallowed_tools` |
 | `permissionModes` | the `permission_mode` values the harness accepts |
 | `resumeSession` | `on_failure: resume_once`, `resume_budget_usd`; a continued run starts a fresh session (with a note) without it |
-| `hardBudgetUsd` | `max_budget_usd`, `wrap_up_reserve_usd` (the CLI stops itself at the budget) |
+| `hardBudgetUsd` | `max_budget_usd`, `wrap_up_reserve_usd`, `resume_budget_usd`, a gate's `budget_usd`, a resume budget (the CLI stops itself at the budget) |
 | `reportsCostUsd` | `max_daily_cost_usd`; without it every run is `unpriced` and [budgets](#unknown-costs-fail-closed) count it as its cap |
 | `mcpInherit` | `inherit_mcp` (agent or project) |
 | `projectAgents` | `claude_agent` (link agents) |

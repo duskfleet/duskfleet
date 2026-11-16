@@ -19,7 +19,13 @@ import { z } from "zod";
 import { ENV_PASSTHROUGH_PATTERN } from "../execution/child-env.js";
 import { SANDBOX_DOMAIN_MESSAGE, SANDBOX_DOMAIN_PATTERN } from "../execution/sandbox.js";
 import { SKILL_NAME_MESSAGE, SKILL_NAME_PATTERN } from "./skills.js";
-import { type AgentDefinition, EFFORT_LEVELS, ON_FAILURE_POLICIES, PERMISSION_MODES } from "./types.js";
+import {
+  type AgentDefinition,
+  DEFAULT_HARNESS,
+  EFFORT_LEVELS,
+  ON_FAILURE_POLICIES,
+  PERMISSION_MODES,
+} from "./types.js";
 
 export const AGENT_ID_PATTERN = /^[a-z0-9][a-z0-9-_]*$/;
 
@@ -253,6 +259,9 @@ export function projectAgentDefinitionHash(projectPath: string, name: string): s
  */
 export function agentDefinitionHash(agent: AgentDefinition, projectPath: string): string {
   const { source: _source, sourcePath: _sourcePath, ...spec } = agent;
+  // An explicit `harness: claude` is the same agent as no harness line: same hash, so a
+  // continuation (continueMismatch) still resumes the session of an existing agent.
+  if (spec.harness === DEFAULT_HARNESS) delete spec.harness;
   const h = createHash("sha256").update(stableJson(spec));
   if (agent.claudeAgent) {
     h.update("\0");

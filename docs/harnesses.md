@@ -175,9 +175,12 @@ Copilot columns are expectations to verify against each CLI's `--help` and real 
 | `projectAgents` | `link` agents (`claude_agent`) | yes | no | no |
 | `addDirs`, `skills`, `effort`, `sandbox` | the fields of the same name | yes | to verify | to verify |
 
-A harness without `hardBudgetUsd` gets no `--max-budget-usd`-style cap and no wrap-up reserve; a
-harness without `resumeSession` refuses `on_failure: resume_once`, and a continued run of it
-starts a fresh session with a note.
+A harness without `hardBudgetUsd` gets no `--max-budget-usd`-style cap and no wrap-up reserve,
+and refuses a budget set for one run as well as the agent's own: a gate's `budget_usd`, a resume
+budget (the agent's or the schedule's `resume_budget_usd`), with the field named, before
+any row is written. A harness without `resumeSession` refuses `on_failure: resume_once`, and a
+continued run of it starts a fresh session with a note. A harness without `reportsCostUsd` never
+stores a cost, whatever its adapter returns: every run of it is `unpriced`.
 
 ## Cost when the CLI gives no dollars
 

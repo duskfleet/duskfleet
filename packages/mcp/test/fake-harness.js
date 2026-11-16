@@ -31,10 +31,12 @@ export class FakeHarness {
   /** Requests `prepare` received, in order. */
   prepared = [];
 
-  constructor({ versionError = null, harness = "fake", capabilities = FAKE_CAPABILITIES } = {}) {
+  /** `result`: fields merged into every result (a misbehaving adapter's `costUsd: 0`, a `timed_out` end). */
+  constructor({ versionError = null, harness = "fake", capabilities = FAKE_CAPABILITIES, result = {} } = {}) {
     this.versionError = versionError;
     this.harness = harness;
     this.capabilities = capabilities;
+    this.resultOverrides = result;
   }
 
   version() {
@@ -49,6 +51,7 @@ export class FakeHarness {
   execute(request, onEvent) {
     this.calls.push(request);
     const startedAt = new Date().toISOString();
+    const overrides = this.resultOverrides;
     if (request.logPath) {
       mkdirSync(path.dirname(request.logPath), { recursive: true });
       appendFileSync(request.logPath, `${JSON.stringify({ type: "fake", prompt: request.prompt })}\n`);
@@ -89,6 +92,7 @@ export class FakeHarness {
           failure: null,
           rawResult: null,
           subagents: [],
+          ...overrides,
         });
       }, 10);
     });

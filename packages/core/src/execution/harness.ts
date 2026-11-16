@@ -135,7 +135,8 @@ export function harnessRefusal(
   if (spec.permission_mode !== undefined && !caps.permissionModes.includes(spec.permission_mode))
     return `permission_mode ${spec.permission_mode} is not supported by harness ${name} (accepted: ${caps.permissionModes.join(", ") || "none"})`;
   if (spec.on_failure === "resume_once" && !caps.resumeSession) return refuse("on_failure: resume_once");
-  if (spec.resume_budget_usd !== undefined && !caps.resumeSession) return refuse("resume_budget_usd");
+  if (spec.resume_budget_usd !== undefined && !(caps.resumeSession && caps.hardBudgetUsd))
+    return refuse("resume_budget_usd");
   if (spec.max_budget_usd !== undefined && !caps.hardBudgetUsd) return refuse("max_budget_usd");
   if (spec.wrap_up_reserve_usd !== undefined && !caps.hardBudgetUsd) return refuse("wrap_up_reserve_usd");
   // The daily cost cap sums reported costs: without them it would read 0 and never refuse.
