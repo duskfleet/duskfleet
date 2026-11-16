@@ -254,13 +254,8 @@ test("update_agent over MCP: sets, refuses and clears sandbox_weaker_network_iso
   };
   try {
     await client.connect(transport);
-    const created = await call("create_agent", {
-      id: "gh",
-      kind: "own",
-      system_prompt: "Hi.",
-      sandbox: true,
-      sandbox_allowed_domains: ["github.com"],
-    });
+    // No domain list: dropping the sandbox below must trip this key's own check, not the domains'.
+    const created = await call("create_agent", { id: "gh", kind: "own", system_prompt: "Hi.", sandbox: true });
     assert.equal(created.error, false, created.text);
     assert.equal(JSON.parse(created.text).agent.sandboxWeakerNetworkIsolation, false);
 
