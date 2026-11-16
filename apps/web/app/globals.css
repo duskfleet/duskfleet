@@ -1847,6 +1847,7 @@ h2 .h2-id {
   text-transform: uppercase;
   letter-spacing: 0.04em;
   text-align: left;
+  white-space: nowrap;
   padding: 8px;
   border-bottom: 1px solid var(--border);
 }
@@ -1878,7 +1879,7 @@ h2 .h2-id {
   width: 64px;
 }
 .agent-table .c-cost {
-  width: 76px;
+  width: 88px; /* "COST 7D" needs ~66 px of label; 76 px wrapped it onto two lines */
 }
 .agent-table .c-last {
   width: 104px;
