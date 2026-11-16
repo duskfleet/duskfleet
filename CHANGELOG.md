@@ -8,9 +8,27 @@ All notable changes to Duskfleet are listed here. The format follows
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-11-16
+
+Two schema migrations (30 and 31) run on the first open of an existing database; nothing to do by hand.
+
 ### Added
 
-- `npm run up` in a checkout: install, build, `install-service` (which restarts the service on the new build) and the dashboard, in one command after a pull.
+- **Opt-in sandbox per agent.** `sandbox: true` in an agent's frontmatter runs its Bash commands inside Claude Code's native sandbox (Seatbelt on macOS, bubblewrap on Linux): no writes outside the project and its `add_dirs`, and no network except the exact host names in `sandbox_allowed_domains`. Off by default; an agent without the key runs exactly as before. A host without the sandbox (Windows, Linux without `bwrap` and `socat`) refuses the run before spawning it, never runs it unsandboxed. A blocked network connection makes the run needs review (`sandbox_blocked`, with the denied host in a run note); a blocked file write is not detected. `doctor` reports whether the sandbox is available and which agents use it. `create_agent`, `update_agent` and `list_agents` carry the new fields. See [docs/security.md](docs/security.md#opt-in-sandbox-sandbox-true) ([#448](https://github.com/duskfleet/duskfleet/pull/448)).
+- `sandbox_weaker_network_isolation: true` for sandboxed agents that need `gh` on macOS: without it every `gh` call fails TLS verification inside the sandbox. It weakens the sandbox's network isolation for every command of the run, so it is a separate opt-in, refused without `sandbox: true` ([#450](https://github.com/duskfleet/duskfleet/pull/450)).
+- `harness:` in agent frontmatter, and one adapter per agent CLI behind it. Claude Code is the only harness shipped and the default, so existing agents run unchanged. A field the agent's harness cannot honour is refused on create, update and at run start, never dropped. Each run records its harness (`get_run`, `list_runs`, `run-info --json`, the run page) and `doctor` lists the registered harnesses with their versions. See [docs/harnesses.md](docs/harnesses.md) ([#451](https://github.com/duskfleet/duskfleet/pull/451)).
+- [docs/quickstart.md](docs/quickstart.md), "Your first scheduled run": from `npx duskfleet init` to an agent that runs on a schedule, in seven steps with the expected output of each command, linked from the README ([#389](https://github.com/duskfleet/duskfleet/pull/389)).
+- [docs/guides/agent-development-loop.md](docs/guides/agent-development-loop.md): how to run a develop / review loop with scheduled agents and flow labels, written with placeholders ([#410](https://github.com/duskfleet/duskfleet/pull/410)).
+- `npm run up` in a checkout: install, build, `install-service` (which restarts the service on the new build) and the dashboard, in one command after a pull ([#442](https://github.com/duskfleet/duskfleet/pull/442)).
+
+### Changed
+
+- `docs/self-hosting-development.md` and `docs/examples/` are gone: they described one installation's own agents and schedules. The guide above replaces them, and `npm run check:public` now fails on a versioned reference to the private notes directory ([#410](https://github.com/duskfleet/duskfleet/pull/410)).
+
+### Fixed
+
+- CLI: a cost above zero and under one cent reads `<$0.01` instead of `$0.00`, for one run (`runs`, `run`, the LAST RUN cell of `schedules`, the `doctor` probe) and for sums (the `runs` total, the spent figure of `budgets`). `--json` output and stored values are unchanged ([#441](https://github.com/duskfleet/duskfleet/pull/441)), ([#444](https://github.com/duskfleet/duskfleet/pull/444)).
+- Dashboard: the "Cost 7d" header of the agents table no longer wraps onto two lines ([#454](https://github.com/duskfleet/duskfleet/pull/454)).
 
 ## [0.4.0] - 2026-11-12
 
@@ -249,7 +267,8 @@ localhost dashboard.
 - An allow-listed MCP server that a run did not use no longer counts as missing ([#165](https://github.com/duskfleet/duskfleet/pull/165)).
 - The published packages had `bin` paths with a `./` prefix, which npm 11 drops at publish time, so `npx duskfleet` would have had no executable; the pack gate now refuses such entries and `publish --dry-run` fails when npm auto-corrects the manifest ([#278](https://github.com/duskfleet/duskfleet/pull/278)); the publish job itself now runs that check before each `npm publish`, so a tag cut before the fix cannot ship without its executables ([#312](https://github.com/duskfleet/duskfleet/pull/312)).
 
-[Unreleased]: https://github.com/duskfleet/duskfleet/compare/v0.4.0...HEAD
+[Unreleased]: https://github.com/duskfleet/duskfleet/compare/v0.5.0...HEAD
+[0.5.0]: https://github.com/duskfleet/duskfleet/releases/tag/v0.5.0
 [0.4.0]: https://github.com/duskfleet/duskfleet/releases/tag/v0.4.0
 [0.3.1]: https://github.com/duskfleet/duskfleet/releases/tag/v0.3.1
 [0.3.0]: https://github.com/duskfleet/duskfleet/releases/tag/v0.3.0
