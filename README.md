@@ -236,7 +236,7 @@ with diagrams: [How it works](docs/how-it-works.md).
 | **Dashboard** | Runs with cost, timeline and issues; a run that hit a permission denial is "needs review", never green. [Dashboard](docs/dashboard.md) |
 | **MCP tools** | 19 tools to create agents, start and inspect runs and manage schedules from a chat. [MCP server](docs/mcp-server.md) |
 | **CLI** | The same operations from a terminal, plus `serve` and `install-service` for the scheduler. [CLI](docs/cli.md) |
-| **Harnesses** | One run path, one adapter per agent CLI: Claude Code today, Codex and Copilot planned; an agent field a CLI cannot honour is refused, never approximated. [Harnesses](docs/harnesses.md) |
+| **Harnesses** | One run path, one adapter per agent CLI: Claude Code and GitHub Copilot CLI, Codex planned; an agent field a CLI cannot honour is refused, never approximated. [Harnesses](docs/harnesses.md) |
 
 ## Commands
 

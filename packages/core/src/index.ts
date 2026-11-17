@@ -123,15 +123,35 @@ export {
   resolveClaudeBinary,
 } from "./execution/claude-code.js";
 export {
+  COPILOT_PERSONA_AGENT,
+  CopilotExecutor,
+  type CopilotExecutorOptions,
+  copilotEnv,
+  resolveCopilotBinary,
+} from "./execution/copilot.js";
+export {
+  type CopilotResultLine,
+  type CopilotStreamState,
+  copilotToolSummary,
+  copilotUsageByModel,
+  createCopilotState,
+  ingestCopilotLine,
+  isCopilotSessionNotFound,
+} from "./execution/copilot-jsonl.js";
+export { COPILOT_RULE_SHAPES, copilotRuleRefusal } from "./execution/copilot-rules.js";
+export {
   assertAgentFitsHarness,
   builtinHarnesses,
   CLAUDE_CAPABILITIES,
+  COPILOT_CAPABILITIES,
+  COPILOT_HARNESS,
   HARNESS_CAPABILITY_KEYS,
   type HarnessCapabilities,
   type HarnessLookup,
   HarnessRegistry,
   harnessOf,
   harnessRefusal,
+  SHIPPED_HARNESSES,
 } from "./execution/harness.js";
 export {
   CappedLogWriter,

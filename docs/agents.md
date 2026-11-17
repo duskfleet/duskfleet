@@ -82,7 +82,7 @@ max_budget_usd: 5
 # wrap_up_reserve_usd: 0.5     # part of max_budget_usd kept for the wrap-up pass; default 10%, min $0.50, 0 = off
 # on_failure: resume_once      # a schedule's next tick resumes a budget-exhausted / timed-out run, once (default none)
 # resume_budget_usd: 3         # budget of that resumed run (default max_budget_usd)
-# harness: claude              # the agent CLI that runs it; claude (default) is the only one that ships (see "Harness")
+# harness: claude              # the agent CLI that runs it: claude (default) or copilot (see "Harness")
 ---
 You are running unattended. Finish the task end to end and summarise what you changed.
 ```
@@ -93,8 +93,8 @@ An agent without `model` uses the Claude Code default, which can be far more exp
 ## Harness
 
 `harness:` names the agent CLI that runs the agent. Leave it out: `claude` (Claude Code) is the
-default and, today, the only harness that ships. The field exists so a second CLI (Codex, Copilot)
-can be added as one more adapter behind the same run path; see [Harnesses](harnesses.md).
+default. `copilot` runs it with GitHub Copilot CLI (see [Copilot agents](#copilot-agents)). Each
+CLI is one adapter behind the same run path; see [Harnesses](harnesses.md).
 
 Each harness declares what it can honour (its *capabilities*). An agent that sets a field its
 harness cannot honour is **refused**, at create / update and again when a run starts, with the
@@ -116,6 +116,41 @@ silently and never approximated: an allow-list a CLI ignored would be a permissi
 
 Claude Code has every capability, so a Claude agent runs exactly as before the field existed. The
 run records its harness (`harness` in `get_run` / `run-info --json`, a line on the run page).
+
+### Copilot agents
+
+`harness: copilot` runs the agent with GitHub Copilot CLI, under the user's GitHub login. It is
+available when Duskfleet finds the binary (`copilot.binary` in `duskfleet.yaml`, else `copilot` on
+PATH; `doctor` says `copilot not installed` otherwise). Only `own` agents: `link` agents stay
+Claude-only.
+
+```markdown
+---
+description: Tidies the changelog
+harness: copilot
+model: claude-haiku-4.5
+permission_mode: dontAsk
+allowed_tools: ["shell(git)", "write(CHANGELOG.md)"]
+timeout_minutes: 15
+---
+Keep CHANGELOG.md in order. Never touch other files.
+```
+
+- **Tool rules are Copilot's own**, passed verbatim to `--allow-tool` / `--deny-tool`: `shell`,
+  `shell(<command>)`, `write`, `write(<path>)`, `read`, `read(<path>)`, `url(<domain>)`, `memory`.
+  A Claude rule (`Bash(git:*)`, `Read`, `Edit`, `mcp__*`) is refused with the entry named, never
+  translated: Copilot matches a shell command by its first subcommand only, so `shell(gh pr)` allows
+  `gh pr merge` too. Write the narrowest rule Copilot can express and know that is its granularity.
+- **Two modes.** `dontAsk`: only the rules (a non-interactive Copilot run denies anything that
+  would prompt). `acceptEdits` (the default): the rules plus `write`. Every other mode is refused.
+- **The body is the persona**: written to a per-run agent file and loaded with `--agent`. The
+  project's own `AGENTS.md` is loaded too, as `CLAUDE.md` is for Claude.
+- **Refused**: `max_budget_usd`, `wrap_up_reserve_usd`, `resume_budget_usd`, `max_daily_cost_usd`
+  (no dollars: every run is `unpriced` and budgets count it as its cap), `inherit_mcp`, `add_dirs`,
+  `skills`, `sandbox*`, `claude_agent`. Allowed: `model`, `effort`, `on_failure: resume_once`,
+  continued sessions, `env_passthrough`, `timeout_minutes`, the concurrency and daily-run caps.
+- User-level Copilot hooks still run in these sessions (there is no flag against them), and a
+  user-level MCP server that loads ends the run as failed. See [Security](security.md).
 
 ## Sandbox
 

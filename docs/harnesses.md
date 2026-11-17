@@ -1,8 +1,8 @@
 # Harness adapters: one run path, one adapter per agent CLI
 
-A *harness* is an agent CLI that Duskfleet can spawn unattended. Claude Code (`claude`) is the one
-that ships; Codex CLI ([#50](https://github.com/duskfleet/duskfleet/issues/50)) and GitHub Copilot
-CLI ([#446](https://github.com/duskfleet/duskfleet/issues/446)) are planned.
+A *harness* is an agent CLI that Duskfleet can spawn unattended. Claude Code (`claude`, the
+default) and GitHub Copilot CLI (`copilot`, [#446](https://github.com/duskfleet/duskfleet/issues/446))
+ship; Codex CLI ([#50](https://github.com/duskfleet/duskfleet/issues/50)) is planned.
 
 ## The idea in one paragraph
 
@@ -38,13 +38,13 @@ flowchart TB
     subgraph adapters ["4 · Adapters, one per harness"]
         a1["Claude adapter<br/>shipped"]
         a2["Codex adapter<br/>planned, issue 50"]
-        a3["Copilot adapter<br/>planned, issue 446"]
+        a3["Copilot adapter<br/>shipped, issue 446"]
     end
 
     subgraph clis ["5 · Agent CLIs, spawned in the project directory"]
         c1["claude -p<br/>stream-json"]
         c2["codex exec<br/>JSONL"]
-        c3["copilot -p<br/>JSONL"]
+        c3["copilot, prompt on stdin<br/>JSONL"]
     end
 
     store["SQLite and logs<br/>read by the dashboard, the CLI and the MCP tools"]
@@ -156,24 +156,28 @@ flowchart TB
 
 Why refusal and not translation: these agents run with nobody watching. An allow-list that an
 adapter silently dropped, or mapped onto something wider, is a permission the owner never
-granted. A refused agent costs one error message; a quietly widened one costs trust. An adapter
-may *later* add a real mapping (Claude's tool rules onto Copilot's `--allow-tool`), and then it
-declares the capability; until it does, the field is refused.
+granted. A refused agent costs one error message; a quietly widened one costs trust. Claude's
+tool rules are never mapped onto Copilot's `--allow-tool`: Copilot matches a shell command by its
+first subcommand only (`shell(gh pr)` covers `gh pr merge`), so `Bash(gh pr create:*)` has no
+equivalent. A Copilot agent writes Copilot's own rules instead (`toolRule` below).
 
-The capability set. The `claude` column is what the shipped adapter declares; the Codex and
-Copilot columns are expectations to verify against each CLI's `--help` and real runs, not facts.
+The capability set. The `claude` and `copilot` columns are what the shipped adapters declare; the
+Codex column is an expectation to verify against its `--help` and real runs, not a fact.
 
-| Capability | Meaning | claude | codex (planned) | copilot (planned) |
+| Capability | Meaning | claude | codex (planned) | copilot |
 |---|---|---|---|---|
-| `toolAllowList` | `allowed_tools` / `disallowed_tools` are enforced | yes | no, a sandbox mode instead | to verify (`--allow-tool`) |
-| `permissionModes` | `permission_mode` values it accepts | all (`bypassPermissions` still needs `claude.allow_bypass_permissions`) | to map onto sandbox modes | to verify |
-| `resumeSession` | a session can be continued | yes | to verify | to verify |
-| `hardBudgetUsd` | the CLI stops at `max_budget_usd` | yes | no | no |
+| `toolAllowList` | `allowed_tools` / `disallowed_tools` are enforced | yes | no, a sandbox mode instead | yes, Copilot's own rules (`--allow-tool` / `--deny-tool`) |
+| `toolRule` | which entries the CLI takes as written | any | | `shell`, `shell(<cmd>)`, `write`, `write(<path>)`, `read`, `read(<path>)`, `url(<domain>)`, `memory`; anything else refused by name |
+| `permissionModes` | `permission_mode` values it accepts | all (`bypassPermissions` still needs `claude.allow_bypass_permissions`) | to map onto sandbox modes | `dontAsk` (the rules only), `acceptEdits` (the rules plus `write`) |
+| `resumeSession` | a session can be continued | yes | to verify | yes (`--resume=<id>`) |
+| `hardBudgetUsd` | the CLI stops at `max_budget_usd` | yes | no | no (its cap is in AI credits) |
 | `reportsCostUsd` | the result carries a cost in dollars | yes | no on a subscription | no (premium requests) |
-| `subagents` | nested agents are reported as rows | yes | no | to verify |
-| `mcpInherit` | `inherit_mcp` gives the user's connectors | yes | to verify | to verify |
+| `subagents` | nested agents are reported as rows | yes | no | no (later issue) |
+| `mcpInherit` | `inherit_mcp` gives the user's connectors | yes | to verify | no (later issue) |
 | `projectAgents` | `link` agents (`claude_agent`) | yes | no | no |
-| `addDirs`, `skills`, `effort`, `sandbox` | the fields of the same name | yes | to verify | to verify |
+| `addDirs` | `add_dirs` | yes | to verify | no: Copilot's `--add-dir` also trusts that directory's skills and agents |
+| `skills`, `sandbox` | the fields of the same name | yes | to verify | no (later issues) |
+| `effort` | `effort` | yes | to verify | yes (`--reasoning-effort`) |
 
 A harness without `hardBudgetUsd` gets no `--max-budget-usd`-style cap and no wrap-up reserve,
 and refuses a budget set for one run as well as the agent's own: a gate's `budget_usd`, a resume
@@ -210,15 +214,29 @@ as its full `max_budget_usd` (or `claude.default_max_budget_usd`). A unit other 
 
 ## What the three harnesses look like through the seam
 
-| | claude (shipped) | codex (#50, planned) | copilot (#446, planned) |
+| | claude (shipped) | codex (#50, planned) | copilot (shipped, #446) |
 |---|---|---|---|
-| Unattended command | `claude -p --output-format stream-json` | `codex exec --json`, prompt on stdin | `copilot -p`, `--output-format json` |
-| Stream | stream-json lines | JSONL events (`thread.started`, `item.completed`, `turn.completed`) | JSONL, schema to capture from real runs |
-| End of run | a `result` line | no result line: inactivity timeout | to verify |
-| Permissions | allow-list per tool, `--permission-prompts none` | sandbox mode (`workspace-write`, network off) | `--allow-tool` rules, or `--allow-all-tools` (opt-in only) |
-| Cost | dollars, reported or estimated | unpriced on a subscription | unpriced (premium requests) |
-| Auth | the user's Claude login or API key | per-agent `CODEX_HOME`, `auth.json` linked | the user's GitHub login |
+| Unattended command | `claude -p --output-format stream-json` | `codex exec --json`, prompt on stdin | `copilot --output-format json`, prompt on stdin |
+| Stream | stream-json lines | JSONL events (`thread.started`, `item.completed`, `turn.completed`) | JSONL events (`session.start`, `assistant.message`, `tool.execution_start` / `_complete`) |
+| End of run | a `result` line | no result line: inactivity timeout | a `result` line (`exitCode`), also after SIGTERM; none = failed |
+| Permissions | allow-list per tool, `--permission-prompts none` | sandbox mode (`workspace-write`, network off) | deny by default in a non-interactive run, `--allow-tool` / `--deny-tool` rules verbatim; `--allow-all*` never |
+| System prompt | `--append-system-prompt` | to verify | a per-run agent file, `--add-dir <tmp> --agent duskfleet-agent` |
+| Cost | dollars, reported or estimated | unpriced on a subscription | unpriced (premium requests); tokens from `--usage-output-file` |
+| Auth | the user's Claude login or API key | per-agent `CODEX_HOME`, `auth.json` linked | the user's GitHub login (`gh` / `copilot login`) |
 | `link` agents | yes | no | no |
+
+The Copilot adapter (`core/src/execution/copilot.ts`, parser `copilot-jsonl.ts`) is registered
+only when its binary resolves: `COPILOT_BIN`, then `copilot.binary` in `duskfleet.yaml`, then
+`copilot` on PATH. Without one, `doctor` lists `copilot not installed` and an agent on it is
+refused at run start. Its parser was written against real runs of Copilot CLI 1.0.112, kept as
+fixtures in `packages/mcp/test/fixtures/copilot/` (their README lists what each run shows); the
+tests replay them through `fake-copilot.js`.
+
+Two things the Copilot adapter detects and refuses at run time rather than guessing: a user-level
+MCP server that loaded anyway (any `session.mcp_servers_loaded` entry not `disabled` ends the run
+as failed, until `mcpInherit` exists), and an unknown session on `--resume` (stderr `No session,
+task, or name matched`, `sessionNotFound`). A rate limit has no fixture yet, so it is not
+classified as `provider_quota`.
 
 ## What is *not* a harness
 

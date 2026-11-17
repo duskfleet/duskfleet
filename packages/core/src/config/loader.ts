@@ -119,6 +119,11 @@ const globalSchema = z.object({
       max_log_bytes: z.number().int().min(1024).default(DEFAULT_MAX_LOG_BYTES),
     })
     .prefault({}),
+  copilot: z
+    .object({
+      binary: z.string().nullable().default(null),
+    })
+    .prefault({}),
   scheduler: z
     .object({
       enabled: z.boolean().default(true),
@@ -258,6 +263,9 @@ export function loadConfig(configDir: string): DuskFleetConfig {
       envPassthrough: g.claude.env_passthrough,
       maxEventBytes: g.claude.max_event_bytes,
       maxLogBytes: g.claude.max_log_bytes,
+    },
+    copilot: {
+      binary: g.copilot.binary ? expandHome(g.copilot.binary) : null,
     },
     scheduler: {
       enabled: g.scheduler.enabled,

@@ -16,6 +16,7 @@ import {
   type PermissionMode,
   type ProjectDefinition,
 } from "../config/types.js";
+import { copilotRuleRefusal } from "./copilot-rules.js";
 import type { Executor } from "./types.js";
 
 /** What an adapter can honour. `false` (or a mode left out) makes the agent fields behind it refused. */
@@ -47,6 +48,11 @@ export interface HarnessCapabilities {
   effort: boolean;
   /** `sandbox`, `sandbox_allowed_domains`, `sandbox_weaker_network_isolation`. */
   sandbox: boolean;
+  /**
+   * Why one `allowed_tools` / `disallowed_tools` entry is refused, or null when the CLI takes it
+   * as written. Absent = every entry is accepted (Claude Code validates its own rules).
+   */
+  toolRule?: (rule: string) => string | null;
 }
 
 /** Capability names, in the order `doctor` and the docs list them. */
@@ -84,11 +90,40 @@ export const CLAUDE_CAPABILITIES: HarnessCapabilities = Object.freeze({
   sandbox: true,
 });
 
+/** Name of the GitHub Copilot CLI harness (issue #446). */
+export const COPILOT_HARNESS = "copilot";
+
+/**
+ * GitHub Copilot CLI (1.0.112, docs/harnesses.md): its own tool rules (`toolRule`), deny by
+ * default in a non-interactive run (`dontAsk`; `acceptEdits` adds `write`), resumable sessions, no
+ * dollars (every run `unpriced`), none of the Claude-only fields. `addDirs` stays false: Copilot's
+ * `--add-dir` also trusts that directory's skills and agents, not the same promise.
+ */
+export const COPILOT_CAPABILITIES: HarnessCapabilities = Object.freeze({
+  toolAllowList: true,
+  permissionModes: ["dontAsk", "acceptEdits"] as const,
+  resumeSession: true,
+  hardBudgetUsd: false,
+  reportsCostUsd: false,
+  subagents: false,
+  mcpInherit: false,
+  projectAgents: false,
+  addDirs: false,
+  skills: false,
+  effort: true,
+  sandbox: false,
+  toolRule: copilotRuleRefusal,
+});
+
+/** The harnesses Duskfleet ships an adapter for, in the order `doctor` lists them. */
+export const SHIPPED_HARNESSES: readonly string[] = [DEFAULT_HARNESS, COPILOT_HARNESS];
+
 /** The capabilities of a harness by name; undefined = no executor registered under that name. */
 export type HarnessLookup = (name: string) => HarnessCapabilities | undefined;
 
 /** What create / update check against when the caller has no registry at hand: the harnesses that ship. */
-export const builtinHarnesses: HarnessLookup = (name) => (name === DEFAULT_HARNESS ? CLAUDE_CAPABILITIES : undefined);
+export const builtinHarnesses: HarnessLookup = (name) =>
+  name === DEFAULT_HARNESS ? CLAUDE_CAPABILITIES : name === COPILOT_HARNESS ? COPILOT_CAPABILITIES : undefined;
 
 /** The agent's harness name (`harness:`, else the default). */
 export function harnessOf(agent: { harness?: string | undefined }): string {
@@ -132,6 +167,17 @@ export function harnessRefusal(
   const refuse = (field: string) => `${field} is not supported by harness ${name}`;
   if (spec.allowed_tools !== undefined && !caps.toolAllowList) return refuse("allowed_tools");
   if (spec.disallowed_tools !== undefined && !caps.toolAllowList) return refuse("disallowed_tools");
+  if (caps.toolRule) {
+    for (const [field, rules] of [
+      ["allowed_tools", spec.allowed_tools],
+      ["disallowed_tools", spec.disallowed_tools],
+    ] as const) {
+      for (const rule of rules ?? []) {
+        const why = caps.toolRule(rule);
+        if (why) return `${field} entry "${rule}" ${why}`;
+      }
+    }
+  }
   if (spec.permission_mode !== undefined && !caps.permissionModes.includes(spec.permission_mode))
     return `permission_mode ${spec.permission_mode} is not supported by harness ${name} (accepted: ${caps.permissionModes.join(", ") || "none"})`;
   if (spec.on_failure === "resume_once" && !caps.resumeSession) return refuse("on_failure: resume_once");

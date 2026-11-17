@@ -212,12 +212,17 @@ npm workspaces, one `config/` and one SQLite database shared by three deliverabl
   and marks the open ones `interrupted` when the run ends. Per-message `output_tokens` of nested
   lines undercount; use `totalTokens`. Only main-session lines set the run's model and last text.
 - **Harnesses: one run path, one adapter per agent CLI** (`execution/harness.ts`, issue #445,
-  docs/harnesses.md): `harness:` in agent frontmatter (default `claude`, the only one shipped),
+  docs/harnesses.md): `harness:` in agent frontmatter (default `claude`; `copilot` since #446),
   `runs.harness` (migration 31). `RunManager` picks the executor from the `HarnessRegistry` built in
   `bootstrap.ts`; `assertAgentFitsHarness` refuses (create / update and `startRun`, field named) any
   field the adapter's `capabilities` cannot honour, never drops or approximates it. CLI-specific
   pre-flight (link's project agent, required MCP servers, shadowed skills) is the adapter's
-  `prepare`; `RunManager` never names a harness.
+  `prepare`; `RunManager` never names a harness. Copilot (`execution/copilot.ts`, parser
+  `copilot-jsonl.ts`, rules `copilot-rules.ts`) takes Copilot's own tool rules verbatim (`toolRule`
+  capability; Claude rules refused by name), is registered only when its binary resolves
+  (`COPILOT_BIN` > `copilot.binary` > PATH), and its parser follows the real-run fixtures in
+  `packages/mcp/test/fixtures/copilot/`. `test/helpers.js` sets `COPILOT_BIN` to `fake-copilot.js`
+  so tests never launch a real `copilot`; `childEnv` drops `COPILOT_BIN`, the adapter `COPILOT_ALLOW_ALL`.
 - **Opt-in sandbox** (`sandbox: true`, `execution/sandbox.ts`, issue #447): the only `--settings`
   Duskfleet passes; agents without it keep today's argv. A host without the sandbox refuses the run
   in `startRun` (never unsandboxed). Only network blocks are detectable (`remedy.kind:
