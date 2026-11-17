@@ -1,0 +1,5 @@
+error: the argument '--trust-folder' cannot be used with '--session-id <id>'
+
+Usage: copilot --prompt <text> --output-format <format> --no-ask-user --no-auto-update --disable-builtin-mcps --max-ai-credits <credits> --usage-output-file <file> --model <model> --trust-folder
+
+For more information, try '--help'.
