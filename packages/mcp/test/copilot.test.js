@@ -190,6 +190,14 @@ test("COPILOT_ALLOW_ALL never reaches the child, even through an env_passthrough
   assert.equal(copilotEnv([], { PATH: "/usr/bin", COPILOT_HOME: "/h", GITHUB_TOKEN: "x" }).GITHUB_TOKEN, undefined);
 });
 
+test("on Windows a mixed-case Copilot_Allow_All is the same variable and is dropped too", () => {
+  const source = { Path: "C:\\bin", Copilot_Allow_All: "true", Copilot_Home: "C:\\h" };
+  const env = copilotEnv(["COPILOT_ALLOW_ALL", "COPILOT_HOME"], source, "win32");
+  assert.equal(env.Copilot_Allow_All, undefined);
+  assert.ok(!Object.keys(env).some((k) => k.toUpperCase() === "COPILOT_ALLOW_ALL"));
+  assert.equal(env.Copilot_Home, "C:\\h", "the rest of the passthrough stands");
+});
+
 test("binary: COPILOT_BIN, then copilot.binary, then PATH; a missing path is null", () => {
   const missing = path.join(here, "no-such-copilot");
   assert.equal(process.env.COPILOT_BIN, fakeCopilot, "helpers.js points every test at the double");

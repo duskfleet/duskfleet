@@ -27,7 +27,7 @@ import { createInterface } from "node:readline";
 import { classifyFailure } from "../observability/failure.js";
 import type { RecordedCommand } from "../observability/run.js";
 import { logger } from "../util/log.js";
-import { childEnv } from "./child-env.js";
+import { childEnv, envNameMatches } from "./child-env.js";
 import {
   type CopilotStreamState,
   copilotUsageByModel,
@@ -325,13 +325,20 @@ export class CopilotExecutor implements Executor {
   }
 }
 
-/** The run's environment: the shared allow-list, minus what makes Copilot trust everything. */
+/**
+ * The run's environment: the shared allow-list, minus what makes Copilot trust everything.
+ * Names are matched as `childEnv` matches them: case-insensitively on Windows, where
+ * `Copilot_Allow_All` is the same variable as `COPILOT_ALLOW_ALL`.
+ */
 export function copilotEnv(
   passthrough?: readonly string[],
   source: NodeJS.ProcessEnv = process.env,
+  platform: NodeJS.Platform = process.platform,
 ): NodeJS.ProcessEnv {
-  const env = childEnv(passthrough, source);
-  for (const name of NEVER_PASSED) delete env[name];
+  const env = childEnv(passthrough, source, platform);
+  for (const key of Object.keys(env)) {
+    if (NEVER_PASSED.some((p) => envNameMatches(key, p, platform))) delete env[key];
+  }
   return env;
 }
 
