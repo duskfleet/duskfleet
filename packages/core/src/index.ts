@@ -191,6 +191,7 @@ export {
   snapshotCheckout,
   type WorktreeDiff,
 } from "./git/diff.js";
+export * from "./observability/artifacts.js";
 export * from "./observability/billing.js";
 export * from "./observability/failure.js";
 export * from "./observability/run.js";

@@ -108,6 +108,14 @@ they arrive and keeps the raw stream in `data/logs/<run_id>.jsonl`:
 - the log's size and SHA-256 (`logBytes`, `logSha256`; `log_bytes`, `log_sha256` in the
   database), taken from the file as written when the run ends, and `logTruncated`. `get_run`
   and `run-info` return them; the run page shows them under "Technical details".
+- what the run produced, one `run_artifacts` row each, written when it ends: today the pull
+  requests it opened (`kind: pr`, the URL). A PR counts when a main-session Bash call whose
+  command contains `gh pr create` printed its `https://github.com/<owner>/<repo>/pull/<n>` URL
+  and did not fail (`source: tool_result`). PR URLs in the final text are added
+  (`source: result_text`) only when such a call produced one, or when a `gh pr create` ran and
+  its output never arrived; a PR the run only mentions, or claims after a `gh pr create` that
+  printed none, is not recorded. Subagents' calls do not count. `get_run` and `run-info` return
+  them as `artifacts`; branches and commits come from `diff`.
 
 Both stores are bounded. One `run_events` payload is at most `claude.max_event_bytes`
 (default 64 KiB): over it the stored JSON keeps its envelope (type, ids, tool name) and the

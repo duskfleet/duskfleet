@@ -73,6 +73,19 @@ export type ExecutionEvent =
     }
   | { type: "tool_use"; name: string; id: string | null; input?: unknown; agentId: string | null }
   | { type: "assistant_text"; text: string; agentId: string | null }
+  /**
+   * The tool_result of a Bash call: its tool_use id and command, the output text and the
+   * `is_error` flag (a failed or rejected call). `agentId` is the session that issued the call.
+   * Run artifacts are read from the main session's ones (observability/artifacts.ts).
+   */
+  | {
+      type: "bash_result";
+      toolUseId: string;
+      command: string;
+      output: string | null;
+      isError: boolean;
+      agentId: string | null;
+    }
   | { type: "subagent_start"; subagent: SubagentRecord }
   | { type: "subagent_end"; subagent: SubagentRecord }
   | { type: "stderr"; text: string }

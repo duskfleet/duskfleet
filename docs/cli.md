@@ -339,7 +339,8 @@ the run did, not the state of the checkout: changes already there before the run
 they were are not shown (Diff says how many), and the worktrees the run created or moved are
 listed under their path, with their files and commit count (a worktree it removed shows as its
 branch). It is not a record of other processes: a worktree another agent used at the same time
-in the same repository would be listed too.
+in the same repository would be listed too. The PRs a run opened (its `gh pr create` output)
+are listed under Artifacts, `artifacts` in `--json`, the same field as `get_run`.
 
 ## Firing an agent from a script or a git hook
 

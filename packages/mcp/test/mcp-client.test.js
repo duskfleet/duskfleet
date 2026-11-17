@@ -121,6 +121,20 @@ test("MCP client can run an agent and inspect the run", async () => {
     assert.ok(Math.abs(list.cost.apiUsd + list.cost.subscriptionUsd - listed) < 1e-9);
     assert.equal(list.cost.heading, list.cost.apiUsd > 0 ? "Spent" : "Usage (API value)");
 
+    // run_artifacts (#382): none for a run without git activity, the PR for one that opened it.
+    assert.deepEqual(run.artifacts, []);
+    const opened = parse(
+      await client.callTool({
+        name: "run_agent",
+        arguments: { prompt: "git-pr", project_path: project, wait_seconds: 10 },
+      }),
+    );
+    assert.equal(opened.status, "completed");
+    const withPr = parse(await client.callTool({ name: "get_run", arguments: { run_id: opened.id } }));
+    assert.deepEqual(withPr.artifacts, [
+      { kind: "pr", value: "https://github.com/example/demo/pull/8", source: "tool_result" },
+    ]);
+
     const bad = await client.callTool({
       name: "run_agent",
       arguments: { prompt: "ok", project_path: "/definitely/not/here" },

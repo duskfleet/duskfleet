@@ -1,6 +1,6 @@
 /**
  * `duskfleet run-info <id>` for a human (DS-33): a `run <id>  <status>` title, then the Run, Usage,
- * Outcome, Subagents and Diff sections (Events only with `--events`), keys in a 14-column label,
+ * Outcome, Subagents, Diff and Artifacts sections (Events only with `--events`), keys in a 14-column label,
  * and the dim json line with the log path last. Receives the object `--json` prints, plus the
  * agent's kind and source when the agent still loads (shown, never printed as JSON).
  */
@@ -41,6 +41,8 @@ export interface RunInfo {
   label: string;
   costLabel: string;
   diff: RunDiff | null;
+  /** What the run produced (`run_artifacts`, same field as get_run); absent = none recorded. */
+  artifacts?: Array<{ kind: string; value: string; source: string }>;
   subagents: RunAgentView[];
   events?: RunEvent[];
   /** The agent as it loads now (`own` / `link`, builtin / user); absent when it no longer loads. */
@@ -215,6 +217,14 @@ function diffBlock(info: RunInfo, opts: RenderOpts): string[] {
   return section("Diff", lines, opts);
 }
 
+/** One line per artifact: `pr  <url>`, the source muted. Nothing when the run produced none. */
+function artifactsBlock(info: RunInfo, opts: RenderOpts): string[] {
+  const artifacts = info.artifacts ?? [];
+  if (artifacts.length === 0) return [];
+  const lines = artifacts.map((a) => `${a.kind.padEnd(6)} ${a.value}  ${paint("muted", `from ${a.source}`, opts)}`);
+  return section("Artifacts", lines, opts);
+}
+
 /** Width of an event's kind. */
 const EVENT_KIND = 10;
 
@@ -254,6 +264,7 @@ export function renderRunInfo(info: RunInfo, opts: RenderOpts): string[] {
       outcomeBlock(info, opts),
       subagentBlock(info, opts),
       diffBlock(info, opts),
+      artifactsBlock(info, opts),
       eventsBlock(info, opts),
     ]),
     "",

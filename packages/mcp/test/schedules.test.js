@@ -705,8 +705,10 @@ test("a run request (dashboard 'Run now') is fired by the lease holder on its ne
     new ClaudeCodeExecutor({ binary: config.claude.binary, strictMcpConfig: true, allowBypassPermissions: false }),
   );
   const repo = new ScheduleRepository(db);
-  const a = new Scheduler(repo, runs, { tickMs: 1000, holder: "A" });
-  const b = new Scheduler(repo, runs, { tickMs: 1000, holder: "B" });
+  // ticks are driven by hand; the lease lasts 3 x tickMs, so a short tickMs let A's lease
+  // expire on a slow CI runner while its first run spawned, and B took it over (flaky)
+  const a = new Scheduler(repo, runs, { tickMs: 60_000, holder: "A" });
+  const b = new Scheduler(repo, runs, { tickMs: 60_000, holder: "B" });
   try {
     const s = a.create({ name: "paused one", agentId: "coder", prompt: "ok", cron: "0 3 * * *", enabled: false });
     assert.equal(s.runRequestedAt, null);

@@ -425,6 +425,23 @@ const MIGRATIONS: ReadonlyArray<{ version: number; sql: string; backfill?: (db: 
       ALTER TABLE runs ADD COLUMN harness TEXT NOT NULL DEFAULT 'claude';
     `,
   },
+  {
+    // What a run produced, as data (issue #382, observability/artifacts.ts): today only `pr`, the
+    // URL printed by a main-session `gh pr create`, or repeated in the final text of a run that
+    // created one. Written when the run ends, before its terminal transition.
+    version: 32,
+    sql: `
+      CREATE TABLE IF NOT EXISTS run_artifacts (
+        id         INTEGER PRIMARY KEY AUTOINCREMENT,
+        run_id     TEXT NOT NULL REFERENCES runs(id) ON DELETE CASCADE,
+        kind       TEXT NOT NULL,
+        value      TEXT NOT NULL,
+        source     TEXT NOT NULL CHECK (source IN ('tool_result', 'result_text')),
+        created_at TEXT NOT NULL,
+        UNIQUE (run_id, kind, value)
+      );
+    `,
+  },
 ];
 
 /**
