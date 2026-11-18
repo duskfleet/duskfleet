@@ -91,6 +91,8 @@ export {
   PROJECT_ID_PATTERN,
   projectIdFromPath,
   readUserProjects,
+  registryPath,
+  sameDirectory,
   type UserProjectEntry,
   upsertUserProject,
 } from "./config/project-files.js";

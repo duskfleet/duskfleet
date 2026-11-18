@@ -10,7 +10,6 @@
  * so no agent-less run mode exists. Answers are read line by line from stdin (a terminal, or a
  * pipe in tests); end of input takes each question's default.
  */
-import { realpathSync } from "node:fs";
 import { createInterface } from "node:readline";
 import {
   type AgentDefinition,
@@ -23,6 +22,7 @@ import {
   REVIEW_REASON_LABELS,
   type Run,
   runCostLabel,
+  sameDirectory,
   upsertUserProject,
   validateProjectPath,
 } from "@duskfleet/core";
@@ -86,20 +86,6 @@ const fail = (s: string) => process.stderr.write(`${s}\n`);
 
 const yes = (answer: string | null, byDefault: boolean) =>
   answer === null || answer.trim() === "" ? byDefault : /^y(es)?$/i.test(answer.trim());
-
-const realOrRaw = (p: string): string => {
-  try {
-    return realpathSync(p);
-  } catch {
-    return p;
-  }
-};
-
-/**
- * Same directory? validateProjectPath returns a realpath, the loader only path.resolve's the
- * registry entries: a project registered through a symlink (/tmp on macOS) must still match.
- */
-export const sameDirectory = (a: string, b: string): boolean => a === b || realOrRaw(a) === realOrRaw(b);
 
 /** The registered project of this directory, or a new entry in the private registry. */
 function projectFor(app: App, input: string): string {

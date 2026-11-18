@@ -113,6 +113,9 @@ Relative project paths resolve from the directory of the file they are in, never
 shell's cwd. Keep your own projects (machine-specific absolute paths) in the **private**
 registry `data/projects.yaml` (`user_projects_file`, git-ignored), same syntax; the versioned
 `config/projects.yaml` only carries repo-relative examples. A private entry with the same id wins.
+Entries Duskfleet writes there itself (a `create_agent` link to a folder that is not a project
+yet, the guided first run) store a folder under your home directory as `~/...`; entries already
+in the file keep their form and are matched either way.
 
 Per project you can also set:
 
