@@ -225,9 +225,10 @@ export function sumUsage(byModel: UsageByModel | null): TokenUsage {
 }
 
 /**
- * `--resume=<id>` named a session Copilot does not have: nothing on stdout, and stderr starts with
- * `Error: No session, task, or name matched` (fixture `resume-unknown`).
+ * `--resume=<id>` named a session Copilot does not have: nothing on stdout, and a stderr line
+ * starts with `Error: No session, task, or name matched` (fixture `resume-unknown`). Matched per
+ * line, so a banner or warning printed before it does not hide it.
  */
 export function isCopilotSessionNotFound(stdoutLines: number, stderr: string): boolean {
-  return stdoutLines === 0 && /^\s*Error: No session, task, or name matched\b/.test(stderr);
+  return stdoutLines === 0 && /^[ \t]*Error: No session, task, or name matched\b/m.test(stderr);
 }

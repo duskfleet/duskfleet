@@ -48,6 +48,7 @@ import type {
   Executor,
   PrepareResult,
 } from "./types.js";
+import { spawnPlan } from "./win-cmd.js";
 
 const log = logger("execution");
 
@@ -101,11 +102,16 @@ export class CopilotExecutor implements Executor {
   }
 
   version(): Promise<string> {
+    const plan = spawnPlan(this.binary, ["--version"]);
     return new Promise((resolve, reject) => {
       execFile(
-        this.binary,
-        ["--version"],
-        { timeout: 15_000, env: copilotEnv(this.options.envPassthrough) },
+        plan.file,
+        plan.args,
+        {
+          timeout: 15_000,
+          env: copilotEnv(this.options.envPassthrough),
+          windowsVerbatimArguments: plan.windowsVerbatimArguments,
+        },
         (err, stdout) => {
           if (err) reject(err);
           else resolve(stdout.trim());
@@ -175,6 +181,8 @@ export class CopilotExecutor implements Executor {
     let resultTimer: NodeJS.Timeout | null = null;
     let graceKilled = false;
     let stderrTail = "";
+    // Checked on every chunk: the 4000-character tail may have dropped the line by the end.
+    let stderrSessionNotFound = false;
     let spawnError: string | null = null;
     let child: ChildProcess;
 
@@ -203,11 +211,14 @@ export class CopilotExecutor implements Executor {
     };
 
     try {
-      child = spawn(this.binary, argv, {
+      // A Windows `copilot.cmd` shim needs cmd.exe (Node refuses a batch file without it): win-cmd.ts.
+      const plan = spawnPlan(this.binary, argv);
+      child = spawn(plan.file, plan.args, {
         cwd: req.cwd,
         env: copilotEnv(req.envPassthrough),
         stdio: ["pipe", "pipe", "pipe"], // stdin carries the prompt, never argv
         shell: false,
+        windowsVerbatimArguments: plan.windowsVerbatimArguments,
         detached: OWN_PROCESS_GROUP,
       });
     } catch (err) {
@@ -262,7 +273,9 @@ export class CopilotExecutor implements Executor {
 
       child.stderr!.setEncoding("utf8");
       child.stderr!.on("data", (chunk: string) => {
-        stderrTail = (stderrTail + chunk).slice(-4000);
+        const window = stderrTail + chunk; // the tail before the cut: a line split across chunks still matches
+        if (!stderrSessionNotFound && isCopilotSessionNotFound(0, window)) stderrSessionNotFound = true;
+        stderrTail = window.slice(-4000);
         logStream?.write(`#stderr ${chunk.replace(/\n(?!$)/g, "\n#stderr ")}`);
         emit({ type: "stderr", text: chunk });
       });
@@ -278,7 +291,7 @@ export class CopilotExecutor implements Executor {
         const endedAt = new Date();
         const usageFile = readUsageFile(path.join(workDir, "usage.json"));
         cleanup();
-        const sessionNotFound = !!req.resumeSessionId && isCopilotSessionNotFound(state.lines, stderrTail);
+        const sessionNotFound = !!req.resumeSessionId && state.lines === 0 && stderrSessionNotFound;
         const exit = state.result?.exitCode ?? code;
         let error: string | null = null;
         let finalOutcome: ExecutionResult["outcome"];
@@ -430,10 +443,14 @@ export function resolveCopilotBinary(configured: string | null, env: NodeJS.Proc
   const override = env["COPILOT_BIN"];
   if (override) return existsSync(override) ? override : null;
   if (configured) return existsSync(configured) ? configured : null;
+  // Windows: a native copilot.exe first, then npm's copilot.cmd shim (spawned through cmd.exe, win-cmd.ts).
+  const names = process.platform === "win32" ? ["copilot.exe", "copilot.cmd"] : ["copilot"];
   for (const dir of effectivePath(env["PATH"]).split(path.delimiter)) {
     if (!dir) continue;
-    const candidate = path.join(dir, process.platform === "win32" ? "copilot.cmd" : "copilot");
-    if (existsSync(candidate)) return candidate;
+    for (const name of names) {
+      const candidate = path.join(dir, name);
+      if (existsSync(candidate)) return candidate;
+    }
   }
   return null;
 }

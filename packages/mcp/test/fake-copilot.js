@@ -6,7 +6,8 @@
  *
  * - The fixture's session id is replaced by the one of `--session-id` / `--resume=<id>`.
  * - `--usage-output-file <f>` gets `<name>.usage.json` when the fixture has one.
- * - `resume-unknown` prints its stderr and exits 1 with nothing on stdout.
+ * - `resume-unknown` prints its stderr and exits 1 with nothing on stdout; `resume-unknown-noisy`
+ *   does the same between two long runs of warnings.
  * - `killed` stops before its cancellation lines and prints them on SIGTERM, exit 143.
  * - `FAKE_COPILOT_RECORD=<file>` (passed through by the test config) receives the argv, the
  *   environment's names, the prompt and the persona agent file `--add-dir` points at.
@@ -58,6 +59,16 @@ function main() {
   if (name === "resume-unknown") {
     process.stderr.write(readFileSync(path.join(fixtures, "resume-unknown.stderr"), "utf8"));
     process.exit(1);
+  }
+  if (name === "resume-unknown-noisy") {
+    // The same error between two runs of warnings, each longer than the executor's 4000-character tail.
+    const warnings = "Warning: something noisy happened\n".repeat(150);
+    process.stderr.write(warnings, () => {
+      process.stderr.write(readFileSync(path.join(fixtures, "resume-unknown.stderr"), "utf8"), () => {
+        process.stderr.write(warnings, () => process.exit(1));
+      });
+    });
+    return;
   }
 
   const lines = readFileSync(path.join(fixtures, `${name}.jsonl`), "utf8")

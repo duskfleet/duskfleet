@@ -24,11 +24,13 @@ import {
   HarnessRegistry,
   harnessRefusal,
   ingestCopilotLine,
+  isCopilotSessionNotFound,
   loadConfig,
   openDatabase,
   RunManager,
   RunRepository,
   resolveCopilotBinary,
+  spawnPlan,
 } from "@duskfleet/core";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -328,6 +330,11 @@ test("resume and an unknown session; cancel ends the run cancelled", async () =>
     assert.equal(unknown.sessionNotFound, true);
     assert.match(unknown.error, /no result line/);
 
+    // Warnings before and after the error, each longer than the stderr tail, do not hide it.
+    const noisy = await copilot.execute({ ...req, prompt: "fixture:resume-unknown-noisy" }).done;
+    assert.equal(noisy.outcome, "failed");
+    assert.equal(noisy.sessionNotFound, true);
+
     let handle = null;
     let cancelled = false;
     handle = copilot.execute({ ...base, cwd, prompt: "fixture:killed", permissionMode: "dontAsk" }, () => {
@@ -341,5 +348,37 @@ test("resume and an unknown session; cancel ends the run cancelled", async () =>
     assert.equal(killed.terminationReason, "cancelled");
   } finally {
     rmSync(cwd, { recursive: true, force: true });
+  }
+});
+
+test("the session-not-found match is per line: a banner before the error does not hide it", () => {
+  const error = "Error: No session, task, or name matched 'x'.\n";
+  assert.equal(isCopilotSessionNotFound(0, `Warning: update available\n${error}`), true);
+  assert.equal(isCopilotSessionNotFound(1, error), false, "stdout lines mean the session ran");
+  assert.equal(isCopilotSessionNotFound(0, "Warning: Error: No session, task, or name matched"), false);
+});
+
+test("a Windows .cmd shim is spawned through cmd.exe with escaped arguments; anything else directly", () => {
+  const shim = "C:\\npm\\copilot.cmd";
+  const plan = spawnPlan(shim, ["--version", "--allow-tool", "shell(git status)", 'a"b&c'], "win32", "cmd.exe");
+  assert.equal(plan.file, "cmd.exe");
+  assert.deepEqual(plan.args.slice(0, 3), ["/d", "/s", "/c"]);
+  assert.equal(plan.windowsVerbatimArguments, true);
+  const line = plan.args[3];
+  assert.ok(line.startsWith(`"${shim} `) && line.endsWith('"'), line);
+  // Quoted, then every cmd metacharacter caret-escaped twice (cmd.exe, then the shim's %*).
+  assert.ok(line.includes('^^^"--version^^^"'), line);
+  assert.ok(line.includes('^^^"shell^^^(git^^^ status^^^)^^^"'), line);
+  assert.ok(line.includes('^^^"a\\^^^"b^^^&c^^^"'), line);
+  assert.ok(!/[^^]&/.test(line), "no bare & reaches cmd.exe");
+
+  assert.equal(spawnPlan("C:\\x\\COPILOT.BAT", [], "win32", "cmd.exe").file, "cmd.exe", "case-insensitive extension");
+  for (const [file, platform] of [
+    ["C:\\x\\copilot.exe", "win32"],
+    ["/usr/local/bin/copilot", "linux"],
+    ["/tmp/copilot.cmd", "darwin"],
+  ]) {
+    const direct = spawnPlan(file, ["--version"], platform);
+    assert.deepEqual(direct, { file, args: ["--version"], windowsVerbatimArguments: false }, file);
   }
 });

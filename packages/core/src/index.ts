@@ -191,6 +191,7 @@ export {
   type StreamState,
 } from "./execution/stream-json.js";
 export * from "./execution/types.js";
+export { escapeCmdArgument, isBatchFile, type SpawnPlan, spawnPlan } from "./execution/win-cmd.js";
 export {
   type CheckoutSnapshot,
   captureRunDiff,

@@ -227,7 +227,8 @@ as its full `max_budget_usd` (or `claude.default_max_budget_usd`). A unit other 
 
 The Copilot adapter (`core/src/execution/copilot.ts`, parser `copilot-jsonl.ts`) is registered
 only when its binary resolves: `COPILOT_BIN`, then `copilot.binary` in `duskfleet.yaml`, then
-`copilot` on PATH. Without one, `doctor` lists `copilot not installed` and an agent on it is
+`copilot` on PATH (on Windows `copilot.exe`, then npm's `copilot.cmd` shim, which is spawned
+through `cmd.exe` with every argument escaped, since Node refuses a batch file without a shell). Without one, `doctor` lists `copilot not installed` and an agent on it is
 refused at run start. Its parser was written against real runs of Copilot CLI 1.0.112, kept as
 fixtures in `packages/mcp/test/fixtures/copilot/` (their README lists what each run shows); the
 tests replay them through `fake-copilot.js`.
