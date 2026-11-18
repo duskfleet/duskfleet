@@ -88,6 +88,8 @@ export interface HarnessReport {
   }[];
   /** Agents whose `harness:` names no registered executor: every run of them is refused. */
   unknown: { agentId: string; harness: string }[];
+  /** Harnesses Duskfleet ships whose CLI was not found (`copilot` without a binary); absent in older reports. */
+  notInstalled?: string[];
 }
 
 /**
@@ -95,15 +97,19 @@ export interface HarnessReport {
  * nobody registered is always one. The Claude binary keeps its own check (an error when missing).
  */
 function harnessCheck(h: HarnessReport): Check {
-  const value = h.registered
-    .map((r) => `${r.name} ${r.error ? "missing" : (r.version ?? "version unknown")}`)
-    .join(" · ");
+  const notInstalled = h.notInstalled ?? [];
+  const value = [
+    ...h.registered.map((r) => `${r.name} ${r.error ? "missing" : (r.version ?? "version unknown")}`),
+    ...notInstalled.map((name) => `${name} not installed`),
+  ].join(" · ");
   const advice = [
     ...h.registered
       .filter((r) => r.error && r.agents.length)
       .map((r) => `${r.name} (${r.binary}) is not usable, but ${r.agents.join(", ")} run on it: ${oneLine(r.error!)}`),
-    ...h.unknown.map(
-      (u) => `agent ${u.agentId} sets harness: ${u.harness}, which is not registered: its runs are refused`,
+    ...h.unknown.map((u) =>
+      notInstalled.includes(u.harness)
+        ? `agent ${u.agentId} sets harness: ${u.harness}, whose CLI is not installed (set ${u.harness}.binary in duskfleet.yaml or put it on PATH): its runs are refused`
+        : `agent ${u.agentId} sets harness: ${u.harness}, which is not registered: its runs are refused`,
     ),
   ];
   return advice.length ? warn("harnesses", value, advice) : ok("harnesses", value);

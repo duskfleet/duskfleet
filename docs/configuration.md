@@ -76,6 +76,8 @@ claude:
   env_passthrough: []           # variables every run (and command gate) gets beyond the default allow-list, e.g. [GH_TOKEN]
   max_event_bytes: 65536        # cap of one stored run event; longer strings are cut with a marker (min 1024)
   max_log_bytes: 52428800       # cap of data/logs/<run_id>.jsonl; past it the log ends with a duskfleet_log_truncated line (min 1024)
+copilot:
+  binary: null                  # GitHub Copilot CLI for harness: copilot agents; null = copilot on PATH, none = harness not registered
 scheduler:
   enabled: true                 # kill switch, re-read every tick
   tick_seconds: 30
@@ -140,6 +142,7 @@ for it). `max_concurrent_runs` always stays the hard cap. See
 |---|---|
 | `DUSKFLEET_CONFIG` | Directory containing `duskfleet.yaml` (default: the closest ancestor `config/` of the running package / cwd) |
 | `CLAUDE_BIN` | Path to the Claude Code binary (overrides `claude.binary`). Read by Duskfleet only: it is not passed on to agent runs. |
+| `COPILOT_BIN` | Path to the GitHub Copilot CLI binary (overrides `copilot.binary`; the tests point it at `fake-copilot.js`). Read by Duskfleet only: it is not passed on to agent runs. |
 | `DUSKFLEET_LOG_LEVEL` | `debug` \| `info` \| `warn` \| `error`, on stderr. Default: `warn` for one-shot CLI commands (`--verbose` = `info`), `info` for `serve` and the MCP server. When set, it wins over both. |
 
 ### What reaches a run

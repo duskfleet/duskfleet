@@ -426,7 +426,8 @@ test("doctor lists each harness; a missing binary matters only when an agent use
     };
     const lines = renderDoctor({ ...base, harnesses: report }, plain);
     const at = lines.findIndex((l) => l.includes("harnesses"));
-    assert.match(lines[at], /^! harnesses\s+claude 2\.1\.0 \(Claude Code\) · fake missing$/);
+    assert.deepEqual(report.notInstalled, ["copilot"], "a shipped harness without its CLI");
+    assert.match(lines[at], /^! harnesses\s+claude 2\.1\.0 \(Claude Code\) · fake missing · copilot not installed$/);
     assert.match(lines[at + 1], /fake \(\/opt\/fake-harness\/bin\/fake\) is not usable, but other run on it: .*ENOENT/);
     assert.match(lines[at + 2], /agent lost sets harness: ghost, which is not registered/);
 
@@ -436,7 +437,7 @@ test("doctor lists each harness; a missing binary matters only when an agent use
     );
     const quiet = renderDoctor({ ...base, harnesses: unused }, plain);
     assert.ok(
-      quiet.some((l) => /^✓ harnesses\s+claude 2\.1\.0 · fake missing$/.test(l)),
+      quiet.some((l) => /^✓ harnesses\s+claude 2\.1\.0 · fake missing · copilot not installed$/.test(l)),
       "an absent binary no agent uses is not a warning",
     );
   } finally {

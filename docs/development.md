@@ -320,6 +320,26 @@ local run-data handling, and recommended configuration.
   (`parseJudgeOutput`; anything else is an `error` eval), and the judged transcript, supplied by the
   caller's `loadTranscript`, is fenced off in the prompt as untrusted evidence. Nothing calls the
   judge after a run yet.
+- **Copilot CLI flags** (`harness: copilot`, `core/src/execution/copilot.ts`): verified against
+  `copilot --help` and real runs of GitHub Copilot CLI 1.0.112 (fixtures in
+  `packages/mcp/test/fixtures/copilot/`, their README lists the command of each). Tests point
+  `COPILOT_BIN` at `fake-copilot.js` (`test/helpers.js`), so a `copilot` installed on the machine is
+  never launched; `childEnv()` never passes `COPILOT_BIN` to a run.
+
+  | Flag | Purpose in Duskfleet |
+  |---|---|
+  | (no `-p`) | the prompt is piped on stdin: same stream, the prompt stays out of argv |
+  | `--output-format json` | JSONL events; the last line is `{"type":"result","exitCode",...}` |
+  | `--no-ask-user`, `--no-auto-update`, `--disable-builtin-mcps` | always: no questions, no CLI update under a run, no built-in MCP servers |
+  | `--session-id <uuid>` / `--resume=<id>` | a fresh session with our id / a continued one |
+  | `--model <model>`, `--reasoning-effort <level>` | only when the agent sets them |
+  | `--allow-tool <rule>` / `--deny-tool <rule>` | the agent's `allowed_tools` / `disallowed_tools`, verbatim; `acceptEdits` adds `--allow-tool write` |
+  | `--add-dir <tmp> --agent duskfleet-agent` | the agent body as a per-run `.github/agents/duskfleet-agent.agent.md` (there is no system prompt flag; `COPILOT_CUSTOM_INSTRUCTIONS_DIRS` is not applied in an untrusted folder) |
+  | `--usage-output-file <tmp>/usage.json` | tokens per model for the result (cumulative for a resumed session) |
+
+  Never passed: `--trust-folder` (it also cannot be combined with `--session-id`),
+  `--allow-all-tools`, `--allow-all`, `--yolo`, `--autopilot`, `--sandbox`; `COPILOT_ALLOW_ALL`
+  is removed from the child's environment even when an `env_passthrough` names it.
 - **Claude CLI flags**: verify every flag against `claude --help` before using it. The ones the
   executor uses, checked against `claude --help` of Claude Code 2.1.285:
 

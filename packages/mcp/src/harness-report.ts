@@ -3,7 +3,7 @@
  * why it could not be read), the agents that run on it, and the agents whose `harness:` names no
  * registered executor. A missing binary of a harness no agent uses is not a problem.
  */
-import { type DuskFleetConfig, type HarnessRegistry, harnessOf } from "@duskfleet/core";
+import { type DuskFleetConfig, type HarnessRegistry, harnessOf, SHIPPED_HARNESSES } from "@duskfleet/core";
 import type { HarnessReport } from "./render/index.js";
 
 export async function harnessReport(
@@ -35,5 +35,7 @@ export async function harnessReport(
   }
   const known = new Set(app.harnesses.names());
   const unknown = agents.filter((a) => !known.has(harnessOf(a))).map((a) => ({ agentId: a.id, harness: harnessOf(a) }));
-  return { registered, unknown };
+  // A harness that ships but whose CLI was not found at start-up (bootstrap registers only what resolves).
+  const notInstalled = SHIPPED_HARNESSES.filter((name) => !known.has(name));
+  return { registered, unknown, notInstalled };
 }

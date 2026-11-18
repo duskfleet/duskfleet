@@ -3,9 +3,10 @@
  * database, build the executor and the RunManager.
  */
 
-import type { ConfigLocation, DuskFleetConfig, Run, SchedulerRole } from "@duskfleet/core";
+import type { ConfigLocation, DuskFleetConfig, Executor, Run, SchedulerRole } from "@duskfleet/core";
 import {
   ClaudeCodeExecutor,
+  CopilotExecutor,
   HarnessRegistry,
   loadConfig,
   locateConfig,
@@ -14,6 +15,7 @@ import {
   processIdentity,
   RunManager,
   RunRepository,
+  resolveCopilotBinary,
   ScheduleRepository,
   Scheduler,
 } from "@duskfleet/core";
@@ -64,9 +66,16 @@ export async function bootstrap(entryFileUrl: string, options: BootstrapOptions 
     envPassthrough: config.claude.envPassthrough,
   });
   log.info("executor ready", { binary: executor.binary });
-  // One adapter per harness (issue #445): Claude Code is the only one that ships. A second one is
-  // one more entry here; RunManager picks per run from the agent's `harness:`.
-  const harnesses = new HarnessRegistry([executor]);
+  // One adapter per harness (issue #445); RunManager picks per run from the agent's `harness:`.
+  // Copilot (#446) only when its binary resolves: an agent on it is otherwise refused as an
+  // unregistered harness, and `doctor` says the CLI is not installed.
+  const executors: Executor[] = [executor];
+  const copilotBinary = resolveCopilotBinary(config.copilot?.binary ?? null);
+  if (copilotBinary) {
+    executors.push(new CopilotExecutor({ binary: copilotBinary, envPassthrough: config.claude.envPassthrough }));
+    log.info("copilot executor ready", { binary: copilotBinary });
+  }
+  const harnesses = new HarnessRegistry(executors);
 
   // One identity for the runs this process owns and for the scheduler lease it may hold.
   const runs = new RunManager(config, repo, harnesses, { owner: processIdentity(options.role ?? "unknown") });

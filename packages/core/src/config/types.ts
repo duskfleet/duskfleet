@@ -167,6 +167,12 @@ export interface ClaudeConfig {
   maxLogBytes: number;
 }
 
+/** `copilot:` in duskfleet.yaml: the GitHub Copilot CLI harness (issue #446). */
+export interface CopilotConfig {
+  /** Path of the `copilot` binary; null = `copilot` on PATH. Without one the harness is not registered. */
+  binary: string | null;
+}
+
 export interface SchedulerConfig {
   /** Kill switch: false stops every process from firing schedules (re-read every tick). */
   enabled: boolean;
@@ -220,6 +226,8 @@ export interface DuskFleetConfig {
   /** Runs of the same agent allowed at the same time (the agent's WIP limit). Default 1. */
   maxConcurrentPerAgent: number;
   claude: ClaudeConfig;
+  /** Optional for configs built by hand (tests): absent = `copilot` on PATH. */
+  copilot?: CopilotConfig;
   scheduler: SchedulerConfig;
   agents: Map<string, AgentDefinition>;
   projects: Map<string, ProjectDefinition>;
