@@ -6,12 +6,16 @@ export {
   agentKind,
   renderAgentCreated,
   renderAgents,
+  renderSkippedAgents,
+  skippedAgentLine,
 } from "./agents.js";
 export { renderBudgetSet, renderBudgets } from "./budgets.js";
 export {
   type DoctorReport,
   type HarnessReport,
+  type LinkModelOverride,
   type LinkToolsReport,
+  linkModelOverrides,
   linkToolsReport,
   renderDoctor,
   type SandboxReport,

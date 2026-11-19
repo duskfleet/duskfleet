@@ -3,7 +3,7 @@
  * filling the rest of the line, and the `✓` acknowledgement of the agent just written. The values
  * are what `--json` prints (the agents without their system prompt).
  */
-import { type AgentDefinition, type AgentSource, DEFAULT_HARNESS } from "@duskfleet/core";
+import { type AgentDefinition, type AgentSource, DEFAULT_HARNESS, type SkippedAgentFile } from "@duskfleet/core";
 import {
   type Cell,
   type Column,
@@ -45,9 +45,25 @@ function modelText(a: AgentView): string {
   return agentKind(a) === "link" ? "agent" : "default";
 }
 
-/** The table, or the empty state naming the command that writes a first agent. */
-export function renderAgents(agents: readonly AgentView[], opts: RenderOpts): string[] {
-  if (agents.length === 0) return emptyState("no agents yet", AGENT_CREATE, opts);
+/** One warning line per agent file the loader skipped: its id is unavailable until the file is fixed. */
+export function renderSkippedAgents(skipped: readonly SkippedAgentFile[], opts: RenderOpts): string[] {
+  return skipped.map((s) => `${paint("warn", GLYPH.warn, opts)} ${skippedAgentLine(s)}`);
+}
+
+/** `agent "x" skipped: <error naming the file>`, shared by `agents` and `doctor`. */
+export function skippedAgentLine(s: SkippedAgentFile): string {
+  const error = oneLine(s.error);
+  return `agent "${s.id}" skipped: ${error.includes(s.sourcePath) ? error : `${s.sourcePath}: ${error}`}`;
+}
+
+/** The table, or the empty state naming the command that writes a first agent; then the skipped files. */
+export function renderAgents(
+  agents: readonly AgentView[],
+  opts: RenderOpts,
+  skipped: readonly SkippedAgentFile[] = [],
+): string[] {
+  const after = skipped.length ? ["", ...renderSkippedAgents(skipped, opts)] : [];
+  if (agents.length === 0) return [...emptyState("no agents yet", AGENT_CREATE, opts), ...after];
   const rows = agents.map((a): Cell[] => [
     { text: a.id, role: "accent" },
     // The harness only when it is not the default one: a Claude agent's row reads as before.
@@ -59,7 +75,7 @@ export function renderAgents(agents: readonly AgentView[], opts: RenderOpts): st
     timeoutText(a.timeoutMinutes),
     oneLine(a.description ?? "") || "-",
   ]);
-  return [...table(COLUMNS, rows, opts), "", jsonLine(opts, `new agent: ${AGENT_CREATE}`)];
+  return [...table(COLUMNS, rows, opts), ...after, "", jsonLine(opts, `new agent: ${AGENT_CREATE}`)];
 }
 
 export interface AgentCreated {

@@ -5,7 +5,15 @@
  * agents), probe. Advice lines are indented under their
  * check. A missing binary is the only error. Pure: the exit code stays the CLI's business.
  */
-import type { BudgetState, ConfigSource, DataSource, SandboxSupport } from "@duskfleet/core";
+import {
+  type AgentDefinition,
+  type BudgetState,
+  type ConfigSource,
+  type DataSource,
+  effectiveAgentFields,
+  linkProjectPath,
+  type SandboxSupport,
+} from "@duskfleet/core";
 import type { ProbeReport } from "../probe.js";
 import type { KeepAwakeStatus, ServiceStatus } from "../service.js";
 import { AGENT_CREATE } from "./agents.js";
@@ -25,6 +33,10 @@ export interface DoctorReport {
   dataDir: string;
   dataSource: DataSource;
   agents: string[];
+  /** Agent files that do not load: their ids are unavailable (absent in reports built before #462). */
+  skippedAgents?: { id: string; source: string; sourcePath: string; error: string; advice: string }[];
+  /** Links whose own `model` differs from their project agent's (issue #459); absent in older reports. */
+  linkModelOverrides?: LinkModelOverride[];
   scheduler: {
     enabled: boolean;
     ticking: boolean;
@@ -92,6 +104,39 @@ function linkToolsCheck(l: LinkToolsReport): Check | null {
         l.gaps.map((g) => g.advice),
       )
     : ok("link tools", `${value}, allowed_tools all declared by the project agent`);
+}
+
+export interface LinkModelOverride {
+  agentId: string;
+  claudeAgent: string;
+  model: string;
+  projectAgentModel: string;
+  advice: string;
+}
+
+/**
+ * A link whose Duskfleet file sets a `model` other than its project agent's `model:`: the run
+ * passes `--model`, so the Duskfleet value wins. Not an error (it is a way to run a project agent
+ * on a cheaper model), but the two copies disagree, so `doctor` says which one runs.
+ */
+export function linkModelOverrides(
+  agents: Iterable<Pick<AgentDefinition, "id" | "model" | "claudeAgent" | "project" | "description">>,
+  projects: ReadonlyMap<string, { path: string }>,
+): LinkModelOverride[] {
+  const out: LinkModelOverride[] = [];
+  for (const a of agents) {
+    if (!a.claudeAgent || a.model === undefined) continue;
+    const { projectAgentModel } = effectiveAgentFields(a, linkProjectPath(a, projects));
+    if (projectAgentModel === null || projectAgentModel === a.model) continue;
+    out.push({
+      agentId: a.id,
+      claudeAgent: a.claudeAgent,
+      model: a.model,
+      projectAgentModel,
+      advice: `link ${a.id} sets model: ${a.model}, its project agent ${a.claudeAgent} says ${projectAgentModel}: runs use ${a.model} (the Duskfleet value wins)`,
+    });
+  }
+  return out;
 }
 
 export interface SandboxReport {
@@ -200,6 +245,21 @@ function claudeCheck(r: DoctorReport, opts: RenderOpts): Check {
   return ok("claude", `${r.claudeVersion ?? "version unknown"} · ${r.claudeBinary}`);
 }
 
+/** The loaded agents, then one advice line per skipped file (a warning: those ids are unavailable). */
+function agentsCheck(r: DoctorReport, opts: RenderOpts): Check {
+  const skipped = r.skippedAgents ?? [];
+  const advice = skipped.map((s) => s.advice);
+  if (!r.agents.length) {
+    return warn("agents", skipped.length ? `none loaded · ${skipped.length} skipped` : "none yet", [
+      ...advice,
+      ...(skipped.length ? [] : [paint("accent", AGENT_CREATE, opts)]),
+    ]);
+  }
+  const value = `${r.agents.length}: ${r.agents.join(", ")}${skipped.length ? ` · ${skipped.length} skipped` : ""}`;
+  const overrides = (r.linkModelOverrides ?? []).map((o) => o.advice);
+  return skipped.length ? warn("agents", value, [...advice, ...overrides]) : ok("agents", value, overrides);
+}
+
 function schedulerCheck(r: DoctorReport): Check {
   const s = r.scheduler;
   const h = s.holder;
@@ -247,9 +307,7 @@ function checks(r: DoctorReport, opts: RenderOpts): Check[] {
       : ok("PATH", "inherited"),
     ok("config", `${r.configDir} (${r.configSource})`),
     ok("data", `${r.dataDir} (${r.dataSource})`),
-    r.agents.length
-      ? ok("agents", `${r.agents.length}: ${r.agents.join(", ")}`)
-      : warn("agents", "none yet", [paint("accent", AGENT_CREATE, opts)]),
+    agentsCheck(r, opts),
     schedulerCheck(r),
     dupes.length
       ? warn(

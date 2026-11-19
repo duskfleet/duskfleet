@@ -80,7 +80,8 @@ test("the loader reads skills: names, and refuses a name that is not a folder na
     assert.match(renderAgentMarkdown(agentToSpec(agent)), /skills:\n {2}- greet\n {2}- review-pr/);
     // A missing skill does not break the load: existence is a create / update check.
     writeFileSync(path.join(r.configDir, "agents", "b.md"), `---\nskills: ["../etc"]\n---\nHi.\n`);
-    assert.throws(() => loadConfig(r.configDir), /skill names are lowercase letters/);
+    const skipped = loadConfig(r.configDir).skippedAgents.find((s) => s.id === "b");
+    assert.match(skipped?.error ?? "", /skill names are lowercase letters/, "an invalid name skips the file (#462)");
   } finally {
     rmSync(r.root, { recursive: true, force: true });
   }

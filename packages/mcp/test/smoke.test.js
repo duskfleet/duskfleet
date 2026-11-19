@@ -749,16 +749,22 @@ test("an isolated agent and a normal agent share a project; two normal agents do
   }
 });
 
-test("max_concurrent must be a whole number >= 1", () => {
+/** The loader's error for the skipped agent file `id` (#462: a bad agent file is skipped, not fatal). */
+async function skippedError(agents, id) {
+  const app = makeApp({ agents });
+  try {
+    assert.equal(app.config.agents.has(id), false, `${id} is not loaded`);
+    return app.config.skippedAgents.find((s) => s.id === id)?.error ?? "";
+  } finally {
+    await app.cleanup();
+  }
+}
+
+test("max_concurrent must be a whole number >= 1", async () => {
   for (const bad of ["0", "1.5", '"two"']) {
-    assert.throws(
-      () => makeApp({ agents: { broken: `---\nmax_concurrent: ${bad}\n---\nx\n` } }),
-      (err) => {
-        assert.match(err.message, /invalid agent file .*broken\.md: max_concurrent: /);
-        assert.match(err.message, /max_concurrent must be a whole number >= 1/);
-        return true;
-      },
-    );
+    const error = await skippedError({ broken: `---\nmax_concurrent: ${bad}\n---\nx\n` }, "broken");
+    assert.match(error, /invalid agent file .*broken\.md: max_concurrent: /);
+    assert.match(error, /max_concurrent must be a whole number >= 1/);
   }
 });
 
@@ -777,14 +783,9 @@ test("daily caps load from frontmatter and are validated", async () => {
     ["max_daily_cost_usd", "0", /max_daily_cost_usd must be a number > 0/],
     ["max_daily_cost_usd", '"lots"', /max_daily_cost_usd must be a number > 0/],
   ]) {
-    assert.throws(
-      () => makeApp({ agents: { broken: `---\n${key}: ${bad}\n---\nx\n` } }),
-      (err) => {
-        assert.match(err.message, new RegExp(`invalid agent file .*broken\\.md: ${key}: `));
-        assert.match(err.message, msg);
-        return true;
-      },
-    );
+    const error = await skippedError({ broken: `---\n${key}: ${bad}\n---\nx\n` }, "broken");
+    assert.match(error, new RegExp(`invalid agent file .*broken\\.md: ${key}: `));
+    assert.match(error, msg);
   }
 });
 

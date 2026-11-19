@@ -128,6 +128,19 @@ export function deleteAgentFile(dir: string, id: string): boolean {
   return true;
 }
 
+/**
+ * Removes one agent file by path, for a file the loader skipped (#462): its name need not match
+ * the id it declares. Only a `.md` file directly inside `dir` is removed. False when it did not exist.
+ */
+export function deleteAgentFileAt(dir: string, file: string): boolean {
+  if (path.dirname(path.resolve(file)) !== path.resolve(dir) || !file.endsWith(".md")) {
+    throw new Error(`refusing to delete ${file}: not an agent file in ${dir}`);
+  }
+  if (!existsSync(file)) return false;
+  unlinkSync(file);
+  return true;
+}
+
 /** Inverse of the loader: a loaded definition back to a writable spec (used by update_agent). */
 export function agentToSpec(a: AgentDefinition): AgentSpec {
   const spec: AgentSpec = {
@@ -284,12 +297,14 @@ export function linkToolGaps(
   allowedTools: readonly string[] | undefined,
   projectAgent: Pick<ProjectAgentInfo, "tools" | "frontmatterError">,
 ): LinkToolGaps {
+  // Nothing to check: no note either, even when the project agent does not parse.
+  if (!allowedTools || allowedTools.length === 0) return { missing: [], skipped: null };
   if (projectAgent.frontmatterError) {
     return { missing: [], skipped: `its frontmatter does not parse (${projectAgent.frontmatterError})` };
   }
   if (projectAgent.tools === null) return { missing: [], skipped: null };
   const declared = projectAgent.tools.map(toolName).filter(Boolean);
-  const missing = (allowedTools ?? []).filter((rule) => {
+  const missing = allowedTools.filter((rule) => {
     const name = toolName(rule);
     return !declared.some((d) => covers(d, name));
   });
@@ -312,7 +327,7 @@ export function linkToolCheck(
   projectPath: string | null,
 ): LinkToolCheck | null {
   if (!spec.claude_agent || !projectPath) return null;
-  const projectAgent = listProjectAgents(projectPath).find((a) => a.name === spec.claude_agent);
+  const projectAgent = findProjectAgent(projectPath, spec.claude_agent);
   if (!projectAgent) return null;
   return { file: projectAgent.path, ...linkToolGaps(spec.allowed_tools, projectAgent) };
 }
@@ -332,6 +347,70 @@ export function linkToolWarnings(
     (rule) =>
       `allowed_tools entry "${rule}" is not in the tools: of ${check.file}: the run will not have it (add it there, or drop it here)`,
   );
+}
+
+/** Where an effective agent field comes from: the Duskfleet file, or a link's project agent. */
+export type AgentFieldSource = "agent" | "project agent";
+
+/** A link's description and model as listed: its own when set, else the project agent's. */
+export interface EffectiveAgentFields {
+  description: string;
+  /** Null when neither file has a description. */
+  descriptionSource: AgentFieldSource | null;
+  model: string | null;
+  /** Null when neither file sets a model (the run uses the CLI default). */
+  modelSource: AgentFieldSource | null;
+  /** The project agent's own `model:`, null for an own agent or when it sets none. */
+  projectAgentModel: string | null;
+}
+
+/**
+ * Read-time fallback for a link (issue #459): `description` is the Duskfleet file's when
+ * non-empty, else the project agent's; `model` the Duskfleet file's when set, else the project
+ * agent's. Nothing is written and `AgentDefinition` is untouched, so `agentDefinitionHash` (and
+ * continued sessions) do not move. An own agent, or a link whose project path is unknown or whose
+ * project agent is missing, gets its own values only. The project agent is matched like the
+ * executor does (`listProjectAgents` name), so unparsable frontmatter contributes nothing.
+ */
+export function effectiveAgentFields(
+  agent: Pick<AgentDefinition, "description" | "model" | "claudeAgent">,
+  projectPath: string | null,
+): EffectiveAgentFields {
+  const projectAgent = agent.claudeAgent && projectPath ? findProjectAgent(projectPath, agent.claudeAgent) : undefined;
+  const ownDescription = agent.description.trim() ? agent.description : "";
+  const description = ownDescription || projectAgent?.description || "";
+  // `model: inherit` in a project agent means "the caller's model": no model of its own.
+  const projectAgentModel =
+    projectAgent?.model && projectAgent.model.trim().toLowerCase() !== "inherit" ? projectAgent.model : null;
+  const model = agent.model ?? projectAgentModel;
+  return {
+    description,
+    descriptionSource: ownDescription ? "agent" : description ? "project agent" : null,
+    model,
+    modelSource: agent.model !== undefined ? "agent" : model ? "project agent" : null,
+    projectAgentModel,
+  };
+}
+
+/**
+ * The project agent named `name`, undefined when the folder cannot be read (`.claude/agents` a
+ * plain file, a directory named `x.md`, an unreadable file): a listing never fails on a project.
+ */
+function findProjectAgent(projectPath: string, name: string): ProjectAgentInfo | undefined {
+  try {
+    return listProjectAgents(projectPath).find((a) => a.name === name);
+  } catch {
+    return undefined;
+  }
+}
+
+/** The folder a link's project agent lives in: its `project`'s path, null when unbound or unknown. */
+export function linkProjectPath(
+  agent: Pick<AgentDefinition, "claudeAgent" | "project">,
+  projects: ReadonlyMap<string, { path: string }>,
+): string | null {
+  if (!agent.claudeAgent || !agent.project) return null;
+  return projects.get(agent.project)?.path ?? null;
 }
 
 /**

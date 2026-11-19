@@ -39,6 +39,12 @@ the guide [Run Claude Code on a schedule on your own machine](guides/run-claude-
   only. Add `--verbose` (or set `DUSKFLEET_LOG_LEVEL=info`, `debug` for more) to see which
   config and data directory it used, the executor and the migrations it applied, on stderr
   ([CLI](cli.md)).
+- **`agent "x" is unavailable: its file ... does not load`** (a run, a schedule's `error`, a gate),
+  or **`agent "x" skipped: ...`** under `doctor` / `agents`: that agent file has invalid
+  frontmatter, an id another file of the same directory already uses, or a `project:` missing from
+  `projects.yaml`. Only that file is skipped; the other agents run. Fix the file the message names
+  (the error says which field); a broken `data/agents/x.md` does not fall back to a builtin `x`
+  meanwhile ([Agents](agents.md#a-file-that-does-not-load)).
 - **New code is not picked up**: the MCP host keeps the server process alive. After
   `npm run build`, restart Claude Desktop or the Claude Code session. Config changes need no restart.
 - **`npm install` fails on root-owned files in `~/.npm`**: use `npm install --cache "$TMPDIR/npm-cache"`.
