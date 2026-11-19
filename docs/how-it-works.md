@@ -116,6 +116,14 @@ they arrive and keeps the raw stream in `data/logs/<run_id>.jsonl`:
   its output never arrived; a PR the run only mentions, or claims after a `gh pr create` that
   printed none, is not recorded. Subagents' calls do not count. `get_run` and `run-info` return
   them as `artifacts`; branches and commits come from `diff`.
+- what the agent was made of, taken when the run starts: `agentHash` covers the Duskfleet
+  definition and, for a link, the project agent file together; `projectAgentHash`
+  (`project_agent_hash`) is the project agent file alone (`<project>/.claude/agents/<name>.md`),
+  null for an own agent. A scheduled link run whose `projectAgentHash` differs from the one of
+  the schedule's previous run gets a `note` event with both hashes. `get_run` and `run-info`
+  return `projectAgentChange` (`previousRunId`, `previousHash`, `hash`, `changed`), null when
+  there is nothing to compare (own agent, first run of the schedule, previous run older than the
+  column).
 
 Both stores are bounded. One `run_events` payload is at most `claude.max_event_bytes`
 (default 64 KiB): over it the stored JSON keeps its envelope (type, ids, tool name) and the

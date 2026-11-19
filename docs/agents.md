@@ -473,6 +473,14 @@ Two things to get right with a link:
   agent is denied the tools that exist. Listing both prefixes keeps the file usable from
   both.
 
+The project agent file lives in the project, so a `git pull`, or the agent itself when it may
+write there, can change its prompt and its `tools:` between two scheduled runs. Each run
+records the file's hash (`projectAgentHash`); when a schedule fires a link whose file changed
+since the schedule's previous run, the new run gets a note ("project agent file ... changed
+since the previous run of this schedule", with both hashes) and `get_run` / `run-info` report
+`projectAgentChange.changed: true`. It is a notice only: the run starts as usual, and its
+status and review reasons are untouched.
+
 A worked example of links and own agents together, on schedules:
 [Run a development loop with agents](guides/agent-development-loop.md).
 
