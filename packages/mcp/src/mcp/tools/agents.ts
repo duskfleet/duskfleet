@@ -15,14 +15,17 @@ import {
   deleteAgentFile,
   deleteSkippedUserAgentFiles,
   EFFORT_LEVELS,
+  effectiveAgentFields,
   envPassthroughSchema,
   harnessNameSchema,
   harnessOf,
+  linkProjectPath,
   listProjectAgents,
   loadAgentDir,
   ON_FAILURE_POLICIES,
   PERMISSION_MODES,
   projectIdFromPath,
+  sameDirectory,
   sandboxAllowedDomainsSchema,
   skillsSchema,
   skippedAgentError,
@@ -62,7 +65,7 @@ function projectFromFolder(
       `${resolved}/.claude/agents has no agent "${claudeAgent}" (available: ${agents.map((a) => a.name).join(", ")})`,
     );
   }
-  const existing = [...config.projects.values()].find((p) => p.path === resolved);
+  const existing = [...config.projects.values()].find((p) => sameDirectory(p.path, resolved));
   if (existing) {
     if (preferredId && preferredId !== existing.id) {
       throw new Error(`${resolved} is already registered as project "${existing.id}"; use that id or omit project.`);
@@ -78,7 +81,7 @@ function projectFromFolder(
   upsertUserProject(config.userProjectsFile, {
     id,
     path: resolved,
-    description: `Registered by create_agent (link) from ${resolved}`,
+    description: "Registered by create_agent (link)",
   });
   const fresh = ctx.config; // reload: the new project must be visible before the agent file is validated
   if (!fresh.projects.has(id))
@@ -87,14 +90,20 @@ function projectFromFolder(
 }
 
 function presentAgent(a: AgentDefinition, config: DuskFleetConfig) {
+  // A link that leaves description / model out lists the project agent's (issue #459).
+  const effective = effectiveAgentFields(a, linkProjectPath(a, config.projects));
   return {
     id: a.id,
     name: a.name,
-    description: a.description,
+    description: effective.description,
+    /** "agent" = this file, "project agent" = a link's .claude/agents/<claudeAgent>.md, null = none. */
+    descriptionSource: effective.descriptionSource,
     source: a.source,
     /** "own" = persona defined in Duskfleet; "link" = reuses the project's .claude/agents/<claudeAgent>.md */
     kind: agentKind(a),
-    model: a.model ?? null,
+    model: effective.model,
+    /** "agent" = this file, "project agent" = a link's project agent, null = the CLI default. */
+    modelSource: effective.modelSource,
     permissionMode: a.permissionMode,
     allowedTools: a.allowedTools ?? [],
     disallowedTools: a.disallowedTools ?? [],

@@ -41,6 +41,10 @@ anything. Code never writes into `config/agents`. Because a user agent may later
 field, and store `add_dirs` inside your home directory as `~/...`
 ([MCP server](mcp-server.md)).
 
+These files hold each agent's unattended envelope (permissions, allow-list, budget, sandbox,
+environment) and live outside every project on purpose, so a run cannot widen its own permissions:
+see [where the unattended envelope lives](security.md#where-the-unattended-envelope-lives).
+
 ### A file that does not load
 
 An agent file you edit by hand can break: invalid frontmatter, an id another file in the same
@@ -484,6 +488,17 @@ a link to a name the project does not define fails before anything is spawned. N
 project agent's `tools:` list does not grant permissions in unattended runs: those tools
 still need to be in `allowed_tools` here.
 
+A link can leave `description` and `model` out: `list_agents` and `duskfleet agents` then show
+the project agent's (`description:` and `model:` of its frontmatter), so the two files never
+hold two copies that drift apart. The JSON forms say where each value came from
+(`descriptionSource` / `modelSource`: `agent` for the Duskfleet file, `project agent`, or null
+when neither sets it). The fallback is for reading only: nothing is written to either file and
+the agent's hash does not change, so continued sessions keep matching. A link that sets its own
+`model` runs with `--model <it>`, so the Duskfleet value wins over the project agent's;
+`duskfleet doctor` prints one advice line under `agents` for each link where the two differ.
+A project agent with `model: inherit` (Claude Code's "use the caller's model") counts as setting
+no model, and a project folder whose `.claude/agents` cannot be read contributes nothing.
+
 Two things to get right with a link:
 
 - **Prompt it as the agent, not as its caller.** The run *is* the project agent. If the
@@ -497,6 +512,28 @@ Two things to get right with a link:
   names interactive sessions show. The list is an allow-list: with the wrong prefix the
   agent is denied the tools that exist. Listing both prefixes keeps the file usable from
   both.
+
+### Which prompt holds which rule
+
+A link has two prompts: the project agent's body (the persona) and the Duskfleet file's body,
+appended after it. Write each rule in one of them, never both: two copies drift apart as soon
+as one is fixed.
+
+- **The project agent's body** holds the job: what to pick, how to do it, what never to do.
+  It must make sense in an interactive Claude Code session too. A rule that would also apply
+  to a person running the agent interactively goes here, once.
+- **The Duskfleet file's body** holds only what is true because the run is unattended: nobody
+  answers questions, shell limits that come from the allow-list, what to do when a tool the
+  run needs is not mounted, where the run may write.
+
+For example, "Open one pull request per issue and never push to `main`" belongs in the
+project agent; "Nobody can answer questions during this run: when the issue is unclear,
+comment on it and stop" belongs in the Duskfleet file.
+
+The two tool lists split the same way: the project agent's `tools:` says what the agent *can*
+use (a hard filter, also interactively), the Duskfleet file's `allowed_tools` what it *may* use
+without a prompt in an unattended run. A tool missing from `tools:` does not exist in the run;
+a tool missing from `allowed_tools` exists but is denied.
 
 A worked example of links and own agents together, on schedules:
 [Run a development loop with agents](guides/agent-development-loop.md).

@@ -14,6 +14,7 @@ export {
 } from "./config/agent-create.js";
 export {
   AGENT_ID_PATTERN,
+  type AgentFieldSource,
   type AgentKind,
   type AgentSpec,
   agentDefinitionHash,
@@ -26,8 +27,11 @@ export {
   assertWrapUpReserve,
   deleteAgentFile,
   deleteAgentFileAt,
+  type EffectiveAgentFields,
+  effectiveAgentFields,
   envPassthroughSchema,
   harnessNameSchema,
+  linkProjectPath,
   listProjectAgents,
   type ProjectAgentInfo,
   projectAgentDefinitionHash,
@@ -97,6 +101,8 @@ export {
   PROJECT_ID_PATTERN,
   projectIdFromPath,
   readUserProjects,
+  registryPath,
+  sameDirectory,
   type UserProjectEntry,
   upsertUserProject,
 } from "./config/project-files.js";
