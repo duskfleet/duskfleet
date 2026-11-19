@@ -420,3 +420,58 @@ test("agents can be created, updated, run and deleted over MCP without touching 
     rmSync(root, { recursive: true, force: true });
   }
 });
+
+test("a linked folder under the home directory is registered as ~/..., without the path in its description", {
+  skip: process.platform === "win32",
+}, async () => {
+  const root = realpathSync(mkdtempSync(path.join(tmpdir(), "duskfleet-home-link-")));
+  const home = path.join(root, "home");
+  const configDir = path.join(root, "config");
+  mkdirSync(path.join(configDir, "agents"), { recursive: true });
+  writeFileSync(path.join(configDir, "duskfleet.yaml"), `data_dir: ../data\nclaude:\n  binary: "${fakeBinary}"\n`);
+  const defineAgent = (dir) => {
+    mkdirSync(path.join(dir, ".claude", "agents"), { recursive: true });
+    writeFileSync(path.join(dir, ".claude", "agents", "helper.md"), "---\nname: helper\n---\nYou help.\n");
+  };
+  const app = path.join(home, "code", "app");
+  const legacy = path.join(home, "code", "legacy");
+  defineAgent(app);
+  defineAgent(legacy);
+  const registry = path.join(root, "data", "projects.yaml");
+  mkdirSync(path.dirname(registry), { recursive: true });
+  // an entry written before #460: absolute home path
+  writeFileSync(registry, `projects:\n  legacy:\n    path: ${legacy}\n`);
+
+  const transport = new StdioClientTransport({
+    command: process.execPath,
+    args: [serverEntry],
+    env: testEnv({ DUSKFLEET_CONFIG: configDir, DUSKFLEET_LOG_LEVEL: "warn", HOME: home }),
+    stderr: "pipe",
+  });
+  const client = new Client({ name: "test-client", version: "0.0.0" });
+  try {
+    await client.connect(transport);
+    const link = (id, dir) =>
+      client.callTool({
+        name: "create_agent",
+        arguments: { id, kind: "link", claude_agent: "helper", project_path: dir },
+      });
+
+    const first = ok(await link("app-helper", app));
+    assert.equal(first.agent.project, "app");
+    assert.equal(first.project.path, app, "runs resolve the same directory as before");
+    const text = readFileSync(registry, "utf8");
+    assert.match(text, /app:\n\s+path: ~\/code\/app\n\s+description: Registered by create_agent \(link\)\n/);
+    assert.ok(!text.includes(app), "no home path anywhere in the new entry");
+
+    const second = ok(await link("app-helper-2", app));
+    assert.equal(second.agent.project, "app", "a second link to the same folder reuses the entry");
+
+    const old = ok(await link("legacy-helper", legacy));
+    assert.equal(old.agent.project, "legacy", "an older entry with an absolute path is still matched");
+    assert.equal(readFileSync(registry, "utf8"), text, "no new entry for either folder");
+  } finally {
+    await client.close();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
