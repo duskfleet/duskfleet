@@ -6,6 +6,7 @@
  */
 import {
   DEFAULT_HARNESS,
+  type ProjectAgentChange,
   REVIEW_REASON_LABELS,
   type Run,
   type RunAgentView,
@@ -47,6 +48,19 @@ export interface RunInfo {
   events?: RunEvent[];
   /** The agent as it loads now (`own` / `link`, builtin / user); absent when it no longer loads. */
   agent?: { kind: string; source: string } | null;
+  /** A scheduled link's project agent file against the schedule's previous run (same field as get_run). */
+  projectAgentChange?: ProjectAgentChange | null;
+}
+
+/** A link's persona hash, and whether it changed since the schedule's previous run. */
+function personaCell(info: RunInfo): string | null {
+  const hash = info.run.projectAgentHash;
+  if (!hash) return null;
+  const change = info.projectAgentChange;
+  if (!change) return hash;
+  return change.changed
+    ? `${hash} (changed since run ${change.previousRunId.slice(0, 8)}: ${change.previousHash})`
+    : `${hash} (unchanged since run ${change.previousRunId.slice(0, 8)})`;
 }
 
 /** Width of the key column. */
@@ -71,6 +85,7 @@ function runBlock(info: RunInfo, opts: RenderOpts): string[] {
         ["project", run.projectId ? `${run.projectId} (${run.projectPath})` : run.projectPath],
         ["label", info.label],
         ["schedule", run.scheduleId],
+        ["persona", personaCell(info)],
         // Only a harness other than Claude Code gets its own line: a Claude run reads as before.
         ["harness", harness === DEFAULT_HARNESS ? null : harness],
         [

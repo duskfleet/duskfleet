@@ -442,6 +442,16 @@ const MIGRATIONS: ReadonlyArray<{ version: number; sql: string; backfill?: (db: 
       );
     `,
   },
+  {
+    // The persona of a link on its own (issue #463): projectAgentDefinitionHash of
+    // <project>/.claude/agents/<claude_agent>.md at start time, so a scheduled fire can tell that
+    // the project agent file changed since the schedule's previous run. NULL for own agents,
+    // a missing file and older rows. agent_hash still covers envelope and persona together.
+    version: 33,
+    sql: `
+      ALTER TABLE runs ADD COLUMN project_agent_hash TEXT;
+    `,
+  },
 ];
 
 /**

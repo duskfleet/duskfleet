@@ -1020,18 +1020,20 @@ async function main(): Promise<void> {
       const artifacts = app.runs.artifacts(id).map(({ kind, value, source }) => ({ kind, value, source })); // same field as get_run
       const costLabel = runCostLabel(run.billingType); // same field as get_run
       const label = runLabel(run); // same field as get_run
+      const projectAgentChange = app.runs.projectAgentChange(run); // same field as get_run
       const events = values.events ? app.runs.events(id) : undefined;
       // The renderer reads the same pieces the JSON flattens into one object.
       print(
         events
-          ? { ...run, label, costLabel, diff, artifacts, subagents, events }
-          : { ...run, label, costLabel, diff, artifacts, subagents },
+          ? { ...run, label, costLabel, projectAgentChange, diff, artifacts, subagents, events }
+          : { ...run, label, costLabel, projectAgentChange, diff, artifacts, subagents },
         (_v, opts) =>
           renderRunInfo(
             {
               run,
               label,
               costLabel,
+              projectAgentChange,
               diff,
               artifacts,
               subagents,

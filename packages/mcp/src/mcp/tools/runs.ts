@@ -126,7 +126,7 @@ export function registerRunTools(server: McpServer, ctx: ToolContext): void {
       description:
         "Fetch a run by id: status, timings, Claude session id, model, tokens, cost, tool calls, errors, " +
         "the command to resume the session and the subagents it delegated to (one entry per Agent call: type, brief, " +
-        "report, tools, model, tokens), and `diff`: what the run changed in a git checkout (files, lines added / deleted, path of the patch), `artifacts`: what it produced ({kind: pr, value: the PR URL, source: tool_result | result_text}), and the raw log's logBytes, logSha256 and logTruncated (set when the run ends). Set include_output to get the full final message, full subagent briefs and reports, and the event timeline.",
+        "report, tools, model, tokens), and `diff`: what the run changed in a git checkout (files, lines added / deleted, path of the patch), `artifacts`: what it produced ({kind: pr, value: the PR URL, source: tool_result | result_text}), and the raw log's logBytes, logSha256 and logTruncated (set when the run ends), and for a link `projectAgentHash` (its project agent file at start) with `projectAgentChange` ({previousRunId, previousHash, hash, changed} against the schedule's previous run, or null). Set include_output to get the full final message, full subagent briefs and reports, and the event timeline.",
       inputSchema: {
         run_id: z.string().describe("Run id returned by run_agent or list_runs"),
         include_output: z.boolean().optional().describe("Include the full final message and the event timeline"),
@@ -145,11 +145,10 @@ export function registerRunTools(server: McpServer, ctx: ToolContext): void {
       const diff = ctx.runs.diff(run_id);
       /** What the run produced (run_artifacts): today the PRs it opened. */
       const artifacts = ctx.runs.artifacts(run_id).map(({ kind, value, source }) => ({ kind, value, source }));
-      return jsonResult(
-        include_output
-          ? { ...view, resumedByRunId, continuedByRunIds, diff, artifacts, subagents, events: ctx.runs.events(run_id) }
-          : { ...view, resumedByRunId, continuedByRunIds, diff, artifacts, subagents },
-      );
+      /** A scheduled link: its project agent file against the schedule's previous run, or null. */
+      const projectAgentChange = ctx.runs.projectAgentChange(run);
+      const out = { ...view, projectAgentChange, resumedByRunId, continuedByRunIds, diff, artifacts, subagents };
+      return jsonResult(include_output ? { ...out, events: ctx.runs.events(run_id) } : out);
     },
   );
 
