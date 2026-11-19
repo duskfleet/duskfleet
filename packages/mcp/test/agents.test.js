@@ -439,6 +439,21 @@ test("list_agents names an agent file that does not load; its run fails with tha
       }),
     );
     assert.equal(run.status, "completed", "the other agents still run");
+
+    // Its id stays taken: create needs overwrite, update names the file, delete removes it.
+    fails(
+      await client.callTool({ name: "create_agent", arguments: { id: "helper", kind: "own", system_prompt: "New." } }),
+      /helper\.md does not load .*overwrite: true/,
+    );
+    assert.ok(existsSync(bad), "the broken file was not overwritten");
+    fails(
+      await client.callTool({ name: "update_agent", arguments: { id: "helper", description: "x" } }),
+      /agent "helper" is unavailable: its file .*helper\.md does not load.*delete_agent/,
+    );
+    const deleted = ok(await client.callTool({ name: "delete_agent", arguments: { id: "helper" } }));
+    assert.deepEqual(deleted.files, [bad]);
+    assert.equal(existsSync(bad), false);
+    assert.equal(deleted.nowResolvesTo.source, "builtin", "the builtin helper is served again");
   } finally {
     await client.close();
     rmSync(root, { recursive: true, force: true });

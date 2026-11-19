@@ -10,13 +10,19 @@ import { after, test } from "node:test";
 import { fileURLToPath } from "node:url";
 import {
   agentToSpec,
+  assertAgentIdFree,
   assertAgentKind,
   assertAgentSpecClean,
   createAgentFromFields,
+  deleteAgentFileAt,
+  deleteSkippedUserAgentFiles,
+  guessAgentId,
+  loadAgentDir,
   loadAgents,
   loadConfig,
   RunManager,
   skippedAgentError,
+  skippedUserAgentFiles,
 } from "@duskfleet/core";
 
 const roots = [];
@@ -175,6 +181,53 @@ test("create still removes a file that does not load, and says why", () => {
   );
   assert.equal(existsSync(path.join(dataDir, "agents", "x.md")), false, "rolled back");
   assert.equal(loadConfig(configDir).agents.get("x").description, "taken");
+});
+
+test("unparseable YAML: the id line is the guess, so the builtin it overrides is not served", () => {
+  const { configDir } = makeConfig({
+    agents: { reviewer: agentFile("builtin reviewer"), "my-reviewer": agentFile("builtin named like the file") },
+    userAgents: { "my-reviewer": "---\nid: reviewer\ndescription: [unclosed\n---\nbody\n" },
+  });
+  const config = loadConfig(configDir);
+  assert.equal(config.skippedAgents[0].id, "reviewer", "the declared id, read from the raw text");
+  assert.equal(config.agents.has("reviewer"), false, "no fallback to the builtin reviewer");
+  assert.equal(config.agents.get("my-reviewer").source, "builtin", "the builtin named like the file is untouched");
+  assert.equal(guessAgentId("---\nid: 'abc'  # x\nmodel: [\n---\n"), "abc");
+  assert.equal(guessAgentId("---\n  id: nested\n---\n"), null, "only a top-level id line");
+  assert.equal(guessAgentId("no frontmatter"), null);
+});
+
+test("create refuses the id of a user file that does not load, unless overwrite is set", () => {
+  const { configDir, dataDir } = makeConfig({
+    agents: { helper: agentFile("builtin helper") },
+    userAgents: { "hand-edited": "---\nid: helper\nmodel: 3\n---\nbody\n" },
+  });
+  const config = loadConfig(configDir);
+  const broken = path.join(dataDir, "agents", "hand-edited.md");
+  assert.throws(
+    () => assertAgentIdFree(config, "helper", false, "overwrite: true", "update_agent"),
+    (err) =>
+      err.message.includes(broken) && /does not load .*model/.test(err.message) && /overwrite: true/.test(err.message),
+  );
+  assert.doesNotThrow(() => assertAgentIdFree(config, "helper", true, "overwrite: true", "update_agent"));
+  assert.deepEqual(
+    skippedUserAgentFiles(config, "helper").map((s) => s.sourcePath),
+    [broken],
+  );
+  assert.deepEqual(deleteSkippedUserAgentFiles(config, "helper"), [broken], "deleted by path, not by id");
+  assert.equal(existsSync(broken), false);
+  assert.equal(loadConfig(configDir).agents.get("helper").source, "builtin", "the builtin is active again");
+});
+
+test("a broken builtin does not affect skippedUserAgentFiles, and deleteAgentFileAt stays in its directory", () => {
+  const { configDir, dataDir } = makeConfig({ agents: { bad: "---\nmodel: 3\n---\nbody\n" } });
+  const config = loadConfig(configDir);
+  assert.deepEqual(skippedUserAgentFiles(config, "bad"), [], "builtin files are never deleted by tools");
+  assert.throws(
+    () => deleteAgentFileAt(path.join(dataDir, "agents"), path.join(configDir, "agents", "bad.md")),
+    /not an agent file/,
+  );
+  assert.equal(loadAgentDir(path.join(configDir, "agents"), "builtin").agents.size, 0, "lenient read, no throw");
 });
 
 test("loadAgents (strict) still throws on the first file that does not load", () => {

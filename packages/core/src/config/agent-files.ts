@@ -128,6 +128,19 @@ export function deleteAgentFile(dir: string, id: string): boolean {
   return true;
 }
 
+/**
+ * Removes one agent file by path, for a file the loader skipped (#462): its name need not match
+ * the id it declares. Only a `.md` file directly inside `dir` is removed. False when it did not exist.
+ */
+export function deleteAgentFileAt(dir: string, file: string): boolean {
+  if (path.dirname(path.resolve(file)) !== path.resolve(dir) || !file.endsWith(".md")) {
+    throw new Error(`refusing to delete ${file}: not an agent file in ${dir}`);
+  }
+  if (!existsSync(file)) return false;
+  unlinkSync(file);
+  return true;
+}
+
 /** Inverse of the loader: a loaded definition back to a writable spec (used by update_agent). */
 export function agentToSpec(a: AgentDefinition): AgentSpec {
   const spec: AgentSpec = {

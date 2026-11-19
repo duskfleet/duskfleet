@@ -13,17 +13,20 @@ import {
   createAgentFromFields,
   type DuskFleetConfig,
   deleteAgentFile,
+  deleteSkippedUserAgentFiles,
   EFFORT_LEVELS,
   envPassthroughSchema,
   harnessNameSchema,
   harnessOf,
   listProjectAgents,
-  loadAgents,
+  loadAgentDir,
   ON_FAILURE_POLICIES,
   PERMISSION_MODES,
   projectIdFromPath,
   sandboxAllowedDomainsSchema,
   skillsSchema,
+  skippedAgentError,
+  skippedUserAgentFiles,
   upsertUserProject,
   validateProjectPath,
   writeAgentAndVerify,
@@ -406,8 +409,16 @@ export function registerAgentTools(server: McpServer, ctx: ToolContext): void {
       try {
         const config = ctx.config;
         const existing = config.agents.get(args.id);
-        if (!existing)
-          return errorResult(new Error(`unknown agent "${args.id}". Known: ${[...config.agents.keys()].join(", ")}`));
+        if (!existing) {
+          const skipped = skippedAgentError(config, args.id);
+          return errorResult(
+            new Error(
+              skipped
+                ? `${skipped}. Fix the file by hand, delete it with delete_agent, or replace it with create_agent and overwrite: true.`
+                : `unknown agent "${args.id}". Known: ${[...config.agents.keys()].join(", ")}`,
+            ),
+          );
+        }
         if (existing.source !== "user") {
           return errorResult(
             new Error(
@@ -457,13 +468,17 @@ export function registerAgentTools(server: McpServer, ctx: ToolContext): void {
       try {
         const config = ctx.config;
         const existing = config.agents.get(args.id);
-        if (!existing) return errorResult(new Error(`unknown agent "${args.id}"`));
-        if (existing.source !== "user")
+        // A user file that does not load (#462) is deleted by path: its name may differ from its id.
+        const broken = existing ? [] : skippedUserAgentFiles(config, args.id);
+        if (!existing && !broken.length)
+          return errorResult(new Error(skippedAgentError(config, args.id) ?? `unknown agent "${args.id}"`));
+        if (existing && existing.source !== "user")
           return errorResult(
             new Error(`"${args.id}" is a builtin agent (${existing.sourcePath}) and cannot be deleted through MCP.`),
           );
         // The default agent must keep resolving: deleting a user override is fine when a builtin remains.
-        const builtinRemains = loadAgents(path.join(config.configDir, "agents"), "builtin").has(args.id);
+        // Lenient read: one broken builtin file must not break the delete of another agent.
+        const builtinRemains = loadAgentDir(path.join(config.configDir, "agents"), "builtin").agents.has(args.id);
         if (args.id === config.defaultAgent && !builtinRemains) {
           return errorResult(
             new Error(
@@ -471,9 +486,19 @@ export function registerAgentTools(server: McpServer, ctx: ToolContext): void {
             ),
           );
         }
-        deleteAgentFile(config.userAgentsDir, args.id);
+        let removedFiles: string[];
+        if (broken.length) {
+          removedFiles = deleteSkippedUserAgentFiles(config, args.id);
+        } else {
+          deleteAgentFile(config.userAgentsDir, args.id);
+          removedFiles = existing ? [existing.sourcePath] : [];
+        }
         const after = ctx.config.agents.get(args.id);
-        return jsonResult({ deleted: true, nowResolvesTo: after ? presentAgent(after, ctx.config) : null });
+        return jsonResult({
+          deleted: true,
+          files: removedFiles,
+          nowResolvesTo: after ? presentAgent(after, ctx.config) : null,
+        });
       } catch (err) {
         return errorResult(err);
       }

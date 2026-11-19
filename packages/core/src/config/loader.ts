@@ -368,11 +368,18 @@ export function loadAgentDir(
     const fileId = file.replace(/\.md$/, "");
     let frontmatter: unknown;
     let body: string;
+    let raw = "";
     try {
-      ({ frontmatter, body } = splitFrontmatter(readFileSync(sourcePath, "utf8")));
+      raw = readFileSync(sourcePath, "utf8");
+      ({ frontmatter, body } = splitFrontmatter(raw));
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
-      skipped.push({ sourcePath, source, id: fileId, error: `invalid agent file ${sourcePath}: ${message}` });
+      skipped.push({
+        sourcePath,
+        source,
+        id: guessAgentId(raw) ?? fileId,
+        error: `invalid agent file ${sourcePath}: ${message}`,
+      });
       continue;
     }
     const parsed = agentFrontmatterSchema.safeParse(frontmatter);
@@ -382,7 +389,7 @@ export function loadAgentDir(
       skipped.push({
         sourcePath,
         source,
-        id: typeof declared === "string" && declared ? declared : fileId,
+        id: typeof declared === "string" && declared ? declared : (guessAgentId(raw) ?? fileId),
         error: `invalid agent file ${sourcePath}: ${issues.join("; ")}`,
       });
       continue;
@@ -431,6 +438,18 @@ export function loadAgentDir(
     agents.set(id, agent);
   }
   return { agents, skipped, duplicates };
+}
+
+/**
+ * Best-effort id of an agent file whose frontmatter does not parse (#462): the first top-level
+ * `id:` line of the frontmatter block, when it is a plain agent id. A guess, so a broken file that
+ * declares another id than its file name still takes that id out instead of leaving a builtin served.
+ */
+export function guessAgentId(raw: string): string | null {
+  const block = /^---\r?\n([\s\S]*?)(?:\r?\n---|$)/.exec(raw)?.[1];
+  if (!block) return null;
+  const m = /^id:[ \t]*(["']?)([a-z0-9][a-z0-9_-]*)\1[ \t]*(?:#.*)?$/m.exec(block);
+  return m?.[2] ?? null;
 }
 
 function loadProjects(file: string, configDir: string): Map<string, ProjectDefinition> {

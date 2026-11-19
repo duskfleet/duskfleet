@@ -8,6 +8,8 @@ export {
   assertAgentWritable,
   assertSpecLoadable,
   createAgentFromFields,
+  deleteSkippedUserAgentFiles,
+  skippedUserAgentFiles,
   writeAgentAndVerify,
 } from "./config/agent-create.js";
 export {
@@ -23,6 +25,7 @@ export {
   assertSandboxSpec,
   assertWrapUpReserve,
   deleteAgentFile,
+  deleteAgentFileAt,
   envPassthroughSchema,
   harnessNameSchema,
   listProjectAgents,
@@ -56,7 +59,9 @@ export {
   dataDirFor,
   expandHome,
   findRepoRoot,
+  guessAgentId,
   isDirectory,
+  loadAgentDir,
   loadAgents,
   loadConfig,
   locateConfig,

@@ -14,11 +14,12 @@ import {
   assertSandboxSpec,
   assertWrapUpReserve,
   deleteAgentFile,
+  deleteAgentFileAt,
   writeAgentFile,
 } from "./agent-files.js";
 import { assertAgentSpecClean } from "./agent-lint.js";
 import { assertSkillsAvailable } from "./skills.js";
-import type { AgentDefinition, DuskFleetConfig } from "./types.js";
+import type { AgentDefinition, DuskFleetConfig, SkippedAgentFile } from "./types.js";
 
 /** Validate what the loader would reject, *before* a file lands on disk and breaks every later config load. */
 export function assertSpecLoadable(spec: AgentSpec, config: DuskFleetConfig): void {
@@ -64,6 +65,13 @@ export function assertAgentIdFree(
   updateHint: string | null,
 ): AgentDefinition | undefined {
   const existing = config.agents.get(id);
+  // A user file that does not load still owns its id (#462): never overwrite it silently.
+  const broken = skippedUserAgentFiles(config, id)[0];
+  if (broken && !overwrite) {
+    throw new Error(
+      `agent "${id}" exists but its file ${broken.sourcePath} does not load (${broken.error}). Fix the file, delete it, or pass ${overwriteHint} to replace it.`,
+    );
+  }
   if (existing && !overwrite) {
     throw new Error(
       existing.source === "user"
@@ -72,6 +80,27 @@ export function assertAgentIdFree(
     );
   }
   return existing;
+}
+
+/**
+ * The user agent files declaring `id` that the loader skipped (#462). Empty when a valid user file
+ * holds the id (a skipped duplicate then does not take it out, the valid file is what tools act on).
+ */
+export function skippedUserAgentFiles(config: DuskFleetConfig, id: string): SkippedAgentFile[] {
+  if (config.agents.get(id)?.source === "user") return [];
+  return (config.skippedAgents ?? []).filter((s) => s.id === id && s.source === "user");
+}
+
+/**
+ * Removes the user files of `id` that do not load (#462), so a broken hand-edited file can be
+ * deleted by the same tools as a valid one. Returns the removed paths (empty when there was none).
+ */
+export function deleteSkippedUserAgentFiles(config: DuskFleetConfig, id: string): string[] {
+  const removed: string[] = [];
+  for (const s of skippedUserAgentFiles(config, id)) {
+    if (deleteAgentFileAt(config.userAgentsDir, s.sourcePath)) removed.push(s.sourcePath);
+  }
+  return removed;
 }
 
 /**
