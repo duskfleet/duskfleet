@@ -262,20 +262,32 @@ export function effectiveAgentFields(
   agent: Pick<AgentDefinition, "description" | "model" | "claudeAgent">,
   projectPath: string | null,
 ): EffectiveAgentFields {
-  const projectAgent =
-    agent.claudeAgent && projectPath
-      ? listProjectAgents(projectPath).find((a) => a.name === agent.claudeAgent)
-      : undefined;
+  const projectAgent = agent.claudeAgent && projectPath ? findProjectAgent(projectPath, agent.claudeAgent) : undefined;
   const ownDescription = agent.description.trim() ? agent.description : "";
   const description = ownDescription || projectAgent?.description || "";
-  const model = agent.model ?? projectAgent?.model ?? null;
+  // `model: inherit` in a project agent means "the caller's model": no model of its own.
+  const projectAgentModel =
+    projectAgent?.model && projectAgent.model.trim().toLowerCase() !== "inherit" ? projectAgent.model : null;
+  const model = agent.model ?? projectAgentModel;
   return {
     description,
     descriptionSource: ownDescription ? "agent" : description ? "project agent" : null,
     model,
     modelSource: agent.model !== undefined ? "agent" : model ? "project agent" : null,
-    projectAgentModel: projectAgent?.model ?? null,
+    projectAgentModel,
   };
+}
+
+/**
+ * The project agent named `name`, undefined when the folder cannot be read (`.claude/agents` a
+ * plain file, a directory named `x.md`, an unreadable file): a listing never fails on a project.
+ */
+function findProjectAgent(projectPath: string, name: string): ProjectAgentInfo | undefined {
+  try {
+    return listProjectAgents(projectPath).find((a) => a.name === name);
+  } catch {
+    return undefined;
+  }
 }
 
 /** The folder a link's project agent lives in: its `project`'s path, null when unbound or unknown. */

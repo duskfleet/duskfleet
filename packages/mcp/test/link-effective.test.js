@@ -113,6 +113,63 @@ test("effectiveAgentFields: neither file has them, unparsable frontmatter, own a
   }
 });
 
+test("effectiveAgentFields: an unreadable project folder contributes nothing instead of throwing", () => {
+  // A directory named x.md inside .claude/agents (readFileSync would throw EISDIR).
+  const withDir = projectWith({ worker: PERSONA });
+  // .claude/agents is a plain file (readdirSync would throw ENOTDIR).
+  const withFile = mkdtempSync(path.join(tmpdir(), "duskfleet-link-effective-"));
+  try {
+    mkdirSync(path.join(withDir, ".claude", "agents", "x.md"));
+    mkdirSync(path.join(withFile, ".claude"), { recursive: true });
+    writeFileSync(path.join(withFile, ".claude", "agents"), "not a folder");
+    for (const project of [withDir, withFile]) {
+      assert.deepEqual(effectiveAgentFields({ description: "", model: "haiku", claudeAgent: "worker" }, project), {
+        description: "",
+        descriptionSource: null,
+        model: "haiku",
+        modelSource: "agent",
+        projectAgentModel: null,
+      });
+    }
+    const projects = new Map([["app", { path: withDir }]]);
+    assert.deepEqual(
+      linkModelOverrides(
+        [{ id: "cheap", description: "", model: "haiku", claudeAgent: "worker", project: "app" }],
+        projects,
+      ),
+      [],
+    );
+  } finally {
+    rmSync(withDir, { recursive: true, force: true });
+    rmSync(withFile, { recursive: true, force: true });
+  }
+});
+
+test("effectiveAgentFields: a project agent with model: inherit has no model of its own", () => {
+  const project = projectWith({ worker: "---\nname: worker\ndescription: Works.\nmodel: inherit\n---\nYou work.\n" });
+  try {
+    const bare = effectiveAgentFields({ description: "", claudeAgent: "worker" }, project);
+    assert.equal(bare.model, null);
+    assert.equal(bare.modelSource, null);
+    assert.equal(bare.projectAgentModel, null);
+    const own = effectiveAgentFields({ description: "", model: "haiku", claudeAgent: "worker" }, project);
+    assert.equal(own.model, "haiku");
+    assert.equal(own.modelSource, "agent");
+    assert.equal(own.projectAgentModel, null);
+    // No false doctor advice: inherit cannot disagree with the link's model.
+    const projects = new Map([["app", { path: project }]]);
+    assert.deepEqual(
+      linkModelOverrides(
+        [{ id: "cheap", description: "", model: "haiku", claudeAgent: "worker", project: "app" }],
+        projects,
+      ),
+      [],
+    );
+  } finally {
+    rmSync(project, { recursive: true, force: true });
+  }
+});
+
 test("linkProjectPath resolves a bound link only", () => {
   const projects = new Map([["app", { path: "/p/app" }]]);
   assert.equal(linkProjectPath({ claudeAgent: "w", project: "app" }, projects), "/p/app");

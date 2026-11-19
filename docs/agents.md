@@ -467,6 +467,8 @@ when neither sets it). The fallback is for reading only: nothing is written to e
 the agent's hash does not change, so continued sessions keep matching. A link that sets its own
 `model` runs with `--model <it>`, so the Duskfleet value wins over the project agent's;
 `duskfleet doctor` prints one advice line under `agents` for each link where the two differ.
+A project agent with `model: inherit` (Claude Code's "use the caller's model") counts as setting
+no model, and a project folder whose `.claude/agents` cannot be read contributes nothing.
 
 Two things to get right with a link:
 
