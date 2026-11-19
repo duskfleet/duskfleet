@@ -17,18 +17,18 @@ Common flags, left out of the table: `codex exec --json --ignore-user-config
 -c sandbox_workspace_write.network_access=false -c model_reasoning_effort="low"`. Unless the
 table says otherwise the prompt is the last argument and stdin is `/dev/null`.
 
-| Fixture            | Extra flags                                                          | Prompt                                   | Exit |
-| ------------------ | -------------------------------------------------------------------- | ---------------------------------------- | ---- |
-| `edit`             | `-s workspace-write`                                                 | create `hello.txt`                       | 0    |
-| `shell`            | `-s workspace-write`                                                 | run `ls -la .`                           | 0    |
-| `readonly-write`   | `-s read-only`                                                       | run `touch marker.txt .`                 | 0    |
-| `network-blocked`  | `-s workspace-write`                                                 | run `curl` against `https://example.com` | 0    |
-| `failed-model`     | `-s workspace-write -m no-such-model`                                | "Say hi"                                 | 1    |
-| `resume`           | `codex exec resume --json --ignore-user-config <thread of edit>`     | "what did you do earlier?"               | 0    |
-| `resume-unknown`   | `codex exec resume --json --ignore-user-config <unknown uuid>`       | "Say hi"                                 | 1    |
-| `stdin`            | `-s read-only -`: the prompt is piped on stdin                       | "Reply with exactly: stdin works"        | 0    |
-| `killed`           | `-s read-only`; SIGTERM after 6 s                                    | a 3000 word essay                        | 143  |
-| `codex-home-patch` | `-s workspace-write`, no `--ignore-user-config`, env `CODEX_HOME=<dir>` | add a line to `hello.txt` with the patch tool | 0 |
+| Fixture            | Extra flags                                                             | Prompt                                        | Exit |
+| ------------------ | ----------------------------------------------------------------------- | --------------------------------------------- | ---- |
+| `edit`             | `-s workspace-write`                                                    | create `hello.txt`                            | 0    |
+| `shell`            | `-s workspace-write`                                                    | run `ls -la .`                                | 0    |
+| `readonly-write`   | `-s read-only`                                                          | run `touch marker.txt .`                      | 0    |
+| `network-blocked`  | `-s workspace-write`                                                    | run `curl` against `https://example.com`      | 0    |
+| `failed-model`     | `-s workspace-write -m no-such-model`                                   | "Say hi"                                      | 1    |
+| `resume`           | `codex exec resume --json --ignore-user-config <thread of edit>`        | "what did you do earlier?"                    | 0    |
+| `resume-unknown`   | `codex exec resume --json --ignore-user-config <unknown uuid>`          | "Say hi"                                      | 1    |
+| `stdin`            | `-s read-only -`: the prompt is piped on stdin                          | "Reply with exactly: stdin works"             | 0    |
+| `killed`           | `-s read-only`; SIGTERM after 6 s                                       | a 3000 word essay                             | 143  |
+| `codex-home-patch` | `-s workspace-write`, no `--ignore-user-config`, env `CODEX_HOME=<dir>` | add a line to `hello.txt` with the patch tool | 0    |
 
 `<dir>` of `codex-home-patch` was an empty directory holding only `auth.json`, a symbolic link to
 the user's `~/.codex/auth.json`. `resume-unknown` printed nothing on stdout.
