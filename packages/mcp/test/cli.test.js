@@ -283,6 +283,44 @@ test("doctor lists the stuck pending and running rows of a dead owner its startu
   }
 });
 
+test("doctor warns about a link whose allowed_tools name a tool the project agent does not declare (#458)", () => {
+  const { root, configDir, project } = makeRoot();
+  try {
+    const projectAgents = path.join(project, ".claude", "agents");
+    mkdirSync(projectAgents, { recursive: true });
+    writeFileSync(path.join(projectAgents, "designer.md"), "---\nname: designer\ntools: Read, Grep\n---\nDesign.\n");
+    writeFileSync(path.join(projectAgents, "free.md"), "---\nname: free\n---\nNo tools line.\n");
+    const link = (id, claudeAgent, tools) =>
+      writeFileSync(
+        path.join(configDir, "agents", `${id}.md`),
+        `---\nclaude_agent: ${claudeAgent}\nproject: demo\nallowed_tools: ${JSON.stringify(tools)}\n---\n`,
+      );
+    link("figma-link", "designer", ["Read", "mcp__claude_ai_Figma"]);
+    link("covered-link", "designer", ["Read(src/**)", "Grep"]);
+    link("free-link", "free", ["Bash(npm test:*)", "mcp__claude_ai_Figma"]);
+
+    const doctor = cli(configDir, ["doctor", "--json"]);
+    assert.equal(doctor.status, 0, doctor.stderr);
+    const { linkTools } = JSON.parse(doctor.stdout);
+    assert.deepEqual(linkTools.checked.sort(), ["covered-link", "figma-link", "free-link"]);
+    assert.deepEqual(
+      linkTools.gaps.map((g) => [g.agentId, g.missing, g.skipped]),
+      [["figma-link", ["mcp__claude_ai_Figma"], null]],
+      "a covered link and one whose project agent has no tools: get no warning",
+    );
+    assert.equal(linkTools.gaps[0].projectAgentFile, path.join(projectAgents, "designer.md"));
+
+    const human = cli(configDir, ["doctor"]);
+    assert.match(human.stdout, /! link tools {6}3 link agent\(s\), 1 with allowed_tools/);
+    assert.match(
+      human.stdout,
+      /agent figma-link: allowed_tools mcp__claude_ai_Figma not in the tools: of .*designer\.md/,
+    );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("an agent file that does not load: agents and doctor name it, its runs fail with its error, the rest works", () => {
   const { root, configDir, project } = makeRoot();
   try {
