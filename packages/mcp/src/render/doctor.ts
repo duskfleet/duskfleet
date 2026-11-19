@@ -4,7 +4,15 @@
  * agents, scheduler, schedules, unpriced runs, orphans, sandbox, harnesses, probe. Advice lines are indented under their
  * check. A missing binary is the only error. Pure: the exit code stays the CLI's business.
  */
-import type { BudgetState, ConfigSource, DataSource, SandboxSupport } from "@duskfleet/core";
+import {
+  type AgentDefinition,
+  type BudgetState,
+  type ConfigSource,
+  type DataSource,
+  effectiveAgentFields,
+  linkProjectPath,
+  type SandboxSupport,
+} from "@duskfleet/core";
 import type { ProbeReport } from "../probe.js";
 import type { KeepAwakeStatus, ServiceStatus } from "../service.js";
 import { AGENT_CREATE } from "./agents.js";
@@ -24,6 +32,8 @@ export interface DoctorReport {
   dataDir: string;
   dataSource: DataSource;
   agents: string[];
+  /** Links whose own `model` differs from their project agent's (issue #459); absent in older reports. */
+  linkModelOverrides?: LinkModelOverride[];
   scheduler: {
     enabled: boolean;
     ticking: boolean;
@@ -53,6 +63,39 @@ export interface DoctorReport {
   /** One entry per registered harness (issue #445); absent in reports built before it existed. */
   harnesses?: HarnessReport;
   probe?: ProbeReport | null;
+}
+
+export interface LinkModelOverride {
+  agentId: string;
+  claudeAgent: string;
+  model: string;
+  projectAgentModel: string;
+  advice: string;
+}
+
+/**
+ * A link whose Duskfleet file sets a `model` other than its project agent's `model:`: the run
+ * passes `--model`, so the Duskfleet value wins. Not an error (it is a way to run a project agent
+ * on a cheaper model), but the two copies disagree, so `doctor` says which one runs.
+ */
+export function linkModelOverrides(
+  agents: Iterable<Pick<AgentDefinition, "id" | "model" | "claudeAgent" | "project" | "description">>,
+  projects: ReadonlyMap<string, { path: string }>,
+): LinkModelOverride[] {
+  const out: LinkModelOverride[] = [];
+  for (const a of agents) {
+    if (!a.claudeAgent || a.model === undefined) continue;
+    const { projectAgentModel } = effectiveAgentFields(a, linkProjectPath(a, projects));
+    if (projectAgentModel === null || projectAgentModel === a.model) continue;
+    out.push({
+      agentId: a.id,
+      claudeAgent: a.claudeAgent,
+      model: a.model,
+      projectAgentModel,
+      advice: `link ${a.id} sets model: ${a.model}, its project agent ${a.claudeAgent} says ${projectAgentModel}: runs use ${a.model} (the Duskfleet value wins)`,
+    });
+  }
+  return out;
 }
 
 export interface SandboxReport {
@@ -209,7 +252,11 @@ function checks(r: DoctorReport, opts: RenderOpts): Check[] {
     ok("config", `${r.configDir} (${r.configSource})`),
     ok("data", `${r.dataDir} (${r.dataSource})`),
     r.agents.length
-      ? ok("agents", `${r.agents.length}: ${r.agents.join(", ")}`)
+      ? ok(
+          "agents",
+          `${r.agents.length}: ${r.agents.join(", ")}`,
+          (r.linkModelOverrides ?? []).map((o) => o.advice),
+        )
       : warn("agents", "none yet", [paint("accent", AGENT_CREATE, opts)]),
     schedulerCheck(r),
     dupes.length

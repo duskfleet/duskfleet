@@ -40,10 +40,12 @@ import {
   costTotalsLine,
   createAgentFromFields,
   type DataSource,
+  effectiveAgentFields,
   effectivePath,
   findRepoRoot,
   harnessOf,
   type LogLevel,
+  linkProjectPath,
   loadConfig,
   mcpServerConfig,
   parseHolder,
@@ -79,6 +81,7 @@ import {
   AGENT_CREATE,
   agentKind,
   type DoctorReport,
+  linkModelOverrides,
   type RenderOpts,
   renderAgentCreated,
   renderAgents,
@@ -614,10 +617,18 @@ async function main(): Promise<void> {
       }
       if (sub) commandUsage("agents", `unknown agents subcommand: ${sub}`);
       const app = await open();
-      const agents = [...app.config.agents.values()].map(({ systemPrompt: _p, ...a }) => ({
-        ...a,
-        harness: harnessOf(a),
-      }));
+      // A link that leaves description / model out lists the project agent's (issue #459).
+      const agents = [...app.config.agents.values()].map(({ systemPrompt: _p, ...a }) => {
+        const effective = effectiveAgentFields(a, linkProjectPath(a, app.config.projects));
+        return {
+          ...a,
+          description: effective.description,
+          descriptionSource: effective.descriptionSource,
+          ...(effective.model !== null ? { model: effective.model } : {}),
+          modelSource: effective.modelSource,
+          harness: harnessOf(a),
+        };
+      });
       // Human: the empty state is on stdout. --json: the hint on stderr, stdout stays `[]`.
       if (agents.length === 0 && jsonOutput) {
         process.stderr.write(`no agents yet: Duskfleet ships none. Create your first one with\n  ${AGENT_CREATE}\n`);
@@ -714,6 +725,8 @@ async function main(): Promise<void> {
         // env (DUSKFLEET_DATA) > config (data_dir, or ../data next to a repo config) > user
         dataSource: app.config.dataSource,
         agents: [...app.config.agents.keys()],
+        // Links whose own model differs from the project agent's: the Duskfleet value wins.
+        linkModelOverrides: linkModelOverrides(app.config.agents.values(), app.config.projects),
         scheduler,
         // Claude Code's native sandbox on this host, and the agents that need it (sandbox: true).
         sandbox: sandboxReport(

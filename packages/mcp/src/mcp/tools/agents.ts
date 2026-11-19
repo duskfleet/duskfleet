@@ -14,9 +14,11 @@ import {
   type DuskFleetConfig,
   deleteAgentFile,
   EFFORT_LEVELS,
+  effectiveAgentFields,
   envPassthroughSchema,
   harnessNameSchema,
   harnessOf,
+  linkProjectPath,
   listProjectAgents,
   loadAgents,
   ON_FAILURE_POLICIES,
@@ -85,14 +87,20 @@ function projectFromFolder(
 }
 
 function presentAgent(a: AgentDefinition, config: DuskFleetConfig) {
+  // A link that leaves description / model out lists the project agent's (issue #459).
+  const effective = effectiveAgentFields(a, linkProjectPath(a, config.projects));
   return {
     id: a.id,
     name: a.name,
-    description: a.description,
+    description: effective.description,
+    /** "agent" = this file, "project agent" = a link's .claude/agents/<claudeAgent>.md, null = none. */
+    descriptionSource: effective.descriptionSource,
     source: a.source,
     /** "own" = persona defined in Duskfleet; "link" = reuses the project's .claude/agents/<claudeAgent>.md */
     kind: agentKind(a),
-    model: a.model ?? null,
+    model: effective.model,
+    /** "agent" = this file, "project agent" = a link's project agent, null = the CLI default. */
+    modelSource: effective.modelSource,
     permissionMode: a.permissionMode,
     allowedTools: a.allowedTools ?? [],
     disallowedTools: a.disallowedTools ?? [],
