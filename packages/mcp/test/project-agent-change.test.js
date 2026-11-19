@@ -41,8 +41,16 @@ function makeApp() {
     path.join(configDir, "agents", "linked.md"),
     `---\nclaude_agent: worker\npermission_mode: dontAsk\n---\n`,
   );
+  writeFileSync(
+    path.join(configDir, "agents", "helper-link.md"),
+    `---\nclaude_agent: helper\npermission_mode: dontAsk\n---\n`,
+  );
   const persona = path.join(realProject, ".claude", "agents", "worker.md");
   writeFileSync(persona, "---\nname: worker\ndescription: works\n---\nv1\n");
+  writeFileSync(
+    path.join(realProject, ".claude", "agents", "helper.md"),
+    "---\nname: helper\ndescription: helps\n---\nother\n",
+  );
   const config = loadConfig(configDir);
   const db = openDatabase(config.dataDir);
   const executor = new ClaudeCodeExecutor({ binary: config.claude.binary, strictMcpConfig: true });
@@ -119,6 +127,24 @@ test("persona edited between two scheduled fires: one note with both hashes, run
     // Another schedule's run is not this schedule's previous run.
     const other = await fire(app, "linked", "sched-2");
     assert.equal(app.runs.projectAgentChange(other), null);
+  } finally {
+    await app.cleanup();
+  }
+});
+
+test("schedule switched to another link agent: its files are never compared", async () => {
+  const app = makeApp();
+  try {
+    const first = await fire(app, "linked");
+    const switched = await fire(app, "helper-link");
+    assert.ok(switched.projectAgentHash);
+    assert.notEqual(switched.projectAgentHash, first.projectAgentHash);
+    assert.equal(app.runs.projectAgentChange(switched), null, "first run of this agent on the schedule");
+    assert.deepEqual(personaNotes(app, switched.id), []);
+    // Back to the first agent: compared with its own previous run, not with the other agent's.
+    const back = await fire(app, "linked");
+    assert.equal(app.runs.projectAgentChange(back).previousRunId, first.id);
+    assert.deepEqual(personaNotes(app, back.id), []);
   } finally {
     await app.cleanup();
   }

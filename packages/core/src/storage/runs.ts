@@ -416,19 +416,23 @@ export class RunRepository {
   }
 
   /**
-   * The run the schedule started before `before` (not a gate run, whatever its status): what a
-   * fire's project agent hash is compared with. Null for the schedule's first run.
+   * The run the schedule started before `before` for the same agent (not a gate run, whatever its
+   * status): what a fire's project agent hash is compared with. Null for the schedule's first run,
+   * and for the first run after the schedule was switched to another agent (two agents' files are
+   * not compared).
    */
-  previousRunOfSchedule(scheduleId: string, before: Pick<Run, "id" | "createdAt">): Run | null {
+  previousRunOfSchedule(scheduleId: string, before: Pick<Run, "id" | "createdAt" | "agentId">): Run | null {
     const row = this.db
       .prepare(
         // Same created_at: the earlier insert wins (the row of `before` may not exist yet: any rowid then).
-        `SELECT * FROM runs WHERE schedule_id = ? AND kind = 'run' AND id <> ?
+        `SELECT * FROM runs WHERE schedule_id = ? AND agent_id = ? AND kind = 'run' AND id <> ?
            AND (created_at < ? OR (created_at = ?
              AND rowid < COALESCE((SELECT rowid FROM runs WHERE id = ?), 9223372036854775807)))
          ORDER BY created_at DESC, rowid DESC LIMIT 1`,
       )
-      .get(scheduleId, before.id, before.createdAt, before.createdAt, before.id) as unknown as RunRow | undefined;
+      .get(scheduleId, before.agentId, before.id, before.createdAt, before.createdAt, before.id) as unknown as
+      | RunRow
+      | undefined;
     return row ? rowToRun(row) : null;
   }
 

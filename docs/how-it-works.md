@@ -120,7 +120,7 @@ they arrive and keeps the raw stream in `data/logs/<run_id>.jsonl`:
   definition and, for a link, the project agent file together; `projectAgentHash`
   (`project_agent_hash`) is the project agent file alone (`<project>/.claude/agents/<name>.md`),
   null for an own agent. A scheduled link run whose `projectAgentHash` differs from the one of
-  the schedule's previous run gets a `note` event with both hashes. `get_run` and `run-info`
+  the schedule's previous run of the same agent gets a `note` event with both hashes. `get_run` and `run-info`
   return `projectAgentChange` (`previousRunId`, `previousHash`, `hash`, `changed`), null when
   there is nothing to compare (own agent, first run of the schedule, previous run older than the
   column).
