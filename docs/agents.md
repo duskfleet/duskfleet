@@ -41,6 +41,10 @@ anything. Code never writes into `config/agents`. Because a user agent may later
 field, and store `add_dirs` inside your home directory as `~/...`
 ([MCP server](mcp-server.md)).
 
+These files hold each agent's unattended envelope (permissions, allow-list, budget, sandbox,
+environment) and live outside every project on purpose, so a run cannot widen its own permissions:
+see [where the unattended envelope lives](security.md#where-the-unattended-envelope-lives).
+
 ## Builtin agents
 
 Two specialised patterns sit in this repository's `config/agents/`, not bound to any project.
