@@ -24,6 +24,7 @@ import {
   ON_FAILURE_POLICIES,
   PERMISSION_MODES,
   projectIdFromPath,
+  sameDirectory,
   sandboxAllowedDomainsSchema,
   skillsSchema,
   upsertUserProject,
@@ -61,7 +62,7 @@ function projectFromFolder(
       `${resolved}/.claude/agents has no agent "${claudeAgent}" (available: ${agents.map((a) => a.name).join(", ")})`,
     );
   }
-  const existing = [...config.projects.values()].find((p) => p.path === resolved);
+  const existing = [...config.projects.values()].find((p) => sameDirectory(p.path, resolved));
   if (existing) {
     if (preferredId && preferredId !== existing.id) {
       throw new Error(`${resolved} is already registered as project "${existing.id}"; use that id or omit project.`);
@@ -77,7 +78,7 @@ function projectFromFolder(
   upsertUserProject(config.userProjectsFile, {
     id,
     path: resolved,
-    description: `Registered by create_agent (link) from ${resolved}`,
+    description: "Registered by create_agent (link)",
   });
   const fresh = ctx.config; // reload: the new project must be visible before the agent file is validated
   if (!fresh.projects.has(id))
