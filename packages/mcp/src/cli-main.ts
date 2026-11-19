@@ -97,6 +97,7 @@ import {
   runReportLines,
   sandboxReport,
   scheduleRequestedLine,
+  skippedAgentLine,
   trimmedRun,
 } from "./render/index.js";
 import {
@@ -622,7 +623,10 @@ async function main(): Promise<void> {
       if (agents.length === 0 && jsonOutput) {
         process.stderr.write(`no agents yet: Duskfleet ships none. Create your first one with\n  ${AGENT_CREATE}\n`);
       }
-      print(agents, renderAgents);
+      // Agent files that do not load: after the table; --json keeps stdout the array, so on stderr.
+      const skipped = app.config.skippedAgents ?? [];
+      if (jsonOutput) for (const s of skipped) process.stderr.write(`${skippedAgentLine(s)}\n`);
+      print(agents, (value, opts) => renderAgents(value, opts, skipped));
       return done();
     }
     case "projects": {
@@ -714,6 +718,14 @@ async function main(): Promise<void> {
         // env (DUSKFLEET_DATA) > config (data_dir, or ../data next to a repo config) > user
         dataSource: app.config.dataSource,
         agents: [...app.config.agents.keys()],
+        // Agent files the loader skipped (#462): the rest of the config loaded without them.
+        skippedAgents: (app.config.skippedAgents ?? []).map((s) => ({
+          id: s.id,
+          source: s.source,
+          sourcePath: s.sourcePath,
+          error: s.error,
+          advice: skippedAgentLine(s),
+        })),
         scheduler,
         // Claude Code's native sandbox on this host, and the agents that need it (sandbox: true).
         sandbox: sandboxReport(

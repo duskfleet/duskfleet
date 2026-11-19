@@ -1469,6 +1469,31 @@ test("a stored command gate with scheduler.allow_command_gates off records error
   }
 });
 
+test("a schedule whose agent file does not load records error naming the file; the other schedules fire", async () => {
+  const { root, configDir } = makeRoot();
+  const t = makeScheduler(configDir);
+  try {
+    const broken = t.scheduler.create({ name: "broken", agentId: "coder", prompt: "ok", cron: "0 * * * *" });
+    const healthy = t.scheduler.create({ name: "healthy", agentId: "coder2", prompt: "ok", cron: "0 * * * *" });
+    const bad = path.join(configDir, "agents", "coder.md");
+    writeFileSync(bad, "---\nproject: demo\npermission_mode: not-a-mode\n---\nbody\n");
+
+    t.due(broken.id);
+    t.due(healthy.id);
+    await t.tickAll();
+    const row = t.repo.get(broken.id);
+    assert.equal(row.lastOutcome, "error");
+    assert.ok(row.lastError.includes(bad), `the error names the file: ${row.lastError}`);
+    assert.match(row.lastError, /permission_mode/);
+    assert.equal(row.lastRunId, null, "no run of the broken agent");
+    const ok = t.repo.get(healthy.id);
+    assert.ok(ok.lastRunId, "the healthy schedule fired");
+    await t.runs.waitForRun(ok.lastRunId, 15_000);
+  } finally {
+    await t.close(root);
+  }
+});
+
 test("command gates fail closed: switched off while config/ fails to load, the stale true is not trusted", async () => {
   const { root, configDir, project } = makeRoot();
   const t = makeScheduler(configDir);
@@ -1482,11 +1507,11 @@ test("command gates fail closed: switched off while config/ fails to load, the s
       gate: { command: `touch "${marker}"; exit 1` },
     });
     const plain = t.scheduler.create({ name: "plain", agentId: "coder2", prompt: "ok", cron: "0 * * * *" });
-    // The switch goes off, but a broken agent file makes every reload fail: the config in memory
-    // still says allow_command_gates: true.
+    // The switch goes off, but a broken projects.yaml makes every reload fail (a broken agent file
+    // no longer does, #462): the config in memory still says allow_command_gates: true.
     writeFileSync(path.join(configDir, "duskfleet.yaml"), globalYaml({ allowCommandGates: false }));
-    const bad = path.join(configDir, "agents", "bad.md");
-    writeFileSync(bad, "---\npermission_mode: not-a-mode\n---\nbody\n");
+    const projectsFile = path.join(configDir, "projects.yaml");
+    writeFileSync(projectsFile, "projects:\n  demo:\n    path: 3\n");
 
     t.due(s.id);
     await t.tickAll();
@@ -1513,7 +1538,7 @@ test("command gates fail closed: switched off while config/ fails to load, the s
     assert.equal(t.scheduler.update(plain.id, { prompt: "again" }).prompt, "again");
 
     // Config loads again with the switch off: the usual refusal.
-    rmSync(bad);
+    writeFileSync(projectsFile, `projects:\n  demo:\n    path: ${project}\n`);
     assert.throws(
       () => t.scheduler.update(plain.id, { gate: { command: "true" } }),
       /command gates are disabled.*scheduler\.allow_command_gates/,

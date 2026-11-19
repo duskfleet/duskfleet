@@ -3,7 +3,7 @@
  * malformed agent file does to a reload. Each test builds its own config dir under tmp.
  */
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { after, test } from "node:test";
@@ -12,9 +12,11 @@ import {
   agentToSpec,
   assertAgentKind,
   assertAgentSpecClean,
+  createAgentFromFields,
   loadAgents,
   loadConfig,
   RunManager,
+  skippedAgentError,
 } from "@duskfleet/core";
 
 const roots = [];
@@ -78,27 +80,106 @@ test("data/projects.yaml merges over config/projects.yaml, same id = the private
   assert.equal(projects.get("private-only").path, path.join(root, "priv"));
 });
 
-test("a malformed agent file fails loadConfig by name, and a reload keeps the previous config", () => {
+test("a malformed agent file is skipped by name, the other agents load", () => {
   const { configDir, dataDir } = makeConfig({ agents: { good: agentFile("fine") } });
+  const bad = path.join(dataDir, "agents", "bad.md");
+  writeFileSync(bad, "---\npermission_mode: not-a-mode\n---\nbody\n");
+  const config = loadConfig(configDir);
+  assert.deepEqual([...config.agents.keys()], ["good"]);
+  assert.equal(config.skippedAgents.length, 1);
+  const [s] = config.skippedAgents;
+  assert.equal(s.sourcePath, bad);
+  assert.equal(s.id, "bad");
+  assert.equal(s.source, "user");
+  assert.match(s.error, /permission_mode/);
+  assert.match(skippedAgentError(config, "bad"), /agent "bad" is unavailable: its file .*bad\.md does not load/);
+  assert.equal(skippedAgentError(config, "good"), null);
+
+  rmSync(bad);
+  assert.deepEqual(loadConfig(configDir).skippedAgents, [], "a fixed file loads again");
+});
+
+test("unreadable YAML, a duplicate id and an unknown project each skip one file only", () => {
+  const { configDir, dataDir } = makeConfig({
+    userAgents: {
+      a: agentFile("first", "id: same\n"),
+      b: agentFile("second", "id: same\n"),
+      broken: "---\ndescription: [unclosed\n---\nbody\n",
+      bound: agentFile("bound", "project: nowhere\n"),
+      ok: agentFile("ok"),
+    },
+  });
+  const config = loadConfig(configDir);
+  assert.deepEqual([...config.agents.keys()].sort(), ["ok", "same"]);
+  assert.equal(config.agents.get("same").description, "first", "the first file of a duplicate id stays");
+  const byPath = new Map(config.skippedAgents.map((s) => [path.basename(s.sourcePath), s]));
+  assert.deepEqual([...byPath.keys()].sort(), ["b.md", "bound.md", "broken.md"]);
+  assert.match(byPath.get("b.md").error, /Duplicate agent id "same"/);
+  assert.equal(byPath.get("broken.md").id, "broken", "unreadable frontmatter: the file name is the id");
+  assert.match(byPath.get("bound.md").error, /project "nowhere" is not in projects.yaml/);
+  assert.ok(byPath.get("bound.md").sourcePath.startsWith(path.join(dataDir, "agents")));
+});
+
+test("a broken user agent never falls back to the builtin of the same id", () => {
+  const { configDir } = makeConfig({
+    agents: { helper: agentFile("builtin helper"), other: agentFile("other") },
+    userAgents: { helper: "---\nid: helper\nmodel: 3\n---\nbody\n", bound: agentFile("b", "project: gone\n") },
+  });
+  writeFileSync(path.join(configDir, "agents", "bound.md"), agentFile("builtin bound"));
+  const config = loadConfig(configDir);
+  assert.deepEqual([...config.agents.keys()], ["other"], "neither builtin is served in place of the broken file");
+  assert.match(skippedAgentError(config, "helper"), /data\/agents\/helper\.md does not load/);
+  assert.match(skippedAgentError(config, "bound"), /project "gone"/);
+});
+
+test("default_agent naming a skipped agent loads; a run without agent_id fails naming the file", async () => {
+  const { configDir, dataDir } = makeConfig({
+    userAgents: { main: "---\nmodel: 3\n---\nbody\n", ok: agentFile("ok") },
+  });
+  writeFileSync(path.join(configDir, "duskfleet.yaml"), "data_dir: ../data\ndefault_agent: main\n");
+  const config = loadConfig(configDir);
+  assert.equal(config.defaultAgent, "main");
+  const runs = new RunManager(config, null, null, { owner: "test@host:1" });
+  await assert.rejects(
+    runs.startRun({ prompt: "x", projectPath: dataDir }),
+    (err) => err.message.includes(path.join(dataDir, "agents", "main.md")) && /unavailable/.test(err.message),
+  );
+  writeFileSync(path.join(configDir, "duskfleet.yaml"), "data_dir: ../data\ndefault_agent: ghost\n");
+  assert.throws(() => loadConfig(configDir), /default_agent "ghost" not found/, "an unknown default still fails");
+});
+
+test("an invalid duskfleet.yaml still fails the load, and a reload keeps the previous config", () => {
+  const { configDir } = makeConfig({ agents: { good: agentFile("fine") } });
   const config = loadConfig(configDir);
   const runs = new RunManager(config, null, null, { owner: "test@host:1" });
 
-  const bad = path.join(dataDir, "agents", "bad.md");
-  writeFileSync(bad, "---\npermission_mode: not-a-mode\n---\nbody\n");
-  assert.throws(
-    () => loadConfig(configDir),
-    (err) => err.message.includes(bad) && /permission_mode/.test(err.message),
-  );
-
+  writeFileSync(path.join(configDir, "duskfleet.yaml"), "data_dir: ../data\nmax_concurrent_runs: lots\n");
+  assert.throws(() => loadConfig(configDir), /max_concurrent_runs/);
   const reloaded = runs.reloadConfig();
   assert.equal(reloaded, config, "the previous config object is kept");
-  assert.deepEqual([...reloaded.agents.keys()], ["good"]);
-  assert.match(runs.configReloadError, /permission_mode/, "the failed reload is recorded");
+  assert.match(runs.configReloadError, /max_concurrent_runs/, "the failed reload is recorded");
 
-  rmSync(bad);
-  writeFileSync(path.join(dataDir, "agents", "added.md"), agentFile("new"));
-  assert.deepEqual([...runs.reloadConfig().agents.keys()].sort(), ["added", "good"], "a fixed file loads again");
+  writeFileSync(path.join(configDir, "duskfleet.yaml"), "data_dir: ../data\n");
+  assert.deepEqual([...runs.reloadConfig().agents.keys()], ["good"]);
   assert.equal(runs.configReloadError, null, "a successful reload clears it");
+});
+
+test("create still removes a file that does not load, and says why", () => {
+  // other.md declares id x: the new x.md sorts after it, so the loader skips x.md as a duplicate.
+  const { configDir, dataDir } = makeConfig({ userAgents: { other: agentFile("taken", "id: x\n") } });
+  const config = loadConfig(configDir);
+  const runs = new RunManager(config, null, null, { owner: "test@host:1" });
+  assert.throws(
+    () => createAgentFromFields("own", { id: "x", system_prompt: "Hi." }, config, () => runs.reloadConfig()),
+    /x\.md did not load \(Duplicate agent id "x".*\); it has been removed again/,
+  );
+  assert.equal(existsSync(path.join(dataDir, "agents", "x.md")), false, "rolled back");
+  assert.equal(loadConfig(configDir).agents.get("x").description, "taken");
+});
+
+test("loadAgents (strict) still throws on the first file that does not load", () => {
+  const { configDir } = makeConfig({ agents: { bad: "---\npermission_mode: nope\n---\nbody\n" } });
+  assert.throws(() => loadAgents(path.join(configDir, "agents"), "builtin"), /invalid agent file .*bad\.md/);
 });
 
 test("the builtin agents shipped in config/agents load, are general-purpose and fit for a public repo", () => {

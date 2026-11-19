@@ -85,10 +85,13 @@ export function writeAgentAndVerify(
 ): AgentDefinition {
   assertSpecLoadable(spec, config);
   const file = writeAgentFile(config.userAgentsDir, spec);
-  const fresh = reload().agents.get(spec.id);
+  const reloaded = reload();
+  const fresh = reloaded.agents.get(spec.id);
   if (!fresh || fresh.sourcePath !== file) {
     deleteAgentFile(config.userAgentsDir, spec.id);
-    throw new Error(`agent file ${file} did not load (see server log); it has been removed again`);
+    // The loader skips a file that does not load instead of throwing (#462): its entry says why.
+    const why = reloaded.skippedAgents?.find((s) => s.sourcePath === file)?.error;
+    throw new Error(`agent file ${file} did not load (${why ?? "see server log"}); it has been removed again`);
   }
   return fresh;
 }

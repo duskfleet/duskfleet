@@ -280,7 +280,8 @@ export function registerAgentTools(server: McpServer, ctx: ToolContext): void {
       title: "List agents",
       description:
         "List the agent definitions available: builtin ones from config/agents and user ones from user_agents_dir. " +
-        "Use an agent's id with run_agent.",
+        "Use an agent's id with run_agent. skippedAgents lists the agent files that do not load (path and error): " +
+        "their ids are unavailable, never replaced by a builtin of the same id, until the file is fixed.",
       inputSchema: {},
     },
     async () => {
@@ -293,6 +294,13 @@ export function registerAgentTools(server: McpServer, ctx: ToolContext): void {
         userAgentsDir: config.userAgentsDir,
         byProject,
         agents,
+        // Files the loader could not load: their ids are unavailable until fixed (#462).
+        skippedAgents: (config.skippedAgents ?? []).map((s) => ({
+          id: s.id,
+          source: s.source,
+          sourcePath: s.sourcePath,
+          error: s.error,
+        })),
       });
     },
   );

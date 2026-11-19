@@ -61,6 +61,7 @@ export {
   loadConfig,
   locateConfig,
   resolveConfigDir,
+  skippedAgentError,
   splitFrontmatter,
 } from "./config/loader.js";
 export {

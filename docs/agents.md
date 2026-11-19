@@ -41,6 +41,25 @@ anything. Code never writes into `config/agents`. Because a user agent may later
 field, and store `add_dirs` inside your home directory as `~/...`
 ([MCP server](mcp-server.md)).
 
+### A file that does not load
+
+An agent file you edit by hand can break: invalid frontmatter, an id another file in the same
+directory already has, or a `project:` that is not in `projects.yaml`. Duskfleet skips that one
+file and loads everything else, so the other agents keep running and their schedules keep firing.
+
+- Its id is unavailable until the file is fixed. A broken file in `data/agents/` never falls back
+  to the builtin of the same id: a run, a schedule or a gate of that agent fails with an error that
+  names the file. With two files of the same id in one directory, the first one (by file name)
+  loads and the second is skipped.
+- `list_agents` (`skippedAgents`), `duskfleet agents` (after the table; with `--json` on stderr,
+  stdout stays the list) and `duskfleet doctor` (one warning line per file, `skippedAgents` in
+  `--json`) name the file and its error.
+- `default_agent` naming a skipped agent does not stop the load either: a run without an agent
+  fails with the file's error.
+
+`duskfleet.yaml` and the two `projects.yaml` files are different: an error there still fails the
+load, and a running process keeps its last good config until it is fixed.
+
 ## Builtin agents
 
 Two specialised patterns sit in this repository's `config/agents/`, not bound to any project.

@@ -5,6 +5,7 @@
  * as one edited over MCP.
  */
 import { hostname } from "node:os";
+import { skippedAgentError } from "../config/loader.js";
 import {
   type AgentDefinition,
   type DuskFleetConfig,
@@ -59,7 +60,12 @@ export function validateScheduleInput(
     throw err;
   }
   const agent = config.agents.get(input.agentId);
-  if (!agent) throw new Error(`unknown agent "${input.agentId}". Known: ${[...config.agents.keys()].join(", ")}`);
+  if (!agent) {
+    throw new Error(
+      skippedAgentError(config, input.agentId) ??
+        `unknown agent "${input.agentId}". Known: ${[...config.agents.keys()].join(", ")}`,
+    );
+  }
   if (input.projectId && !config.projects.has(input.projectId)) {
     throw new Error(`unknown project "${input.projectId}". Known: ${[...config.projects.keys()].join(", ")}`);
   }

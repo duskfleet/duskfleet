@@ -390,3 +390,57 @@ test("agents can be created, updated, run and deleted over MCP without touching 
     rmSync(root, { recursive: true, force: true });
   }
 });
+
+test("list_agents names an agent file that does not load; its run fails with that error, never the builtin", async () => {
+  const root = mkdtempSync(path.join(tmpdir(), "duskfleet-agents-skip-"));
+  const configDir = path.join(root, "config");
+  mkdirSync(path.join(configDir, "agents"), { recursive: true });
+  const project = path.join(root, "project");
+  mkdirSync(project);
+  writeFileSync(path.join(configDir, "duskfleet.yaml"), `data_dir: ../data\nclaude:\n  binary: "${fakeBinary}"\n`);
+  writeFileSync(path.join(configDir, "agents", "coder.md"), `---\nname: Coder\n---\nBe brief.\n`);
+  writeFileSync(path.join(configDir, "agents", "helper.md"), `---\nname: Helper\n---\nHelp.\n`);
+  const userDir = path.join(root, "data", "agents");
+  mkdirSync(userDir, { recursive: true });
+  const bad = path.join(userDir, "helper.md");
+  writeFileSync(bad, "---\nmodel: 3\n---\nOverride.\n");
+
+  const transport = new StdioClientTransport({
+    command: process.execPath,
+    args: [serverEntry],
+    env: testEnv({ DUSKFLEET_CONFIG: configDir, DUSKFLEET_LOG_LEVEL: "warn" }),
+    stderr: "pipe",
+  });
+  const client = new Client({ name: "test-client", version: "0.0.0" });
+  try {
+    await client.connect(transport);
+    const listed = ok(await client.callTool({ name: "list_agents", arguments: {} }));
+    assert.deepEqual(
+      listed.agents.map((a) => a.id),
+      ["coder"],
+      "the builtin helper is not served in place of the broken override",
+    );
+    assert.equal(listed.skippedAgents.length, 1);
+    assert.equal(listed.skippedAgents[0].id, "helper");
+    assert.equal(listed.skippedAgents[0].sourcePath, bad);
+    assert.match(listed.skippedAgents[0].error, /model/);
+
+    fails(
+      await client.callTool({
+        name: "run_agent",
+        arguments: { prompt: "go", project_path: project, agent_id: "helper", wait_seconds: 5 },
+      }),
+      /agent "helper" is unavailable: its file .*helper\.md does not load/,
+    );
+    const run = ok(
+      await client.callTool({
+        name: "run_agent",
+        arguments: { prompt: "go", project_path: project, agent_id: "coder", wait_seconds: 10 },
+      }),
+    );
+    assert.equal(run.status, "completed", "the other agents still run");
+  } finally {
+    await client.close();
+    rmSync(root, { recursive: true, force: true });
+  }
+});

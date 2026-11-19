@@ -7,7 +7,7 @@
 import { randomUUID } from "node:crypto";
 import path from "node:path";
 import { agentDefinitionHash, projectAgentDefinitionHash } from "../config/agent-files.js";
-import { loadConfig } from "../config/loader.js";
+import { loadConfig, skippedAgentError } from "../config/loader.js";
 import { prepareSkillBundle } from "../config/skills.js";
 import {
   type AgentDefinition,
@@ -1505,7 +1505,7 @@ export class RunManager {
     }
     const agent = this.config.agents.get(id);
     if (!agent) {
-      throw new Error(`unknown agent "${id}". Known agents: ${known}`);
+      throw new Error(skippedAgentError(this.config, id) ?? `unknown agent "${id}". Known agents: ${known}`);
     }
     return agent;
   }
