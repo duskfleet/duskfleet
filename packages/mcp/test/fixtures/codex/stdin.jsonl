@@ -1,0 +1,4 @@
+{"type":"thread.started","thread_id":"01a1f617-b4d6-75d1-bd5f-bd8edc4a7caa"}
+{"type":"turn.started"}
+{"type":"item.completed","item":{"id":"item_0","type":"agent_message","text":"stdin works"}}
+{"type":"turn.completed","usage":{"input_tokens":19634,"cached_input_tokens":13696,"cache_write_input_tokens":0,"output_tokens":6,"reasoning_output_tokens":0}}
