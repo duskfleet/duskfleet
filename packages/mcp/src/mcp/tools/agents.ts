@@ -17,6 +17,7 @@ import {
   envPassthroughSchema,
   harnessNameSchema,
   harnessOf,
+  linkToolWarnings,
   listProjectAgents,
   loadAgents,
   ON_FAILURE_POLICIES,
@@ -81,6 +82,12 @@ function projectFromFolder(
   if (!fresh.projects.has(id))
     throw new Error(`project "${id}" was written to ${config.userProjectsFile} but did not load`);
   return id;
+}
+
+/** Advice that never refuses the write: a link's allowed_tools entries its project agent does not declare. */
+function agentWarnings(a: AgentDefinition, config: DuskFleetConfig): string[] {
+  const projectPath = a.project ? (config.projects.get(a.project)?.path ?? null) : null;
+  return linkToolWarnings({ claude_agent: a.claudeAgent, allowed_tools: a.allowedTools }, projectPath);
 }
 
 function presentAgent(a: AgentDefinition, config: DuskFleetConfig) {
@@ -335,12 +342,14 @@ export function registerAgentTools(server: McpServer, ctx: ToolContext): void {
         }
         const cfg = ctx.config;
         const fresh = createAgentFromFields(kind, fields, cfg, () => ctx.config, ctx.runs.harnesses.lookup);
+        const after = ctx.config;
         return jsonResult({
           created: true,
           kind,
           overrode: existing?.source ?? null,
           ...(registeredProject ? { project: cfg.projects.get(registeredProject) } : {}),
-          agent: presentAgent(fresh, ctx.config),
+          agent: presentAgent(fresh, after),
+          warnings: agentWarnings(fresh, after),
         });
       } catch (err) {
         return errorResult(err);
@@ -425,7 +434,13 @@ export function registerAgentTools(server: McpServer, ctx: ToolContext): void {
         const kind = requestedKind ?? agentKind(spec);
         assertAgentWritable(kind, spec, cfgNow, stored.skills ?? [], ctx.runs.harnesses.lookup);
         const fresh = writeAgentAndVerify(cfgNow, spec, () => ctx.config);
-        return jsonResult({ updated: true, kind, agent: presentAgent(fresh, ctx.config) });
+        const after = ctx.config;
+        return jsonResult({
+          updated: true,
+          kind,
+          agent: presentAgent(fresh, after),
+          warnings: agentWarnings(fresh, after),
+        });
       } catch (err) {
         return errorResult(err);
       }

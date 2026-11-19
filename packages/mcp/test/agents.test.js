@@ -336,6 +336,36 @@ test("agents can be created, updated, run and deleted over MCP without touching 
       }),
     );
     assert.equal(relinked.agent.claudeAgent, "coordinator");
+    assert.deepEqual(relinked.warnings, [], "no allowed_tools: nothing to warn about");
+    // allowed_tools the project agent (tools: Read, Grep) does not declare: a warning, never a refusal
+    const figmaLink = ok(
+      await client.callTool({
+        name: "create_agent",
+        arguments: {
+          id: "figma-link",
+          kind: "link",
+          claude_agent: "coordinator",
+          project: "demo",
+          allowed_tools: ["Read(src/**)", "Grep", "mcp__claude_ai_Figma"],
+        },
+      }),
+    );
+    assert.equal(figmaLink.created, true);
+    assert.equal(figmaLink.warnings.length, 1);
+    assert.match(figmaLink.warnings[0], /"mcp__claude_ai_Figma" is not in the tools: of .*coordinator\.md/);
+    const covered = ok(
+      await client.callTool({ name: "update_agent", arguments: { id: "figma-link", allowed_tools: ["Read", "Grep"] } }),
+    );
+    assert.deepEqual(covered.warnings, [], "fully covered by the project agent's tools:");
+    const uncovered = ok(
+      await client.callTool({
+        name: "update_agent",
+        arguments: { id: "figma-link", allowed_tools: ["Bash(npm test:*)"] },
+      }),
+    );
+    assert.equal(uncovered.updated, true);
+    assert.match(uncovered.warnings[0], /"Bash\(npm test:\*\)" is not in the tools:/);
+    ok(await client.callTool({ name: "delete_agent", arguments: { id: "figma-link" } }));
     const linkedRun = ok(
       await client.callTool({
         name: "run_agent",

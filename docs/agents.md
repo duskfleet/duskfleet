@@ -459,6 +459,15 @@ a link to a name the project does not define fails before anything is spawned. N
 project agent's `tools:` list does not grant permissions in unattended runs: those tools
 still need to be in `allowed_tools` here.
 
+The reverse also holds: an `allowed_tools` entry the project agent's `tools:` does not declare
+is not available to the run. `create_agent` and `update_agent` return such entries in
+`warnings` (the entry and the project agent file named), and `doctor` lists them under
+`link tools`. They are warnings only: the agent is written and keeps running. The comparison is
+by tool name (`Bash(gh issue view:*)` is `Bash`), MCP names by server (`mcp__claude_ai_Figma`
+and `mcp__claude_ai_Figma__get_screenshot` cover each other). A project agent without `tools:`
+inherits every tool, so nothing is reported; one whose frontmatter does not parse gets one note
+saying the check was skipped.
+
 Two things to get right with a link:
 
 - **Prompt it as the agent, not as its caller.** The run *is* the project agent. If the
