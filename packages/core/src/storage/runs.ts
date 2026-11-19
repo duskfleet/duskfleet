@@ -78,6 +78,7 @@ interface RunRow {
   skills_bundle: string | null;
   sandbox_violations?: number | null;
   harness?: string | null;
+  project_agent_hash?: string | null;
 }
 
 function rowToRun(r: RunRow): Run {
@@ -140,6 +141,7 @@ function rowToRun(r: RunRow): Run {
     logTruncated: r.log_truncated === null || r.log_truncated === undefined ? null : r.log_truncated === 1,
     skillsBundle: r.skills_bundle ?? null,
     harness: r.harness ?? DEFAULT_HARNESS,
+    projectAgentHash: r.project_agent_hash ?? null,
   };
 }
 
@@ -351,8 +353,8 @@ export class RunRepository {
            cache_read_tokens, cache_creation_tokens, cost_usd, permission_denials, denied_tools_json, mcp_json, human_intervention,
            context_exhausted, retries, log_path, raw_result_json, schedule_id, owner, phases_json, review_reasons_json, resumed_from_run_id, kind,
            usage_by_model_json, billing_type, error_code, error_family, error_detail_json, agent_hash, claude_code_version,
-           last_event_at, continued_from_run_id, title, cost_status, max_budget_usd, skills_bundle, harness)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+           last_event_at, continued_from_run_id, title, cost_status, max_budget_usd, skills_bundle, harness, project_agent_hash)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         run.id,
@@ -409,7 +411,29 @@ export class RunRepository {
         run.maxBudgetUsd ?? null,
         run.skillsBundle ?? null,
         run.harness ?? DEFAULT_HARNESS,
+        run.projectAgentHash ?? null,
       );
+  }
+
+  /**
+   * The run the schedule started before `before` for the same agent (not a gate run, whatever its
+   * status): what a fire's project agent hash is compared with. Null for the schedule's first run,
+   * and for the first run after the schedule was switched to another agent (two agents' files are
+   * not compared).
+   */
+  previousRunOfSchedule(scheduleId: string, before: Pick<Run, "id" | "createdAt" | "agentId">): Run | null {
+    const row = this.db
+      .prepare(
+        // Same created_at: the earlier insert wins (the row of `before` may not exist yet: any rowid then).
+        `SELECT * FROM runs WHERE schedule_id = ? AND agent_id = ? AND kind = 'run' AND id <> ?
+           AND (created_at < ? OR (created_at = ?
+             AND rowid < COALESCE((SELECT rowid FROM runs WHERE id = ?), 9223372036854775807)))
+         ORDER BY created_at DESC, rowid DESC LIMIT 1`,
+      )
+      .get(scheduleId, before.agentId, before.id, before.createdAt, before.createdAt, before.id) as unknown as
+      | RunRow
+      | undefined;
+    return row ? rowToRun(row) : null;
   }
 
   /** The run that resumed `runId` (on_failure: resume_once), or null. At most one exists: a resume is tried once. */

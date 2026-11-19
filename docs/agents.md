@@ -522,6 +522,14 @@ Two things to get right with a link:
   agent is denied the tools that exist. Listing both prefixes keeps the file usable from
   both.
 
+The project agent file lives in the project, so a `git pull`, or the agent itself when it may
+write there, can change its prompt and its `tools:` between two scheduled runs. Each run
+records the file's hash (`projectAgentHash`); when a schedule fires a link whose file changed
+since the schedule's previous run of the same agent, the new run gets a note ("project agent file ... changed
+since the previous run of this schedule", with both hashes) and `get_run` / `run-info` report
+`projectAgentChange.changed: true`. It is a notice only: the run starts as usual, and its
+status and review reasons are untouched.
+
 ### Which prompt holds which rule
 
 A link has two prompts: the project agent's body (the persona) and the Duskfleet file's body,
