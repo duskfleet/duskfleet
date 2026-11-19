@@ -708,6 +708,20 @@ a.stat.tile-link:active,
   padding: 0 8px;
   color: var(--text);
 }
+/* harness (agent CLI) next to the model: claude / copilot; amber when this host cannot start it.
+   A block: its own line under the model in the Agents and Runs Model cells (the Agent header and
+   schedule meta lines are flex rows, where it sits inline); a narrow column wraps
+   "copilot · not installed" rather than overflow it */
+.harness {
+  display: block;
+  font-family: var(--font-mono);
+  font-size: 14px;
+  line-height: 21px;
+  color: var(--muted);
+}
+.harness.warn-text {
+  color: var(--warn);
+}
 .tag {
   display: inline-block;
   padding: 0 6px;

@@ -4,6 +4,7 @@ import { notFound } from "next/navigation";
 import { AgentActions } from "@/components/AgentActions";
 import { AgentRunNow } from "@/components/AgentRunNow";
 import { AgentStatus } from "@/components/AgentStatus";
+import { HarnessTag } from "@/components/HarnessTag";
 import { MultiSelect, type MultiSelectOption } from "@/components/MultiSelect";
 import { RunTable } from "@/components/RunTable";
 import { Spark } from "@/components/Spark";
@@ -155,6 +156,8 @@ export default async function AgentPage({ params, searchParams }: Params) {
                 model not set
               </span>
             )}
+            <span className="sep">·</span>
+            <HarnessTag info={a.harnessInfo} />
             <span className="sep">·</span>
             <code className="ad-file" title={a.sourcePath}>
               {a.fileLabel}
