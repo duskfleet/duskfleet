@@ -283,6 +283,86 @@ test("doctor lists the stuck pending and running rows of a dead owner its startu
   }
 });
 
+test("doctor warns about a link whose allowed_tools name a tool the project agent does not declare (#458)", () => {
+  const { root, configDir, project } = makeRoot();
+  try {
+    const projectAgents = path.join(project, ".claude", "agents");
+    mkdirSync(projectAgents, { recursive: true });
+    writeFileSync(path.join(projectAgents, "designer.md"), "---\nname: designer\ntools: Read, Grep\n---\nDesign.\n");
+    writeFileSync(path.join(projectAgents, "free.md"), "---\nname: free\n---\nNo tools line.\n");
+    const link = (id, claudeAgent, tools) =>
+      writeFileSync(
+        path.join(configDir, "agents", `${id}.md`),
+        `---\nclaude_agent: ${claudeAgent}\nproject: demo\nallowed_tools: ${JSON.stringify(tools)}\n---\n`,
+      );
+    link("figma-link", "designer", ["Read", "mcp__claude_ai_Figma"]);
+    link("covered-link", "designer", ["Read(src/**)", "Grep"]);
+    link("free-link", "free", ["Bash(npm test:*)", "mcp__claude_ai_Figma"]);
+
+    const doctor = cli(configDir, ["doctor", "--json"]);
+    assert.equal(doctor.status, 0, doctor.stderr);
+    const { linkTools } = JSON.parse(doctor.stdout);
+    assert.deepEqual(linkTools.checked.sort(), ["covered-link", "figma-link", "free-link"]);
+    assert.deepEqual(
+      linkTools.gaps.map((g) => [g.agentId, g.missing, g.skipped]),
+      [["figma-link", ["mcp__claude_ai_Figma"], null]],
+      "a covered link and one whose project agent has no tools: get no warning",
+    );
+    assert.equal(linkTools.gaps[0].projectAgentFile, path.join(projectAgents, "designer.md"));
+
+    const human = cli(configDir, ["doctor"]);
+    assert.match(human.stdout, /! link tools {6}3 link agent\(s\), 1 with allowed_tools/);
+    assert.match(
+      human.stdout,
+      /agent figma-link: allowed_tools mcp__claude_ai_Figma not in the tools: of .*designer\.md/,
+    );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("an agent file that does not load: agents and doctor name it, its runs fail with its error, the rest works", () => {
+  const { root, configDir, project } = makeRoot();
+  try {
+    const userDir = path.join(root, "data", "agents");
+    mkdirSync(userDir, { recursive: true });
+    const bad = path.join(userDir, "broken.md");
+    writeFileSync(bad, "---\npermission_mode: not-a-mode\n---\nbody\n");
+
+    const listed = cli(configDir, ["agents", "--json"]);
+    assert.equal(listed.status, 0, listed.stderr);
+    assert.deepEqual(
+      JSON.parse(listed.stdout).map((a) => a.id),
+      ["coder"],
+      "stdout stays the array of loaded agents",
+    );
+    assert.ok(listed.stderr.includes(`agent "broken" skipped: invalid agent file ${bad}`), listed.stderr);
+    const human = cli(configDir, ["agents"]);
+    assert.equal(human.status, 0, human.stderr);
+    assert.match(human.stdout, /^! agent "broken" skipped: .*permission_mode/m);
+
+    const doctor = cli(configDir, ["doctor", "--json"]);
+    assert.equal(doctor.status, 0, doctor.stderr);
+    const report = JSON.parse(doctor.stdout);
+    assert.deepEqual(report.agents, ["coder"]);
+    assert.equal(report.skippedAgents.length, 1);
+    assert.equal(report.skippedAgents[0].sourcePath, bad);
+    assert.match(report.skippedAgents[0].error, /permission_mode/);
+    const doctorHuman = cli(configDir, ["doctor"]);
+    assert.equal(doctorHuman.status, 0, "a skipped file is a warning, not an error");
+    assert.match(doctorHuman.stdout, /^! agents {10}1: coder · 1 skipped$/m);
+    assert.match(doctorHuman.stdout, /^ {18}agent "broken" skipped: invalid agent file .*broken\.md/m);
+
+    const refused = cli(configDir, ["run", "--project", project, "--agent", "broken", "--", "go"]);
+    assert.notEqual(refused.status, 0);
+    assert.ok(refused.stderr.includes(`agent "broken" is unavailable: its file ${bad} does not load`), refused.stderr);
+    const fine = cli(configDir, ["run", "--project", project, "--agent", "coder", "--", "go"]);
+    assert.equal(fine.status, 0, fine.stderr);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("doctor --probe makes one haiku run outside any project, says it costs money and reports failures", () => {
   const { root, configDir } = makeRoot();
   try {

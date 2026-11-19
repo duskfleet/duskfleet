@@ -13,18 +13,24 @@ import {
   createAgentFromFields,
   type DuskFleetConfig,
   deleteAgentFile,
+  deleteSkippedUserAgentFiles,
   EFFORT_LEVELS,
+  effectiveAgentFields,
   envPassthroughSchema,
   harnessNameSchema,
   harnessOf,
+  linkProjectPath,
+  linkToolWarnings,
   listProjectAgents,
-  loadAgents,
+  loadAgentDir,
   ON_FAILURE_POLICIES,
   PERMISSION_MODES,
   projectIdFromPath,
   sameDirectory,
   sandboxAllowedDomainsSchema,
   skillsSchema,
+  skippedAgentError,
+  skippedUserAgentFiles,
   upsertUserProject,
   validateProjectPath,
   writeAgentAndVerify,
@@ -84,15 +90,29 @@ function projectFromFolder(
   return id;
 }
 
+/** Advice that never refuses the write: a link's allowed_tools entries its project agent does not declare. */
+function agentWarnings(a: AgentDefinition, config: DuskFleetConfig): string[] {
+  return linkToolWarnings(
+    { claude_agent: a.claudeAgent, allowed_tools: a.allowedTools },
+    linkProjectPath(a, config.projects),
+  );
+}
+
 function presentAgent(a: AgentDefinition, config: DuskFleetConfig) {
+  // A link that leaves description / model out lists the project agent's (issue #459).
+  const effective = effectiveAgentFields(a, linkProjectPath(a, config.projects));
   return {
     id: a.id,
     name: a.name,
-    description: a.description,
+    description: effective.description,
+    /** "agent" = this file, "project agent" = a link's .claude/agents/<claudeAgent>.md, null = none. */
+    descriptionSource: effective.descriptionSource,
     source: a.source,
     /** "own" = persona defined in Duskfleet; "link" = reuses the project's .claude/agents/<claudeAgent>.md */
     kind: agentKind(a),
-    model: a.model ?? null,
+    model: effective.model,
+    /** "agent" = this file, "project agent" = a link's project agent, null = the CLI default. */
+    modelSource: effective.modelSource,
     permissionMode: a.permissionMode,
     allowedTools: a.allowedTools ?? [],
     disallowedTools: a.disallowedTools ?? [],
@@ -281,7 +301,8 @@ export function registerAgentTools(server: McpServer, ctx: ToolContext): void {
       title: "List agents",
       description:
         "List the agent definitions available: builtin ones from config/agents and user ones from user_agents_dir. " +
-        "Use an agent's id with run_agent.",
+        "Use an agent's id with run_agent. skippedAgents lists the agent files that do not load (path and error): " +
+        "their ids are unavailable, never replaced by a builtin of the same id, until the file is fixed.",
       inputSchema: {},
     },
     async () => {
@@ -294,6 +315,13 @@ export function registerAgentTools(server: McpServer, ctx: ToolContext): void {
         userAgentsDir: config.userAgentsDir,
         byProject,
         agents,
+        // Files the loader could not load: their ids are unavailable until fixed (#462).
+        skippedAgents: (config.skippedAgents ?? []).map((s) => ({
+          id: s.id,
+          source: s.source,
+          sourcePath: s.sourcePath,
+          error: s.error,
+        })),
       });
     },
   );
@@ -336,12 +364,14 @@ export function registerAgentTools(server: McpServer, ctx: ToolContext): void {
         }
         const cfg = ctx.config;
         const fresh = createAgentFromFields(kind, fields, cfg, () => ctx.config, ctx.runs.harnesses.lookup);
+        const after = ctx.config;
         return jsonResult({
           created: true,
           kind,
           overrode: existing?.source ?? null,
           ...(registeredProject ? { project: cfg.projects.get(registeredProject) } : {}),
-          agent: presentAgent(fresh, ctx.config),
+          agent: presentAgent(fresh, after),
+          warnings: agentWarnings(fresh, after),
         });
       } catch (err) {
         return errorResult(err);
@@ -399,8 +429,16 @@ export function registerAgentTools(server: McpServer, ctx: ToolContext): void {
       try {
         const config = ctx.config;
         const existing = config.agents.get(args.id);
-        if (!existing)
-          return errorResult(new Error(`unknown agent "${args.id}". Known: ${[...config.agents.keys()].join(", ")}`));
+        if (!existing) {
+          const skipped = skippedAgentError(config, args.id);
+          return errorResult(
+            new Error(
+              skipped
+                ? `${skipped}. Fix the file by hand, delete it with delete_agent, or replace it with create_agent and overwrite: true.`
+                : `unknown agent "${args.id}". Known: ${[...config.agents.keys()].join(", ")}`,
+            ),
+          );
+        }
         if (existing.source !== "user") {
           return errorResult(
             new Error(
@@ -426,7 +464,13 @@ export function registerAgentTools(server: McpServer, ctx: ToolContext): void {
         const kind = requestedKind ?? agentKind(spec);
         assertAgentWritable(kind, spec, cfgNow, stored.skills ?? [], ctx.runs.harnesses.lookup);
         const fresh = writeAgentAndVerify(cfgNow, spec, () => ctx.config);
-        return jsonResult({ updated: true, kind, agent: presentAgent(fresh, ctx.config) });
+        const after = ctx.config;
+        return jsonResult({
+          updated: true,
+          kind,
+          agent: presentAgent(fresh, after),
+          warnings: agentWarnings(fresh, after),
+        });
       } catch (err) {
         return errorResult(err);
       }
@@ -450,13 +494,17 @@ export function registerAgentTools(server: McpServer, ctx: ToolContext): void {
       try {
         const config = ctx.config;
         const existing = config.agents.get(args.id);
-        if (!existing) return errorResult(new Error(`unknown agent "${args.id}"`));
-        if (existing.source !== "user")
+        // A user file that does not load (#462) is deleted by path: its name may differ from its id.
+        const broken = existing ? [] : skippedUserAgentFiles(config, args.id);
+        if (!existing && !broken.length)
+          return errorResult(new Error(skippedAgentError(config, args.id) ?? `unknown agent "${args.id}"`));
+        if (existing && existing.source !== "user")
           return errorResult(
             new Error(`"${args.id}" is a builtin agent (${existing.sourcePath}) and cannot be deleted through MCP.`),
           );
         // The default agent must keep resolving: deleting a user override is fine when a builtin remains.
-        const builtinRemains = loadAgents(path.join(config.configDir, "agents"), "builtin").has(args.id);
+        // Lenient read: one broken builtin file must not break the delete of another agent.
+        const builtinRemains = loadAgentDir(path.join(config.configDir, "agents"), "builtin").agents.has(args.id);
         if (args.id === config.defaultAgent && !builtinRemains) {
           return errorResult(
             new Error(
@@ -464,9 +512,19 @@ export function registerAgentTools(server: McpServer, ctx: ToolContext): void {
             ),
           );
         }
-        deleteAgentFile(config.userAgentsDir, args.id);
+        let removedFiles: string[];
+        if (broken.length) {
+          removedFiles = deleteSkippedUserAgentFiles(config, args.id);
+        } else {
+          deleteAgentFile(config.userAgentsDir, args.id);
+          removedFiles = existing ? [existing.sourcePath] : [];
+        }
         const after = ctx.config.agents.get(args.id);
-        return jsonResult({ deleted: true, nowResolvesTo: after ? presentAgent(after, ctx.config) : null });
+        return jsonResult({
+          deleted: true,
+          files: removedFiles,
+          nowResolvesTo: after ? presentAgent(after, ctx.config) : null,
+        });
       } catch (err) {
         return errorResult(err);
       }

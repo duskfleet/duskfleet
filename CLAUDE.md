@@ -173,8 +173,12 @@ npm workspaces, one `config/` and one SQLite database shared by three deliverabl
   knob read by fake-claude.js (`FAKE_CLAUDE_*`) only reaches it because the test config passes it.
 - **Agents can be bound to a project** (`project: <id>`): grouped, default target, refused
   elsewhere. `create_agent`/`update_agent` and the CLI's `agents create` validate the spec
-  *before* writing, and roll the file back if the config no longer loads: one bad agent file
-  would otherwise break every later config reload. That path is one, in core
+  *before* writing, and roll the file back if it does not load. A hand-edited agent file that does
+  not load (frontmatter, duplicate id, unknown `project`) is skipped, never fatal: it lands in
+  `config.skippedAgents` (`loadAgentDir`, #462), its id is unavailable (a broken user file never
+  falls back to the builtin of the same id; `skippedAgentError` names the file for runs, schedules
+  and gates), and `list_agents`, `agents` and `doctor` list it. `duskfleet.yaml` and the
+  `projects.yaml` files stay fatal (`writeGlobalFile` relies on the throw). That path is one, in core
   (`core/src/config/agent-create.ts`); never re-implement it in a caller. They also refuse home paths and secret-looking values in any field
   (`assertAgentSpecClean`, `core/src/config/agent-lint.ts`); `add_dirs` under home become `~/...`.
 - **Two agent kinds, always explicit**: `own` (persona written here, body = system prompt,

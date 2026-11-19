@@ -336,6 +336,36 @@ test("agents can be created, updated, run and deleted over MCP without touching 
       }),
     );
     assert.equal(relinked.agent.claudeAgent, "coordinator");
+    assert.deepEqual(relinked.warnings, [], "no allowed_tools: nothing to warn about");
+    // allowed_tools the project agent (tools: Read, Grep) does not declare: a warning, never a refusal
+    const figmaLink = ok(
+      await client.callTool({
+        name: "create_agent",
+        arguments: {
+          id: "figma-link",
+          kind: "link",
+          claude_agent: "coordinator",
+          project: "demo",
+          allowed_tools: ["Read(src/**)", "Grep", "mcp__claude_ai_Figma"],
+        },
+      }),
+    );
+    assert.equal(figmaLink.created, true);
+    assert.equal(figmaLink.warnings.length, 1);
+    assert.match(figmaLink.warnings[0], /"mcp__claude_ai_Figma" is not in the tools: of .*coordinator\.md/);
+    const covered = ok(
+      await client.callTool({ name: "update_agent", arguments: { id: "figma-link", allowed_tools: ["Read", "Grep"] } }),
+    );
+    assert.deepEqual(covered.warnings, [], "fully covered by the project agent's tools:");
+    const uncovered = ok(
+      await client.callTool({
+        name: "update_agent",
+        arguments: { id: "figma-link", allowed_tools: ["Bash(npm test:*)"] },
+      }),
+    );
+    assert.equal(uncovered.updated, true);
+    assert.match(uncovered.warnings[0], /"Bash\(npm test:\*\)" is not in the tools:/);
+    ok(await client.callTool({ name: "delete_agent", arguments: { id: "figma-link" } }));
     const linkedRun = ok(
       await client.callTool({
         name: "run_agent",
@@ -385,6 +415,75 @@ test("agents can be created, updated, run and deleted over MCP without touching 
     assert.equal(gone.nowResolvesTo, null);
     assert.ok(!existsSync(path.join(userDir, "test-fixer.md")));
     fails(await client.callTool({ name: "delete_agent", arguments: { id: "test-fixer" } }), /unknown agent/);
+  } finally {
+    await client.close();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("list_agents names an agent file that does not load; its run fails with that error, never the builtin", async () => {
+  const root = mkdtempSync(path.join(tmpdir(), "duskfleet-agents-skip-"));
+  const configDir = path.join(root, "config");
+  mkdirSync(path.join(configDir, "agents"), { recursive: true });
+  const project = path.join(root, "project");
+  mkdirSync(project);
+  writeFileSync(path.join(configDir, "duskfleet.yaml"), `data_dir: ../data\nclaude:\n  binary: "${fakeBinary}"\n`);
+  writeFileSync(path.join(configDir, "agents", "coder.md"), `---\nname: Coder\n---\nBe brief.\n`);
+  writeFileSync(path.join(configDir, "agents", "helper.md"), `---\nname: Helper\n---\nHelp.\n`);
+  const userDir = path.join(root, "data", "agents");
+  mkdirSync(userDir, { recursive: true });
+  const bad = path.join(userDir, "helper.md");
+  writeFileSync(bad, "---\nmodel: 3\n---\nOverride.\n");
+
+  const transport = new StdioClientTransport({
+    command: process.execPath,
+    args: [serverEntry],
+    env: testEnv({ DUSKFLEET_CONFIG: configDir, DUSKFLEET_LOG_LEVEL: "warn" }),
+    stderr: "pipe",
+  });
+  const client = new Client({ name: "test-client", version: "0.0.0" });
+  try {
+    await client.connect(transport);
+    const listed = ok(await client.callTool({ name: "list_agents", arguments: {} }));
+    assert.deepEqual(
+      listed.agents.map((a) => a.id),
+      ["coder"],
+      "the builtin helper is not served in place of the broken override",
+    );
+    assert.equal(listed.skippedAgents.length, 1);
+    assert.equal(listed.skippedAgents[0].id, "helper");
+    assert.equal(listed.skippedAgents[0].sourcePath, bad);
+    assert.match(listed.skippedAgents[0].error, /model/);
+
+    fails(
+      await client.callTool({
+        name: "run_agent",
+        arguments: { prompt: "go", project_path: project, agent_id: "helper", wait_seconds: 5 },
+      }),
+      /agent "helper" is unavailable: its file .*helper\.md does not load/,
+    );
+    const run = ok(
+      await client.callTool({
+        name: "run_agent",
+        arguments: { prompt: "go", project_path: project, agent_id: "coder", wait_seconds: 10 },
+      }),
+    );
+    assert.equal(run.status, "completed", "the other agents still run");
+
+    // Its id stays taken: create needs overwrite, update names the file, delete removes it.
+    fails(
+      await client.callTool({ name: "create_agent", arguments: { id: "helper", kind: "own", system_prompt: "New." } }),
+      /helper\.md does not load .*overwrite: true/,
+    );
+    assert.ok(existsSync(bad), "the broken file was not overwritten");
+    fails(
+      await client.callTool({ name: "update_agent", arguments: { id: "helper", description: "x" } }),
+      /agent "helper" is unavailable: its file .*helper\.md does not load.*delete_agent/,
+    );
+    const deleted = ok(await client.callTool({ name: "delete_agent", arguments: { id: "helper" } }));
+    assert.deepEqual(deleted.files, [bad]);
+    assert.equal(existsSync(bad), false);
+    assert.equal(deleted.nowResolvesTo.source, "builtin", "the builtin helper is served again");
   } finally {
     await client.close();
     rmSync(root, { recursive: true, force: true });

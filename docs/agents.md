@@ -45,6 +45,31 @@ These files hold each agent's unattended envelope (permissions, allow-list, budg
 environment) and live outside every project on purpose, so a run cannot widen its own permissions:
 see [where the unattended envelope lives](security.md#where-the-unattended-envelope-lives).
 
+### A file that does not load
+
+An agent file you edit by hand can break: invalid frontmatter, an id another file in the same
+directory already has, or a `project:` that is not in `projects.yaml`. Duskfleet skips that one
+file and loads everything else, so the other agents keep running and their schedules keep firing.
+
+- Its id is unavailable until the file is fixed. A broken file in `data/agents/` never falls back
+  to the builtin of the same id: a run, a schedule or a gate of that agent fails with an error that
+  names the file. With two files of the same id in one directory, the first one (by file name)
+  loads and the second is skipped.
+- When the YAML cannot be parsed at all, the id is a guess: the first `id:` line of the
+  frontmatter, else the file name.
+- `create_agent` and `agents create` refuse that id unless you pass `overwrite: true` (CLI:
+  `--force`), naming the file and its error. `update_agent` refuses it too: fix the file by hand,
+  replace it, or remove it with `delete_agent` or the dashboard's delete, which delete the broken
+  user file whatever its name.
+- `list_agents` (`skippedAgents`), `duskfleet agents` (after the table; with `--json` on stderr,
+  stdout stays the list) and `duskfleet doctor` (one warning line per file, `skippedAgents` in
+  `--json`) name the file and its error.
+- `default_agent` naming a skipped agent does not stop the load either: a run without an agent
+  fails with the file's error.
+
+`duskfleet.yaml` and the two `projects.yaml` files are different: an error there still fails the
+load, and a running process keeps its last good config until it is fixed.
+
 ## Builtin agents
 
 Two specialised patterns sit in this repository's `config/agents/`, not bound to any project.
@@ -463,6 +488,26 @@ a link to a name the project does not define fails before anything is spawned. N
 project agent's `tools:` list does not grant permissions in unattended runs: those tools
 still need to be in `allowed_tools` here.
 
+The reverse also holds: an `allowed_tools` entry the project agent's `tools:` does not declare
+is not available to the run. `create_agent` and `update_agent` return such entries in
+`warnings` (the entry and the project agent file named), and `doctor` lists them under
+`link tools`. They are warnings only: the agent is written and keeps running. The comparison is
+by tool name (`Bash(gh issue view:*)` is `Bash`), MCP names by server (`mcp__claude_ai_Figma`
+and `mcp__claude_ai_Figma__get_screenshot` cover each other). A project agent without `tools:`
+inherits every tool, so nothing is reported; one whose frontmatter does not parse gets one note
+saying the check was skipped.
+
+A link can leave `description` and `model` out: `list_agents` and `duskfleet agents` then show
+the project agent's (`description:` and `model:` of its frontmatter), so the two files never
+hold two copies that drift apart. The JSON forms say where each value came from
+(`descriptionSource` / `modelSource`: `agent` for the Duskfleet file, `project agent`, or null
+when neither sets it). The fallback is for reading only: nothing is written to either file and
+the agent's hash does not change, so continued sessions keep matching. A link that sets its own
+`model` runs with `--model <it>`, so the Duskfleet value wins over the project agent's;
+`duskfleet doctor` prints one advice line under `agents` for each link where the two differ.
+A project agent with `model: inherit` (Claude Code's "use the caller's model") counts as setting
+no model, and a project folder whose `.claude/agents` cannot be read contributes nothing.
+
 Two things to get right with a link:
 
 - **Prompt it as the agent, not as its caller.** The run *is* the project agent. If the
@@ -484,6 +529,28 @@ since the schedule's previous run, the new run gets a note ("project agent file 
 since the previous run of this schedule", with both hashes) and `get_run` / `run-info` report
 `projectAgentChange.changed: true`. It is a notice only: the run starts as usual, and its
 status and review reasons are untouched.
+
+### Which prompt holds which rule
+
+A link has two prompts: the project agent's body (the persona) and the Duskfleet file's body,
+appended after it. Write each rule in one of them, never both: two copies drift apart as soon
+as one is fixed.
+
+- **The project agent's body** holds the job: what to pick, how to do it, what never to do.
+  It must make sense in an interactive Claude Code session too. A rule that would also apply
+  to a person running the agent interactively goes here, once.
+- **The Duskfleet file's body** holds only what is true because the run is unattended: nobody
+  answers questions, shell limits that come from the allow-list, what to do when a tool the
+  run needs is not mounted, where the run may write.
+
+For example, "Open one pull request per issue and never push to `main`" belongs in the
+project agent; "Nobody can answer questions during this run: when the issue is unclear,
+comment on it and stop" belongs in the Duskfleet file.
+
+The two tool lists split the same way: the project agent's `tools:` says what the agent *can*
+use (a hard filter, also interactively), the Duskfleet file's `allowed_tools` what it *may* use
+without a prompt in an unattended run. A tool missing from `tools:` does not exist in the run;
+a tool missing from `allowed_tools` exists but is denied.
 
 A worked example of links and own agents together, on schedules:
 [Run a development loop with agents](guides/agent-development-loop.md).

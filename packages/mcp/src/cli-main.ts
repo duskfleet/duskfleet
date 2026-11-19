@@ -40,10 +40,13 @@ import {
   costTotalsLine,
   createAgentFromFields,
   type DataSource,
+  effectiveAgentFields,
   effectivePath,
   findRepoRoot,
   harnessOf,
   type LogLevel,
+  linkProjectPath,
+  linkToolCheck,
   loadConfig,
   mcpServerConfig,
   parseHolder,
@@ -79,6 +82,8 @@ import {
   AGENT_CREATE,
   agentKind,
   type DoctorReport,
+  linkModelOverrides,
+  linkToolsReport,
   type RenderOpts,
   renderAgentCreated,
   renderAgents,
@@ -97,6 +102,7 @@ import {
   runReportLines,
   sandboxReport,
   scheduleRequestedLine,
+  skippedAgentLine,
   trimmedRun,
 } from "./render/index.js";
 import {
@@ -614,15 +620,26 @@ async function main(): Promise<void> {
       }
       if (sub) commandUsage("agents", `unknown agents subcommand: ${sub}`);
       const app = await open();
-      const agents = [...app.config.agents.values()].map(({ systemPrompt: _p, ...a }) => ({
-        ...a,
-        harness: harnessOf(a),
-      }));
+      // A link that leaves description / model out lists the project agent's (issue #459).
+      const agents = [...app.config.agents.values()].map(({ systemPrompt: _p, ...a }) => {
+        const effective = effectiveAgentFields(a, linkProjectPath(a, app.config.projects));
+        return {
+          ...a,
+          description: effective.description,
+          descriptionSource: effective.descriptionSource,
+          ...(effective.model !== null ? { model: effective.model } : {}),
+          modelSource: effective.modelSource,
+          harness: harnessOf(a),
+        };
+      });
       // Human: the empty state is on stdout. --json: the hint on stderr, stdout stays `[]`.
       if (agents.length === 0 && jsonOutput) {
         process.stderr.write(`no agents yet: Duskfleet ships none. Create your first one with\n  ${AGENT_CREATE}\n`);
       }
-      print(agents, renderAgents);
+      // Agent files that do not load: after the table; --json keeps stdout the array, so on stderr.
+      const skipped = app.config.skippedAgents ?? [];
+      if (jsonOutput) for (const s of skipped) process.stderr.write(`${skippedAgentLine(s)}\n`);
+      print(agents, (value, opts) => renderAgents(value, opts, skipped));
       return done();
     }
     case "projects": {
@@ -714,6 +731,16 @@ async function main(): Promise<void> {
         // env (DUSKFLEET_DATA) > config (data_dir, or ../data next to a repo config) > user
         dataSource: app.config.dataSource,
         agents: [...app.config.agents.keys()],
+        // Agent files the loader skipped (#462): the rest of the config loaded without them.
+        skippedAgents: (app.config.skippedAgents ?? []).map((s) => ({
+          id: s.id,
+          source: s.source,
+          sourcePath: s.sourcePath,
+          error: s.error,
+          advice: skippedAgentLine(s),
+        })),
+        // Links whose own model differs from the project agent's: the Duskfleet value wins.
+        linkModelOverrides: linkModelOverrides(app.config.agents.values(), app.config.projects),
         scheduler,
         // Claude Code's native sandbox on this host, and the agents that need it (sandbox: true).
         sandbox: sandboxReport(
@@ -723,6 +750,18 @@ async function main(): Promise<void> {
         // One line per registered harness (binary, version or why it is missing) and the agents on
         // a harness nobody registered. The claude version above is reused, not asked twice.
         harnesses: await harnessReport(app, { version, error }),
+        // Link agents: allowed_tools entries the project agent's tools: does not declare (advice only).
+        linkTools: linkToolsReport(
+          [...app.config.agents.values()]
+            .filter((a) => a.claudeAgent)
+            .map((a) => ({
+              agentId: a.id,
+              check: linkToolCheck(
+                { claude_agent: a.claudeAgent, allowed_tools: a.allowedTools },
+                linkProjectPath(a, app.config.projects),
+              ),
+            })),
+        ),
         // Runs of this UTC month that ended without a cost, per budget: under unpriced_policy count
         // each stands in at the cap it started with (runs.max_budget_usd, else the agent's or the default cap).
         unpricedRuns: app.runs.unpricedRunsByBudget().map(({ budget, runs }) => ({

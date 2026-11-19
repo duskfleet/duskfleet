@@ -143,12 +143,14 @@ test("the loader reads sandbox and sandbox_allowed_domains, and refuses a domain
       path.join(app.configDir, "agents", "bad.md"),
       `---\nsandbox: true\nsandbox_allowed_domains: ["https://github.com"]\n---\nBad.\n`,
     );
-    assert.throws(() => loadConfig(app.configDir), /exact host names/);
+    // The bad file is skipped by name (#462), the rest of the config loads.
+    const skippedError = () => loadConfig(app.configDir).skippedAgents.find((s) => s.id === "bad")?.error ?? "";
+    assert.match(skippedError(), /exact host names/);
     writeFileSync(
       path.join(app.configDir, "agents", "bad.md"),
       `---\nsandbox: true\nsandbox_allowed_domains: ["*.github.com"]\n---\nBad.\n`,
     );
-    assert.throws(() => loadConfig(app.configDir), /exact host names/);
+    assert.match(skippedError(), /exact host names/);
   } finally {
     rmSync(app.root, { recursive: true, force: true });
     app.db.close();

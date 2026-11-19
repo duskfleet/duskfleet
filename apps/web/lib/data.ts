@@ -30,7 +30,7 @@ import {
   findRepoRoot,
   type ListRunsFilter,
   listProjectAgents,
-  loadAgents,
+  loadAgentDir,
   loadConfig,
   MIXED_MODEL,
   mcpServerConfig,
@@ -181,12 +181,8 @@ export function listAgents() {
   const projectAgents = new Map<string, ProjectAgentInfo[]>();
 
   // A user file with a builtin's id overrides it: the card says so.
-  let builtinIds = new Set<string>();
-  try {
-    builtinIds = new Set(loadAgents(path.join(cfg.configDir, "agents"), "builtin").keys());
-  } catch {
-    // a broken builtin would have failed loadConfig already
-  }
+  // Lenient read: a broken builtin file is skipped, as in loadConfig (#462).
+  const builtinIds = new Set(loadAgentDir(path.join(cfg.configDir, "agents"), "builtin").agents.keys());
   const root = findRepoRoot(process.cwd());
   const home = homedir();
   const fileLabel = (p: string) =>
