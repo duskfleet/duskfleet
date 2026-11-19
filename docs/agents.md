@@ -486,6 +486,28 @@ Two things to get right with a link:
   agent is denied the tools that exist. Listing both prefixes keeps the file usable from
   both.
 
+### Which prompt holds which rule
+
+A link has two prompts: the project agent's body (the persona) and the Duskfleet file's body,
+appended after it. Write each rule in one of them, never both: two copies drift apart as soon
+as one is fixed.
+
+- **The project agent's body** holds the job: what to pick, how to do it, what never to do.
+  It must make sense in an interactive Claude Code session too. A rule that would also apply
+  to a person running the agent interactively goes here, once.
+- **The Duskfleet file's body** holds only what is true because the run is unattended: nobody
+  answers questions, shell limits that come from the allow-list, what to do when a tool the
+  run needs is not mounted, where the run may write.
+
+For example, "Open one pull request per issue and never push to `main`" belongs in the
+project agent; "Nobody can answer questions during this run: when the issue is unclear,
+comment on it and stop" belongs in the Duskfleet file.
+
+The two tool lists split the same way: the project agent's `tools:` says what the agent *can*
+use (a hard filter, also interactively), the Duskfleet file's `allowed_tools` what it *may* use
+without a prompt in an unattended run. A tool missing from `tools:` does not exist in the run;
+a tool missing from `allowed_tools` exists but is denied.
+
 A worked example of links and own agents together, on schedules:
 [Run a development loop with agents](guides/agent-development-loop.md).
 
