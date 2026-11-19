@@ -11,6 +11,8 @@ export { renderBudgetSet, renderBudgets } from "./budgets.js";
 export {
   type DoctorReport,
   type HarnessReport,
+  type LinkModelOverride,
+  linkModelOverrides,
   renderDoctor,
   type SandboxReport,
   sandboxReport,

@@ -459,6 +459,15 @@ a link to a name the project does not define fails before anything is spawned. N
 project agent's `tools:` list does not grant permissions in unattended runs: those tools
 still need to be in `allowed_tools` here.
 
+A link can leave `description` and `model` out: `list_agents` and `duskfleet agents` then show
+the project agent's (`description:` and `model:` of its frontmatter), so the two files never
+hold two copies that drift apart. The JSON forms say where each value came from
+(`descriptionSource` / `modelSource`: `agent` for the Duskfleet file, `project agent`, or null
+when neither sets it). The fallback is for reading only: nothing is written to either file and
+the agent's hash does not change, so continued sessions keep matching. A link that sets its own
+`model` runs with `--model <it>`, so the Duskfleet value wins over the project agent's;
+`duskfleet doctor` prints one advice line under `agents` for each link where the two differ.
+
 Two things to get right with a link:
 
 - **Prompt it as the agent, not as its caller.** The run *is* the project agent. If the

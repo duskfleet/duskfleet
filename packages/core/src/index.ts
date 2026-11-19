@@ -12,6 +12,7 @@ export {
 } from "./config/agent-create.js";
 export {
   AGENT_ID_PATTERN,
+  type AgentFieldSource,
   type AgentKind,
   type AgentSpec,
   agentDefinitionHash,
@@ -23,8 +24,11 @@ export {
   assertSandboxSpec,
   assertWrapUpReserve,
   deleteAgentFile,
+  type EffectiveAgentFields,
+  effectiveAgentFields,
   envPassthroughSchema,
   harnessNameSchema,
+  linkProjectPath,
   listProjectAgents,
   type ProjectAgentInfo,
   projectAgentDefinitionHash,

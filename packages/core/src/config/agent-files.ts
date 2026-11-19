@@ -235,6 +235,58 @@ export function listProjectAgents(projectPath: string): ProjectAgentInfo[] {
   return out;
 }
 
+/** Where an effective agent field comes from: the Duskfleet file, or a link's project agent. */
+export type AgentFieldSource = "agent" | "project agent";
+
+/** A link's description and model as listed: its own when set, else the project agent's. */
+export interface EffectiveAgentFields {
+  description: string;
+  /** Null when neither file has a description. */
+  descriptionSource: AgentFieldSource | null;
+  model: string | null;
+  /** Null when neither file sets a model (the run uses the CLI default). */
+  modelSource: AgentFieldSource | null;
+  /** The project agent's own `model:`, null for an own agent or when it sets none. */
+  projectAgentModel: string | null;
+}
+
+/**
+ * Read-time fallback for a link (issue #459): `description` is the Duskfleet file's when
+ * non-empty, else the project agent's; `model` the Duskfleet file's when set, else the project
+ * agent's. Nothing is written and `AgentDefinition` is untouched, so `agentDefinitionHash` (and
+ * continued sessions) do not move. An own agent, or a link whose project path is unknown or whose
+ * project agent is missing, gets its own values only. The project agent is matched like the
+ * executor does (`listProjectAgents` name), so unparsable frontmatter contributes nothing.
+ */
+export function effectiveAgentFields(
+  agent: Pick<AgentDefinition, "description" | "model" | "claudeAgent">,
+  projectPath: string | null,
+): EffectiveAgentFields {
+  const projectAgent =
+    agent.claudeAgent && projectPath
+      ? listProjectAgents(projectPath).find((a) => a.name === agent.claudeAgent)
+      : undefined;
+  const ownDescription = agent.description.trim() ? agent.description : "";
+  const description = ownDescription || projectAgent?.description || "";
+  const model = agent.model ?? projectAgent?.model ?? null;
+  return {
+    description,
+    descriptionSource: ownDescription ? "agent" : description ? "project agent" : null,
+    model,
+    modelSource: agent.model !== undefined ? "agent" : model ? "project agent" : null,
+    projectAgentModel: projectAgent?.model ?? null,
+  };
+}
+
+/** The folder a link's project agent lives in: its `project`'s path, null when unbound or unknown. */
+export function linkProjectPath(
+  agent: Pick<AgentDefinition, "claudeAgent" | "project">,
+  projects: ReadonlyMap<string, { path: string }>,
+): string | null {
+  if (!agent.claudeAgent || !agent.project) return null;
+  return projects.get(agent.project)?.path ?? null;
+}
+
 /**
  * Short content hash of `<project>/.claude/agents/<name>.md`, so a recorded subagent
  * invocation can be tied to the exact persona that ran. Null when the name is not a
