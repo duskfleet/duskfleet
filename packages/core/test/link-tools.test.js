@@ -56,6 +56,12 @@ test("linkToolGaps: unparsable frontmatter skips the check with one note", () =>
   assert.match(r.skipped, /frontmatter does not parse \(bad indentation\)/);
 });
 
+test("linkToolGaps: no allowed_tools means nothing to check, so no note even for unparsable frontmatter", () => {
+  const broken = { tools: null, frontmatterError: "bad indentation" };
+  assert.deepEqual(linkToolGaps(undefined, broken), { missing: [], skipped: null });
+  assert.deepEqual(linkToolGaps([], broken), { missing: [], skipped: null });
+});
+
 test("linkToolCheck / linkToolWarnings read the project agent file; own agents and unknown agents get nothing", () => {
   const root = mkdtempSync(path.join(tmpdir(), "duskfleet-link-tools-"));
   try {
