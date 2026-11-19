@@ -45,6 +45,31 @@ These files hold each agent's unattended envelope (permissions, allow-list, budg
 environment) and live outside every project on purpose, so a run cannot widen its own permissions:
 see [where the unattended envelope lives](security.md#where-the-unattended-envelope-lives).
 
+### A file that does not load
+
+An agent file you edit by hand can break: invalid frontmatter, an id another file in the same
+directory already has, or a `project:` that is not in `projects.yaml`. Duskfleet skips that one
+file and loads everything else, so the other agents keep running and their schedules keep firing.
+
+- Its id is unavailable until the file is fixed. A broken file in `data/agents/` never falls back
+  to the builtin of the same id: a run, a schedule or a gate of that agent fails with an error that
+  names the file. With two files of the same id in one directory, the first one (by file name)
+  loads and the second is skipped.
+- When the YAML cannot be parsed at all, the id is a guess: the first `id:` line of the
+  frontmatter, else the file name.
+- `create_agent` and `agents create` refuse that id unless you pass `overwrite: true` (CLI:
+  `--force`), naming the file and its error. `update_agent` refuses it too: fix the file by hand,
+  replace it, or remove it with `delete_agent` or the dashboard's delete, which delete the broken
+  user file whatever its name.
+- `list_agents` (`skippedAgents`), `duskfleet agents` (after the table; with `--json` on stderr,
+  stdout stays the list) and `duskfleet doctor` (one warning line per file, `skippedAgents` in
+  `--json`) name the file and its error.
+- `default_agent` naming a skipped agent does not stop the load either: a run without an agent
+  fails with the file's error.
+
+`duskfleet.yaml` and the two `projects.yaml` files are different: an error there still fails the
+load, and a running process keeps its last good config until it is fixed.
+
 ## Builtin agents
 
 Two specialised patterns sit in this repository's `config/agents/`, not bound to any project.

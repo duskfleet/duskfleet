@@ -14,6 +14,7 @@
  * Generic on purpose: what "work" means (a ticket query, a git diff, a file) is the user's.
  */
 import { spawn } from "node:child_process";
+import { skippedAgentError } from "../config/loader.js";
 import type { DuskFleetConfig } from "../config/types.js";
 import { childEnv, mergeEnvPassthrough } from "../execution/child-env.js";
 import { BudgetError } from "../orchestration/budget.js";
@@ -65,7 +66,14 @@ export function validateGate(config: DuskFleetConfig, gate: ScheduleGate, schedu
   }
   const a = gate.agent!;
   const agent = config.agents.get(a.agentId);
-  if (!agent) throw new Error(`gate agent "${a.agentId}" is unknown. Known: ${[...config.agents.keys()].join(", ")}`);
+  if (!agent) {
+    const skipped = skippedAgentError(config, a.agentId);
+    throw new Error(
+      skipped
+        ? `gate ${skipped}`
+        : `gate agent "${a.agentId}" is unknown. Known: ${[...config.agents.keys()].join(", ")}`,
+    );
+  }
   if (!a.prompt?.trim()) throw new Error("gate.agent.prompt is required");
   if (a.budgetUsd !== undefined && !(a.budgetUsd > 0)) throw new Error("gate.agent.budget_usd must be positive");
   if (a.marker !== undefined && !a.marker.trim()) throw new Error("gate.agent.marker is empty");

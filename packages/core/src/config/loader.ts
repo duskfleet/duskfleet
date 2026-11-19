@@ -27,6 +27,7 @@ import {
   ON_FAILURE_POLICIES,
   PERMISSION_MODES,
   type ProjectDefinition,
+  type SkippedAgentFile,
 } from "./types.js";
 
 const log = logger("config");
@@ -218,9 +219,18 @@ export function loadConfig(configDir: string): DuskFleetConfig {
     : path.join(dataDir, "agents");
 
   // Builtin agents ship with the repo; user agents are created at runtime and
-  // override a builtin with the same id.
-  const agents = loadAgents(path.join(configDir, "agents"), "builtin");
-  for (const [id, agent] of loadAgents(userAgentsDir, "user")) agents.set(id, agent);
+  // override a builtin with the same id. A file that does not load is skipped, never fatal: one
+  // hand-edited agent must not stop every run, list and tick (#462).
+  const builtin = loadAgentDir(path.join(configDir, "agents"), "builtin");
+  const user = loadAgentDir(userAgentsDir, "user");
+  const agents = builtin.agents;
+  const skippedAgents: SkippedAgentFile[] = [...builtin.skipped, ...user.skipped];
+  for (const [id, agent] of user.agents) agents.set(id, agent);
+  // Fail closed: a broken user file takes its id out, it never falls back to the builtin it
+  // overrides. A duplicate is the exception: the first file of that id is valid and stays.
+  for (const s of user.skipped) {
+    if (!user.duplicates.has(s.sourcePath) && !user.agents.has(s.id)) agents.delete(s.id);
+  }
   // Projects: the versioned registry plus a private one next to the data (machine-specific
   // absolute paths never belong in the repo). Same id = the private entry wins.
   const projects = loadProjects(path.join(configDir, "projects.yaml"), configDir);
@@ -229,14 +239,23 @@ export function loadConfig(configDir: string): DuskFleetConfig {
     : path.join(dataDir, "projects.yaml");
   for (const [id, p] of loadProjects(userProjectsFile, path.dirname(userProjectsFile))) projects.set(id, p);
 
-  for (const a of agents.values()) {
+  for (const a of [...agents.values()]) {
     if (a.project && !projects.has(a.project)) {
-      throw new Error(
-        `agent "${a.id}" (${a.sourcePath}) belongs to project "${a.project}", which is not in projects.yaml. Known projects: ${[...projects.keys()].join(", ") || "(none)"}`,
-      );
+      agents.delete(a.id);
+      skippedAgents.push({
+        sourcePath: a.sourcePath,
+        source: a.source,
+        id: a.id,
+        error: `project "${a.project}" is not in projects.yaml (agent "${a.id}" belongs to it). Known projects: ${[...projects.keys()].join(", ") || "(none)"}`,
+      });
     }
   }
-  if (g.default_agent !== null && !agents.has(g.default_agent)) {
+  // A default_agent whose file was skipped loads: the run without agent_id fails naming the file.
+  if (
+    g.default_agent !== null &&
+    !agents.has(g.default_agent) &&
+    !skippedAgents.some((s) => s.id === g.default_agent)
+  ) {
     throw new Error(
       `default_agent "${g.default_agent}" not found. Known agents: ${[...agents.keys()].join(", ") || "(none)"}`,
     );
@@ -279,7 +298,17 @@ export function loadConfig(configDir: string): DuskFleetConfig {
     },
     agents,
     projects,
+    skippedAgents,
   };
+}
+
+/**
+ * Why an agent id is unavailable because its file was skipped, naming the file: null when no
+ * skipped file declares that id. Callers use it before their own "unknown agent" message.
+ */
+export function skippedAgentError(config: Pick<DuskFleetConfig, "skippedAgents">, id: string): string | null {
+  const s = config.skippedAgents?.find((f) => f.id === id);
+  return s ? `agent "${id}" is unavailable: its file ${s.sourcePath} does not load (${s.error})` : null;
 }
 
 /**
@@ -313,22 +342,65 @@ export function dataDirFor(
  *   System prompt body...
  */
 export function loadAgents(agentsDir: string, source: AgentSource = "builtin"): Map<string, AgentDefinition> {
+  const { agents, skipped } = loadAgentDir(agentsDir, source);
+  if (skipped[0]) throw new Error(skipped[0].error);
+  return agents;
+}
+
+/**
+ * The lenient form `loadConfig` uses: every file that loads, plus one entry per file that does
+ * not (unreadable YAML, frontmatter schema, an id already taken in this directory; `duplicates`
+ * holds the paths of the last kind, whose id belongs to an earlier valid file).
+ */
+export function loadAgentDir(
+  agentsDir: string,
+  source: AgentSource,
+): { agents: Map<string, AgentDefinition>; skipped: SkippedAgentFile[]; duplicates: Set<string> } {
   const agents = new Map<string, AgentDefinition>();
-  if (!existsSync(agentsDir)) return agents;
+  const skipped: SkippedAgentFile[] = [];
+  const duplicates = new Set<string>();
+  if (!existsSync(agentsDir)) return { agents, skipped, duplicates };
 
   for (const file of readdirSync(agentsDir)
     .filter((f) => f.endsWith(".md"))
     .sort()) {
     const sourcePath = path.join(agentsDir, file);
-    const { frontmatter, body } = splitFrontmatter(readFileSync(sourcePath, "utf8"));
+    const fileId = file.replace(/\.md$/, "");
+    let frontmatter: unknown;
+    let body: string;
+    let raw = "";
+    try {
+      raw = readFileSync(sourcePath, "utf8");
+      ({ frontmatter, body } = splitFrontmatter(raw));
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      skipped.push({
+        sourcePath,
+        source,
+        id: guessAgentId(raw) ?? fileId,
+        error: `invalid agent file ${sourcePath}: ${message}`,
+      });
+      continue;
+    }
     const parsed = agentFrontmatterSchema.safeParse(frontmatter);
     if (!parsed.success) {
       const issues = parsed.error.issues.map((i) => `${i.path.join(".") || "(frontmatter)"}: ${i.message}`);
-      throw new Error(`invalid agent file ${sourcePath}: ${issues.join("; ")}`);
+      const declared = (frontmatter as { id?: unknown } | null)?.id;
+      skipped.push({
+        sourcePath,
+        source,
+        id: typeof declared === "string" && declared ? declared : (guessAgentId(raw) ?? fileId),
+        error: `invalid agent file ${sourcePath}: ${issues.join("; ")}`,
+      });
+      continue;
     }
     const fm = parsed.data;
-    const id = fm.id ?? file.replace(/\.md$/, "");
-    if (agents.has(id)) throw new Error(`Duplicate agent id "${id}" in ${sourcePath}`);
+    const id = fm.id ?? fileId;
+    if (agents.has(id)) {
+      skipped.push({ sourcePath, source, id, error: `Duplicate agent id "${id}" in ${sourcePath}` });
+      duplicates.add(sourcePath);
+      continue;
+    }
 
     const agent: AgentDefinition = {
       id,
@@ -365,7 +437,19 @@ export function loadAgents(agentsDir: string, source: AgentSource = "builtin"): 
     if (fm.harness !== undefined) agent.harness = fm.harness;
     agents.set(id, agent);
   }
-  return agents;
+  return { agents, skipped, duplicates };
+}
+
+/**
+ * Best-effort id of an agent file whose frontmatter does not parse (#462): the first top-level
+ * `id:` line of the frontmatter block, when it is a plain agent id. A guess, so a broken file that
+ * declares another id than its file name still takes that id out instead of leaving a builtin served.
+ */
+export function guessAgentId(raw: string): string | null {
+  const block = /^---\r?\n([\s\S]*?)(?:\r?\n---|$)/.exec(raw)?.[1];
+  if (!block) return null;
+  const m = /^id:[ \t]*(["']?)([a-z0-9][a-z0-9_-]*)\1[ \t]*(?:#.*)?$/m.exec(block);
+  return m?.[2] ?? null;
 }
 
 function loadProjects(file: string, configDir: string): Map<string, ProjectDefinition> {

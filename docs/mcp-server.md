@@ -139,7 +139,9 @@ Outcomes of a schedule tick (`lastOutcome` in `list_schedules`; details in [sche
 | `error` | the fire failed (spawn, gate or config error); the message is the firing's error text |
 
 `create_agent` and `update_agent` validate the spec before writing and roll the file back if
-the config no longer loads, so one bad agent file never breaks later config reloads. They
+it does not load. An agent file edited by hand that does not load is skipped, not fatal:
+`list_agents` reports it under `skippedAgents` (id, path, error) and its id is unavailable until
+the file is fixed ([Agents](agents.md#a-file-that-does-not-load)). They
 also refuse a spec that would be unfit for a public repo: a home directory path
 (`/Users/<name>`, `/home/<name>`, `C:\Users\<name>`, `/Volumes/<name>`, or this machine's home
 directory) or a secret-looking value (API keys, GitHub / Slack / AWS tokens, private keys,

@@ -32,6 +32,8 @@ export interface DoctorReport {
   dataDir: string;
   dataSource: DataSource;
   agents: string[];
+  /** Agent files that do not load: their ids are unavailable (absent in reports built before #462). */
+  skippedAgents?: { id: string; source: string; sourcePath: string; error: string; advice: string }[];
   /** Links whose own `model` differs from their project agent's (issue #459); absent in older reports. */
   linkModelOverrides?: LinkModelOverride[];
   scheduler: {
@@ -204,6 +206,21 @@ function claudeCheck(r: DoctorReport, opts: RenderOpts): Check {
   return ok("claude", `${r.claudeVersion ?? "version unknown"} · ${r.claudeBinary}`);
 }
 
+/** The loaded agents, then one advice line per skipped file (a warning: those ids are unavailable). */
+function agentsCheck(r: DoctorReport, opts: RenderOpts): Check {
+  const skipped = r.skippedAgents ?? [];
+  const advice = skipped.map((s) => s.advice);
+  if (!r.agents.length) {
+    return warn("agents", skipped.length ? `none loaded · ${skipped.length} skipped` : "none yet", [
+      ...advice,
+      ...(skipped.length ? [] : [paint("accent", AGENT_CREATE, opts)]),
+    ]);
+  }
+  const value = `${r.agents.length}: ${r.agents.join(", ")}${skipped.length ? ` · ${skipped.length} skipped` : ""}`;
+  const overrides = (r.linkModelOverrides ?? []).map((o) => o.advice);
+  return skipped.length ? warn("agents", value, [...advice, ...overrides]) : ok("agents", value, overrides);
+}
+
 function schedulerCheck(r: DoctorReport): Check {
   const s = r.scheduler;
   const h = s.holder;
@@ -251,13 +268,7 @@ function checks(r: DoctorReport, opts: RenderOpts): Check[] {
       : ok("PATH", "inherited"),
     ok("config", `${r.configDir} (${r.configSource})`),
     ok("data", `${r.dataDir} (${r.dataSource})`),
-    r.agents.length
-      ? ok(
-          "agents",
-          `${r.agents.length}: ${r.agents.join(", ")}`,
-          (r.linkModelOverrides ?? []).map((o) => o.advice),
-        )
-      : warn("agents", "none yet", [paint("accent", AGENT_CREATE, opts)]),
+    agentsCheck(r, opts),
     schedulerCheck(r),
     dupes.length
       ? warn(

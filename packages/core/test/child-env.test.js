@@ -98,7 +98,9 @@ test("claude.env_passthrough and an agent's env_passthrough load; a bad entry is
     assert.deepEqual(config.agents.get("gh").envPassthrough, ["NPM_TOKEN"]);
 
     writeFileSync(path.join(configDir, "agents", "gh.md"), '---\nenv_passthrough: ["NOT A NAME"]\n---\nBad.\n');
-    assert.throws(() => loadConfig(configDir), /env_passthrough/);
+    const bad = loadConfig(configDir);
+    assert.equal(bad.agents.has("gh"), false, "the agent file is skipped (#462)");
+    assert.match(bad.skippedAgents[0].error, /env_passthrough/);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

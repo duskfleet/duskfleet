@@ -231,4 +231,19 @@ export interface DuskFleetConfig {
   scheduler: SchedulerConfig;
   agents: Map<string, AgentDefinition>;
   projects: Map<string, ProjectDefinition>;
+  /**
+   * Agent files the loader skipped (invalid frontmatter, duplicate id, unknown project): the rest
+   * of the config loads without them. Their id is unavailable, never served by a builtin of the
+   * same id, until the file is fixed. Optional for configs built by hand (tests): absent = none.
+   */
+  skippedAgents?: SkippedAgentFile[];
+}
+
+/** One agent file `loadConfig` could not load. */
+export interface SkippedAgentFile {
+  sourcePath: string;
+  source: AgentSource;
+  /** The id the file declares when it can be read, else its file name (the loader's own fallback). */
+  id: string;
+  error: string;
 }

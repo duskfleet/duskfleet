@@ -1,7 +1,15 @@
 "use server";
 
 import path from "node:path";
-import { agentToSpec, deleteAgentFile, loadAgents, writeAgentFile } from "@duskfleet/core";
+import {
+  agentToSpec,
+  deleteAgentFile,
+  deleteSkippedUserAgentFiles,
+  loadAgentDir,
+  skippedAgentError,
+  skippedUserAgentFiles,
+  writeAgentFile,
+} from "@duskfleet/core";
 /**
  * The dashboard's writes on agents: edits to *user* agent files (data/agents).
  * Builtins stay versioned and are never edited here; runs are never touched
@@ -19,17 +27,21 @@ export interface ActionResult {
 export async function deleteAgentAction(id: string): Promise<ActionResult> {
   const cfg = config();
   const agent = cfg.agents.get(id);
-  if (!agent) return { ok: false, message: `Agent "${id}" not found.` };
-  if (agent.source !== "user")
+  // A user file that does not load (#462) is deleted by path: its name may differ from its id.
+  const broken = agent ? [] : skippedUserAgentFiles(cfg, id);
+  if (!agent && !broken.length) return { ok: false, message: skippedAgentError(cfg, id) ?? `Agent "${id}" not found.` };
+  if (agent && agent.source !== "user")
     return { ok: false, message: `"${id}" is a builtin agent (config/agents): edit the repo, not the dashboard.` };
-  const builtinRemains = loadAgents(path.join(cfg.configDir, "agents"), "builtin").has(id);
+  // Lenient read: one broken builtin file must not break the delete of another agent.
+  const builtinRemains = loadAgentDir(path.join(cfg.configDir, "agents"), "builtin").agents.has(id);
   if (id === cfg.defaultAgent && !builtinRemains) {
     return {
       ok: false,
       message: `"${id}" is the default_agent in duskfleet.yaml and has no builtin fallback. Change default_agent first.`,
     };
   }
-  deleteAgentFile(cfg.userAgentsDir, id);
+  if (broken.length) deleteSkippedUserAgentFiles(cfg, id);
+  else deleteAgentFile(cfg.userAgentsDir, id);
   revalidatePath("/agents");
   revalidatePath("/");
   return {
