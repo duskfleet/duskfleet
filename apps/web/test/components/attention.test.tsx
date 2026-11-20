@@ -204,6 +204,100 @@ test("schedules, budgets and busy: anchors on /schedules, Costs, and the next-fi
   assert.match(html, /<a href="\/schedules#s2" class="att-link">Open schedule →<\/a>/);
 });
 
+// Issue #465: skipped agent files and changed link personas.
+const files: AttentionSection = {
+  kind: "files",
+  title: "Agent files that do not load",
+  items: [
+    {
+      kind: "files",
+      key: "agentFile:data/agents/helper.md",
+      subjectId: "data/agents/helper.md",
+      eventId: "invalid frontmatter",
+      dismissable: false,
+      label: "data/agents/helper.md · does not load",
+      tone: "bad",
+      badge: "Does not load",
+      agentId: "helper",
+      file: "data/agents/helper.md",
+      source: "user",
+      detail: "invalid frontmatter",
+    },
+  ],
+};
+const personas: AttentionSection = {
+  kind: "personas",
+  title: "Link personas changed",
+  items: [
+    {
+      kind: "personas",
+      key: "persona:s3",
+      subjectId: "s3",
+      eventId: "r12",
+      dismissable: true,
+      label: "builder · persona changed",
+      tone: "warn",
+      badge: "Persona changed",
+      scheduleId: "s3",
+      name: "builder",
+      agentId: "ui",
+      personaFile: ".claude/agents/builder.md",
+      detail: ".claude/agents/builder.md changed since the previous run (r11)",
+      runId: "r12",
+      previousRunId: "r11",
+      at: AT,
+    },
+  ],
+};
+
+test("agent files section: tinted row with the file and its error, no link, no toggle, cannot-see note", () => {
+  const html = renderToStaticMarkup(<AttentionSections sections={[files]} now={NOW} />);
+  assert.match(html, /<h2 id="att-files" class="att-h2">Agent files that do not load <span class="count">1<\/span>/);
+  for (const th of ["Error", "Agent file", "Source"]) assert.match(html, new RegExp(`>${th}</th>`));
+  assert.match(html, /<tr class="att-row tint-bad">/);
+  assert.match(html, /<span class="att-chip bad">Does not load<\/span>/);
+  assert.match(html, /<div class="att-title">helper · data\/agents\/helper\.md<\/div>/);
+  assert.match(html, /<div class="att-detail">invalid frontmatter<\/div>/);
+  assert.match(html, /<td class="c-meta">user<\/td>/);
+  assert.match(html, /<span class="att-head-note">Cannot be marked seen: leaves when fixed<\/span>/);
+  assert.doesNotMatch(html, /href=/);
+  assert.doesNotMatch(html, /<button/);
+});
+
+test("personas section: schedule and agent, the file in the detail, run link and seen toggle", () => {
+  const html = renderToStaticMarkup(<AttentionSections sections={[personas]} now={NOW} />);
+  assert.match(html, /<h2 id="att-personas" class="att-h2">Link personas changed <span class="count">1<\/span>/);
+  assert.match(html, /<th class="num" scope="col">Run started<\/th>/);
+  assert.match(html, /<span class="att-chip warn">Persona changed<\/span>/);
+  assert.match(html, /<div class="att-title">builder · ui<\/div>/);
+  assert.match(html, /\.claude\/agents\/builder\.md changed since the previous run \(r11\)/);
+  assert.match(html, /<a href="\/runs\/r12" class="att-link">Open run →<\/a>/);
+  assert.match(html, /aria-pressed="false" aria-label="Mark seen: builder · persona changed"/);
+  assert.doesNotMatch(html, /att-head-note/);
+});
+
+test("personas section came back after seen: the New since seen pill", () => {
+  const back = {
+    ...personas,
+    items: [{ ...personas.items[0], newSinceSeen: "2026-11-05T20:40:00Z" }],
+  } as AttentionSection;
+  assert.match(renderToStaticMarkup(<AttentionSections sections={[back]} now={NOW} />), /New since seen/);
+});
+
+test("AttentionSeen: a seen persona item opens its run", () => {
+  const items = [{ ...personas.items[0], seenAt: new Date(NOW - 10_000).toISOString() }] as never;
+  const html = renderToStaticMarkup(<AttentionSeen items={items} now={NOW} open={true} />);
+  assert.match(html, /<div class="att-title">builder · ui<\/div>/);
+  assert.match(html, /<a href="\/runs\/r12" class="att-link">Open run →<\/a>/);
+  assert.match(html, /aria-pressed="true" aria-label="Mark unseen: builder · persona changed"/);
+});
+
+test("AttentionSummary: coral agent-file chip, amber persona chip", () => {
+  const html = renderToStaticMarkup(<AttentionSummary sections={[files, personas]} />);
+  assert.match(html, /<span class="att-chip bad">1 agent file broken<\/span>/);
+  assert.match(html, /<span class="att-chip warn">1 persona changed<\/span>/);
+});
+
 test("seen toggle per dismissable row, Mark section seen on the heading, no cannot-see note", () => {
   const html = renderToStaticMarkup(<AttentionSections sections={[failed]} now={NOW} />);
   assert.match(

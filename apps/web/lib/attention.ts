@@ -14,10 +14,12 @@ import {
   type FailureCode,
   isClaudeNotFound,
   isOrphaned,
+  type ProjectAgentChange,
   REVIEW_REASON_LABELS,
   type Run,
   type Schedule,
   type ScheduleFiring,
+  type SkippedAgentFile,
 } from "@duskfleet/core";
 
 /** Items older than this are absent (owner decision on #69: 48 hours, not 7 days). */
@@ -29,14 +31,25 @@ export const ATTENTION_WINDOW_MS = 48 * 3600_000;
 export const BUSY_STREAK_MIN = 3;
 
 /** Fixed order of the sections; empty ones are hidden. */
-export const SECTION_KINDS = ["login", "failed", "review", "schedules", "budgets", "busy"] as const;
+export const SECTION_KINDS = [
+  "login",
+  "files",
+  "failed",
+  "review",
+  "schedules",
+  "personas",
+  "budgets",
+  "busy",
+] as const;
 export type SectionKind = (typeof SECTION_KINDS)[number];
 
 export const SECTION_TITLES: Record<SectionKind, string> = {
   login: "Login and quota errors",
+  files: "Agent files that do not load",
   failed: "Failed runs",
   review: "Needs review",
   schedules: "Schedules paused or in error",
+  personas: "Link personas changed",
   budgets: "Budget warnings",
   busy: "Repeated skipped busy",
 };
@@ -154,13 +167,49 @@ export interface BusyItem extends ItemBase {
   at: string;
 }
 
-export type AttentionItem = LoginItem | RunItem | ScheduleItem | BudgetItem | BusyItem;
+/** An agent file the loader skipped (#462): leaves only when the file loads again. */
+export interface AgentFileItem extends ItemBase {
+  kind: "files";
+  key: string;
+  tone: "bad";
+  badge: string;
+  /** The id the file declares (or its file name). */
+  agentId: string;
+  /** The file as the Agents page names it: repo-relative, `~/...` or absolute. */
+  file: string;
+  /** builtin (config/agents) or user (data/agents). */
+  source: string;
+  /** The loader's error, first line. */
+  detail: string;
+}
+
+/** A scheduled link run whose project agent file changed since the schedule's previous run (#463). */
+export interface PersonaItem extends ItemBase {
+  kind: "personas";
+  key: string;
+  tone: "warn";
+  badge: string;
+  scheduleId: string;
+  name: string;
+  agentId: string;
+  /** `.claude/agents/<name>.md`, or null when the agent is no longer a link. */
+  personaFile: string | null;
+  detail: string;
+  /** The run that started with the changed file; the row opens it. */
+  runId: string;
+  previousRunId: string;
+  at: string;
+}
+
+export type AttentionItem = LoginItem | AgentFileItem | RunItem | ScheduleItem | PersonaItem | BudgetItem | BusyItem;
 
 interface ItemsByKind {
   login: LoginItem;
+  files: AgentFileItem;
   failed: RunItem;
   review: RunItem;
   schedules: ScheduleItem;
+  personas: PersonaItem;
   budgets: BudgetItem;
   busy: BusyItem;
 }
@@ -225,6 +274,26 @@ export interface AttentionInput {
   schedules: AttentionSchedule[];
   /** Every budget with its status; the ones under their warning are dropped here. */
   budgets: AttentionBudget[];
+  /** The agent files the loaded config skipped (`config.skippedAgents`); absent = none. */
+  skippedAgents?: AttentionSkippedAgent[];
+  /** Per schedule, its last run's project agent file against the previous run's; absent = none. */
+  personaChanges?: AttentionPersonaChange[];
+}
+
+/** `SkippedAgentFile` with the file already labelled for display (no home path). */
+export type AttentionSkippedAgent = Pick<SkippedAgentFile, "id" | "source" | "error"> & { file: string };
+
+/** A schedule's last run and core's `compareProjectAgent` of it against the previous run. */
+export interface AttentionPersonaChange {
+  scheduleId: string;
+  name: string;
+  agentId: string;
+  /** The link's `claude_agent` today, or null when the agent is gone or no longer a link. */
+  claudeAgent: string | null;
+  runId: string;
+  /** When the last run started. */
+  at: string;
+  change: Pick<ProjectAgentChange, "previousRunId" | "changed">;
 }
 
 const at = (r: AttentionRun) => r.endedAt ?? r.createdAt;
@@ -471,6 +540,61 @@ function busyItems(schedules: AttentionSchedule[], since: number): BusyItem[] {
   return items.sort(newestFirst);
 }
 
+/**
+ * One item per skipped agent file, never dismissable: it leaves when the file loads again (the
+ * next config read no longer lists it). No window: a broken file stays broken until fixed.
+ */
+function agentFileItems(skipped: AttentionSkippedAgent[]): AgentFileItem[] {
+  return skipped
+    .map((s) => ({
+      kind: "files" as const,
+      key: `agentFile:${s.file}`,
+      subjectId: s.file,
+      // The error is the event: a different error of the same file is a different item.
+      eventId: firstLine(s.error),
+      dismissable: false,
+      label: `${s.file} · does not load`,
+      tone: "bad" as const,
+      badge: "Does not load",
+      agentId: s.id,
+      file: s.file,
+      source: s.source,
+      detail: firstLine(s.error),
+    }))
+    .sort((a, b) => a.file.localeCompare(b.file));
+}
+
+/**
+ * One item per schedule whose last run started with a project agent file other than the previous
+ * run's. The run id is the event: a later change is a later run, so a new item after "seen".
+ */
+function personaItems(changes: AttentionPersonaChange[], since: number): PersonaItem[] {
+  const items: PersonaItem[] = [];
+  for (const c of changes) {
+    if (!c.change.changed || Date.parse(c.at) < since) continue;
+    const personaFile = c.claudeAgent ? `.claude/agents/${c.claudeAgent}.md` : null;
+    items.push({
+      kind: "personas",
+      key: `persona:${c.scheduleId}`,
+      subjectId: c.scheduleId,
+      eventId: c.runId,
+      dismissable: true,
+      label: `${c.name} · persona changed`,
+      tone: "warn",
+      badge: "Persona changed",
+      scheduleId: c.scheduleId,
+      name: c.name,
+      agentId: c.agentId,
+      personaFile,
+      detail: `${personaFile ?? "The project agent file"} changed since the previous run (${c.change.previousRunId})`,
+      runId: c.runId,
+      previousRunId: c.change.previousRunId,
+      at: c.at,
+    });
+  }
+  return items.sort(newestFirst);
+}
+
 /** The sections in their fixed order, empty ones dropped. */
 export function attentionSections(input: AttentionInput): AttentionSection[] {
   const since = input.now - ATTENTION_WINDOW_MS;
@@ -480,9 +604,11 @@ export function attentionSections(input: AttentionInput): AttentionSection[] {
   const { failed, review } = runItems(runs, login.folded, handPaused);
   const byKind: { [K in SectionKind]: Array<ItemsByKind[K]> } = {
     login: login.items,
+    files: agentFileItems(input.skippedAgents ?? []),
     failed,
     review,
     schedules: scheduleItems(input.schedules, since),
+    personas: personaItems(input.personaChanges ?? [], since),
     budgets: budgetItems(input.budgets),
     busy: busyItems(input.schedules, since),
   };
@@ -491,19 +617,26 @@ export function attentionSections(input: AttentionInput): AttentionSection[] {
   );
 }
 
-/** Coral when a login/quota item or a spent hard-stop budget is present, amber otherwise; null at 0. */
+/**
+ * Coral when an item that leaves only when fixed is present (login/quota, a skipped agent file, a
+ * spent hard-stop budget), amber otherwise; null at 0.
+ */
 export function attentionBadge(sections: AttentionSection[]): AttentionBadge | null {
   const items = sections.flatMap((s) => s.items as AttentionItem[]);
   if (items.length === 0) return null;
-  const coral = items.some((i) => i.kind === "login" || (i.kind === "budgets" && i.tone === "bad"));
+  const coral = items.some(
+    (i) => i.kind === "login" || i.kind === "files" || (i.kind === "budgets" && i.tone === "bad"),
+  );
   return { count: items.length, tone: coral ? "bad" : "warn" };
 }
 
 const CHIP_NOUNS: Record<SectionKind, [string, string]> = {
   login: ["login error", "login errors"],
+  files: ["agent file broken", "agent files broken"],
   failed: ["failed run", "failed runs"],
   review: ["needs review", "need review"],
   schedules: ["schedule paused", "schedules paused"],
+  personas: ["persona changed", "personas changed"],
   budgets: ["budget warning", "budget warnings"],
   busy: ["skipped busy", "skipped busy"],
 };
@@ -520,7 +653,7 @@ export function summaryChips(
     const n = s.items.length;
     const [one, many] = CHIP_NOUNS[s.kind];
     const tone: Tone =
-      s.kind === "login" || s.kind === "failed"
+      s.kind === "login" || s.kind === "files" || s.kind === "failed"
         ? "bad"
         : s.kind === "busy"
           ? "neutral"

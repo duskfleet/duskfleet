@@ -230,20 +230,114 @@ test("sections keep the fixed order and the chips name each one", () => {
       }),
     ],
     budgets: [budget()],
+    skippedAgents: [skipped()],
+    personaChanges: [persona({ scheduleId: "l" })],
   });
   assert.deepEqual(kinds(s), [...SECTION_KINDS]);
   assert.deepEqual(
     summaryChips(s).map((c) => [c.label, c.tone]),
     [
       ["1 login error", "bad"],
+      ["1 agent file broken", "bad"],
       ["1 failed run", "bad"],
       ["1 needs review", "warn"],
       ["1 schedule paused", "warn"],
+      ["1 persona changed", "warn"],
       ["1 budget warning", "warn"],
       ["1 skipped busy", "neutral"],
     ],
   );
-  assert.deepEqual(attentionBadge(s), { count: 6, tone: "bad" });
+  assert.deepEqual(attentionBadge(s), { count: 8, tone: "bad" });
+});
+
+// Issue #465: skipped agent files (#462) and changed link personas (#463).
+
+const allItems = (s) => s.flatMap((x) => x.items);
+const seenAck = (item, seenAt = ago(5)) => ({
+  itemKey: ackKey(item),
+  kind: item.kind,
+  subjectId: item.subjectId,
+  seenAt,
+});
+
+function skipped(over = {}) {
+  return {
+    id: "helper",
+    source: "user",
+    file: "data/agents/helper.md",
+    error: "invalid frontmatter: model must be a string\n  at line 3",
+    ...over,
+  };
+}
+
+function persona(over = {}) {
+  return {
+    scheduleId: "s1",
+    name: "nightly",
+    agentId: "dev",
+    claudeAgent: "builder",
+    runId: "r-new",
+    at: ago(20),
+    change: { previousRunId: "r-old", changed: true },
+    ...over,
+  };
+}
+
+test("a skipped agent file is one coral item with its error, never dismissable, gone when it loads", () => {
+  const s = sections({
+    skippedAgents: [skipped(), skipped({ id: "a", file: "config/agents/a.md", source: "builtin" })],
+  });
+  assert.deepEqual(kinds(s), ["files"]);
+  const [a, helper] = s[0].items;
+  assert.equal(a.file, "config/agents/a.md", "sorted by file");
+  assert.equal(helper.agentId, "helper");
+  assert.equal(helper.detail, "invalid frontmatter: model must be a string", "first line of the error");
+  assert.equal(helper.dismissable, false);
+  assert.deepEqual(attentionBadge(s), { count: 2, tone: "bad" });
+  assert.deepEqual(sections({ skippedAgents: [] }), [], "the file loads again: no item");
+});
+
+test("a skipped agent file ignores seen marks and cannot be acked", () => {
+  const s = sections({ skippedAgents: [skipped()] });
+  const [item] = allItems(s);
+  const view = applySeen(s, [seenAck(item)]);
+  assert.equal(view.seen.length, 0);
+  assert.equal(view.sections[0].items.length, 1);
+  assert.deepEqual(acksFor(s, [ackKey(item)]).refused, [ackKey(item)]);
+});
+
+test("a changed persona is one item per schedule, linking to the run and naming the file", () => {
+  const s = sections({
+    personaChanges: [persona(), persona({ scheduleId: "s2", name: "weekly", runId: "r2", at: ago(5) })],
+  });
+  assert.deepEqual(kinds(s), ["personas"]);
+  const [weekly, nightly] = s[0].items;
+  assert.equal(weekly.scheduleId, "s2", "newest first");
+  assert.equal(nightly.runId, "r-new");
+  assert.equal(nightly.personaFile, ".claude/agents/builder.md");
+  assert.equal(nightly.detail, ".claude/agents/builder.md changed since the previous run (r-old)");
+  assert.equal(nightly.dismissable, true);
+  assert.deepEqual(attentionBadge(s), { count: 2, tone: "warn" });
+});
+
+test("no persona item when the file did not change, the run is out of the window, or there is none", () => {
+  assert.deepEqual(sections({ personaChanges: [persona({ change: { previousRunId: "r-old", changed: false } })] }), []);
+  assert.deepEqual(sections({ personaChanges: [persona({ at: ago(49 * 60) })] }), []);
+  assert.deepEqual(sections({ personaChanges: [] }), []);
+  const [item] = allItems(sections({ personaChanges: [persona({ claudeAgent: null })] }));
+  assert.equal(item.personaFile, null);
+  assert.match(item.detail, /^The project agent file changed/);
+});
+
+test("a seen persona item stays seen until the next changed run, which comes back as new", () => {
+  const first = sections({ personaChanges: [persona()] });
+  const mark = seenAck(allItems(first)[0]);
+  assert.equal(applySeen(first, [mark]).seen.length, 1, "seen: hidden from the sections");
+  assert.deepEqual(applySeen(first, [mark]).sections, []);
+  const next = sections({ personaChanges: [persona({ runId: "r-newer", at: ago(1) })] });
+  const view = applySeen(next, [mark]);
+  assert.equal(view.seen.length, 0);
+  assert.equal(view.sections[0].items[0].newSinceSeen, mark.seenAt);
 });
 
 // DS-32 (issue #430): item keys, the seen split, and what may be marked seen.

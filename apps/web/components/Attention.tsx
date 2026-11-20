@@ -2,6 +2,7 @@ import Link from "next/link";
 import type { ReactNode } from "react";
 import { MarkSeenButton, SeenGroup, SeenToggle } from "@/components/SeenControls";
 import {
+  type AgentFileItem,
   type AttentionItem,
   type AttentionSection,
   ackKey,
@@ -9,6 +10,7 @@ import {
   type BusyItem,
   dismissableKeys,
   type LoginItem,
+  type PersonaItem,
   type RunItem,
   type ScheduleItem,
   type SectionKind,
@@ -53,15 +55,27 @@ const usd = (n: number) => `$${n.toFixed(2)}`;
 
 const COLUMNS: Record<SectionKind, string[]> = {
   login: ["Error", "What happened", "Runs", "Since"],
+  files: ["Error", "Agent file", "Source"],
   failed: ["Status", "Run", "Model", "Duration", "When"],
   review: ["Status", "Run", "Model", "Duration", "When"],
   schedules: ["State", "Schedule", "Paused", "Next fire if resumed"],
+  personas: ["State", "Schedule", "Run started"],
   budgets: ["Level", "Budget", "Spent"],
   busy: ["Streak", "Schedule", "Last skip"],
 };
 
 /** Columns that hold numbers or times: right-aligned, tabular. */
-const NUMERIC = new Set(["Runs", "Since", "Duration", "When", "Paused", "Next fire if resumed", "Spent", "Last skip"]);
+const NUMERIC = new Set([
+  "Runs",
+  "Since",
+  "Duration",
+  "When",
+  "Paused",
+  "Next fire if resumed",
+  "Run started",
+  "Spent",
+  "Last skip",
+]);
 
 /** "New since seen 20:40": an unseen item an older event of which was marked seen. */
 function NewSinceSeen({ at, now }: { at: string; now: number }) {
@@ -202,6 +216,35 @@ function BudgetRow({ item, now }: { item: BudgetItem; now: number }) {
   );
 }
 
+/** A skipped agent file: no link (the fix is editing the file), no seen toggle (leaves when it loads). */
+function AgentFileRow({ item, now }: { item: AgentFileItem; now: number }) {
+  return (
+    <tr className="att-row tint-bad">
+      <td className="c-badge">
+        <KindChip tone={item.tone}>{item.badge}</KindChip>
+      </td>
+      <Main title={`${item.agentId} · ${item.file}`} detail={item.detail} now={now} />
+      <td className="c-meta">{item.source}</td>
+      <td className="c-act" />
+      <SeenCell item={item} />
+    </tr>
+  );
+}
+
+function PersonaRow({ item, now }: { item: PersonaItem; now: number }) {
+  return (
+    <tr className="att-row">
+      <td className="c-badge">
+        <KindChip tone={item.tone}>{item.badge}</KindChip>
+      </td>
+      <Main title={`${item.name} · ${item.agentId}`} detail={item.detail} newSince={item.newSinceSeen} now={now} />
+      <td className="c-when num">{fmtClock(item.at, now)}</td>
+      <Act href={`/runs/${item.runId}`}>Open run →</Act>
+      <SeenCell item={item} />
+    </tr>
+  );
+}
+
 function BusyRow({ item, now }: { item: BusyItem; now: number }) {
   return (
     <tr className="att-row">
@@ -220,11 +263,15 @@ function Row({ item, now }: { item: AttentionItem; now: number }) {
   switch (item.kind) {
     case "login":
       return <LoginRows item={item} now={now} />;
+    case "files":
+      return <AgentFileRow item={item} now={now} />;
     case "failed":
     case "review":
       return <RunRowItem item={item} now={now} />;
     case "schedules":
       return <ScheduleRow item={item} now={now} />;
+    case "personas":
+      return <PersonaRow item={item} now={now} />;
     case "budgets":
       return <BudgetRow item={item} now={now} />;
     case "busy":
@@ -286,6 +333,10 @@ function seenRowParts(item: AttentionItem): { title: string; href: string | null
   switch (item.kind) {
     case "login":
       return { title: item.title, href: null, act: "" };
+    case "files":
+      return { title: `${item.agentId} · ${item.file}`, href: null, act: "" };
+    case "personas":
+      return { title: `${item.name} · ${item.agentId}`, href: `/runs/${item.runId}`, act: "Open run →" };
     case "failed":
     case "review":
       return { title: `${item.agentId} · ${item.project}`, href: `/runs/${item.runId}`, act: "Open run →" };
