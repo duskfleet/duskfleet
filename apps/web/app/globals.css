@@ -5459,11 +5459,13 @@ details.desc ul {
   .att-short {
     display: inline;
   }
-  .att-login .att-head-note {
+  .att-login .att-head-note,
+  .att-files .att-head-note {
     display: block;
     margin-top: 4px;
   }
-  .att-login .att-section-head .att-h2 {
+  .att-login .att-section-head .att-h2,
+  .att-files .att-section-head .att-h2 {
     display: block;
   }
   .att-head .att-title-row {
