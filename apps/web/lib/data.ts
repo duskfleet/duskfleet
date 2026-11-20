@@ -22,6 +22,7 @@ import {
   type CostSplit,
   type CostSplitBy,
   claudeCodeAddArgs,
+  compareProjectAgent,
   costSeries,
   type DuskFleetConfig,
   describeCron,
@@ -62,6 +63,7 @@ import {
 } from "@duskfleet/core";
 import {
   ATTENTION_WINDOW_MS,
+  type AttentionPersonaChange,
   type AttentionSection,
   type AttentionView,
   applySeen,
@@ -179,6 +181,18 @@ export function agentSummary(
   return { id: a.id, name: a.name, claudeAgent: a.claudeAgent ?? null, description: [...new Set(parts)].join(" · ") };
 }
 
+/** An agent file as the dashboard names it: repo-relative, `~/...`, or absolute. */
+function agentFileLabeller(): (p: string) => string {
+  const root = findRepoRoot(process.cwd());
+  const home = homedir();
+  return (p: string) =>
+    root && p.startsWith(root + path.sep)
+      ? path.relative(root, p)
+      : home && p.startsWith(home + path.sep)
+        ? "~" + p.slice(home.length)
+        : p;
+}
+
 /**
  * The harnesses this host can start, as the MCP server's bootstrap registers them: Claude Code
  * always (a missing claude binary is `doctor`'s own error), the others only when their CLI resolves.
@@ -205,14 +219,7 @@ export function listAgents() {
   // A user file with a builtin's id overrides it: the card says so.
   // Lenient read: a broken builtin file is skipped, as in loadConfig (#462).
   const builtinIds = new Set(loadAgentDir(path.join(cfg.configDir, "agents"), "builtin").agents.keys());
-  const root = findRepoRoot(process.cwd());
-  const home = homedir();
-  const fileLabel = (p: string) =>
-    root && p.startsWith(root + path.sep)
-      ? path.relative(root, p)
-      : home && p.startsWith(home + path.sep)
-        ? "~" + p.slice(home.length)
-        : p;
+  const fileLabel = agentFileLabeller();
 
   return [...cfg.agents.values()].map(({ systemPrompt, ...a }) => {
     const linked = a.claudeAgent ? resolveLink(cfg, projectAgents, a.project, a.claudeAgent) : null;
@@ -1088,12 +1095,51 @@ export function attention(now = Date.now()): AttentionSection[] {
     }
     return { ...s, theoreticalNextAt, firings: schedules.firings(s.id, ATTENTION_FIRINGS) };
   });
+  const cfg = config();
+  const fileLabel = agentFileLabeller();
   return attentionSections({
     now,
     runs: list,
     schedules: scheduleRows,
-    budgets: budgetStatuses(runs.budgets, config()),
+    budgets: budgetStatuses(runs.budgets, cfg),
+    skippedAgents: (cfg.skippedAgents ?? []).map((s) => ({
+      id: s.id,
+      source: s.source,
+      error: s.error,
+      file: fileLabel(s.sourcePath),
+    })),
+    personaChanges: personaChanges(scheduleRows, cfg, since),
   });
+}
+
+/**
+ * Each schedule's last run against the schedule's previous run (issue #463), the same comparison
+ * as `RunManager.projectAgentChange`: only scheduled link runs that recorded a project agent hash,
+ * started inside the window.
+ */
+function personaChanges(
+  rows: Array<{ id: string; name: string; agentId: string; lastRunId: string | null }>,
+  cfg: DuskFleetConfig,
+  since: string,
+): AttentionPersonaChange[] {
+  const { runs } = services();
+  const out: AttentionPersonaChange[] = [];
+  for (const s of rows) {
+    const run = s.lastRunId ? runs.get(s.lastRunId) : null;
+    if (!run || run.kind !== "run" || !run.projectAgentHash || run.createdAt < since) continue;
+    const change = compareProjectAgent(run.projectAgentHash, runs.previousRunOfSchedule(s.id, run));
+    if (!change) continue;
+    out.push({
+      scheduleId: s.id,
+      name: s.name,
+      agentId: run.agentId,
+      claudeAgent: cfg.agents.get(run.agentId)?.claudeAgent ?? null,
+      runId: run.id,
+      at: run.createdAt,
+      change,
+    });
+  }
+  return out;
 }
 
 /** The "seen" marks of the Alerts items (migration 29); written only by app/attention/actions.ts. */

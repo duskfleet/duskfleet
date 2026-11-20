@@ -218,30 +218,38 @@ in a fixed order. Empty sections are hidden:
 1. **Login and quota errors**: one item per cause (`auth_required`, `provider_quota`, a
    `claude` binary not found), with the runs it failed folded in. "How to fix" opens the fix
    line in place (the same text as the CLI's hint, core's `FAILURE_FIXES`).
-2. **Failed runs**: failed, timed-out and orphaned runs, one item per agent with a count.
-3. **Needs review**: completed runs with a stored [review reason](#needs-review), one item per agent.
-4. **Schedules paused or in error**: auto-paused schedules (`paused_reason`) and schedules whose
+2. **Agent files that do not load**: one item per agent file the loader skipped (see
+   [agents](agents.md)), with its file, source (builtin or user) and the loader's error. Coral; it
+   leaves when the file loads again.
+3. **Failed runs**: failed, timed-out and orphaned runs, one item per agent with a count.
+4. **Needs review**: completed runs with a stored [review reason](#needs-review), one item per agent.
+5. **Schedules paused or in error**: auto-paused schedules (`paused_reason`) and schedules whose
    last firing errored. A schedule paused by hand is not listed.
-5. **Budget warnings**: monthly budgets at or past `warn_percent`; a spent hard stop is coral.
-6. **Repeated skipped busy**: a schedule whose last 3 or more firings were all `skipped_busy`
+6. **Link personas changed**: a schedule whose last run of a link agent started with a project
+   agent file (`.claude/agents/<name>.md`) other than the schedule's previous run had. One item
+   per schedule, opening the run; nothing is blocked.
+7. **Budget warnings**: monthly budgets at or past `warn_percent`; a spent hard stop is coral.
+8. **Repeated skipped busy**: a schedule whose last 3 or more firings were all `skipped_busy`
    (the `deferred` rows `scheduler.defer_busy` writes in between do not break the streak).
 
 An item leaves when its cause is fixed: the agent ends a clean run, or its schedule is paused by
-hand (run items); a later run ends without the login code; the schedule is resumed or fires again;
-the spend drops below the warning or the month changes. Run and schedule items older than 48 hours
-are dropped too.
+hand (run items); a later run ends without the login code; the agent file loads again; the
+schedule is resumed or fires again (a persona item also leaves when the next run starts with the
+same file); the spend drops below the warning or the month changes. Run, schedule and persona
+items older than 48 hours are dropped too.
 
 **Seen.** Each item has a check button that marks it seen; "Mark section seen" and "Mark all seen"
 mark every item shown, and a toast offers Undo for about 8 seconds. A seen item moves to the
 collapsible **Seen** group at the bottom ("seen hh:mm"); its pressed button un-sees it. The mark is
 stored in the database (`attention_acks`), so it is the same in every browser and survives a
 reload. It belongs to the item's latest event (the newest run of the agent, the newest firing of
-the schedule, the budget's month and threshold): a new event brings the item back by itself, with
-a "New since seen hh:mm" pill. Login and quota errors and a spent hard-stop budget cannot be marked
-seen; they leave only when fixed.
+the schedule, the budget's month and threshold, the run that started with a changed persona): a new
+event brings the item back by itself, with a "New since seen hh:mm" pill. Login and quota errors,
+agent files that do not load and a spent hard-stop budget cannot be marked seen; they leave only
+when fixed.
 
-The tab's badge counts unseen items, not runs. It is coral when a login or quota error or a spent
-hard stop is present, amber otherwise, and absent at 0.
+The tab's badge counts unseen items, not runs. It is coral when a login or quota error, an agent
+file that does not load or a spent hard stop is present, amber otherwise, and absent at 0.
 
 ## Trends
 
