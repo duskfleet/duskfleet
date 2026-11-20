@@ -85,6 +85,16 @@ the guide [Run Claude Code on a schedule on your own machine](guides/run-claude-
 - **`cancel_run` says the run is owned by another live Duskfleet process**: the claude child
   belongs to that process (another MCP server, or `serve`); cancel it there, or stop that process
   and the run is recovered as orphaned.
+- **A Copilot agent is refused with `copilot mcp list --json failed`** (or `did not print JSON`):
+  before each `harness: copilot` run Duskfleet lists the configured MCP servers to disable them,
+  and without that list the run is not started (nothing is recorded). Run
+  `copilot mcp list --json` in the project folder yourself: a login, a broken
+  `~/.copilot/mcp-config.json` or a CLI update that changed the output shows there. The error
+  carries the exit code and the end of its stderr.
+- **A Copilot run fails with `Copilot loaded MCP server <name>`**: a server loaded although it was
+  passed as `--disable-mcp-server` (or appeared after the listing). Copilot runs have no MCP, so the
+  run is stopped. Check that `copilot mcp list --json` in the project folder names that server; if it
+  does, the CLI ignored the disable, so report it with the CLI version.
 
 ## Unattended runs
 
