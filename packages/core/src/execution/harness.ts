@@ -115,15 +115,45 @@ export const COPILOT_CAPABILITIES: HarnessCapabilities = Object.freeze({
   toolRule: copilotRuleRefusal,
 });
 
+/** Name of the Codex CLI harness (issue #50). */
+export const CODEX_HARNESS = "codex";
+
+/**
+ * Codex CLI (codex-cli 0.167.1, docs/harnesses.md): no tool allow-list, only a sandbox mode
+ * (`dontAsk` = read-only, `acceptEdits` = workspace-write, network off), no dollars (every run
+ * `unpriced`), no project-defined agents (nothing in the CLI loads one from a project folder).
+ * `resumeSession` stays false until a real run shows a resumed turn keeps the write sandbox.
+ */
+export const CODEX_CAPABILITIES: HarnessCapabilities = Object.freeze({
+  toolAllowList: false,
+  permissionModes: ["dontAsk", "acceptEdits"] as const,
+  resumeSession: false,
+  hardBudgetUsd: false,
+  reportsCostUsd: false,
+  subagents: false,
+  mcpInherit: false,
+  projectAgents: false,
+  addDirs: false,
+  skills: false,
+  effort: true,
+  sandbox: false,
+});
+
 /** The harnesses Duskfleet ships an adapter for, in the order `doctor` lists them. */
-export const SHIPPED_HARNESSES: readonly string[] = [DEFAULT_HARNESS, COPILOT_HARNESS];
+export const SHIPPED_HARNESSES: readonly string[] = [DEFAULT_HARNESS, COPILOT_HARNESS, CODEX_HARNESS];
 
 /** The capabilities of a harness by name; undefined = no executor registered under that name. */
 export type HarnessLookup = (name: string) => HarnessCapabilities | undefined;
 
 /** What create / update check against when the caller has no registry at hand: the harnesses that ship. */
 export const builtinHarnesses: HarnessLookup = (name) =>
-  name === DEFAULT_HARNESS ? CLAUDE_CAPABILITIES : name === COPILOT_HARNESS ? COPILOT_CAPABILITIES : undefined;
+  name === DEFAULT_HARNESS
+    ? CLAUDE_CAPABILITIES
+    : name === COPILOT_HARNESS
+      ? COPILOT_CAPABILITIES
+      : name === CODEX_HARNESS
+        ? CODEX_CAPABILITIES
+        : undefined;
 
 /** The agent's harness name (`harness:`, else the default). */
 export function harnessOf(agent: { harness?: string | undefined }): string {

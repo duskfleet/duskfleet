@@ -16,6 +16,10 @@ delete process.env.DUSKFLEET_DATA;
 const fakeCopilot = fileURLToPath(new URL("./fake-copilot.js", import.meta.url));
 chmodSync(fakeCopilot, 0o755);
 process.env.COPILOT_BIN = fakeCopilot;
+// Same for CODEX_BIN: fake-codex.js, never a real `codex`.
+const fakeCodex = fileURLToPath(new URL("./fake-codex.js", import.meta.url));
+chmodSync(fakeCodex, 0o755);
+process.env.CODEX_BIN = fakeCodex;
 
 /** Environment for spawned CLI / MCP processes: ours without CLAUDE_BIN / DUSKFLEET_DATA, plus `extra`. */
 export function testEnv(extra = {}) {

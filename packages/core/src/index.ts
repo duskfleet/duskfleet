@@ -140,10 +140,25 @@ export {
   resolveClaudeBinary,
 } from "./execution/claude-code.js";
 export {
+  CODEX_SANDBOX_BY_MODE,
+  CodexExecutor,
+  type CodexExecutorOptions,
+  resolveCodexBinary,
+  tomlString,
+} from "./execution/codex.js";
+export {
+  type CodexStreamState,
+  type CodexTurnEnd,
+  codexTurnUsage,
+  createCodexState,
+  ingestCodexLine,
+} from "./execution/codex-jsonl.js";
+export {
   COPILOT_PERSONA_AGENT,
   CopilotExecutor,
   type CopilotExecutorOptions,
   copilotEnv,
+  copilotMcpServersToDisable,
   resolveCopilotBinary,
 } from "./execution/copilot.js";
 export {
@@ -160,6 +175,8 @@ export {
   assertAgentFitsHarness,
   builtinHarnesses,
   CLAUDE_CAPABILITIES,
+  CODEX_CAPABILITIES,
+  CODEX_HARNESS,
   COPILOT_CAPABILITIES,
   COPILOT_HARNESS,
   HARNESS_CAPABILITY_KEYS,

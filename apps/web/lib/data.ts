@@ -49,8 +49,11 @@ import {
   type RunStatus,
   recentReviewReasons,
   resolveClaudeBinary,
+  resolveCodexBinary,
   resolveConfigDir,
+  resolveCopilotBinary,
   ScheduleRepository,
+  SHIPPED_HARNESSES,
   scheduleIdleStats,
   scheduleRunState,
   shellLine,
@@ -67,6 +70,7 @@ import {
   attentionSections,
 } from "./attention";
 import { cliCommand, detectInstall, type Install, usableMcpEntry } from "./cli";
+import { DEFAULT_HARNESS_NAME, type HostHarnesses, harnessInfo } from "./harness";
 import { ACTIVE_SQL, ACTIVE_STATUSES, RUNNING_COUNT_SQL } from "./running";
 import { costModel, listScoped, scopeList } from "./scope";
 import { mergeSeries } from "./trends";
@@ -189,8 +193,26 @@ function agentFileLabeller(): (p: string) => string {
         : p;
 }
 
+/**
+ * The harnesses this host can start, as the MCP server's bootstrap registers them: Claude Code
+ * always (a missing claude binary is `doctor`'s own error), the others only when their CLI resolves.
+ */
+export function hostHarnesses(cfg: DuskFleetConfig = config()): HostHarnesses {
+  const host = new Map<string, string | null>();
+  for (const name of SHIPPED_HARNESSES) {
+    if (name === DEFAULT_HARNESS_NAME) host.set(name, null);
+    else if (name === "copilot")
+      host.set(name, resolveCopilotBinary(cfg.copilot?.binary ?? null) ? null : "GitHub Copilot CLI not found");
+    else if (name === "codex")
+      host.set(name, resolveCodexBinary(cfg.codex?.binary ?? null) ? null : "Codex CLI not found");
+    else host.set(name, `${name} CLI not found`);
+  }
+  return host;
+}
+
 export function listAgents() {
   const cfg = config();
+  const host = hostHarnesses(cfg);
   // .claude/agents is read once per project per request, not once per agent.
   const projectAgents = new Map<string, ProjectAgentInfo[]>();
 
@@ -226,6 +248,8 @@ export function listAgents() {
       linked,
       effectiveModel,
       modelSource,
+      /** The agent CLI it runs on (`harness:`, else claude) and whether this host can start it. */
+      harnessInfo: harnessInfo(a.harness, host),
     };
   });
 }
@@ -970,6 +994,7 @@ export function agentRecentReviewReasons(agentId: string, projectPath?: string, 
 export function listSchedules() {
   const { schedules, runs } = services();
   const cfg = config();
+  const host = hostHarnesses(cfg);
   const now = new Date();
   return schedules.list().map((s) => {
     let cronHuman = s.cron;
@@ -1001,6 +1026,8 @@ export function listSchedules() {
       willResumeRunId,
       effectiveProjectId,
       idle7d,
+      /** The harness of the schedule's agent; null when the agent is not loaded (its own warning says so). */
+      harnessInfo: cfg.agents.has(s.agentId) ? harnessInfo(cfg.agents.get(s.agentId)?.harness, host) : null,
     };
   });
 }

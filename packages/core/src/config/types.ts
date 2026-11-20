@@ -173,6 +173,12 @@ export interface CopilotConfig {
   binary: string | null;
 }
 
+/** `codex:` in duskfleet.yaml: the Codex CLI harness (issue #50). */
+export interface CodexConfig {
+  /** Path of the `codex` binary; null = `codex` on PATH. Without one the harness is not registered. */
+  binary: string | null;
+}
+
 export interface SchedulerConfig {
   /** Kill switch: false stops every process from firing schedules (re-read every tick). */
   enabled: boolean;
@@ -228,6 +234,8 @@ export interface DuskFleetConfig {
   claude: ClaudeConfig;
   /** Optional for configs built by hand (tests): absent = `copilot` on PATH. */
   copilot?: CopilotConfig;
+  /** Optional for configs built by hand (tests): absent = `codex` on PATH. */
+  codex?: CodexConfig;
   scheduler: SchedulerConfig;
   agents: Map<string, AgentDefinition>;
   projects: Map<string, ProjectDefinition>;
