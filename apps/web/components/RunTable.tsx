@@ -12,6 +12,8 @@ import {
   fmtTime,
   shortModel,
 } from "@/lib/format";
+import { DEFAULT_HARNESS_NAME } from "@/lib/harness";
+import { HarnessTag } from "./HarnessTag";
 import { RunRow } from "./RunRow";
 import { StatusBadge } from "./StatusBadge";
 
@@ -240,6 +242,8 @@ export function RunTable({
                   <span className="pill model" title={r.modelUsed ?? r.modelRequested ?? "CLI default"}>
                     {shortModel(r.modelUsed ?? r.modelRequested)}
                   </span>
+                  {/* the harness the run was recorded with (runs.harness); drops with the Model column */}
+                  <HarnessTag info={{ name: r.harness || DEFAULT_HARNESS_NAME, missing: null }} />
                 </td>
                 <td className="num col-duration">{fmtDuration(duration)}</td>
                 <td className="num col-turns">{fmtInt(r.numTurns)}</td>

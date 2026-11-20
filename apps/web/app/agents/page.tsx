@@ -1,6 +1,7 @@
 import path from "node:path";
 import Link from "next/link";
 import { AgentStatus } from "@/components/AgentStatus";
+import { HarnessTag } from "@/components/HarnessTag";
 import { MultiSelect, type MultiSelectOption } from "@/components/MultiSelect";
 import { Spark } from "@/components/Spark";
 import { type AgentState, agentState, cleanTone } from "@/lib/agents";
@@ -374,6 +375,7 @@ function AgentRow({ row: r }: { row: Row }) {
             default
           </code>
         )}
+        <HarnessTag info={a.harnessInfo} />
       </td>
       <td className="ar-runs">
         <span className="ar-l">Runs 7d</span>

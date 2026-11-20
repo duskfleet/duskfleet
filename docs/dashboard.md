@@ -85,6 +85,8 @@ no badge when nothing runs); it re-reads the count every 5 seconds and on every 
   that produced no stream-json output for 5 minutes shows a "no output for N min" flag (amber,
   red from 15 minutes; since the start when it never produced any). Informational only: nothing
   kills the run. The timestamp is `last_event_at`, written at most every 15 seconds.
+  The Model cell carries the harness the run was recorded with (`runs.harness`; `claude` for rows
+  older than it) on a second line; under 900 px it drops with the Model column.
 - **Run detail**: short title, status line, duration / cost / turns / tool calls / tokens (a
   subscription run's cost is labelled "reported, not billed"; an API key run's is billed, see
   [`billingType`](cli.md#what-a-run-records); the list's cost cell says the same on hover), the
@@ -116,11 +118,17 @@ no badge when nothing runs); it re-reads the count every 5 seconds and on every 
   then one table per project ("Any project" first, then projects by id), one row per agent: status (running with a pending or
   running run, else "paused · auto" when a bound schedule was auto-paused, else needs review from
   the stored review reasons of its last run, else idle; the tiles and the Status filter count the
-  same status), id and kind, a one-line description, model, runs over 7 days with a per-day
+  same status), id and kind, a one-line description, model with the [harness](harnesses.md)
+  under it, runs over 7 days with a per-day
   sparkline, clean %, cost and last run, and links to its runs and schedule. From tablet width
   (1024 px) down the same row reflows into a four-line block, each number under its column label.
+  The harness is the agent file's `harness:` as written (`claude` when it sets none). One this
+  host cannot start is amber: "not installed" when Duskfleet ships it but its CLI was not found
+  (`copilot` without a binary), "not registered" when no adapter has that name; the reason, as
+  `doctor` words it, is on hover. The dashboard resolves the CLI itself, the way the MCP server
+  and `serve` do at start-up.
 - **Agent** (`/agents/<id>`): everything that configures one agent. Header with kind, builtin /
-  override chip, status, project, model and file; 30-day tiles over UTC days (runs and cost with
+  override chip, status, project, model, harness (marked as on Agents) and file; 30-day tiles over UTC days (runs and cost with
   sparklines, clean %, needs review; gate runs left out of the counts, kept in the cost); the system prompt (own) or the link target with the project persona
   (link), expanding in place; the 5 latest runs (gate runs left out) with a Status filter; permissions (allow-list
   past 8 entries expands in place) and limits, including daily caps and the monthly budget; the
@@ -138,7 +146,8 @@ no badge when nothing runs); it re-reads the count every 5 seconds and on every 
   Resume" (by hand, or by a budget whose tick another schedule of the scope tripped), or what the
   gate said on its run of consecutive skips, as a plain line; the error of a failed fire in red,
   also on a paused card with that plain pause line in front. Then
-  cron (raw and in plain words), the schedule name, project, model, the
+  cron (raw and in plain words), the schedule name, project, model, its agent's harness (marked
+  as on Agents), the
   [gate](schedules.md#gates-skip-cheaply-when-there-is-no-work) and on-failure policy in force, the
   prompt, the last 10 firings as squares coloured by how the run they started **ended** (clean,
   needs review from the stored review reasons, failed, running, cancelled, deferred (busy, waiting
