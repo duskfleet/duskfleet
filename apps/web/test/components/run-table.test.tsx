@@ -224,6 +224,16 @@ test("RunTable: scheduled, gate and retry links", () => {
   );
 });
 
+test("RunTable: the harness the run was recorded with, under the model; claude when the row has none", () => {
+  const copilot = renderToStaticMarkup(<RunTable runs={[run({ harness: "copilot" })]} emptyText="" />);
+  assert.match(
+    copilot,
+    /<\/span><span class="harness" title="Runs on the copilot agent CLI \(harness\)">copilot<\/span><\/td>/,
+  );
+  const legacy = renderToStaticMarkup(<RunTable runs={[run({ harness: undefined })]} emptyText="" />);
+  assert.match(legacy, /<span class="harness" title="[^"]+">claude<\/span>/);
+});
+
 test("RunTable: the cost column says what the costs are, billed, API value or both", () => {
   const api = run({ billingType: "api" });
   assert.equal(headers(renderToStaticMarkup(<RunTable runs={[api]} emptyText="" />))[5], "Cost");

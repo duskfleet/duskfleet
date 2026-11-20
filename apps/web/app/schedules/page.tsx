@@ -8,6 +8,7 @@ import {
 } from "@duskfleet/core";
 import Link from "next/link";
 import { CopyButton } from "@/components/CopyButton";
+import { HarnessTag } from "@/components/HarnessTag";
 import { ScheduleActions } from "@/components/ScheduleActions";
 import { SchedulesNote } from "@/components/SchedulesNote";
 import { cliCommand, installServiceCommand } from "@/lib/cli";
@@ -352,6 +353,12 @@ export default function SchedulesPage() {
                             <>
                               <span className="sep">·</span>
                               <span className="model">{s.model}</span>
+                            </>
+                          )}
+                          {s.harnessInfo && (
+                            <>
+                              <span className="sep">·</span>
+                              <HarnessTag info={s.harnessInfo} />
                             </>
                           )}
                           {s.gate && (
