@@ -43,6 +43,7 @@ import {
 } from "../observability/artifacts.js";
 import { costStatusOf } from "../observability/billing.js";
 import {
+  compareProjectAgent,
   continueRefusal,
   isBudgetExhausted,
   isResumable,
@@ -50,6 +51,7 @@ import {
   LAST_EVENT_WRITE_MS,
   normalizeRunTitle,
   orphanedError,
+  type ProjectAgentChange,
   type Run,
   type RunAgent,
   type RunKind,
@@ -632,6 +634,9 @@ export class RunManager {
         throw new Error(`agent "${agent.id}": ${err instanceof Error ? err.message : String(err)}`);
       }
     }
+    // The persona of a link on its own (it lives in the project, a pull can change it): no harness
+    // named here, the request's claudeAgent says whether there is one.
+    const projectAgentHash = request.claudeAgent ? projectAgentDefinitionHash(projectPath, request.claudeAgent) : null;
 
     // Record the run (with the exact command) *before* launching it.
     const run: Run = {
@@ -684,6 +689,7 @@ export class RunManager {
       // The whole cap this run may spend (main pass plus reserve): a budget's stand-in while its cost is unknown.
       maxBudgetUsd: budget.total,
       agentHash,
+      projectAgentHash,
       claudeCodeVersion: null,
       lastEventAt: null,
       continuedFromRunId: continued?.id ?? null,
@@ -712,6 +718,13 @@ export class RunManager {
         skillsBundle: bundle.id,
       });
     for (const message of skillNotes) this.runs.addEvent(runId, "note", { message });
+    // A notice, never a block: the persona file changed since the schedule's previous run.
+    const personaChange = this.projectAgentChange(run);
+    if (personaChange?.changed)
+      this.runs.addEvent(runId, "note", {
+        message: `project agent file .claude/agents/${request.claudeAgent}.md changed since the previous run of this schedule (${personaChange.previousRunId}): ${personaChange.previousHash} -> ${personaChange.hash}`,
+        projectAgentChange: personaChange,
+      });
     if (resume) {
       this.runs.addEvent(runId, "note", {
         message: `resumes run ${resume.fromRun.id} (${resume.fromRun.status}, ${resume.fromRun.terminationReason ?? "no termination reason"}) with a ${budget.total} USD budget`,
@@ -918,6 +931,15 @@ export class RunManager {
   /** The runs that continued `runId`'s session, oldest first. */
   continuedBy(runId: string): Run[] {
     return this.runs.continuedBy(runId);
+  }
+
+  /**
+   * A scheduled link run's project agent file against the schedule's previous run (issue #463),
+   * or null when there is nothing to compare. A pure read; what `get_run` and `run-info` show.
+   */
+  projectAgentChange(run: Run): ProjectAgentChange | null {
+    if (!run.scheduleId || run.kind === "gate" || !run.projectAgentHash) return null;
+    return compareProjectAgent(run.projectAgentHash, this.runs.previousRunOfSchedule(run.scheduleId, run));
   }
 
   cancelRun(id: string): Run {
