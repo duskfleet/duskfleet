@@ -1,8 +1,8 @@
 # Harness adapters: one run path, one adapter per agent CLI
 
 A *harness* is an agent CLI that Duskfleet can spawn unattended. Claude Code (`claude`, the
-default) and GitHub Copilot CLI (`copilot`, [#446](https://github.com/duskfleet/duskfleet/issues/446))
-ship; Codex CLI ([#50](https://github.com/duskfleet/duskfleet/issues/50)) is planned.
+default), GitHub Copilot CLI (`copilot`, [#446](https://github.com/duskfleet/duskfleet/issues/446))
+and Codex CLI (`codex`, [#50](https://github.com/duskfleet/duskfleet/issues/50)) ship.
 
 ## The idea in one paragraph
 
@@ -37,13 +37,13 @@ flowchart TB
 
     subgraph adapters ["4 · Adapters, one per harness"]
         a1["Claude adapter<br/>shipped"]
-        a2["Codex adapter<br/>planned, issue 50"]
+        a2["Codex adapter<br/>shipped, issue 50"]
         a3["Copilot adapter<br/>shipped, issue 446"]
     end
 
     subgraph clis ["5 · Agent CLIs, spawned in the project directory"]
         c1["claude -p<br/>stream-json"]
-        c2["codex exec<br/>JSONL"]
+        c2["codex exec, prompt on stdin<br/>JSONL"]
         c3["copilot, prompt on stdin<br/>JSONL"]
     end
 
@@ -161,23 +161,22 @@ tool rules are never mapped onto Copilot's `--allow-tool`: Copilot matches a she
 first subcommand only (`shell(gh pr)` covers `gh pr merge`), so `Bash(gh pr create:*)` has no
 equivalent. A Copilot agent writes Copilot's own rules instead (`toolRule` below).
 
-The capability set. The `claude` and `copilot` columns are what the shipped adapters declare; the
-Codex column is an expectation to verify against its `--help` and real runs, not a fact.
+The capability set, as the shipped adapters declare it:
 
-| Capability | Meaning | claude | codex (planned) | copilot |
+| Capability | Meaning | claude | codex | copilot |
 |---|---|---|---|---|
-| `toolAllowList` | `allowed_tools` / `disallowed_tools` are enforced | yes | no, a sandbox mode instead | yes, Copilot's own rules (`--allow-tool` / `--deny-tool`) |
+| `toolAllowList` | `allowed_tools` / `disallowed_tools` are enforced | yes | no: Codex has a sandbox mode, no tool rules | yes, Copilot's own rules (`--allow-tool` / `--deny-tool`) |
 | `toolRule` | which entries the CLI takes as written | any | | `shell`, `shell(<cmd>)`, `write`, `write(<path>)`, `read`, `read(<path>)`, `url(<domain>)`, `memory`; anything else refused by name |
-| `permissionModes` | `permission_mode` values it accepts | all (`bypassPermissions` still needs `claude.allow_bypass_permissions`) | to map onto sandbox modes | `dontAsk` (the rules only), `acceptEdits` (the rules plus `write`) |
-| `resumeSession` | a session can be continued | yes | to verify | yes (`--resume=<id>`) |
+| `permissionModes` | `permission_mode` values it accepts | all (`bypassPermissions` still needs `claude.allow_bypass_permissions`) | `dontAsk` (`-s read-only`), `acceptEdits` (`-s workspace-write`); the network off in both | `dontAsk` (the rules only), `acceptEdits` (the rules plus `write`) |
+| `resumeSession` | a session can be continued | yes | not yet: whether a resumed turn keeps the write sandbox is unverified | yes (`--resume=<id>`) |
 | `hardBudgetUsd` | the CLI stops at `max_budget_usd` | yes | no | no (its cap is in AI credits) |
-| `reportsCostUsd` | the result carries a cost in dollars | yes | no on a subscription | no (premium requests) |
+| `reportsCostUsd` | the result carries a cost in dollars | yes | no (the stream has tokens only) | no (premium requests) |
 | `subagents` | nested agents are reported as rows | yes | no | no (later issue) |
-| `mcpInherit` | `inherit_mcp` gives the user's connectors | yes | to verify | no (later issue) |
-| `projectAgents` | `link` agents (`claude_agent`) | yes | no | no |
-| `addDirs` | `add_dirs` | yes | to verify | no: Copilot's `--add-dir` also trusts that directory's skills and agents |
-| `skills`, `sandbox` | the fields of the same name | yes | to verify | no (later issues) |
-| `effort` | `effort` | yes | to verify | yes (`--reasoning-effort`) |
+| `mcpInherit` | `inherit_mcp` gives the user's connectors | yes | no (`--ignore-user-config` drops the user's servers) | no (later issue) |
+| `projectAgents` | `link` agents (`claude_agent`) | yes | no: nothing in the CLI loads an agent from a project folder | no |
+| `addDirs` | `add_dirs` | yes | no (later issue: Codex's `--add-dir` makes a directory writable) | no: Copilot's `--add-dir` also trusts that directory's skills and agents |
+| `skills`, `sandbox` | the fields of the same name | yes | no (Codex runs in its own sandbox, always) | no (later issues) |
+| `effort` | `effort` | yes | yes (`-c model_reasoning_effort`) | yes (`--reasoning-effort`) |
 
 A harness without `hardBudgetUsd` gets no `--max-budget-usd`-style cap and no wrap-up reserve,
 and refuses a budget set for one run as well as the agent's own: a gate's `budget_usd`, a resume
@@ -214,16 +213,41 @@ as its full `max_budget_usd` (or `claude.default_max_budget_usd`). A unit other 
 
 ## What the three harnesses look like through the seam
 
-| | claude (shipped) | codex (#50, planned) | copilot (shipped, #446) |
+| | claude (shipped) | codex (shipped, #50) | copilot (shipped, #446) |
 |---|---|---|---|
-| Unattended command | `claude -p --output-format stream-json` | `codex exec --json`, prompt on stdin | `copilot --output-format json`, prompt on stdin |
-| Stream | stream-json lines | JSONL events (`thread.started`, `item.completed`, `turn.completed`) | JSONL events (`session.start`, `assistant.message`, `tool.execution_start` / `_complete`) |
-| End of run | a `result` line | no result line: inactivity timeout | a `result` line (`exitCode`), also after SIGTERM; none = failed |
-| Permissions | allow-list per tool, `--permission-prompts none` | sandbox mode (`workspace-write`, network off) | deny by default in a non-interactive run, `--allow-tool` / `--deny-tool` rules verbatim; `--allow-all*` never |
-| System prompt | `--append-system-prompt` | to verify | a per-run agent file, `--add-dir <tmp> --agent duskfleet-agent` |
-| Cost | dollars, reported or estimated | unpriced on a subscription | unpriced (premium requests); tokens from `--usage-output-file` |
-| Auth | the user's Claude login or API key | per-agent `CODEX_HOME`, `auth.json` linked | the user's GitHub login (`gh` / `copilot login`) |
+| Unattended command | `claude -p --output-format stream-json` | `codex exec --json --ignore-user-config --ignore-rules ... -`, prompt on stdin | `copilot --output-format json`, prompt on stdin |
+| Stream | stream-json lines | JSONL events (`thread.started`, `item.started` / `item.completed`, `turn.completed` / `turn.failed`) | JSONL events (`session.start`, `assistant.message`, `tool.execution_start` / `_complete`) |
+| End of run | a `result` line | `turn.completed` or `turn.failed`; none = failed; 30 min without output = timed out (backstop) | a `result` line (`exitCode`), also after SIGTERM; none = failed |
+| Permissions | allow-list per tool, `--permission-prompts none` | sandbox mode (`read-only` / `workspace-write`), network off | deny by default in a non-interactive run, `--allow-tool` / `--deny-tool` rules verbatim; `--allow-all*` never |
+| System prompt | `--append-system-prompt` | `-c developer_instructions="<TOML string>"` | a per-run agent file, `--add-dir <tmp> --agent duskfleet-agent` |
+| Session id | chosen by Duskfleet (`--session-id`) | chosen by Codex (`thread.started`'s `thread_id`) | chosen by Duskfleet (`--session-id`) |
+| Cost | dollars, reported or estimated | unpriced; tokens from `turn.completed.usage` | unpriced (premium requests); tokens from `--usage-output-file` |
+| Auth | the user's Claude login or API key | the user's Codex login (`codex login`, `~/.codex/auth.json`) | the user's GitHub login (`gh` / `copilot login`) |
 | `link` agents | yes | no | no |
+
+The Codex adapter (`core/src/execution/codex.ts`, parser `codex-jsonl.ts`) is registered the same
+way: `CODEX_BIN`, then `codex.binary` in `duskfleet.yaml`, then `codex` on PATH (on Windows
+`codex.exe`, then `codex.cmd`); `doctor` lists `codex not installed` otherwise. Its parser follows
+real runs of codex-cli 0.167.1, kept as fixtures in `packages/mcp/test/fixtures/codex/` and
+replayed by `fake-codex.js`. What it does and does not do:
+
+- `--ignore-user-config` on every run: the user's `config.toml` (default model, `notify` program,
+  trusted projects, MCP servers) never reaches a run. Authentication still comes from
+  `CODEX_HOME` (default `~/.codex`), so no per-agent `CODEX_HOME` is created: the flag already
+  gives the isolation that mattered, and session files stay in the user's store. An agent may
+  still pass `CODEX_HOME` through `env_passthrough`.
+- The project's `AGENTS.md` is Codex's own instruction file and is loaded, as `CLAUDE.md` is for
+  Claude. The agent body goes in `developer_instructions`.
+- `codex exec` checks that it runs inside a git repository (`--skip-git-repo-check` turns that
+  off); Duskfleet never passes the flag, so keep a Codex agent's project a git repository (every
+  fixture ran in one).
+- A command the sandbox blocked is an ordinary failed command (`status: "failed"` and its own
+  error text, exit 0): nothing in the stream names the sandbox, so it is not counted as a
+  sandbox violation or a denial. The network stays off; an agent that needs it is a later issue.
+- `resumeSession` stays off until a real run shows that `codex exec resume` keeps the write
+  sandbox: `on_failure: resume_once` is refused and a continued run starts a fresh session.
+- `effort` is passed as written; a value the model does not know fails the run with Codex's own
+  error.
 
 The Copilot adapter (`core/src/execution/copilot.ts`, parser `copilot-jsonl.ts`) is registered
 only when its binary resolves: `COPILOT_BIN`, then `copilot.binary` in `duskfleet.yaml`, then

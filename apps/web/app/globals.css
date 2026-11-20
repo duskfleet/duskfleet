@@ -708,7 +708,7 @@ a.stat.tile-link:active,
   padding: 0 8px;
   color: var(--text);
 }
-/* harness (agent CLI) next to the model: claude / copilot; amber when this host cannot start it.
+/* harness (agent CLI) next to the model: claude / copilot / codex; amber when this host cannot start it.
    A block: its own line under the model in the Agents and Runs Model cells (the Agent header and
    schedule meta lines are flex rows, where it sits inline); a narrow column wraps
    "copilot · not installed" rather than overflow it */

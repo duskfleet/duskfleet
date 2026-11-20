@@ -1,6 +1,6 @@
 /**
  * The agent CLI an agent or a run is on (issue #478), and whether this host can start it. Pure:
- * `data.ts` builds the host map from core (`SHIPPED_HARNESSES`, `resolveCopilotBinary`), the
+ * `data.ts` builds the host map from core (`SHIPPED_HARNESSES`, `resolveCopilotBinary`, `resolveCodexBinary`), the
  * lists only render the result.
  */
 
@@ -14,7 +14,7 @@ export const DEFAULT_HARNESS_NAME = "claude";
 export type HostHarnesses = ReadonlyMap<string, string | null>;
 
 export interface HarnessInfo {
-  /** As the agent file spells it (`claude`, `copilot`). */
+  /** As the agent file spells it (`claude`, `copilot`, `codex`). */
   name: string;
   /** Null when this host can start it; else a short label and the reason, as `doctor` words it. */
   missing: { label: "not installed" | "not registered"; reason: string } | null;

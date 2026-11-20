@@ -6,6 +6,7 @@
 import type { ConfigLocation, DuskFleetConfig, Executor, Run, SchedulerRole } from "@duskfleet/core";
 import {
   ClaudeCodeExecutor,
+  CodexExecutor,
   CopilotExecutor,
   HarnessRegistry,
   loadConfig,
@@ -15,6 +16,7 @@ import {
   processIdentity,
   RunManager,
   RunRepository,
+  resolveCodexBinary,
   resolveCopilotBinary,
   ScheduleRepository,
   Scheduler,
@@ -74,6 +76,12 @@ export async function bootstrap(entryFileUrl: string, options: BootstrapOptions 
   if (copilotBinary) {
     executors.push(new CopilotExecutor({ binary: copilotBinary, envPassthrough: config.claude.envPassthrough }));
     log.info("copilot executor ready", { binary: copilotBinary });
+  }
+  // Codex (#50), same rule.
+  const codexBinary = resolveCodexBinary(config.codex?.binary ?? null);
+  if (codexBinary) {
+    executors.push(new CodexExecutor({ binary: codexBinary, envPassthrough: config.claude.envPassthrough }));
+    log.info("codex executor ready", { binary: codexBinary });
   }
   const harnesses = new HarnessRegistry(executors);
 

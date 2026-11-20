@@ -111,7 +111,7 @@ max_budget_usd: 5
 # wrap_up_reserve_usd: 0.5     # part of max_budget_usd kept for the wrap-up pass; default 10%, min $0.50, 0 = off
 # on_failure: resume_once      # a schedule's next tick resumes a budget-exhausted / timed-out run, once (default none)
 # resume_budget_usd: 3         # budget of that resumed run (default max_budget_usd)
-# harness: claude              # the agent CLI that runs it: claude (default) or copilot (see "Harness")
+# harness: claude              # the agent CLI that runs it: claude (default), copilot or codex (see "Harness")
 ---
 You are running unattended. Finish the task end to end and summarise what you changed.
 ```
@@ -122,7 +122,8 @@ An agent without `model` uses the Claude Code default, which can be far more exp
 ## Harness
 
 `harness:` names the agent CLI that runs the agent. Leave it out: `claude` (Claude Code) is the
-default. `copilot` runs it with GitHub Copilot CLI (see [Copilot agents](#copilot-agents)). Each
+default. `copilot` runs it with GitHub Copilot CLI (see [Copilot agents](#copilot-agents)), `codex`
+with Codex CLI (see [Codex agents](#codex-agents)). Each
 CLI is one adapter behind the same run path; see [Harnesses](harnesses.md).
 
 Each harness declares what it can honour (its *capabilities*). An agent that sets a field its
@@ -189,6 +190,40 @@ Keep CHANGELOG.md in order. Never touch other files.
   defence for that case.
 - User-level Copilot hooks still run in these sessions (there is no flag against them). See
   [Security](security.md).
+
+### Codex agents
+
+`harness: codex` runs the agent with Codex CLI (`codex exec`), under the user's Codex login
+(`codex login`). It is available when Duskfleet finds the binary (`codex.binary` in
+`duskfleet.yaml`, else `codex` on PATH; `doctor` says `codex not installed` otherwise). Only `own`
+agents: Codex has no project-defined agents to link to.
+
+```markdown
+---
+description: Explains the failing test
+harness: codex
+permission_mode: dontAsk
+effort: low
+timeout_minutes: 15
+---
+Read the failing test and explain why it fails. Change nothing.
+```
+
+- **No tool rules, a sandbox.** Codex has no allow-list, so `allowed_tools` and
+  `disallowed_tools` are refused. `dontAsk` runs under `-s read-only` (nothing written),
+  `acceptEdits` (the default) under `-s workspace-write` (writes in the project only). The network
+  is off in both. Every other mode is refused.
+- **The body is the persona**, passed as Codex's `developer_instructions`. The project's own
+  `AGENTS.md` is loaded too. The user's `~/.codex/config.toml` is not (`--ignore-user-config`):
+  set `model` in the agent, not there.
+- **The project must be a git repository** (`codex exec` checks it).
+- **Refused**: `allowed_tools`, `disallowed_tools`, `max_budget_usd`, `wrap_up_reserve_usd`,
+  `resume_budget_usd`, `on_failure: resume_once`, `max_daily_cost_usd` (no dollars: every run is
+  `unpriced` and budgets count it as its cap), `inherit_mcp`, `add_dirs`, `skills`, `sandbox*`,
+  `claude_agent`. Allowed: `model`, `effort`, `env_passthrough`, `timeout_minutes`, the concurrency
+  and daily-run caps. A continued session starts fresh, with a note.
+- A command the sandbox blocked shows as a failed command in the run, not as a denial: the stream
+  does not say the sandbox was the cause.
 
 ## Sandbox
 
