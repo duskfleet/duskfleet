@@ -152,6 +152,7 @@ export {
   codexTurnUsage,
   createCodexState,
   ingestCodexLine,
+  isCodexSessionNotFound,
 } from "./execution/codex-jsonl.js";
 export {
   COPILOT_PERSONA_AGENT,

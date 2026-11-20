@@ -168,7 +168,7 @@ The capability set, as the shipped adapters declare it:
 | `toolAllowList` | `allowed_tools` / `disallowed_tools` are enforced | yes | no: Codex has a sandbox mode, no tool rules | yes, Copilot's own rules (`--allow-tool` / `--deny-tool`) |
 | `toolRule` | which entries the CLI takes as written | any | | `shell`, `shell(<cmd>)`, `write`, `write(<path>)`, `read`, `read(<path>)`, `url(<domain>)`, `memory`; anything else refused by name |
 | `permissionModes` | `permission_mode` values it accepts | all (`bypassPermissions` still needs `claude.allow_bypass_permissions`) | `dontAsk` (`-s read-only`), `acceptEdits` (`-s workspace-write`); the network off in both | `dontAsk` (the rules only), `acceptEdits` (the rules plus `write`) |
-| `resumeSession` | a session can be continued | yes | not yet: whether a resumed turn keeps the write sandbox is unverified | yes (`--resume=<id>`) |
+| `resumeSession` | a session can be continued | yes | yes (`codex exec resume <thread_id>`, always with `-c sandbox_mode` from `permission_mode`) | yes (`--resume=<id>`) |
 | `hardBudgetUsd` | the CLI stops at `max_budget_usd` | yes | no | no (its cap is in AI credits) |
 | `reportsCostUsd` | the result carries a cost in dollars | yes | no (the stream has tokens only) | no (premium requests) |
 | `subagents` | nested agents are reported as rows | yes | no | no (later issue) |
@@ -244,8 +244,14 @@ replayed by `fake-codex.js`. What it does and does not do:
 - A command the sandbox blocked is an ordinary failed command (`status: "failed"` and its own
   error text, exit 0): nothing in the stream names the sandbox, so it is not counted as a
   sandbox violation or a denial. The network stays off; an agent that needs it is a later issue.
-- `resumeSession` stays off until a real run shows that `codex exec resume` keeps the write
-  sandbox: `on_failure: resume_once` is refused and a continued run starts a fresh session.
+- Sessions resume (`on_failure: resume_once`, a continued schedule, `run_agent { resume_run_id }`)
+  with `codex exec resume ... <thread_id> -`. Resume has no `-s`; `-c sandbox_mode="<mode>"` decides
+  the resumed turn's sandbox (verified by hand: a `workspace-write` session resumed as `read-only`
+  cannot write), so it is passed on every resume, from the agent's `permission_mode` as it is now.
+  `-m` is not passed on a resume (it was not part of the verified command), so the run records no
+  model. A thread Codex no longer has (`no rollout found` on stderr) makes a continued run start
+  fresh with a note, as for the other harnesses; a `resume_once` retry of it fails.
+  `resume_budget_usd` stays refused (no dollar budget).
 - `effort` is passed as written; a value the model does not know fails the run with Codex's own
   error.
 

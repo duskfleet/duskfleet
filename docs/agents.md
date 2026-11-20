@@ -218,10 +218,16 @@ Read the failing test and explain why it fails. Change nothing.
   set `model` in the agent, not there.
 - **The project must be a git repository** (`codex exec` checks it).
 - **Refused**: `allowed_tools`, `disallowed_tools`, `max_budget_usd`, `wrap_up_reserve_usd`,
-  `resume_budget_usd`, `on_failure: resume_once`, `max_daily_cost_usd` (no dollars: every run is
-  `unpriced` and budgets count it as its cap), `inherit_mcp`, `add_dirs`, `skills`, `sandbox*`,
-  `claude_agent`. Allowed: `model`, `effort`, `env_passthrough`, `timeout_minutes`, the concurrency
-  and daily-run caps. A continued session starts fresh, with a note.
+  `resume_budget_usd`, `max_daily_cost_usd` (no dollars: every run is `unpriced` and budgets count
+  it as its cap), `inherit_mcp`, `add_dirs`, `skills`, `sandbox*`, `claude_agent`. Allowed:
+  `model`, `effort`, `env_passthrough`, `timeout_minutes`, `on_failure: resume_once`, the
+  concurrency and daily-run caps.
+- **Sessions resume** (`on_failure: resume_once`, a continued schedule, `run_agent
+  { resume_run_id }`) in the same Codex thread, always under the agent's sandbox mode
+  (`-c sandbox_mode`): a read-only agent stays read-only on a resume. A thread Codex no longer has
+  makes a continued run start a fresh session, with a note. The resume does not pass `model` (only
+  the verified flags are used), and whether the persona replaces or adds to the first turn's
+  `developer_instructions` on a resume has not been verified.
 - A command the sandbox blocked shows as a failed command in the run, not as a denial: the stream
   does not say the sandbox was the cause.
 

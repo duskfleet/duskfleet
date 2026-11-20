@@ -364,10 +364,19 @@ local run-data handling, and recommended configuration.
   | `-c sandbox_workspace_write.network_access=false` | always: the network stays off |
   | `-m <model>`, `-c model_reasoning_effort="<level>"` | only when the agent sets them |
   | `-c developer_instructions="<TOML string>"` | the agent body (quotes, backslashes and control characters escaped, `tomlString`) |
+  | `exec resume --json ... -c sandbox_mode="<mode>" ... <thread_id> -` | a resumed or continued run (issue #485): same flags as above except `-s` (resume has none) and `-m` (not part of the verified command); the sandbox always as `-c sandbox_mode`, from `permission_mode` |
+
+  Verified by hand on codex-cli 0.167.1 (2026-11-20) for the resume form: `-c sandbox_mode` decides
+  the sandbox of the resumed turn whatever the base session used (a `workspace-write` session
+  resumed with `read-only` cannot write; a `read-only` one cannot write either way), and the resumed
+  run reports the same `thread_id`. An unknown thread prints nothing on stdout, exit 1, and
+  `Error: thread/resume: thread/resume failed: no rollout found for thread id <id>` on stderr
+  (fixture `resume-unknown.stderr`). Not verified: whether `developer_instructions` on resume
+  replaces or adds to the base session's (the adapter passes the same value as a fresh run).
 
   Never passed: `--dangerously-bypass-approvals-and-sandbox`, `--dangerously-bypass-hook-trust`,
-  `-s danger-full-access`, `--skip-git-repo-check`, `--ephemeral`. `codex exec resume` is not
-  used yet (`resumeSession: false`).
+  `-s danger-full-access`, `--skip-git-repo-check`, `--ephemeral`, and never `exec resume`
+  without `-c sandbox_mode`.
 - **Claude CLI flags**: verify every flag against `claude --help` before using it. The ones the
   executor uses, checked against `claude --help` of Claude Code 2.1.285:
 
