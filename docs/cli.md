@@ -125,7 +125,8 @@ What the list commands show:
   only by running runs: new runs are refused, schedules are not paused). The budget id that
   `budgets delete` takes is in `budgets --json`.
 - `doctor`: `doctor · n warnings · n errors`, then one line per check (node, claude, PATH, config,
-  data, agents, scheduler, schedules, unpriced runs, orphans, probe) with its advice indented
+  data, agents, scheduler, schedules, unpriced runs, orphans, link tools when there are link
+  agents, probe) with its advice indented
   under it. A missing `claude` binary is the only error.
 
 Logs go to stderr, so stdout stays the command's output. A one-shot command logs warnings and
@@ -306,6 +307,13 @@ install directories were put in front ([Troubleshooting](troubleshooting.md)).
 `doctor` also reports the scheduler: whether something is ticking, which kind of process holds
 the lease (`serve`, `mcp`, `cli`) and whether the service is installed and running. See
 [Schedules](schedules.md#who-ticks) for the service.
+
+`doctor` also checks every link agent's `allowed_tools` against the `tools:` of its project
+agent (`link tools`, shown only when there are link agents): one advice line per link with entries
+the project agent does not declare, which its runs will not have. `linkTools` in `--json` holds
+`checked` (the link ids) and `gaps` (`agentId`, `projectAgentFile`, `missing`, `skipped` when the
+project agent's frontmatter does not parse, `advice`). Advice only; see
+[Agents](agents.md#reusing-agents-a-project-already-defines).
 
 Like every CLI command, `doctor` starts with the orphan sweep: `running` rows, and `pending`
 rows never spawned, whose owning process on this host is gone are marked failed as orphaned.

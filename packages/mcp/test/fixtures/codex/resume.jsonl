@@ -1,0 +1,4 @@
+{"type":"thread.started","thread_id":"01a1f616-dda1-7da0-adb2-81638c8f87ec"}
+{"type":"turn.started"}
+{"type":"item.completed","item":{"id":"item_0","type":"agent_message","text":"I created `hello.txt` with the single line `hello.`"}}
+{"type":"turn.completed","usage":{"input_tokens":54455,"cached_input_tokens":43904,"cache_write_input_tokens":0,"output_tokens":90,"reasoning_output_tokens":0}}

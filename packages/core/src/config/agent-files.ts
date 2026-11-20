@@ -205,6 +205,8 @@ export interface ProjectAgentInfo {
   tools: string[] | null;
   model: string | null;
   path: string;
+  /** Why the frontmatter did not parse (the file is still listed by name); null when it did or there is none. */
+  frontmatterError: string | null;
 }
 
 /**
@@ -221,11 +223,13 @@ export function listProjectAgents(projectPath: string): ProjectAgentInfo[] {
     const full = path.join(dir, file);
     const match = /^---\r?\n([\s\S]*?)\r?\n---/.exec(readFileSync(full, "utf8"));
     let fm: Record<string, unknown> = {};
+    let frontmatterError: string | null = null;
     try {
       const parsed = match ? parseYaml(match[1] ?? "") : null;
       if (parsed && typeof parsed === "object") fm = parsed as Record<string, unknown>;
-    } catch {
+    } catch (err) {
       // unreadable frontmatter: still list the file by name
+      frontmatterError = (err instanceof Error ? err.message : String(err)).split("\n")[0] ?? "invalid YAML";
     }
     const name = typeof fm["name"] === "string" ? fm["name"] : file.replace(/\.md$/, "");
     const toolsRaw = fm["tools"];
@@ -243,9 +247,106 @@ export function listProjectAgents(projectPath: string): ProjectAgentInfo[] {
       tools,
       model: typeof fm["model"] === "string" ? fm["model"] : null,
       path: full,
+      frontmatterError,
     });
   }
   return out;
+}
+
+/** What `linkToolGaps` found: allow-list entries the project agent does not declare, or why it could not tell. */
+export interface LinkToolGaps {
+  /** `allowed_tools` entries, verbatim, that no entry of the project agent's `tools:` covers. */
+  missing: string[];
+  /** Set when the check was skipped (unparsable frontmatter); `missing` is then empty. */
+  skipped: string | null;
+}
+
+/** The tool a rule names: the text before `(` (`Bash(gh issue view:*)` is `Bash`). */
+function toolName(rule: string): string {
+  const open = rule.indexOf("(");
+  return (open === -1 ? rule : rule.slice(0, open)).trim();
+}
+
+/** `mcp__<server>` or `mcp__<server>__<tool>` split in two; null for a non-MCP tool. `__*` counts as the server. */
+function mcpParts(name: string): { server: string; tool: string | null } | null {
+  if (!name.startsWith("mcp__")) return null;
+  const rest = name.slice("mcp__".length);
+  const sep = rest.indexOf("__");
+  if (sep === -1) return { server: rest, tool: null };
+  const tool = rest.slice(sep + 2);
+  return { server: rest.slice(0, sep), tool: tool === "" || tool === "*" ? null : tool };
+}
+
+function covers(declared: string, allowed: string): boolean {
+  if (declared === allowed) return true;
+  const d = mcpParts(declared);
+  const a = mcpParts(allowed);
+  if (!d || !a || d.server !== a.server) return false;
+  // A server covers each of its tools and a tool covers its server entry; two tools never cover each other.
+  return d.tool === null || a.tool === null || d.tool === a.tool;
+}
+
+/**
+ * A link has two tool lists kept in sync by hand: its own `allowed_tools` and the project agent's
+ * `tools:`. An allowed tool the project agent does not declare is not available to the run. This
+ * returns those entries, compared by tool name (rule arguments ignored) and MCP names by server. A
+ * project agent without `tools:` inherits every tool: nothing is missing. Advisory only: callers warn,
+ * never refuse.
+ */
+export function linkToolGaps(
+  allowedTools: readonly string[] | undefined,
+  projectAgent: Pick<ProjectAgentInfo, "tools" | "frontmatterError">,
+): LinkToolGaps {
+  // Nothing to check: no note either, even when the project agent does not parse.
+  if (!allowedTools || allowedTools.length === 0) return { missing: [], skipped: null };
+  if (projectAgent.frontmatterError) {
+    return { missing: [], skipped: `its frontmatter does not parse (${projectAgent.frontmatterError})` };
+  }
+  if (projectAgent.tools === null) return { missing: [], skipped: null };
+  const declared = projectAgent.tools.map(toolName).filter(Boolean);
+  const missing = allowedTools.filter((rule) => {
+    const name = toolName(rule);
+    return !declared.some((d) => covers(d, name));
+  });
+  return { missing, skipped: null };
+}
+
+/** `linkToolGaps` for a link, with the project agent file it was checked against. */
+export interface LinkToolCheck extends LinkToolGaps {
+  /** `<project>/.claude/agents/<name>.md`. */
+  file: string;
+}
+
+/**
+ * `linkToolGaps` for a link (`claude_agent` set) against its project agent. Null for an own agent,
+ * an unknown project, or a project agent that cannot be found (create refuses that; doctor's
+ * other checks and the run's pre-flight report it).
+ */
+export function linkToolCheck(
+  spec: { claude_agent?: string | undefined; allowed_tools?: readonly string[] | undefined },
+  projectPath: string | null,
+): LinkToolCheck | null {
+  if (!spec.claude_agent || !projectPath) return null;
+  const projectAgent = findProjectAgent(projectPath, spec.claude_agent);
+  if (!projectAgent) return null;
+  return { file: projectAgent.path, ...linkToolGaps(spec.allowed_tools, projectAgent) };
+}
+
+/**
+ * The warnings `create_agent` / `update_agent` return for a link: one per allow-list entry its
+ * project agent does not declare, or one saying the check was skipped. Empty when there is nothing to say.
+ */
+export function linkToolWarnings(
+  spec: { claude_agent?: string | undefined; allowed_tools?: readonly string[] | undefined },
+  projectPath: string | null,
+): string[] {
+  const check = linkToolCheck(spec, projectPath);
+  if (!check) return [];
+  if (check.skipped) return [`allowed_tools not checked against ${check.file}: ${check.skipped}`];
+  return check.missing.map(
+    (rule) =>
+      `allowed_tools entry "${rule}" is not in the tools: of ${check.file}: the run will not have it (add it there, or drop it here)`,
+  );
 }
 
 /** Where an effective agent field comes from: the Duskfleet file, or a link's project agent. */

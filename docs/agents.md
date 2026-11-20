@@ -497,6 +497,15 @@ a link to a name the project does not define fails before anything is spawned. N
 project agent's `tools:` list does not grant permissions in unattended runs: those tools
 still need to be in `allowed_tools` here.
 
+The reverse also holds: an `allowed_tools` entry the project agent's `tools:` does not declare
+is not available to the run. `create_agent` and `update_agent` return such entries in
+`warnings` (the entry and the project agent file named), and `doctor` lists them under
+`link tools`. They are warnings only: the agent is written and keeps running. The comparison is
+by tool name (`Bash(gh issue view:*)` is `Bash`), MCP names by server (`mcp__claude_ai_Figma`
+and `mcp__claude_ai_Figma__get_screenshot` cover each other). A project agent without `tools:`
+inherits every tool, so nothing is reported; one whose frontmatter does not parse gets one note
+saying the check was skipped.
+
 A link can leave `description` and `model` out: `list_agents` and `duskfleet agents` then show
 the project agent's (`description:` and `model:` of its frontmatter), so the two files never
 hold two copies that drift apart. The JSON forms say where each value came from
@@ -521,6 +530,14 @@ Two things to get right with a link:
   names interactive sessions show. The list is an allow-list: with the wrong prefix the
   agent is denied the tools that exist. Listing both prefixes keeps the file usable from
   both.
+
+The project agent file lives in the project, so a `git pull`, or the agent itself when it may
+write there, can change its prompt and its `tools:` between two scheduled runs. Each run
+records the file's hash (`projectAgentHash`); when a schedule fires a link whose file changed
+since the schedule's previous run of the same agent, the new run gets a note ("project agent file ... changed
+since the previous run of this schedule", with both hashes) and `get_run` / `run-info` report
+`projectAgentChange.changed: true`. It is a notice only: the run starts as usual, and its
+status and review reasons are untouched.
 
 ### Which prompt holds which rule
 

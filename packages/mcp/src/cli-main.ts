@@ -46,6 +46,7 @@ import {
   harnessOf,
   type LogLevel,
   linkProjectPath,
+  linkToolCheck,
   loadConfig,
   mcpServerConfig,
   parseHolder,
@@ -82,6 +83,7 @@ import {
   agentKind,
   type DoctorReport,
   linkModelOverrides,
+  linkToolsReport,
   type RenderOpts,
   renderAgentCreated,
   renderAgents,
@@ -748,6 +750,18 @@ async function main(): Promise<void> {
         // One line per registered harness (binary, version or why it is missing) and the agents on
         // a harness nobody registered. The claude version above is reused, not asked twice.
         harnesses: await harnessReport(app, { version, error }),
+        // Link agents: allowed_tools entries the project agent's tools: does not declare (advice only).
+        linkTools: linkToolsReport(
+          [...app.config.agents.values()]
+            .filter((a) => a.claudeAgent)
+            .map((a) => ({
+              agentId: a.id,
+              check: linkToolCheck(
+                { claude_agent: a.claudeAgent, allowed_tools: a.allowedTools },
+                linkProjectPath(a, app.config.projects),
+              ),
+            })),
+        ),
         // Runs of this UTC month that ended without a cost, per budget: under unpriced_policy count
         // each stands in at the cap it started with (runs.max_budget_usd, else the agent's or the default cap).
         unpricedRuns: app.runs.unpricedRunsByBudget().map(({ budget, runs }) => ({
@@ -1006,18 +1020,20 @@ async function main(): Promise<void> {
       const artifacts = app.runs.artifacts(id).map(({ kind, value, source }) => ({ kind, value, source })); // same field as get_run
       const costLabel = runCostLabel(run.billingType); // same field as get_run
       const label = runLabel(run); // same field as get_run
+      const projectAgentChange = app.runs.projectAgentChange(run); // same field as get_run
       const events = values.events ? app.runs.events(id) : undefined;
       // The renderer reads the same pieces the JSON flattens into one object.
       print(
         events
-          ? { ...run, label, costLabel, diff, artifacts, subagents, events }
-          : { ...run, label, costLabel, diff, artifacts, subagents },
+          ? { ...run, label, costLabel, projectAgentChange, diff, artifacts, subagents, events }
+          : { ...run, label, costLabel, projectAgentChange, diff, artifacts, subagents },
         (_v, opts) =>
           renderRunInfo(
             {
               run,
               label,
               costLabel,
+              projectAgentChange,
               diff,
               artifacts,
               subagents,

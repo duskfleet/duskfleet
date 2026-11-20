@@ -181,6 +181,12 @@ export interface Run {
   agentHash: string | null;
   claudeCodeVersion: string | null;
   /**
+   * The persona of a link on its own (migration 33): `projectAgentDefinitionHash` of the project
+   * agent file at start time. Null for an own agent, a missing file and older rows. A scheduled fire
+   * compares it with the schedule's previous run (`ProjectAgentChange`) and notes a change.
+   */
+  projectAgentHash?: string | null;
+  /**
    * When the run last produced output (any stream-json event; migration 20), refreshed by
    * `RunManager` at most every `LAST_EVENT_WRITE_MS`. Null before the first event and for
    * older rows. Read through `runSilence`.
@@ -444,6 +450,31 @@ export function needsReview(run: ReviewInput): boolean {
   return reviewReasons(run).length > 0;
 }
 
+/**
+ * A scheduled link run's persona against the schedule's previous run (issue #463): a notice, never
+ * a review reason. Null when there is nothing to compare: an own agent, the schedule's first run,
+ * or a previous run that recorded no project agent hash (older rows).
+ */
+export interface ProjectAgentChange {
+  previousRunId: string;
+  previousHash: string;
+  hash: string;
+  changed: boolean;
+}
+
+export function compareProjectAgent(
+  hash: string | null | undefined,
+  previous: Pick<Run, "id" | "projectAgentHash"> | null,
+): ProjectAgentChange | null {
+  if (!hash || !previous?.projectAgentHash) return null;
+  return {
+    previousRunId: previous.id,
+    previousHash: previous.projectAgentHash,
+    hash,
+    changed: previous.projectAgentHash !== hash,
+  };
+}
+
 /** The columns a list or a schedule row needs to say how a run ended, without its result blobs. */
 export type RunSummary = Pick<Run, "id" | "status" | "reviewReasons" | "terminationReason" | "costUsd" | "endedAt">;
 
@@ -492,6 +523,8 @@ export function summarizeRun(run: Run) {
     /** Eval bundle: the agent definition and harness (Claude Code) version this run used; null when unknown. */
     agentHash: run.agentHash,
     claudeCodeVersion: run.claudeCodeVersion,
+    /** A link's project agent file (persona) at start time; null for an own agent or an older run. */
+    projectAgentHash: run.projectAgentHash ?? null,
     /** The skills bundle (data/skill-bundles/<id>) the run got; null when the agent declares no skills. */
     skillsBundle: run.skillsBundle ?? null,
     claudeSessionId: run.claudeSessionId,
