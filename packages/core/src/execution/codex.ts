@@ -15,8 +15,14 @@
  * - the agent body as `-c developer_instructions="<TOML string>"` (no file to write).
  *
  * Never passed: `--dangerously-bypass-approvals-and-sandbox`, `--dangerously-bypass-hook-trust`,
- * `-s danger-full-access`. Codex picks the session id itself (`thread.started`); resuming one is
- * not offered yet (`resumeSession: false`, see docs/harnesses.md).
+ * `-s danger-full-access`. Codex picks the session id itself (`thread.started`).
+ *
+ * Resuming (issue #485, verified by hand on codex-cli 0.167.1): `codex exec resume` has no `-s`, but
+ * `-c sandbox_mode="<mode>"` decides the sandbox of the resumed turn whatever the base session used,
+ * so a resume always carries it, from the agent's `permission_mode` (never the resume form without
+ * it). The thread id is the last argument before `-`; Codex reports the same id in `thread.started`.
+ * An unknown thread prints nothing on stdout and a `no rollout found` line on stderr
+ * (`isCodexSessionNotFound`): the result says `sessionNotFound`, the run path starts fresh.
  */
 import { type ChildProcess, execFile, spawn } from "node:child_process";
 import { existsSync } from "node:fs";
@@ -26,7 +32,7 @@ import { classifyFailure } from "../observability/failure.js";
 import type { RecordedCommand } from "../observability/run.js";
 import { logger } from "../util/log.js";
 import { childEnv } from "./child-env.js";
-import { type CodexStreamState, createCodexState, ingestCodexLine } from "./codex-jsonl.js";
+import { type CodexStreamState, createCodexState, ingestCodexLine, isCodexSessionNotFound } from "./codex-jsonl.js";
 import { CODEX_CAPABILITIES, CODEX_HARNESS } from "./harness.js";
 import { CappedLogWriter, DEFAULT_MAX_LOG_BYTES } from "./log-caps.js";
 import { effectivePath } from "./search-path.js";
@@ -108,8 +114,26 @@ export class CodexExecutor implements Executor {
   buildArgv(req: ExecutionRequest): string[] {
     const sandbox = (CODEX_SANDBOX_BY_MODE as Record<string, string>)[req.permissionMode];
     if (!sandbox) throw new Error(`permission_mode ${req.permissionMode} is not supported by harness codex`);
-    // RunManager refuses a resume first (`resumeSession: false`): never start a fresh session in its place.
-    if (req.resumeSessionId) throw new Error("resuming a session is not supported by harness codex");
+    if (req.resumeSessionId) {
+      // The verified resume form: the sandbox as a config override (resume has no `-s`), always.
+      // No `-m`: the model flag was not part of the verified command.
+      const argv = [
+        "exec",
+        "resume",
+        "--json",
+        "--ignore-user-config",
+        "--ignore-rules",
+        "-c",
+        `sandbox_mode=${tomlString(sandbox)}`,
+        "-c",
+        "sandbox_workspace_write.network_access=false",
+      ];
+      if (req.effort) argv.push("-c", `model_reasoning_effort=${tomlString(req.effort)}`);
+      // The same value as a fresh run; whether it replaces or adds to the base session's is unverified.
+      if (req.appendSystemPrompt) argv.push("-c", `developer_instructions=${tomlString(req.appendSystemPrompt)}`);
+      argv.push(req.resumeSessionId, "-");
+      return argv;
+    }
     const argv = [
       "exec",
       "--json",
@@ -156,6 +180,7 @@ export class CodexExecutor implements Executor {
     let inactivityTimer: NodeJS.Timeout | null = null;
     let graceKilled = false;
     let stderrTail = "";
+    let stderrSessionNotFound = false;
     let spawnError: string | null = null;
     let child: ChildProcess;
 
@@ -204,8 +229,9 @@ export class CodexExecutor implements Executor {
         exitCode: null,
         signal: null,
         state,
-        sessionId: req.sessionId,
-        model: req.model ?? null,
+        sessionId: req.resumeSessionId ?? req.sessionId,
+        model: req.resumeSessionId ? null : (req.model ?? null),
+        sessionNotFound: false,
       });
       return { command, pid: null, cancel: () => {}, done: ended.then(() => result) };
     }
@@ -246,7 +272,10 @@ export class CodexExecutor implements Executor {
 
       child.stderr!.setEncoding("utf8");
       child.stderr!.on("data", (chunk: string) => {
-        stderrTail = (stderrTail + chunk).slice(-4000);
+        const window = stderrTail + chunk; // the tail before the cut: a line split across chunks still matches
+        if (req.resumeSessionId && !stderrSessionNotFound && isCodexSessionNotFound(0, window))
+          stderrSessionNotFound = true;
+        stderrTail = window.slice(-4000);
         logStream?.write(`#stderr ${chunk.replace(/\n(?!$)/g, "\n#stderr ")}`);
         emit({ type: "stderr", text: chunk });
       });
@@ -258,6 +287,7 @@ export class CodexExecutor implements Executor {
         closed = true;
         for (const t of [killTimer, resultTimer, timeoutTimer, inactivityTimer]) if (t) clearTimeout(t);
         const endedAt = new Date();
+        const sessionNotFound = !!req.resumeSessionId && state.lines === 0 && stderrSessionNotFound;
         let error: string | null = null;
         let finalOutcome: ExecutionResult["outcome"];
         if (outcome) {
@@ -293,8 +323,9 @@ export class CodexExecutor implements Executor {
             exitCode: code,
             signal: sig,
             state,
-            sessionId: req.sessionId,
-            model: req.model ?? null,
+            sessionId: req.resumeSessionId ?? req.sessionId,
+            model: req.resumeSessionId ? null : (req.model ?? null),
+            sessionNotFound,
           }),
         );
       });
@@ -344,6 +375,7 @@ function finalResult(input: {
   state: CodexStreamState;
   sessionId: string;
   model: string | null;
+  sessionNotFound: boolean;
 }): ExecutionResult {
   const { state } = input;
   return {
@@ -376,6 +408,7 @@ function finalResult(input: {
     permissionDenials: 0,
     deniedTools: [],
     contextExhausted: false,
+    sessionNotFound: input.sessionNotFound,
     // Only the error text of a failed run is classified; no fixture shows a rate limit yet.
     failure: classifyFailure({
       outcome: input.outcome,

@@ -230,8 +230,10 @@ npm workspaces, one `config/` and one SQLite database shared by three deliverabl
   Codex (`harness: codex`, #50, `execution/codex.ts`, parser `codex-jsonl.ts`) has no tool rules,
   only its sandbox (`dontAsk` = `-s read-only`, `acceptEdits` = `-s workspace-write`, network always
   off), always `--ignore-user-config --ignore-rules`, the body as `-c developer_instructions` (a
-  TOML string, `tomlString`); Codex picks the session id (`thread.started`), `resumeSession: false`
-  until a real run shows resume keeps the sandbox. Fixtures in `packages/mcp/test/fixtures/codex/`,
+  TOML string, `tomlString`); Codex picks the session id (`thread.started`). Resume (#485) is
+  `codex exec resume ... <thread_id> -`, always with `-c sandbox_mode` from `permission_mode` (resume
+  has no `-s`; never the resume form without it); an unknown thread is `sessionNotFound`
+  (`isCodexSessionNotFound`). Fixtures in `packages/mcp/test/fixtures/codex/`,
   `CODEX_BIN` → `fake-codex.js` in `test/helpers.js`, `childEnv` drops `CODEX_BIN`.
 - **Opt-in sandbox** (`sandbox: true`, `execution/sandbox.ts`, issue #447): the only `--settings`
   Duskfleet passes; agents without it keep today's argv. A host without the sandbox refuses the run

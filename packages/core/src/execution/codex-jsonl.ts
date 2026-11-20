@@ -162,6 +162,15 @@ export function ingestCodexLine(state: CodexStreamState, line: string): Executio
   return out;
 }
 
+/**
+ * `codex exec resume <id>` named a thread Codex does not have: nothing on stdout, exit 1, and a
+ * stderr line `Error: thread/resume: thread/resume failed: no rollout found for thread id <id>`
+ * (fixture `resume-unknown.stderr`). Matched per line, so a warning printed before it does not hide it.
+ */
+export function isCodexSessionNotFound(stdoutLines: number, stderr: string): boolean {
+  return stdoutLines === 0 && /^[ \t]*Error: thread\/resume: .*\bno rollout found for thread id\b/m.test(stderr);
+}
+
 /** What a tool item did, for the timeline: the command, or the files a patch changed. */
 function toolInput(item: Record<string, unknown>): unknown {
   if (str(item["type"]) === "command_execution") return { command: str(item["command"]) ?? "" };

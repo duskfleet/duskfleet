@@ -122,12 +122,13 @@ export const CODEX_HARNESS = "codex";
  * Codex CLI (codex-cli 0.167.1, docs/harnesses.md): no tool allow-list, only a sandbox mode
  * (`dontAsk` = read-only, `acceptEdits` = workspace-write, network off), no dollars (every run
  * `unpriced`), no project-defined agents (nothing in the CLI loads one from a project folder).
- * `resumeSession` stays false until a real run shows a resumed turn keeps the write sandbox.
+ * Resumable (#485): `codex exec resume` with `-c sandbox_mode` keeps the agent's sandbox on the
+ * resumed turn; `resume_budget_usd` stays refused (no `hardBudgetUsd`).
  */
 export const CODEX_CAPABILITIES: HarnessCapabilities = Object.freeze({
   toolAllowList: false,
   permissionModes: ["dontAsk", "acceptEdits"] as const,
-  resumeSession: false,
+  resumeSession: true,
   hardBudgetUsd: false,
   reportsCostUsd: false,
   subagents: false,

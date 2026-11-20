@@ -22,6 +22,7 @@ import {
   HarnessRegistry,
   harnessRefusal,
   ingestCodexLine,
+  isCodexSessionNotFound,
   loadConfig,
   openDatabase,
   RunManager,
@@ -35,7 +36,7 @@ const fakeClaude = path.join(here, "fake-claude.js");
 const fakeCodex = path.join(here, "fake-codex.js");
 const fixtures = path.join(here, "fixtures", "codex");
 
-function setup(agents = {}) {
+function setup(agents = {}, codexOptions = {}) {
   const root = mkdtempSync(path.join(tmpdir(), "duskfleet-codex-"));
   const configDir = path.join(root, "config");
   mkdirSync(path.join(configDir, "agents"), { recursive: true });
@@ -62,11 +63,12 @@ function setup(agents = {}) {
   const config = loadConfig(configDir);
   const db = openDatabase(config.dataDir);
   const claude = new ClaudeCodeExecutor({ binary: fakeClaude, strictMcpConfig: true, allowBypassPermissions: false });
-  const codex = new CodexExecutor({ binary: config.codex.binary });
+  const codex = new CodexExecutor({ binary: config.codex.binary, ...codexOptions });
   const runs = new RunManager(config, new RunRepository(db), new HarnessRegistry([claude, codex]));
   process.env.FAKE_CODEX_RECORD = record;
   const cleanup = () => {
     delete process.env.FAKE_CODEX_RECORD;
+    delete process.env.FAKE_CODEX_FORGET;
     runs.shutdown();
     db.close();
     rmSync(root, { recursive: true, force: true });
@@ -120,10 +122,85 @@ test("argv: exec --json, user config and rules ignored, sandbox per mode, networ
     assert.ok(!argv.some((a) => a.includes("\n")), "no raw newline in argv");
   }
   assert.throws(() => codex.buildArgv({ ...base, permissionMode: "plan" }), /permission_mode plan/);
+});
+
+test("argv for a resume: exec resume, the sandbox always as -c sandbox_mode, the thread id before -", () => {
+  const codex = new CodexExecutor({ binary: fakeCodex });
+  const thread = "01a1f616-dda1-7da0-adb2-81638c8f87ec";
+  const readOnly = codex.buildArgv({ ...base, permissionMode: "dontAsk", resumeSessionId: thread });
+  assert.deepEqual(readOnly, [
+    "exec",
+    "resume",
+    "--json",
+    "--ignore-user-config",
+    "--ignore-rules",
+    "-c",
+    'sandbox_mode="read-only"',
+    "-c",
+    "sandbox_workspace_write.network_access=false",
+    thread,
+    "-",
+  ]);
+  const edits = codex.buildArgv({
+    ...base,
+    permissionMode: "acceptEdits",
+    resumeSessionId: thread,
+    model: "gpt-5.1-codex-mini",
+    effort: "low",
+    appendSystemPrompt: "Be brief.",
+  });
+  const pairs = (f) => edits.flatMap((a, i) => (a === f ? [edits[i + 1]] : []));
+  assert.deepEqual(pairs("-c"), [
+    'sandbox_mode="workspace-write"',
+    "sandbox_workspace_write.network_access=false",
+    'model_reasoning_effort="low"',
+    'developer_instructions="Be brief."',
+  ]);
+  assert.deepEqual(edits.slice(-2), [thread, "-"]);
+  for (const argv of [readOnly, edits]) {
+    assert.ok(!argv.includes("-s"), "resume has no -s: the sandbox goes through -c");
+    assert.ok(!argv.includes("-m"), "-m was not part of the verified resume command");
+    assert.ok(!argv.includes("--dangerously-bypass-approvals-and-sandbox"));
+    assert.ok(!argv.includes("danger-full-access"));
+  }
   assert.throws(
-    () => codex.buildArgv({ ...base, permissionMode: "dontAsk", resumeSessionId: base.sessionId }),
-    /resuming a session is not supported by harness codex/,
+    () => codex.buildArgv({ ...base, permissionMode: "plan", resumeSessionId: thread }),
+    /permission_mode plan/,
+    "never the resume form without a sandbox",
   );
+});
+
+test("isCodexSessionNotFound: the stderr line, only with nothing on stdout", () => {
+  const line = readFileSync(path.join(fixtures, "resume-unknown.stderr"), "utf8");
+  assert.equal(isCodexSessionNotFound(0, line), true);
+  assert.equal(isCodexSessionNotFound(0, `Reading additional input from stdin...\n${line}`), true);
+  assert.equal(isCodexSessionNotFound(1, line), false, "stdout lines mean the session ran");
+  assert.equal(isCodexSessionNotFound(0, "Error: exit code 1"), false);
+  assert.equal(isCodexSessionNotFound(0, `Warning: ${line}`), false);
+});
+
+test("executor: a resume keeps the thread id; an unknown thread is sessionNotFound", async () => {
+  const cwd = mkdtempSync(path.join(tmpdir(), "duskfleet-codex-exec-"));
+  try {
+    const codex = new CodexExecutor({ binary: fakeCodex });
+    const thread = "01a1f617-c6d0-7c60-afd6-20cde1649506"; // the killed fixture's thread
+    const resumed = await codex.execute({ ...base, cwd, permissionMode: "dontAsk", resumeSessionId: thread }).done;
+    assert.equal(resumed.outcome, "completed");
+    assert.equal(resumed.sessionId, thread);
+    assert.equal(resumed.sessionNotFound, false);
+
+    const unknown = "00000000-0000-7000-8000-000000000001";
+    const gone = await codex.execute({ ...base, cwd, permissionMode: "dontAsk", resumeSessionId: unknown }).done;
+    assert.equal(gone.outcome, "failed");
+    assert.equal(gone.sessionNotFound, true);
+    assert.equal(gone.sessionId, unknown);
+    assert.match(gone.error, /no rollout found/);
+
+    const fresh = await codex.execute({ ...base, cwd, permissionMode: "dontAsk", prompt: "fixture:failed-model" }).done;
+    assert.equal(fresh.sessionNotFound, false, "a fresh run is never sessionNotFound");
+  } finally {
+    rmSync(cwd, { recursive: true, force: true });
+  }
 });
 
 test("tomlString: quotes, backslashes and control characters are escaped", () => {
@@ -138,7 +215,6 @@ test("every field Codex cannot honour is refused, by name", () => {
   const cases = [
     [{ allowed_tools: ["Bash(ls)"] }, "allowed_tools"],
     [{ disallowed_tools: ["Write"] }, "disallowed_tools"],
-    [{ on_failure: "resume_once" }, "on_failure: resume_once"],
     [{ max_budget_usd: 1 }, "max_budget_usd"],
     [{ wrap_up_reserve_usd: 0 }, "wrap_up_reserve_usd"],
     [{ resume_budget_usd: 1 }, "resume_budget_usd"],
@@ -159,10 +235,17 @@ test("every field Codex cannot honour is refused, by name", () => {
   for (const mode of ["plan", "auto", "default", "bypassPermissions"]) {
     assert.match(harnessRefusal({ harness: "codex", permission_mode: mode }, builtinHarnesses), /^permission_mode /);
   }
-  for (const fine of [{ permission_mode: "dontAsk" }, { permission_mode: "acceptEdits" }, { effort: "high" }, {}]) {
+  for (const fine of [
+    { permission_mode: "dontAsk" },
+    { permission_mode: "acceptEdits" },
+    { effort: "high" },
+    { on_failure: "resume_once" },
+    {},
+  ]) {
     assert.equal(harnessRefusal({ harness: "codex", ...fine }, builtinHarnesses), null);
   }
   assert.equal(CODEX_CAPABILITIES.reportsCostUsd, false);
+  assert.equal(CODEX_CAPABILITIES.resumeSession, true, "resume with -c sandbox_mode (#485)");
   assert.equal(CODEX_CAPABILITIES.projectAgents, false, "nothing in the CLI loads an agent from a project");
   const codex = new CodexExecutor({ binary: fakeCodex });
   assert.throws(() => codex.prepare({ ...base, permissionMode: "dontAsk", allowedTools: ["x"] }), /allowed_tools/);
@@ -307,5 +390,73 @@ test("cancel ends the run cancelled; silence past the inactivity limit ends it t
     assert.equal(done.outcome, "completed", "a finished turn disarms the inactivity timer");
   } finally {
     rmSync(cwd, { recursive: true, force: true });
+  }
+});
+
+const notes = (runs, runId) =>
+  runs
+    .events(runId)
+    .filter((e) => e.type === "note")
+    .map((e) => e.payload);
+
+test("on_failure: resume_once resumes a timed-out run once, same thread, under the agent's sandbox", async () => {
+  const t = setup(
+    { reader: "harness: codex\npermission_mode: dontAsk\non_failure: resume_once" },
+    { inactivityMs: 3_000 },
+  );
+  try {
+    const started = await t.runs.startRun({ agentId: "reader", projectPath: t.project, prompt: "fixture:killed" });
+    const timedOut = await t.runs.waitForRun(started.id, 15_000);
+    assert.equal(timedOut.status, "timed_out");
+    assert.equal(timedOut.claudeSessionId, "01a1f617-c6d0-7c60-afd6-20cde1649506");
+
+    const retry = await t.runs.resumeRun({ runId: timedOut.id });
+    const resumed = await t.runs.waitForRun(retry.id, 15_000);
+    assert.equal(resumed.status, "completed");
+    assert.equal(resumed.resumedFromRunId, timedOut.id);
+    assert.equal(resumed.claudeSessionId, timedOut.claudeSessionId, "the resumed run keeps the thread id");
+    const argv = t.recorded().argv;
+    assert.deepEqual(argv.slice(0, 2), ["exec", "resume"]);
+    assert.ok(argv.includes('sandbox_mode="read-only"'), "a read-only agent's resume stays read-only");
+    assert.deepEqual(argv.slice(-2), [timedOut.claudeSessionId, "-"]);
+    await assert.rejects(t.runs.resumeRun({ runId: timedOut.id }), /already resumed once/);
+  } finally {
+    t.cleanup();
+  }
+});
+
+test("a continued Codex run resumes its thread; an unknown thread starts fresh with a note", async () => {
+  const t = setup({ helper: "harness: codex\npermission_mode: acceptEdits" });
+  try {
+    const first = await t.runs.waitForRun(
+      (await t.runs.startRun({ agentId: "helper", projectPath: t.project, prompt: "fixture:edit" })).id,
+      15_000,
+    );
+    assert.equal(first.status, "completed");
+
+    const next = await t.runs.waitForRun(
+      (await t.runs.continueRun({ runId: first.id, prompt: "what did you do earlier?" })).id,
+      15_000,
+    );
+    assert.equal(next.status, "completed");
+    assert.equal(next.continuedFromRunId, first.id);
+    assert.equal(next.claudeSessionId, first.claudeSessionId);
+    const argv = t.recorded().argv;
+    assert.deepEqual(argv.slice(0, 2), ["exec", "resume"]);
+    assert.ok(argv.includes('sandbox_mode="workspace-write"'));
+
+    process.env.FAKE_CODEX_FORGET = "1";
+    const fresh = await t.runs.waitForRun(
+      (await t.runs.continueRun({ runId: first.id, prompt: "fixture:stdin" })).id,
+      15_000,
+    );
+    assert.equal(fresh.status, "completed");
+    assert.equal(fresh.continuedFromRunId, null, "not a continuation once the thread was unknown");
+    assert.ok(notes(t.runs, fresh.id).some((n) => n.notContinuedFromRunId === first.id));
+    const freshArgv = t.recorded().argv;
+    assert.ok(!freshArgv.includes("resume"), "the fallback is a fresh exec");
+    assert.equal(freshArgv[freshArgv.indexOf("-s") + 1], "workspace-write");
+  } finally {
+    t.cleanup();
   }
 });
