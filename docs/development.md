@@ -331,6 +331,7 @@ local run-data handling, and recommended configuration.
   | (no `-p`) | the prompt is piped on stdin: same stream, the prompt stays out of argv |
   | `--output-format json` | JSONL events; the last line is `{"type":"result","exitCode",...}` |
   | `--no-ask-user`, `--no-auto-update`, `--disable-builtin-mcps` | always: no questions, no CLI update under a run, no built-in MCP servers |
+  | `--disable-mcp-server <name>` (repeatable) | once per server `copilot mcp list --json` names in the run's folder, built-in ones excepted (issue #476). Resolved before the run row exists; a listing that fails or prints no JSON refuses the run |
   | `--session-id <uuid>` / `--resume=<id>` | a fresh session with our id / a continued one |
   | `--model <model>`, `--reasoning-effort <level>` | only when the agent sets them |
   | `--allow-tool <rule>` / `--deny-tool <rule>` | the agent's `allowed_tools` / `disallowed_tools`, verbatim; `acceptEdits` adds `--allow-tool write` |
@@ -338,8 +339,18 @@ local run-data handling, and recommended configuration.
   | `--usage-output-file <tmp>/usage.json` | tokens per model for the result (cumulative for a resumed session) |
 
   Never passed: `--trust-folder` (it also cannot be combined with `--session-id`),
-  `--allow-all-tools`, `--allow-all`, `--yolo`, `--autopilot`, `--sandbox`; `COPILOT_ALLOW_ALL`
-  is removed from the child's environment even when an `env_passthrough` names it.
+  `--allow-all-tools`, `--allow-all`, `--yolo`, `--autopilot`, `--sandbox`,
+  `--enable-mcp-server`, `--additional-mcp-config`; `COPILOT_ALLOW_ALL` is removed from the
+  child's environment even when an `env_passthrough` names it.
+
+  MCP servers (checked by hand on 1.0.112, 2026-11-19, `copilot --help`, `copilot mcp --help`,
+  `copilot mcp list --json`): no flag makes Copilot ignore the user configuration as a whole, so
+  the adapter disables servers by name. Sources are the user's `~/.copilot/mcp-config.json`, a
+  workspace `.mcp.json` or `.github/mcp.json` (skipped, with a warning on stderr, when the folder
+  is not trusted) and installed plugins. `copilot mcp list --json` makes no model call and prints
+  `{ "mcpServers": { "<name>": { "type", "source", "enabled", ... } } }` on stdout (built-in entries
+  have `"source": "builtin"`); only stdout is read. It runs in the run's folder, so a trusted
+  folder's workspace servers are listed and disabled too.
 - **Codex CLI flags** (`harness: codex`, `core/src/execution/codex.ts`): verified by hand against
   `codex exec --help` and real runs of codex-cli 0.167.1 (fixtures in
   `packages/mcp/test/fixtures/codex/`, their README lists the command of each). Tests point

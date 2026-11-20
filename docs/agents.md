@@ -179,8 +179,17 @@ Keep CHANGELOG.md in order. Never touch other files.
   (no dollars: every run is `unpriced` and budgets count it as its cap), `inherit_mcp`, `add_dirs`,
   `skills`, `sandbox*`, `claude_agent`. Allowed: `model`, `effort`, `on_failure: resume_once`,
   continued sessions, `env_passthrough`, `timeout_minutes`, the concurrency and daily-run caps.
-- User-level Copilot hooks still run in these sessions (there is no flag against them), and a
-  user-level MCP server that loads ends the run as failed. See [Security](security.md).
+- **No MCP servers.** Before each run Duskfleet asks `copilot mcp list --json` (in the project
+  folder) which servers are configured, user-level, workspace (a trusted folder's `.mcp.json` or
+  `.github/mcp.json`) or plugin, and passes one `--disable-mcp-server <name>` per server, so a
+  Copilot that also hosts Duskfleet, or any other server, keeps running agents. A listing that fails
+  refuses the run with the reason, before it is recorded. A server that loads anyway (the init line
+  shows it not `disabled`) still ends the run as failed. Checked on Copilot CLI 1.0.112 on an
+  account whose organization disables third-party servers by policy, so every server already showed
+  `disabled`; that one loads in a `-p` run on an unmanaged account was not observed, and this is the
+  defence for that case.
+- User-level Copilot hooks still run in these sessions (there is no flag against them). See
+  [Security](security.md).
 
 ### Codex agents
 

@@ -9,6 +9,8 @@
  * - `resume-unknown` prints its stderr and exits 1 with nothing on stdout; `resume-unknown-noisy`
  *   does the same between two long runs of warnings.
  * - `killed` stops before its cancellation lines and prints them on SIGTERM, exit 143.
+ * - `mcp list --json` prints a listing (`FAKE_COPILOT_MCP_LIST*`); the init line reports the
+ *   `--disable-mcp-server` names disabled and `FAKE_COPILOT_MCP_LOADED` ones loaded (see below).
  * - `FAKE_COPILOT_RECORD=<file>` (passed through by the test config) receives the argv, the
  *   environment's names, the prompt and the persona agent file `--add-dir` points at.
  */
@@ -26,6 +28,46 @@ const flag = (name) => {
 if (argv[0] === "--version") {
   process.stdout.write("GitHub Copilot CLI 1.0.112.\n");
   process.exit(0);
+}
+
+// `copilot mcp list --json` (issue #476): the shape seen on 1.0.112, built-in servers only unless
+// FAKE_COPILOT_MCP_LIST holds the stdout to print (verbatim, broken JSON included);
+// FAKE_COPILOT_MCP_LIST_EXIT=<n> fails it instead. The trust warning always goes to stderr, as
+// the real CLI prints it in an untrusted folder.
+if (argv[0] === "mcp" && argv[1] === "list" && argv[2] === "--json") {
+  process.stderr.write("Warning: workspace MCP servers were skipped because this folder is not trusted.\n");
+  const exit = Number(process.env.FAKE_COPILOT_MCP_LIST_EXIT ?? 0);
+  if (exit) {
+    process.stderr.write("Error: could not read the MCP configuration\n");
+    process.exit(exit);
+  }
+  const builtin = {
+    mcpServers: {
+      "github-mcp-server": { type: "http", source: "builtin", enabled: true },
+      githubiq: { type: "http", source: "builtin", enabled: true },
+    },
+  };
+  process.stdout.write(process.env.FAKE_COPILOT_MCP_LIST ?? `${JSON.stringify(builtin, null, 2)}\n`);
+  process.exit(0);
+}
+
+/**
+ * The init line, as the CLI would report it: every `--disable-mcp-server` name `disabled`, and
+ * the names in FAKE_COPILOT_MCP_LOADED (comma-separated) loaded despite that. Left verbatim when
+ * neither applies, so the fixtures replay unchanged.
+ */
+function mcpInit(line) {
+  const loaded = (process.env.FAKE_COPILOT_MCP_LOADED ?? "").split(",").filter(Boolean);
+  const disabled = argv.flatMap((a, i) => (a === "--disable-mcp-server" ? [argv[i + 1]] : []));
+  if (!loaded.length && !disabled.length) return line;
+  const event = JSON.parse(line);
+  const builtin = event.data.servers.filter((s) => s.source === "builtin");
+  event.data.servers = [
+    ...disabled.filter((n) => !loaded.includes(n)).map((name) => ({ name, status: "disabled" })),
+    ...loaded.map((name) => ({ name, status: "connected" })),
+    ...builtin,
+  ];
+  return JSON.stringify(event);
 }
 
 let prompt = "";
@@ -75,7 +117,9 @@ function main() {
     .split("\n")
     .filter(Boolean);
   const original = JSON.parse(lines.at(-1)).sessionId;
-  const out = lines.map((l) => (original ? l.split(original).join(sessionId) : l));
+  const out = lines
+    .map((l) => (original ? l.split(original).join(sessionId) : l))
+    .map((l) => (l.includes('"type":"session.mcp_servers_loaded"') ? mcpInit(l) : l));
   const usage = path.join(fixtures, `${name}.usage.json`);
   const usageOut = flag("--usage-output-file");
   const exitCode = JSON.parse(out.at(-1)).exitCode ?? 0;

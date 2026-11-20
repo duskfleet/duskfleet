@@ -19,6 +19,7 @@ import {
   COPILOT_PERSONA_AGENT,
   CopilotExecutor,
   copilotEnv,
+  copilotMcpServersToDisable,
   copilotUsageByModel,
   createCopilotState,
   HarnessRegistry,
@@ -66,7 +67,8 @@ function setup(agents = {}) {
   const db = openDatabase(config.dataDir);
   const claude = new ClaudeCodeExecutor({ binary: fakeClaude, strictMcpConfig: true, allowBypassPermissions: false });
   const copilot = new CopilotExecutor({ binary: config.copilot.binary });
-  const runs = new RunManager(config, new RunRepository(db), new HarnessRegistry([claude, copilot]));
+  const repo = new RunRepository(db);
+  const runs = new RunManager(config, repo, new HarnessRegistry([claude, copilot]));
   process.env.FAKE_COPILOT_RECORD = record;
   const cleanup = () => {
     delete process.env.FAKE_COPILOT_RECORD;
@@ -75,7 +77,7 @@ function setup(agents = {}) {
     rmSync(root, { recursive: true, force: true });
   };
   const recorded = () => JSON.parse(readFileSync(record, "utf8"));
-  return { root, project: realpathSync(project), config, runs, copilot, recorded, cleanup };
+  return { root, project: realpathSync(project), config, runs, repo, copilot, recorded, cleanup };
 }
 
 const base = { cwd: "/w", prompt: "p", sessionId: "11111111-2222-4333-8444-555555555555" };
@@ -311,6 +313,110 @@ test("a denial is needs review; an unknown model fails; COPILOT_ALLOW_ALL stays 
     assert.match(failed.error, /not available/);
   } finally {
     delete process.env.COPILOT_ALLOW_ALL;
+    t.cleanup();
+  }
+});
+
+/** Runs `fn` with the given FAKE_COPILOT_* variables set, removing them afterwards. */
+async function withEnv(vars, fn) {
+  Object.assign(process.env, vars);
+  try {
+    return await fn();
+  } finally {
+    for (const k of Object.keys(vars)) delete process.env[k];
+  }
+}
+
+const listing = (servers) => JSON.stringify({ mcpServers: servers });
+const userAndWorkspace = listing({
+  "user-a": { type: "stdio", source: "user", enabled: true },
+  "ws-b": { type: "http", source: "workspace", enabled: true },
+  "github-mcp-server": { type: "http", source: "builtin", enabled: true },
+});
+
+test("MCP listing: every server but the built-in ones is disabled; anything else is refused with the reason", () => {
+  assert.deepEqual(copilotMcpServersToDisable(userAndWorkspace), ["user-a", "ws-b"]);
+  assert.deepEqual(
+    copilotMcpServersToDisable(listing({ githubiq: { source: "builtin" } })),
+    [],
+    "built-in only: nothing to add",
+  );
+  assert.deepEqual(copilotMcpServersToDisable(listing({})), []);
+  assert.throws(() => copilotMcpServersToDisable("not json"), /did not print JSON: "not json"/);
+  assert.throws(() => copilotMcpServersToDisable("[]"), /no mcpServers object/);
+  assert.throws(() => copilotMcpServersToDisable('{"servers":{}}'), /no mcpServers object/);
+});
+
+test("argv: one --disable-mcp-server per listed server; none listed keeps the argv byte for byte", async () => {
+  const copilot = new CopilotExecutor({ binary: fakeCopilot });
+  const cwd = mkdtempSync(path.join(tmpdir(), "duskfleet-copilot-mcp-"));
+  try {
+    const plain = { ...base, cwd, permissionMode: "dontAsk", envPassthrough: ["FAKE_COPILOT_*"] };
+    const before = copilot.buildArgv({ ...plain }, "/tmp/w");
+    const none = { ...plain };
+    copilot.prepare(none);
+    assert.equal(none.disableMcpServers, undefined, "the default listing has built-in servers only");
+    assert.deepEqual(copilot.buildArgv(none, "/tmp/w"), before);
+
+    const some = { ...plain };
+    await withEnv({ FAKE_COPILOT_MCP_LIST: userAndWorkspace }, () => copilot.prepare(some));
+    assert.deepEqual(some.disableMcpServers, ["user-a", "ws-b"]);
+    const argv = copilot.buildArgv(some, "/tmp/w");
+    assert.deepEqual(
+      argv.flatMap((a, i) => (a === "--disable-mcp-server" ? [argv[i + 1]] : [])),
+      ["user-a", "ws-b"],
+    );
+    assert.ok(argv.includes("--disable-builtin-mcps"), "the built-in flag stays");
+    assert.ok(!argv.includes("--enable-mcp-server") && !argv.includes("--additional-mcp-config"));
+  } finally {
+    rmSync(cwd, { recursive: true, force: true });
+  }
+});
+
+test("a run with user-level servers starts with them disabled; one that loads anyway still fails the run", async () => {
+  const t = setup({ helper: "harness: copilot\nallowed_tools: [write]" });
+  try {
+    await withEnv({ FAKE_COPILOT_MCP_LIST: userAndWorkspace }, async () => {
+      const started = await t.runs.startRun({ agentId: "helper", projectPath: t.project, prompt: "fixture:edit" });
+      const run = await t.runs.waitForRun(started.id, 15_000);
+      assert.equal(run.status, "completed", run.error ?? "");
+      const argv = t.recorded().argv;
+      assert.deepEqual(
+        argv.flatMap((a, i) => (a === "--disable-mcp-server" ? [argv[i + 1]] : [])),
+        ["user-a", "ws-b"],
+      );
+      assert.deepEqual(run.command.argv, argv, "the recorded command carries the disables");
+      assert.ok(run.mcp.mounted.every((s) => s.status === "disabled"));
+
+      await withEnv({ FAKE_COPILOT_MCP_LOADED: "user-a" }, async () => {
+        const leaked = await t.runs.startRun({ agentId: "helper", projectPath: t.project, prompt: "fixture:edit" });
+        const failed = await t.runs.waitForRun(leaked.id, 15_000);
+        assert.equal(failed.status, "failed");
+        assert.match(failed.error, /Copilot loaded MCP server user-a; harness copilot runs without MCP/);
+      });
+    });
+  } finally {
+    t.cleanup();
+  }
+});
+
+test("a listing that fails or prints no JSON refuses the run before its row exists, with the reason", async () => {
+  const t = setup({ helper: "harness: copilot\nallowed_tools: [write]" });
+  try {
+    await withEnv({ FAKE_COPILOT_MCP_LIST_EXIT: "3" }, () =>
+      assert.rejects(
+        t.runs.startRun({ agentId: "helper", projectPath: t.project, prompt: "fixture:edit" }),
+        /agent "helper": copilot mcp list --json failed \(exit 3\).*\nstderr: .*could not read the MCP configuration/s,
+      ),
+    );
+    await withEnv({ FAKE_COPILOT_MCP_LIST: "Error: something" }, () =>
+      assert.rejects(
+        t.runs.startRun({ agentId: "helper", projectPath: t.project, prompt: "fixture:edit" }),
+        /copilot mcp list --json did not print JSON/,
+      ),
+    );
+    assert.deepEqual(t.repo.list(), [], "no run row was written");
+  } finally {
     t.cleanup();
   }
 });
