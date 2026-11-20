@@ -44,8 +44,8 @@ export const DEFAULT_ENV_ALLOW: readonly string[] = [
 
 /**
  * Never passed, whatever an allow-list says: markers that make Claude Code believe it is nested
- * inside another session, and `CLAUDE_BIN` / `COPILOT_BIN` (an agent running `npm test` here
- * would launch the real CLI instead of the test double).
+ * inside another session, and `CLAUDE_BIN` / `COPILOT_BIN` / `CODEX_BIN` (an agent running
+ * `npm test` here would launch the real CLI instead of the test double).
  */
 const ALWAYS_DROPPED: readonly string[] = [
   "CLAUDECODE",
@@ -53,6 +53,7 @@ const ALWAYS_DROPPED: readonly string[] = [
   "CLAUDE_CODE_SSE_*",
   "CLAUDE_BIN",
   "COPILOT_BIN",
+  "CODEX_BIN",
 ];
 
 /** An `env_passthrough` entry: an exact variable name or `PREFIX_*`. */

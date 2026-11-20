@@ -340,6 +340,23 @@ local run-data handling, and recommended configuration.
   Never passed: `--trust-folder` (it also cannot be combined with `--session-id`),
   `--allow-all-tools`, `--allow-all`, `--yolo`, `--autopilot`, `--sandbox`; `COPILOT_ALLOW_ALL`
   is removed from the child's environment even when an `env_passthrough` names it.
+- **Codex CLI flags** (`harness: codex`, `core/src/execution/codex.ts`): verified by hand against
+  `codex exec --help` and real runs of codex-cli 0.167.1 (fixtures in
+  `packages/mcp/test/fixtures/codex/`, their README lists the command of each). Tests point
+  `CODEX_BIN` at `fake-codex.js` (`test/helpers.js`); `childEnv()` never passes `CODEX_BIN` to a run.
+
+  | Flag | Purpose in Duskfleet |
+  |---|---|
+  | `exec --json ... -` | one non-interactive turn, JSONL events; `-` reads the prompt from stdin (a prompt argument would get stdin appended to it) |
+  | `--ignore-user-config`, `--ignore-rules` | always: no `~/.codex/config.toml` (model, `notify`, trusted projects, MCP servers), no execpolicy `.rules` files; auth still comes from `CODEX_HOME` |
+  | `-s read-only` / `-s workspace-write` | `dontAsk` / `acceptEdits` |
+  | `-c sandbox_workspace_write.network_access=false` | always: the network stays off |
+  | `-m <model>`, `-c model_reasoning_effort="<level>"` | only when the agent sets them |
+  | `-c developer_instructions="<TOML string>"` | the agent body (quotes, backslashes and control characters escaped, `tomlString`) |
+
+  Never passed: `--dangerously-bypass-approvals-and-sandbox`, `--dangerously-bypass-hook-trust`,
+  `-s danger-full-access`, `--skip-git-repo-check`, `--ephemeral`. `codex exec resume` is not
+  used yet (`resumeSession: false`).
 - **Claude CLI flags**: verify every flag against `claude --help` before using it. The ones the
   executor uses, checked against `claude --help` of Claude Code 2.1.285:
 

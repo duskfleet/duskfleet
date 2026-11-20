@@ -216,7 +216,7 @@ npm workspaces, one `config/` and one SQLite database shared by three deliverabl
   and marks the open ones `interrupted` when the run ends. Per-message `output_tokens` of nested
   lines undercount; use `totalTokens`. Only main-session lines set the run's model and last text.
 - **Harnesses: one run path, one adapter per agent CLI** (`execution/harness.ts`, issue #445,
-  docs/harnesses.md): `harness:` in agent frontmatter (default `claude`; `copilot` since #446),
+  docs/harnesses.md): `harness:` in agent frontmatter (default `claude`; `copilot` since #446, `codex` since #50),
   `runs.harness` (migration 31). `RunManager` picks the executor from the `HarnessRegistry` built in
   `bootstrap.ts`; `assertAgentFitsHarness` refuses (create / update and `startRun`, field named) any
   field the adapter's `capabilities` cannot honour, never drops or approximates it. CLI-specific
@@ -227,6 +227,12 @@ npm workspaces, one `config/` and one SQLite database shared by three deliverabl
   (`COPILOT_BIN` > `copilot.binary` > PATH), and its parser follows the real-run fixtures in
   `packages/mcp/test/fixtures/copilot/`. `test/helpers.js` sets `COPILOT_BIN` to `fake-copilot.js`
   so tests never launch a real `copilot`; `childEnv` drops `COPILOT_BIN`, the adapter `COPILOT_ALLOW_ALL`.
+  Codex (`harness: codex`, #50, `execution/codex.ts`, parser `codex-jsonl.ts`) has no tool rules,
+  only its sandbox (`dontAsk` = `-s read-only`, `acceptEdits` = `-s workspace-write`, network always
+  off), always `--ignore-user-config --ignore-rules`, the body as `-c developer_instructions` (a
+  TOML string, `tomlString`); Codex picks the session id (`thread.started`), `resumeSession: false`
+  until a real run shows resume keeps the sandbox. Fixtures in `packages/mcp/test/fixtures/codex/`,
+  `CODEX_BIN` → `fake-codex.js` in `test/helpers.js`, `childEnv` drops `CODEX_BIN`.
 - **Opt-in sandbox** (`sandbox: true`, `execution/sandbox.ts`, issue #447): the only `--settings`
   Duskfleet passes; agents without it keep today's argv. A host without the sandbox refuses the run
   in `startRun` (never unsandboxed). Only network blocks are detectable (`remedy.kind:
@@ -269,5 +275,4 @@ npm workspaces, one `config/` and one SQLite database shared by three deliverabl
 
 Shipped: the scheduler (cron, gates, daily caps, monthly budgets, auto-pause, `serve` /
 `install-service`). Next: deterministic evals (`tests_passed`, `build_passed`, `files_exist`) as post-run hooks,
-then LLM evals as a second read-only run, then metrics tools and Git integration. A Codex CLI
-executor as a second runtime comes after evals.
+then LLM evals as a second read-only run, then metrics tools and Git integration.
