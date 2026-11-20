@@ -48,6 +48,7 @@ import {
   type RunStatus,
   recentReviewReasons,
   resolveClaudeBinary,
+  resolveCodexBinary,
   resolveConfigDir,
   resolveCopilotBinary,
   ScheduleRepository,
@@ -188,6 +189,8 @@ export function hostHarnesses(cfg: DuskFleetConfig = config()): HostHarnesses {
     if (name === DEFAULT_HARNESS_NAME) host.set(name, null);
     else if (name === "copilot")
       host.set(name, resolveCopilotBinary(cfg.copilot?.binary ?? null) ? null : "GitHub Copilot CLI not found");
+    else if (name === "codex")
+      host.set(name, resolveCodexBinary(cfg.codex?.binary ?? null) ? null : "Codex CLI not found");
     else host.set(name, `${name} CLI not found`);
   }
   return host;
