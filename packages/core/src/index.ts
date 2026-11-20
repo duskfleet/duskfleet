@@ -139,6 +139,7 @@ export {
   CopilotExecutor,
   type CopilotExecutorOptions,
   copilotEnv,
+  copilotMcpServersToDisable,
   resolveCopilotBinary,
 } from "./execution/copilot.js";
 export {

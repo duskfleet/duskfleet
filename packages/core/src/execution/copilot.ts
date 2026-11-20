@@ -7,6 +7,8 @@
  * - the prompt goes on stdin (no `-p`: same stream, the prompt stays out of argv and `ps`);
  * - `--output-format json` (JSONL), `--no-ask-user`, `--no-auto-update` (a run must not change the
  *   CLI under it), `--disable-builtin-mcps` (runs are strict-MCP), always;
+ * - `--disable-mcp-server <name>` for every other server `copilot mcp list --json` names in the
+ *   run's folder (user-level, trusted workspace, plugins), resolved in `prepare` (issue #476);
  * - `--session-id <uuid>` for a fresh session, `--resume=<id>` to continue one;
  * - `allowed_tools` / `disallowed_tools` hold Copilot's own rules, passed verbatim to
  *   `--allow-tool` / `--deny-tool` (copilot-rules.ts); `acceptEdits` adds `--allow-tool write`.
@@ -19,7 +21,7 @@
  * Never passed: `--trust-folder`, `--allow-all-tools`, `--allow-all`, `--yolo`, `--autopilot`;
  * `COPILOT_ALLOW_ALL` never reaches the child, even through an `env_passthrough`.
  */
-import { type ChildProcess, execFile, spawn } from "node:child_process";
+import { type ChildProcess, execFile, spawn, spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -65,6 +67,7 @@ export interface CopilotExecutorOptions {
 export const COPILOT_PERSONA_AGENT = "duskfleet-agent";
 /** Variables that must never reach the child: `"true"` also trusts the folder and loads its hooks. */
 const NEVER_PASSED = ["COPILOT_ALLOW_ALL"];
+const MCP_LIST_TIMEOUT_MS = 15_000;
 const KILL_GRACE_MS = 5_000;
 const RESULT_GRACE_MS = 5_000;
 const OWN_PROCESS_GROUP = process.platform !== "win32";
@@ -98,7 +101,34 @@ export class CopilotExecutor implements Executor {
     if (request.inheritMcp) throw new Error("inherit_mcp is not supported by harness copilot");
     if (request.claudeAgent) throw new Error("claude_agent is not supported by harness copilot");
     if (request.sandbox) throw new Error("sandbox is not supported by harness copilot");
+    // User-level and (trusted folder) workspace servers: one --disable-mcp-server each. A listing
+    // that fails refuses the run: starting without knowing what would load is not an option.
+    const disable = copilotMcpServersToDisable(this.listMcpServers(request));
+    if (disable.length) request.disableMcpServers = disable;
     return { notes: [] };
+  }
+
+  /**
+   * stdout of `copilot mcp list --json` in the run's folder (where a trusted folder's workspace
+   * servers are listed too). Synchronous on purpose: `startRun` checks its guards and writes the
+   * run row without yielding in between. No model call; stderr carries only warnings.
+   */
+  private listMcpServers(request: ExecutionRequest): string {
+    const plan = spawnPlan(this.binary, ["mcp", "list", "--json"]);
+    const r = spawnSync(plan.file, plan.args, {
+      cwd: request.cwd,
+      env: copilotEnv(request.envPassthrough),
+      encoding: "utf8",
+      timeout: MCP_LIST_TIMEOUT_MS,
+      stdio: ["ignore", "pipe", "pipe"],
+      shell: false,
+      windowsVerbatimArguments: plan.windowsVerbatimArguments,
+    });
+    if (!r.error && r.status === 0) return r.stdout;
+    const why = r.error ? r.error.message : r.status !== null ? `exit ${r.status}` : `signal ${r.signal}`;
+    throw new Error(
+      `copilot mcp list --json failed (${why}), so the MCP servers to disable are unknown${tail(r.stderr ?? "")}`,
+    );
   }
 
   version(): Promise<string> {
@@ -124,14 +154,9 @@ export class CopilotExecutor implements Executor {
   buildArgv(req: ExecutionRequest, workDir: string): string[] {
     if (!COPILOT_CAPABILITIES.permissionModes.includes(req.permissionMode))
       throw new Error(`permission_mode ${req.permissionMode} is not supported by harness copilot`);
-    const argv = [
-      "--output-format",
-      "json",
-      "--no-ask-user",
-      "--no-auto-update",
-      "--disable-builtin-mcps",
-      req.resumeSessionId ? `--resume=${req.resumeSessionId}` : "--session-id",
-    ];
+    const argv = ["--output-format", "json", "--no-ask-user", "--no-auto-update", "--disable-builtin-mcps"];
+    for (const name of req.disableMcpServers ?? []) argv.push("--disable-mcp-server", name);
+    argv.push(req.resumeSessionId ? `--resume=${req.resumeSessionId}` : "--session-id");
     if (!req.resumeSessionId) argv.push(req.sessionId);
     if (req.model) argv.push("--model", req.model);
     if (req.effort) argv.push("--reasoning-effort", req.effort);
@@ -259,8 +284,9 @@ export class CopilotExecutor implements Executor {
         for (const ev of ingestCopilotLine(state, line)) {
           emit(ev);
           if (ev.type !== "init" || refusal || outcome) continue;
-          // No MCP for this harness yet (`mcpInherit: false`): a user-level server that loaded
-          // anyway would hand the agent tools nobody allow-listed. End the run, never ignore it.
+          // No MCP for this harness yet (`mcpInherit: false`): `prepare` disabled every server the
+          // listing named, so this is the backstop. A server that loaded anyway would hand the
+          // agent tools nobody allow-listed: end the run, never ignore it.
           const loaded = ev.mcpServers.filter((s) => s.status !== "disabled").map((s) => s.name);
           if (loaded.length) {
             refusal = `Copilot loaded MCP server${loaded.length > 1 ? "s" : ""} ${loaded.join(", ")}; harness copilot runs without MCP, so the run was stopped`;
@@ -353,6 +379,27 @@ export function copilotEnv(
     if (NEVER_PASSED.some((p) => envNameMatches(key, p, platform))) delete env[key];
   }
   return env;
+}
+
+/**
+ * The servers a run must disable, from the stdout of `copilot mcp list --json` (verified on
+ * 1.0.112: `{ "mcpServers": { "<name>": { "type", "source", "enabled", ... } } }`): every entry
+ * except `"source": "builtin"` ones, which `--disable-builtin-mcps` already covers (so a machine
+ * with no server of its own keeps the argv it had). Throws, with the reason, on anything else.
+ */
+export function copilotMcpServersToDisable(stdout: string): string[] {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(stdout);
+  } catch {
+    throw new Error(`copilot mcp list --json did not print JSON: ${JSON.stringify(stdout.trim().slice(0, 200))}`);
+  }
+  const servers = (parsed as { mcpServers?: unknown } | null)?.mcpServers;
+  if (!servers || typeof servers !== "object" || Array.isArray(servers))
+    throw new Error("copilot mcp list --json printed no mcpServers object");
+  return Object.entries(servers as Record<string, unknown>)
+    .filter(([, s]) => (s as { source?: unknown } | null)?.source !== "builtin")
+    .map(([name]) => name);
 }
 
 /** `<dir>/.github/agents/<name>.agent.md`: frontmatter `name` and `description`, body = the system prompt. */

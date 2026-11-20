@@ -233,7 +233,9 @@ refused at run start. Its parser was written against real runs of Copilot CLI 1.
 fixtures in `packages/mcp/test/fixtures/copilot/` (their README lists what each run shows); the
 tests replay them through `fake-copilot.js`.
 
-Two things the Copilot adapter detects and refuses at run time rather than guessing: a user-level
+Its `prepare` lists the configured MCP servers (`copilot mcp list --json`, in the project folder)
+and disables each with `--disable-mcp-server`; a listing that fails refuses the run before its row
+exists. Two things the Copilot adapter detects and refuses at run time rather than guessing: an
 MCP server that loaded anyway (any `session.mcp_servers_loaded` entry not `disabled` ends the run
 as failed, until `mcpInherit` exists), and an unknown session on `--resume` (stderr `No session,
 task, or name matched`, `sessionNotFound`). A rate limit has no fixture yet, so it is not

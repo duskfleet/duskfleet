@@ -35,6 +35,11 @@ export interface ExecutionRequest {
    * printed before the first model turn, so the restart costs seconds, not dollars.
    */
   requiredMcpServers?: string[];
+  /**
+   * MCP servers the child must not load, one `--disable-mcp-server <name>` each (Copilot: the
+   * user-level and workspace servers its `prepare` found in `copilot mcp list --json`).
+   */
+  disableMcpServers?: string[];
   /** Passed as --add-dir. */
   addDirs?: string[];
   /** Passed as --agent: adopt a project-defined Claude Code agent. */
