@@ -11,6 +11,7 @@
  * - `killed` stops before its cancellation lines and prints them on SIGTERM, exit 143.
  * - `mcp list --json` prints a listing (`FAKE_COPILOT_MCP_LIST*`); the init line reports the
  *   `--disable-mcp-server` names disabled and `FAKE_COPILOT_MCP_LOADED` ones loaded (see below).
+ * - `mcp add` / `mcp remove` edit the user servers of `FAKE_COPILOT_MCP_STATE` (issue #477).
  * - `FAKE_COPILOT_RECORD=<file>` (passed through by the test config) receives the argv, the
  *   environment's names, the prompt and the persona agent file `--add-dir` points at.
  */
@@ -41,13 +42,74 @@ if (argv[0] === "mcp" && argv[1] === "list" && argv[2] === "--json") {
     process.stderr.write("Error: could not read the MCP configuration\n");
     process.exit(exit);
   }
-  const builtin = {
+  const listing = {
     mcpServers: {
       "github-mcp-server": { type: "http", source: "builtin", enabled: true },
       githubiq: { type: "http", source: "builtin", enabled: true },
+      ...userServers(),
     },
   };
-  process.stdout.write(process.env.FAKE_COPILOT_MCP_LIST ?? `${JSON.stringify(builtin, null, 2)}\n`);
+  process.stdout.write(process.env.FAKE_COPILOT_MCP_LIST ?? `${JSON.stringify(listing, null, 2)}\n`);
+  process.exit(0);
+}
+
+/**
+ * `copilot mcp add <name> [--env K=V]... -- <command> [args...]` and `copilot mcp remove <name>`
+ * (issue #477, forms checked by hand on 1.0.114). The user configuration lives in the JSON file
+ * FAKE_COPILOT_MCP_STATE (`{ "mcpServers": { ... } }`, the shape of ~/.copilot/mcp-config.json),
+ * never in the real one; `mcp list --json` lists its servers with `source: "user"`. Whether the
+ * real listing carries `env` is unverified: this one does.
+ */
+function userServers() {
+  const file = process.env.FAKE_COPILOT_MCP_STATE;
+  if (!file || !existsSync(file)) return {};
+  const servers = JSON.parse(readFileSync(file, "utf8")).mcpServers ?? {};
+  return Object.fromEntries(
+    Object.entries(servers).map(([name, s]) => [name, { ...s, source: "user", enabled: true }]),
+  );
+}
+
+function saveUserServers(servers) {
+  const file = process.env.FAKE_COPILOT_MCP_STATE;
+  if (!file) {
+    process.stderr.write("fake-copilot: FAKE_COPILOT_MCP_STATE is not set\n");
+    process.exit(2);
+  }
+  writeFileSync(file, `${JSON.stringify({ mcpServers: servers }, null, 2)}\n`);
+}
+
+if (argv[0] === "mcp" && (argv[1] === "add" || argv[1] === "remove")) {
+  const file = process.env.FAKE_COPILOT_MCP_STATE;
+  const servers = file && existsSync(file) ? (JSON.parse(readFileSync(file, "utf8")).mcpServers ?? {}) : {};
+  const end = argv.indexOf("--");
+  const head = end === -1 ? argv.slice(2) : argv.slice(2, end);
+  const env = {};
+  const names = [];
+  for (let i = 0; i < head.length; i++) {
+    if (head[i] === "--env") {
+      const [k, ...v] = head[++i].split("=");
+      env[k] = v.join("=");
+    } else names.push(head[i]);
+  }
+  const [name] = names;
+  if (argv[1] === "remove") {
+    if (!servers[name]) {
+      process.stderr.write(`Error: MCP server "${name}" not found in the user configuration\n`);
+      process.exit(1);
+    }
+    delete servers[name];
+    saveUserServers(servers);
+    process.stdout.write(`Removed MCP server "${name}"\n`);
+    process.exit(0);
+  }
+  if (servers[name]) {
+    process.stderr.write(`Error: MCP server "${name}" already exists\n`);
+    process.exit(1);
+  }
+  const [command, ...args] = argv.slice(end + 1);
+  servers[name] = { type: "stdio", command, args, env, tools: ["*"] };
+  saveUserServers(servers);
+  process.stdout.write(`Added MCP server "${name}"\n`);
   process.exit(0);
 }
 

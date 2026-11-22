@@ -17,19 +17,45 @@ process that owns them, named in the error). The server also ticks the
 After `npm run build`, restart the host (Claude Desktop, or the Claude Code session) to load
 the new code. Config under `config/` needs no restart.
 
-## Register with a Claude host
+## Register with an MCP host
 
 ```bash
 duskfleet mcp register --target claude-desktop --dry-run   # print the diff, change nothing
 duskfleet mcp register --target claude-desktop             # print the diff, ask, back up, write
 duskfleet mcp register --target claude-code --dry-run      # print the claude mcp add command only
 duskfleet mcp register --target claude-code --yes          # print it and run it without asking
-duskfleet mcp status                                       # which host has a duskfleet entry, and what it runs
+duskfleet mcp register --target copilot --dry-run          # print the copilot mcp add command only
+duskfleet mcp register --target codex                      # print the codex mcp add command, ask, run it
+duskfleet mcp status                                       # each host's entry, what it runs, which database it opens
 ```
 
 (From a checkout: `npm run cli -- mcp register ...`.) The command always shows the exact
-change first and asks before applying it; `--yes` skips the question, and outside a terminal
-(a script) it is required, otherwise nothing is changed.
+change first, with the config and data directories the entry will use, and asks before
+applying it; `--yes` skips the question, and outside a terminal (a script) it is required,
+otherwise nothing is changed.
+
+Any host can ask, any harness can run: the host is only where you talk to Duskfleet, the
+agent runs on the harness its file names (`harness:`, [Harnesses](harnesses.md)).
+
+| Host (`--target`) | Registered through | Can run agents on |
+|---|---|---|
+| Claude Code (`claude-code`) | `claude mcp add --scope user` | claude, copilot, codex |
+| Claude Desktop (`claude-desktop`) | `claude_desktop_config.json` (diff, backup) | claude, copilot, codex |
+| Copilot CLI (`copilot`) | `copilot mcp add` | claude, copilot, codex |
+| Codex CLI (`codex`) | `codex mcp add` | claude, copilot, codex |
+
+A harness is usable when its CLI is installed on this host (`doctor` lists them); a field the
+harness cannot honour is refused by name when the agent is created (`create_agent` says which
+harnesses this host has).
+
+**One database for every host.** Registering several hosts is meant to drive one Duskfleet:
+one config directory, one SQLite database, one dashboard. `mcp status` shows, under each
+registered host, the data and config directories its entry resolves to (from the entry's
+`DUSKFLEET_CONFIG` / `DUSKFLEET_DATA`, or where the server finds them by itself), and warns when
+a host opens another data directory than this install (an entry registered from another
+checkout or install, for example): what that host creates goes to a database the dashboard
+does not show. `doctor` repeats the warning in one line. Remove that entry and register again
+from this install.
 
 - **Claude Desktop**: the `mcpServers.duskfleet` entry of `claude_desktop_config.json` is added
   or replaced; every other key and server is kept. The diff of that entry is printed, the file
@@ -52,6 +78,25 @@ change first and asks before applying it; `--yes` skips the question, and outsid
   `~/.claude.json`) with the same command, arguments and environment nothing runs; when any of
   them differs (a missing or stale `CLAUDE_BIN` included) the CLI stops and asks you to
   `claude mcp remove duskfleet` first.
+
+- **Copilot CLI** and **Codex CLI**: `copilot mcp add duskfleet --env KEY=VALUE ... -- <command>`
+  (or `codex mcp add ...`) is printed, then run through the CLI found the same way as for runs
+  (`COPILOT_BIN` / `CODEX_BIN`, `copilot.binary` / `codex.binary`, `PATH`). Duskfleet never edits
+  their config files (`~/.copilot/mcp-config.json`, `~/.codex/config.toml` or `$CODEX_HOME`): the
+  current entry is read from `copilot mcp list --json` / `codex mcp list --json`. Same command,
+  arguments and environment = nothing runs; anything else stops with `copilot mcp remove
+  duskfleet` (or `codex mcp remove duskfleet`) to run first. The entry also carries
+  `COPILOT_BIN` / `CODEX_BIN` when that binary was found outside `PATH`. Start a new session of the
+  CLI afterwards. Duskfleet's own Codex runs pass `--ignore-user-config`, so the server
+  registered here is never loaded inside a run.
+
+  **Managed Copilot accounts**: an organization can disable third-party MCP servers by policy.
+  The registration then succeeds and the server is blocked when a session starts ("Third-party
+  MCP servers are disabled by your organization's Copilot policy. Only built-in servers are
+  available."). That is the organization's setting (an allow-listed MCP registry), not something
+  Duskfleet can change or detect before a session starts; `mcp register` and `mcp status` say so.
+  The Copilot host is **not verified on a live Copilot session by the maintainers** (their
+  account is managed): the tests go through a fake CLI. Reports from an unmanaged account are welcome.
 
 **The command registered** is `node` and the server's `dist/index.js`, both as absolute paths
 of the install that ran `mcp register`, with `CLAUDE_BIN` (and `DUSKFLEET_CONFIG` when the

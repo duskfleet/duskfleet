@@ -24,8 +24,8 @@ import { fileURLToPath } from "node:url";
  *   duskfleet serve            # long-running scheduler process (what the service runs)
  *   duskfleet install-service [--print] [--no-keep-awake]   # register `serve` with launchd / systemd --user / Task Scheduler (macOS: under caffeinate)
  *   duskfleet uninstall-service
- *   duskfleet mcp register --target claude-code|claude-desktop [--dry-run] [--yes]   # preview, backup, write
- *   duskfleet mcp status       # which Claude hosts have a duskfleet entry, and what it runs
+ *   duskfleet mcp register --target claude-code|claude-desktop|copilot|codex [--dry-run] [--yes]   # preview, backup, write
+ *   duskfleet mcp status       # which MCP hosts have a duskfleet entry, what it runs, which database it opens
  *   duskfleet doctor         # also reports the service and who holds the scheduler lease
  *   duskfleet doctor --probe   # plus one real hello run on haiku (costs cents): auth, blocking hooks
  *   duskfleet --version        # handled in cli.ts, before the Node version check
@@ -61,7 +61,7 @@ import {
   subagentView,
   summarizeRun,
 } from "@duskfleet/core";
-import { bootstrap } from "./bootstrap.js";
+import { type App, bootstrap } from "./bootstrap.js";
 import { commandHelp, isCommand, unknownCommandText, wantsHelp } from "./cli-help.js";
 import { assertPortFree, ensureWeb, findWeb, parsePort, startDashboard } from "./dashboard.js";
 import { runFirstRun, stdinPrompter } from "./first-run.js";
@@ -69,13 +69,23 @@ import { harnessReport } from "./harness-report.js";
 import { runInit } from "./init.js";
 import {
   applyDesktop,
+  COPILOT_POLICY_NOTE,
+  dataDirWarnings,
   desktopConfigPath,
+  HOST_TITLE,
+  type HostCliTarget,
+  hostBinaries,
+  hostBinEnv,
+  isHostCliTarget,
   MCP_TARGETS,
+  type McpServerEntry,
   type McpTarget,
   mcpStatus,
   planClaudeCode,
   planDesktop,
+  planHostCli,
   runClaudeCodeAdd,
+  withDirs,
 } from "./mcp-register.js";
 import { PROBE_COST_NOTE, type ProbeReport, probeNotRun, runProbe } from "./probe.js";
 import {
@@ -178,7 +188,7 @@ function usage(asked = false): never {
       "  duskfleet serve",
       "  duskfleet install-service [--print] [--no-keep-awake]",
       "  duskfleet uninstall-service",
-      "  duskfleet mcp register --target claude-code|claude-desktop [--dry-run] [--yes]",
+      "  duskfleet mcp register --target claude-code|claude-desktop|copilot|codex [--dry-run] [--yes]",
       "  duskfleet mcp status",
       "  duskfleet doctor [--probe]",
       "  duskfleet --help",
@@ -375,6 +385,9 @@ async function mcpRegister(
       ? `server command: npx, pinned to duskfleet@${packageVersion()} (this CLI runs from npx's temporary cache)`
       : "server command: node + the absolute path of this install's MCP server",
   );
+  // Every host should drive this install's database (issue #477): say which one, before asking.
+  out(`config: ${app.config.configDir}\ndata: ${app.config.dataDir}`);
+  if (isHostCliTarget(target)) return registerHostCli(app, target, entry, dryRun, yes);
 
   if (target === "claude-code") {
     const plan = planClaudeCode(entry);
@@ -409,6 +422,77 @@ async function mcpRegister(
   const { backup } = applyDesktop(plan);
   if (backup) out(`backup: ${backup}`);
   out(`written: ${plan.path}\nRestart Claude Desktop to load the duskfleet tools.`);
+  return 0;
+}
+
+type DuskFleetConfig = App["config"];
+
+/** This install's config when it loads (`mcp status` also works before `init`, without one). */
+function installConfig(): DuskFleetConfig | null {
+  try {
+    return loadConfig(resolveConfigDir(import.meta.url));
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Every host's entry with the config and data directories it resolves to, and one warning per
+ * host that opens another database than this install (issue #477). `mcp status` and `doctor`.
+ */
+function mcpHostsReport(config: DuskFleetConfig | null) {
+  const binaries = hostBinaries({ copilot: config?.copilot?.binary, codex: config?.codex?.binary });
+  const dataDir = config?.dataDir ?? null;
+  const statuses = withDirs(mcpStatus(undefined, undefined, undefined, binaries), dataDir);
+  return { statuses, warnings: dataDirWarnings(statuses, dataDir) };
+}
+
+/** What `doctor` keeps of `mcpHostsReport`: the registered hosts and the warnings. */
+function mcpHostsSummary(r: ReturnType<typeof mcpHostsReport>): NonNullable<DoctorReport["mcpHosts"]> {
+  return { registered: r.statuses.filter((s) => s.registered).map((s) => s.target), warnings: r.warnings };
+}
+
+/**
+ * `mcp register --target copilot|codex` (issue #477): the host CLI's own `mcp add`, printed
+ * first; an entry that differs is refused with the `mcp remove` command. Returns the exit code.
+ */
+async function registerHostCli(
+  app: Awaited<ReturnType<typeof bootstrap>>,
+  target: HostCliTarget,
+  base: McpServerEntry,
+  dryRun: boolean,
+  yes: boolean,
+): Promise<number> {
+  const out = (s: string) => process.stdout.write(`${s}\n`);
+  const configured = app.config[target]?.binary ?? null;
+  const binary = hostBinaries({ [target]: configured })[target];
+  const title = HOST_TITLE[target];
+  if (!binary) {
+    process.stderr.write(
+      `${title} not found: install it, or point ${target === "copilot" ? "COPILOT_BIN" : "CODEX_BIN"} or ${target}.binary in duskfleet.yaml at it; nothing was changed.\n`,
+    );
+    return 1;
+  }
+  const entry = { ...base, env: { ...base.env, ...hostBinEnv(target, binary, configured) } };
+  const plan = planHostCli(target, binary, entry);
+  if (plan.upToDate) {
+    out(`${title} already has "duskfleet" with this command; nothing to do.`);
+    return 0;
+  }
+  if (plan.conflict) {
+    const envList = Object.entries(plan.conflict.env).map(([k, v]) => `${k}=${v}`);
+    process.stderr.write(
+      `${title} already has a "duskfleet" entry running ${[plan.conflict.command, ...plan.conflict.args].join(" ")} (env: ${envList.length ? envList.join(" ") : "none"}), which differs from this one.\nRemove it first (${target} mcp remove duskfleet), then run this again.\n`,
+    );
+    return 1;
+  }
+  out(`will run:\n  ${plan.display}`);
+  if (dryRun) return 0;
+  if (!yes && !(await confirm("Run it?"))) return 1;
+  const code = runClaudeCodeAdd(binary, plan.args);
+  if (code !== 0) return code;
+  out(`registered in ${title}: start a new ${target} session to load the duskfleet tools.`);
+  if (target === "copilot") out(`Note: ${COPILOT_POLICY_NOTE}.`);
   return 0;
 }
 
@@ -457,7 +541,8 @@ async function main(): Promise<void> {
   }
   // Read-only and config-free: works before `init`.
   if (command === "mcp" && rest[0] === "status" && rest.length === 1) {
-    print(mcpStatus(), renderMcpStatus);
+    const { statuses, warnings } = mcpHostsReport(installConfig());
+    print(statuses, (v, o) => renderMcpStatus(v, o, warnings));
     return;
   }
   // Needs the config (data and config paths), not the database: the dashboard opens it itself.
@@ -792,6 +877,8 @@ async function main(): Promise<void> {
             ? `marked ${app.recoveredAtStartup.length} run(s) failed with the orphaned error: their owning process is gone`
             : null,
         },
+        // MCP hosts with a duskfleet entry, and those that open another database (issue #477).
+        mcpHosts: mcpHostsSummary(mcpHostsReport(app.config)),
         ...(doctorFlags.probe ? { probe } : {}),
       };
       print(report, renderDoctor);

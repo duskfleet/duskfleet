@@ -118,7 +118,8 @@ Before running agents unattended, review the [security boundaries](docs/security
 
 Then register the MCP server in Claude Code or Claude Desktop, if `init` did not:
 `npx duskfleet mcp register --target claude-code --dry-run` shows the change, the same command
-without `--dry-run` makes it (`--target claude-desktop` for the desktop app). Ask the assistant
+without `--dry-run` makes it (`--target claude-desktop` for the desktop app, `copilot` or `codex`
+for Copilot CLI and Codex CLI). Ask the assistant
 to create agents, start runs and set up schedules: see [MCP server](docs/mcp-server.md).
 
 To keep schedules firing with Claude Desktop closed, register the scheduler as a per-user
@@ -305,7 +306,7 @@ start.
 | [Configuration](docs/configuration.md) | `duskfleet.yaml`, projects registry, concurrency limits, environment variables |
 | [Agents](docs/agents.md) | The two agent kinds (own, link), frontmatter, permission modes in unattended runs, project binding, MCP servers inside runs |
 | [Schedules](docs/schedules.md) | Cron schedules, who ticks, running unattended as a service, busy and kill-switch policies |
-| [MCP server](docs/mcp-server.md) | Registering in Claude Desktop and Claude Code, the tool catalogue, a typical conversation |
+| [MCP server](docs/mcp-server.md) | Registering in Claude Desktop, Claude Code, Copilot CLI and Codex CLI, the tool catalogue, a typical conversation |
 | [CLI](docs/cli.md) | Commands, and what a run records |
 | [Dashboard](docs/dashboard.md) | The five views and what "needs review" means |
 | [Security](docs/security.md) | Process, filesystem, permissions, dashboard and local run-data boundaries |

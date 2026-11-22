@@ -1,12 +1,17 @@
 /**
- * `duskfleet mcp register` / `duskfleet mcp status`: add the Duskfleet MCP server to a Claude
- * host, showing the exact change first.
+ * `duskfleet mcp register` / `duskfleet mcp status`: add the Duskfleet MCP server to an MCP
+ * host (Claude Code, Claude Desktop, Copilot CLI, Codex CLI), showing the exact change first.
  *
  *   claude-code     `claude mcp add --scope user ...` (printed before it runs); status reads
  *                   the user-scope `mcpServers` of `~/.claude.json`
  *   claude-desktop  `mcpServers.duskfleet` of claude_desktop_config.json: a unified diff of the
  *                   entry, a `.bak-<timestamp>` copy of the file, then the write. A file that is
  *                   not valid JSON is never overwritten.
+ *   copilot, codex  `copilot mcp add` / `codex mcp add` (printed before it runs, issue #477); status
+ *                   reads `<cli> mcp list --json`. Duskfleet never edits their config files.
+ *
+ * `withDirs` adds the config and data directories each entry resolves to: every host should
+ * drive the same database as this install, and `mcp status` / `doctor` warn when one does not.
  *
  * The entry itself (node + dist/index.js, or the pinned npx form) is rendered by core's
  * `config/mcp-entry.ts`, shared with the dashboard's /mcp page.
@@ -26,11 +31,23 @@ import {
 } from "node:fs";
 import { homedir } from "node:os";
 import path from "node:path";
-import { claudeCodeAddArgs, desktopConfigPath, type McpServerEntry, SERVER_NAME, shellLine } from "@duskfleet/core";
+import {
+  claudeCodeAddArgs,
+  desktopConfigPath,
+  entryDirs,
+  hostCliAddArgs,
+  type LocationContext,
+  type McpServerEntry,
+  resolveCodexBinary,
+  resolveCopilotBinary,
+  SERVER_NAME,
+  shellLine,
+} from "@duskfleet/core";
 
 export {
   claudeCodeAddArgs,
   desktopConfigPath,
+  hostCliAddArgs,
   inNpxCache,
   type McpServerEntry,
   SERVER_NAME,
@@ -39,8 +56,16 @@ export {
   shellLine,
 } from "@duskfleet/core";
 
-export const MCP_TARGETS = ["claude-code", "claude-desktop"] as const;
+export const MCP_TARGETS = ["claude-code", "claude-desktop", "copilot", "codex"] as const;
 export type McpTarget = (typeof MCP_TARGETS)[number];
+
+/** The hosts registered through their own CLI's `mcp add` (issue #477), not through a file Duskfleet edits. */
+export const HOST_CLI_TARGETS = ["copilot", "codex"] as const;
+export type HostCliTarget = (typeof HOST_CLI_TARGETS)[number];
+
+export function isHostCliTarget(target: McpTarget): target is HostCliTarget {
+  return (HOST_CLI_TARGETS as readonly string[]).includes(target);
+}
 
 // ---- Claude Desktop -------------------------------------------------------------
 
@@ -222,6 +247,16 @@ export interface McpTargetStatus {
   env: Record<string, string>;
   /** Set when the config could not be read (left untouched). */
   error: string | null;
+  /** The config directory the entry resolves to (`withDirs`); null when not registered or unknown. */
+  configDir?: string | null;
+  /** The data directory (the database) the entry resolves to; null when not registered or unknown. */
+  dataDir?: string | null;
+  /** False: the entry opens another database than this install's (or than the other hosts'). Null: unknown. */
+  sameData?: boolean | null;
+  /** A caveat on this host (Copilot's organization policy, a CLI that is not installed, env not listed). */
+  note?: string | null;
+  /** False when the host's listing does not show the entry's env (it is then not compared). */
+  envKnown?: boolean;
 }
 
 function stringRecord(v: unknown): Record<string, string> {
@@ -253,16 +288,219 @@ function statusFrom(target: McpTarget, file: string): McpTargetStatus {
   }
 }
 
+// ---- Copilot CLI, Codex CLI (issue #477) ------------------------------------------
+
+/** The binaries of the CLI hosts, null when not installed. */
+export interface HostBinaries {
+  copilot: string | null;
+  codex: string | null;
+}
+
+/** Same lookup as the harnesses (`COPILOT_BIN` / `CODEX_BIN` > the config's binary > PATH). */
+export function hostBinaries(
+  configured: { copilot?: string | null | undefined; codex?: string | null | undefined } = {},
+  env: NodeJS.ProcessEnv = process.env,
+): HostBinaries {
+  return {
+    copilot: resolveCopilotBinary(configured.copilot ?? null, env),
+    codex: resolveCodexBinary(configured.codex ?? null, env),
+  };
+}
+
+export const HOST_TITLE: Readonly<Record<McpTarget, string>> = {
+  "claude-code": "Claude Code",
+  "claude-desktop": "Claude Desktop",
+  copilot: "Copilot CLI",
+  codex: "Codex CLI",
+};
+
+const BIN_VAR: Readonly<Record<HostCliTarget, string>> = { copilot: "COPILOT_BIN", codex: "CODEX_BIN" };
+
+/**
+ * The extra env of a Copilot / Codex entry: `COPILOT_BIN` / `CODEX_BIN` when the binary was
+ * resolved outside PATH (the variable itself, or the config's binary), so the server the host
+ * starts with its own PATH finds the same CLI for its runs.
+ */
+export function hostBinEnv(
+  target: HostCliTarget,
+  binary: string | null,
+  configured: string | null,
+  env: NodeJS.ProcessEnv = process.env,
+): Record<string, string> {
+  const name = BIN_VAR[target];
+  return binary && (env[name] || configured) ? { [name]: binary } : {};
+}
+
+/** Where the host CLI keeps the entry `mcp add` writes (shown only; Duskfleet never edits it). */
+export function hostConfigPath(target: HostCliTarget, home = homedir(), env: NodeJS.ProcessEnv = process.env): string {
+  if (target === "copilot") return path.join(home, ".copilot", "mcp-config.json");
+  return path.join(env["CODEX_HOME"] || path.join(home, ".codex"), "config.toml");
+}
+
+/**
+ * After a Copilot registration, and on its status row: an organization can disable third-party
+ * MCP servers by policy (seen on 1.0.112: the server is then blocked at session start), which
+ * Duskfleet cannot detect before a session starts.
+ */
+export const COPILOT_POLICY_NOTE =
+  "if the tools do not appear, your organization's Copilot policy may disable third-party MCP servers " +
+  '("Third-party MCP servers are disabled by your organization\'s Copilot policy. Only built-in servers are available."): ' +
+  "that is the organization's setting (an allow-listed MCP registry), not something Duskfleet can change";
+
+/**
+ * The `duskfleet` entry in a host CLI's `mcp list --json` (shapes recorded on Copilot CLI 1.0.114
+ * and codex-cli 0.167.1): Copilot `{ mcpServers: { <name>: { type, command, args, source, ... } } }`
+ * (a builtin server of that name does not count), Codex `[{ name, transport: { type, command, args,
+ * env } }]`. Null when absent. Throws on output that is not the recorded shape.
+ */
+export function parseHostListing(
+  target: HostCliTarget,
+  stdout: string,
+): { command: string | null; args: string[]; env: Record<string, string>; envKnown: boolean } | null {
+  const parsed: unknown = JSON.parse(stdout);
+  let entry: unknown;
+  if (target === "copilot") {
+    if (!isObject(parsed) || !isObject(parsed["mcpServers"])) throw new Error("no mcpServers object");
+    entry = parsed["mcpServers"][SERVER_NAME];
+    if (isObject(entry) && entry["source"] === "builtin") return null;
+  } else {
+    if (!Array.isArray(parsed)) throw new Error("not an array");
+    const found = parsed.find((s) => isObject(s) && s["name"] === SERVER_NAME);
+    entry = isObject(found) ? found["transport"] : undefined;
+  }
+  if (!isObject(entry)) return null;
+  const env = entry["env"];
+  return {
+    command: typeof entry["command"] === "string" ? entry["command"] : null,
+    args: Array.isArray(entry["args"]) ? entry["args"].map(String) : [],
+    env: stringRecord(env),
+    // Codex lists `env` (null when there is none); whether Copilot's listing carries it is unverified.
+    envKnown: isObject(env) || (target === "codex" && env === null),
+  };
+}
+
+function hostCliStatus(
+  target: HostCliTarget,
+  binary: string | null,
+  home: string,
+  env: NodeJS.ProcessEnv,
+): McpTargetStatus {
+  const base: McpTargetStatus = {
+    target,
+    configPath: hostConfigPath(target, home, env),
+    registered: false,
+    command: null,
+    args: [],
+    env: {},
+    error: null,
+    note: null,
+  };
+  if (!binary) {
+    return { ...base, note: `${HOST_TITLE[target]} not found (${BIN_VAR[target]}, ${target}.binary or PATH)` };
+  }
+  const r = spawnSync(binary, ["mcp", "list", "--json"], {
+    encoding: "utf8",
+    timeout: 15_000,
+    windowsHide: true,
+    env: process.env,
+  });
+  const failed = r.error?.message ?? (r.status !== 0 ? (r.stderr || "").trim().split("\n").at(-1) : null);
+  if (failed) return { ...base, error: `${binary} mcp list --json failed: ${failed || `exit ${r.status}`}` };
+  let found: ReturnType<typeof parseHostListing>;
+  try {
+    found = parseHostListing(target, r.stdout);
+  } catch (err) {
+    return {
+      ...base,
+      error: `${binary} mcp list --json: unexpected output (${err instanceof Error ? err.message : String(err)})`,
+    };
+  }
+  if (!found) return base;
+  const { envKnown, ...entry } = found;
+  const notes = [
+    target === "copilot" ? COPILOT_POLICY_NOTE : null,
+    envKnown ? null : "the listing shows no env for the entry: its env and data directory are not compared",
+  ].filter(Boolean);
+  return { ...base, registered: true, ...entry, envKnown, note: notes.length ? notes.join("; ") : null };
+}
+
+/**
+ * Each registered entry's config and data directories (`entryDirs`), and whether it opens the
+ * same database as this install (`installDataDir`; without one, as the first registered host).
+ */
+export function withDirs(
+  statuses: readonly McpTargetStatus[],
+  installDataDir: string | null,
+  ctx: LocationContext = {},
+): McpTargetStatus[] {
+  const resolved = statuses.map((s) => {
+    if (!s.registered || s.command === null || s.envKnown === false) {
+      return { ...s, configDir: null, dataDir: null, sameData: null };
+    }
+    const dirs = entryDirs(s, ctx);
+    return { ...s, configDir: dirs?.configDir ?? null, dataDir: dirs?.dataDir ?? null };
+  });
+  const reference = installDataDir ? path.resolve(installDataDir) : (resolved.find((s) => s.dataDir)?.dataDir ?? null);
+  return resolved.map((s) => ({ ...s, sameData: s.dataDir && reference ? s.dataDir === reference : null }));
+}
+
+/** One line per host whose entry opens another database (`withDirs` ran first). */
+export function dataDirWarnings(statuses: readonly McpTargetStatus[], installDataDir: string | null): string[] {
+  const reference = installDataDir ?? statuses.find((s) => s.dataDir)?.dataDir ?? null;
+  return statuses
+    .filter((s) => s.sameData === false)
+    .map(
+      (s) =>
+        `${HOST_TITLE[s.target]} uses the data directory ${s.dataDir}, ${installDataDir ? "this install uses" : "the other hosts use"} ${reference}: the agents, runs and schedules it creates go to another database the dashboard does not show; register it again from this install (duskfleet mcp register --target ${s.target}, after removing the old entry)`,
+    );
+}
+
 /** `mcp status`: whether each host has a `duskfleet` entry and what it runs. Read-only. */
 export function mcpStatus(
   platform: NodeJS.Platform = process.platform,
   home = homedir(),
   env: NodeJS.ProcessEnv = process.env,
+  binaries: HostBinaries = hostBinaries(),
 ): McpTargetStatus[] {
   return [
     statusFrom("claude-code", claudeCodeConfigPath(home)),
     statusFrom("claude-desktop", desktopConfigPath(platform, home, env)),
+    hostCliStatus("copilot", binaries.copilot, home, env),
+    hostCliStatus("codex", binaries.codex, home, env),
   ];
+}
+
+export interface HostCliPlan {
+  /** What the preview prints. */
+  display: string;
+  args: string[];
+  upToDate: boolean;
+  /** Registered with something else: `mcp add` is not run, the user removes it first. */
+  conflict: McpTargetStatus | null;
+}
+
+/** What `register --target copilot|codex` would run. Throws when the host's listing cannot be read. */
+export function planHostCli(
+  target: HostCliTarget,
+  binary: string,
+  entry: McpServerEntry,
+  home = homedir(),
+  env: NodeJS.ProcessEnv = process.env,
+): HostCliPlan {
+  const status = hostCliStatus(target, binary, home, env);
+  if (status.error) throw new Error(`${status.error}; nothing was changed`);
+  const args = hostCliAddArgs(entry);
+  const same =
+    status.registered &&
+    status.command === entry.command &&
+    JSON.stringify(status.args) === JSON.stringify(entry.args) &&
+    (status.envKnown === false || sameEnv(status.env, entry.env));
+  return {
+    display: shellLine(target, args),
+    args,
+    upToDate: same,
+    conflict: status.registered && !same ? status : null,
+  };
 }
 
 export interface ClaudeCodePlan {
@@ -294,7 +532,7 @@ export function planClaudeCode(entry: McpServerEntry, home = homedir()): ClaudeC
   };
 }
 
-/** Run `claude mcp add`, its output on this terminal. Returns the exit status. */
+/** Run `claude mcp add` (or `copilot` / `codex mcp add`), its output on this terminal. Returns the exit status. */
 export function runClaudeCodeAdd(claudeBin: string, args: string[]): number {
   const r = spawnSync(claudeBin, args, { stdio: "inherit", windowsHide: true });
   if (r.error) throw new Error(`could not run ${claudeBin}: ${r.error.message}`);
