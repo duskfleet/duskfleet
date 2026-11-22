@@ -112,6 +112,7 @@ max_budget_usd: 5
 # on_failure: resume_once      # a schedule's next tick resumes a budget-exhausted / timed-out run, once (default none)
 # resume_budget_usd: 3         # budget of that resumed run (default max_budget_usd)
 # harness: claude              # the agent CLI that runs it: claude (default), copilot or codex (see "Harness")
+# codex_network: true          # harness codex + acceptEdits only: network on, every host, your credentials (see "Codex agents")
 ---
 You are running unattended. Finish the task end to end and summarise what you changed.
 ```
@@ -212,7 +213,33 @@ Read the failing test and explain why it fails. Change nothing.
 - **No tool rules, a sandbox.** Codex has no allow-list, so `allowed_tools` and
   `disallowed_tools` are refused. `dontAsk` runs under `-s read-only` (nothing written),
   `acceptEdits` (the default) under `-s workspace-write` (writes in the project only). The network
-  is off in both. Every other mode is refused.
+  is off in both unless the agent opts in (below). Every other mode is refused.
+- **Network, opt-in: `codex_network: true`.** Without the network a Codex agent cannot `git push`,
+  open a pull request, install a dependency or call an API. With it the run's `workspace-write`
+  sandbox reaches **every host** (Codex offers no host list), and its commands act with **your**
+  credentials: the `gh` keyring login, SSH keys, git credential helpers. Read
+  [Security](security.md#codex-agents-harness-codex) before turning it on. Only with
+  `acceptEdits`: a `dontAsk` agent with it is refused, and so is the field on any other harness
+  (use `sandbox_allowed_domains` on Claude). `create_agent` / `update_agent` and `agents create`
+  answer with a warning that says what it grants, `doctor` lists the agents that have it, and each
+  run records a note (the recorded command shows `network_access=true`).
+
+  ```markdown
+  ---
+  description: Fixes the failing test and opens a pull request
+  harness: codex
+  permission_mode: acceptEdits
+  codex_network: true
+  isolated: true
+  ---
+  Work in your own git worktree. Fix the failing test, push a branch, open a pull request.
+  ```
+
+- **Tokens do not reach commands.** Codex removes every variable whose name contains `KEY`,
+  `SECRET` or `TOKEN` from the environment of the commands it runs (verified on codex-cli 0.167.1;
+  no `shell_environment_policy` override tried brought one back). So `env_passthrough: [GH_TOKEN]`
+  has no effect inside a Codex run: create / update accept it but warn. With `codex_network`, `gh`
+  uses the machine's keyring login instead.
 - **The body is the persona**, passed as Codex's `developer_instructions`. The project's own
   `AGENTS.md` is loaded too. The user's `~/.codex/config.toml` is not (`--ignore-user-config`):
   set `model` in the agent, not there.
@@ -221,7 +248,7 @@ Read the failing test and explain why it fails. Change nothing.
   `resume_budget_usd`, `max_daily_cost_usd` (no dollars: every run is `unpriced` and budgets count
   it as its cap), `inherit_mcp`, `add_dirs`, `skills`, `sandbox*`, `claude_agent`. Allowed:
   `model`, `effort`, `env_passthrough`, `timeout_minutes`, `on_failure: resume_once`, the
-  concurrency and daily-run caps.
+  concurrency and daily-run caps, `codex_network` (with `acceptEdits`).
 - **Sessions resume** (`on_failure: resume_once`, a continued schedule, `run_agent
   { resume_run_id }`) in the same Codex thread, always under the agent's sandbox mode
   (`-c sandbox_mode`): a read-only agent stays read-only on a resume. A thread Codex no longer has

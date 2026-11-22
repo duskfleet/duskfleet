@@ -140,6 +140,7 @@ export {
   resolveClaudeBinary,
 } from "./execution/claude-code.js";
 export {
+  CODEX_NETWORK_NOTE,
   CODEX_SANDBOX_BY_MODE,
   CodexExecutor,
   type CodexExecutorOptions,
@@ -178,12 +179,14 @@ export {
   CLAUDE_CAPABILITIES,
   CODEX_CAPABILITIES,
   CODEX_HARNESS,
+  CODEX_NETWORK_GRANT,
   COPILOT_CAPABILITIES,
   COPILOT_HARNESS,
   HARNESS_CAPABILITY_KEYS,
   type HarnessCapabilities,
   type HarnessLookup,
   HarnessRegistry,
+  harnessGrantWarnings,
   harnessOf,
   harnessRefusal,
   SHIPPED_HARNESSES,

@@ -10,7 +10,8 @@
  *   projects, MCP servers, never reach a run; auth still comes from `CODEX_HOME`) and
  *   `--ignore-rules` (no user or project execpolicy `.rules` file);
  * - Codex has no tool allow-list, only a sandbox: `dontAsk` = `-s read-only`, `acceptEdits` =
- *   `-s workspace-write`, and the network always off (`-c sandbox_workspace_write.network_access=false`);
+ *   `-s workspace-write`, and the network off (`-c sandbox_workspace_write.network_access=false`)
+ *   unless the agent opts in with `codex_network: true` (issue #488, `acceptEdits` only: `=true`);
  * - `-m <model>`, `-c model_reasoning_effort="<effort>"`;
  * - the agent body as `-c developer_instructions="<TOML string>"` (no file to write).
  *
@@ -61,6 +62,15 @@ export interface CodexExecutorOptions {
 
 /** The sandbox each accepted `permission_mode` runs under. */
 export const CODEX_SANDBOX_BY_MODE = Object.freeze({ dontAsk: "read-only", acceptEdits: "workspace-write" } as const);
+
+/** The note a networked Codex run records at start. */
+export const CODEX_NETWORK_NOTE =
+  "network on (codex_network: true): -c sandbox_workspace_write.network_access=true, every host, with the credentials of the user who runs Duskfleet";
+
+/** The `-c` value of the network switch: off unless the agent opted in. */
+function networkAccess(req: ExecutionRequest): string {
+  return `sandbox_workspace_write.network_access=${req.network ? "true" : "false"}`;
+}
 const KILL_GRACE_MS = 5_000;
 const RESULT_GRACE_MS = 5_000;
 /** Backstop only: a run ends on its own `turn.completed` / `turn.failed`. */
@@ -88,7 +98,10 @@ export class CodexExecutor implements Executor {
     if (request.inheritMcp) throw new Error("inherit_mcp is not supported by harness codex");
     if (request.claudeAgent) throw new Error("claude_agent is not supported by harness codex");
     if (request.sandbox) throw new Error("sandbox is not supported by harness codex");
-    return { notes: [] };
+    if (!request.network) return { notes: [] };
+    if (CODEX_SANDBOX_BY_MODE[request.permissionMode as keyof typeof CODEX_SANDBOX_BY_MODE] !== "workspace-write")
+      throw new Error("codex_network needs permission_mode acceptEdits on harness codex");
+    return { notes: [CODEX_NETWORK_NOTE] };
   }
 
   version(): Promise<string> {
@@ -114,6 +127,9 @@ export class CodexExecutor implements Executor {
   buildArgv(req: ExecutionRequest): string[] {
     const sandbox = (CODEX_SANDBOX_BY_MODE as Record<string, string>)[req.permissionMode];
     if (!sandbox) throw new Error(`permission_mode ${req.permissionMode} is not supported by harness codex`);
+    // Never the network on a read-only sandbox (#488): prepare and the harness check refuse it first.
+    if (req.network && sandbox !== "workspace-write")
+      throw new Error("codex_network needs permission_mode acceptEdits on harness codex");
     if (req.resumeSessionId) {
       // The verified resume form: the sandbox as a config override (resume has no `-s`), always.
       // No `-m`: the model flag was not part of the verified command.
@@ -126,7 +142,7 @@ export class CodexExecutor implements Executor {
         "-c",
         `sandbox_mode=${tomlString(sandbox)}`,
         "-c",
-        "sandbox_workspace_write.network_access=false",
+        networkAccess(req),
       ];
       if (req.effort) argv.push("-c", `model_reasoning_effort=${tomlString(req.effort)}`);
       // The same value as a fresh run; whether it replaces or adds to the base session's is unverified.
@@ -134,16 +150,7 @@ export class CodexExecutor implements Executor {
       argv.push(req.resumeSessionId, "-");
       return argv;
     }
-    const argv = [
-      "exec",
-      "--json",
-      "--ignore-user-config",
-      "--ignore-rules",
-      "-s",
-      sandbox,
-      "-c",
-      "sandbox_workspace_write.network_access=false",
-    ];
+    const argv = ["exec", "--json", "--ignore-user-config", "--ignore-rules", "-s", sandbox, "-c", networkAccess(req)];
     if (req.model) argv.push("-m", req.model);
     if (req.effort) argv.push("-c", `model_reasoning_effort=${tomlString(req.effort)}`);
     if (req.appendSystemPrompt) argv.push("-c", `developer_instructions=${tomlString(req.appendSystemPrompt)}`);

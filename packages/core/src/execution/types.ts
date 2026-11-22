@@ -55,6 +55,11 @@ export interface ExecutionRequest {
    * `enableWeakerNetworkIsolation` (macOS TLS for `gh`). Absent = no `--settings` at all.
    */
   sandbox?: { allowedDomains: string[]; weakerNetworkIsolation?: boolean };
+  /**
+   * Codex only (`codex_network: true`, issue #488): the run's `workspace-write` sandbox gets the
+   * network (`-c sandbox_workspace_write.network_access=true`), every host. Absent = network off.
+   */
+  network?: boolean;
   timeoutMs?: number;
   /** Absolute path of the file that receives every raw event line. */
   logPath?: string;
