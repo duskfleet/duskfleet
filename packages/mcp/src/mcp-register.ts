@@ -350,7 +350,7 @@ export const COPILOT_POLICY_NOTE =
 /**
  * The `duskfleet` entry in a host CLI's `mcp list --json` (shapes recorded on Copilot CLI 1.0.114
  * and codex-cli 0.167.1): Copilot `{ mcpServers: { <name>: { type, command, args, source, ... } } }`
- * (a builtin server of that name does not count), Codex `[{ name, transport: { type, command, args,
+ * (only `source: "user"` counts; a builtin, workspace or plugin server of that name does not), Codex `[{ name, transport: { type, command, args,
  * env } }]`. Null when absent. Throws on output that is not the recorded shape.
  */
 export function parseHostListing(
@@ -362,7 +362,9 @@ export function parseHostListing(
   if (target === "copilot") {
     if (!isObject(parsed) || !isObject(parsed["mcpServers"])) throw new Error("no mcpServers object");
     entry = parsed["mcpServers"][SERVER_NAME];
-    if (isObject(entry) && entry["source"] === "builtin") return null;
+    // Only the user-level entry is ours (`mcp add` writes it): a builtin, workspace or plugin
+    // server of that name is not the registration, and `copilot mcp remove` cannot remove it.
+    if (isObject(entry) && entry["source"] !== "user") return null;
   } else {
     if (!Array.isArray(parsed)) throw new Error("not an array");
     const found = parsed.find((s) => isObject(s) && s["name"] === SERVER_NAME);
@@ -404,8 +406,14 @@ function hostCliStatus(
     windowsHide: true,
     env: process.env,
   });
-  const failed = r.error?.message ?? (r.status !== 0 ? (r.stderr || "").trim().split("\n").at(-1) : null);
-  if (failed) return { ...base, error: `${binary} mcp list --json failed: ${failed || `exit ${r.status}`}` };
+  // The exit status decides, not the text: a CLI that exits non-zero (or is killed) with an empty
+  // stderr must not be read as an empty listing.
+  const failed = r.error
+    ? r.error.message
+    : r.status !== 0
+      ? (r.stderr || "").trim().split("\n").at(-1) || (r.status === null ? `killed (${r.signal})` : `exit ${r.status}`)
+      : null;
+  if (failed !== null) return { ...base, error: `${binary} mcp list --json failed: ${failed}` };
   let found: ReturnType<typeof parseHostListing>;
   try {
     found = parseHostListing(target, r.stdout);

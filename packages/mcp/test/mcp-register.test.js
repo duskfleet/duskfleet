@@ -345,6 +345,11 @@ test("copilot / codex mcp add: name first, --env per variable, -- then the comma
     parseHostListing("copilot", JSON.stringify({ mcpServers: { duskfleet: { type: "http", source: "builtin" } } })),
     null,
   );
+  // Only source "user" is the registration: a workspace or plugin server of that name is not.
+  for (const source of ["workspace", "plugin"]) {
+    const other = { mcpServers: { duskfleet: { type: "stdio", command: "/n", args: ["/i.js"], source } } };
+    assert.equal(parseHostListing("copilot", JSON.stringify(other)), null, source);
+  }
   assert.equal(parseHostListing("copilot", JSON.stringify({ mcpServers: {} })), null);
   assert.throws(() => parseHostListing("copilot", "[]"), /mcpServers/);
   // Codex: [{ name, transport: { type, command, args, env } }]; env null = none, known.
@@ -619,6 +624,46 @@ for (const [target, title] of [
     }
   });
 }
+
+test("cli: a failing copilot mcp list with an empty stderr is an error, never an empty listing", () => {
+  const { root, env } = makeHome();
+  try {
+    const state = path.join(root, "state.json");
+    const e = {
+      ...env,
+      FAKE_COPILOT_MCP_STATE: state,
+      FAKE_COPILOT_MCP_LIST_EXIT: "1",
+      FAKE_COPILOT_MCP_LIST_QUIET: "1",
+    };
+    const r = cli(e, ["mcp", "register", "--target", "copilot", "--yes"]);
+    assert.equal(r.status, 1);
+    assert.match(r.stderr, /mcp list --json failed: exit 1/);
+    assert.equal(existsSync(state), false, "no mcp add after a failed listing");
+    const s = JSON.parse(cli(e, ["mcp", "status", "--json"]).stdout).find((t) => t.target === "copilot");
+    assert.equal(s.registered, false);
+    assert.match(s.error, /failed: exit 1$/);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("cli: a copilot workspace server named duskfleet is not the registration; register adds the user entry", () => {
+  const { root, env } = makeHome();
+  try {
+    const state = path.join(root, "state.json");
+    const workspace = { duskfleet: { type: "stdio", command: process.execPath, args: ["/repo/dist/index.js"] } };
+    const e = { ...env, FAKE_COPILOT_MCP_STATE: state, FAKE_COPILOT_MCP_WORKSPACE: JSON.stringify(workspace) };
+    const before = JSON.parse(cli(e, ["mcp", "status", "--json"]).stdout).find((t) => t.target === "copilot");
+    assert.equal(before.registered, false);
+    const r = cli(e, ["mcp", "register", "--target", "copilot", "--yes"]);
+    assert.equal(r.status, 0, r.stderr);
+    assert.doesNotMatch(r.stdout, /nothing to do/);
+    assert.doesNotMatch(r.stderr, /Remove it first/);
+    assert.ok(JSON.parse(readFileSync(state, "utf8")).mcpServers.duskfleet, "the user entry was added");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
 
 test("cli: a host on another data directory is named by mcp status and by doctor's advice line", () => {
   const { root, env } = makeHome();

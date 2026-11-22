@@ -34,18 +34,25 @@ if (argv[0] === "--version") {
 // `copilot mcp list --json` (issue #476): the shape seen on 1.0.112, built-in servers only unless
 // FAKE_COPILOT_MCP_LIST holds the stdout to print (verbatim, broken JSON included);
 // FAKE_COPILOT_MCP_LIST_EXIT=<n> fails it instead. The trust warning always goes to stderr, as
-// the real CLI prints it in an untrusted folder.
+// the real CLI prints it in an untrusted folder, unless FAKE_COPILOT_MCP_LIST_QUIET=1 (then a
+// failure has an empty stderr). FAKE_COPILOT_MCP_WORKSPACE (JSON `{ <name>: {...} }`) adds
+// workspace servers, listed with `source: "workspace"` before the user ones.
 if (argv[0] === "mcp" && argv[1] === "list" && argv[2] === "--json") {
-  process.stderr.write("Warning: workspace MCP servers were skipped because this folder is not trusted.\n");
+  const quiet = process.env.FAKE_COPILOT_MCP_LIST_QUIET === "1";
+  if (!quiet) process.stderr.write("Warning: workspace MCP servers were skipped because this folder is not trusted.\n");
   const exit = Number(process.env.FAKE_COPILOT_MCP_LIST_EXIT ?? 0);
   if (exit) {
-    process.stderr.write("Error: could not read the MCP configuration\n");
+    if (!quiet) process.stderr.write("Error: could not read the MCP configuration\n");
     process.exit(exit);
   }
+  const workspace = JSON.parse(process.env.FAKE_COPILOT_MCP_WORKSPACE ?? "{}");
   const listing = {
     mcpServers: {
       "github-mcp-server": { type: "http", source: "builtin", enabled: true },
       githubiq: { type: "http", source: "builtin", enabled: true },
+      ...Object.fromEntries(
+        Object.entries(workspace).map(([name, s]) => [name, { ...s, source: "workspace", enabled: true }]),
+      ),
       ...userServers(),
     },
   };
