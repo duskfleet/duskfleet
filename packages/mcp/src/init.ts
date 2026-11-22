@@ -182,14 +182,21 @@ export async function runInit(options: InitOptions): Promise<number> {
     if (process.stdin.isTTY) target = await askMcpTarget();
     else out(`[4/5] MCP registration: skipped (not a terminal; pass --mcp ${hosts})`);
   }
-  // A failed registration is reported, not fatal (#349, #490): the config is written, so init goes
-  // on to the first run and the summary, and repeats the failure after it.
+  // A failed registration does not stop init (#349, #490): the config is written, so init goes on
+  // to the first run and the summary, repeats the failure after it and exits 1 so a script sees it.
+  // A throw (bootstrap finds no agent CLI at all) is a failure like a non-zero exit.
   let mcpFailure: string | null = null;
   if (target) {
     out(`[4/5] MCP registration: ${target}`);
-    const code = await options.registerMcp(target);
-    if (code !== 0) {
-      mcpFailure = `MCP registration failed (exit ${code}); run it again with: duskfleet mcp register --target ${target}`;
+    let reason: string | null;
+    try {
+      const code = await options.registerMcp(target);
+      reason = code === 0 ? null : `exit ${code}`;
+    } catch (err) {
+      reason = err instanceof Error ? err.message : String(err);
+    }
+    if (reason !== null) {
+      mcpFailure = `MCP registration failed (${reason}); run it again with: duskfleet mcp register --target ${target}`;
       fail(`[4/5] ${mcpFailure}`);
     }
   } else if (options.yes || process.stdin.isTTY) {
@@ -226,6 +233,9 @@ export async function runInit(options: InitOptions): Promise<number> {
   const advice = agentClisAdvice(clis);
   // stdout like the summary, so a reader of `init` output alone sees why `run` would fail.
   if (advice.length > 0) out(`\n${advice.join("\n")}`);
-  if (mcpFailure) fail(`\n${mcpFailure}`);
+  if (mcpFailure) {
+    fail(`\n${mcpFailure}`);
+    return 1;
+  }
   return 0;
 }

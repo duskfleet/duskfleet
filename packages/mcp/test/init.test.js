@@ -139,9 +139,9 @@ test("init with only Codex CLI (#489): usable and logged in, nothing reported br
     }
     assert.equal(s.cli("mcp", "register", "--target", "claude-code", "--yes").status, 1);
 
-    // init does not abort on it: exit 0, the summary printed, the failure repeated after it.
+    // init does not abort on it: the summary printed, the failure repeated after it, then exit 1.
     const initMcp = s.cli("init", "--mcp", "claude-code", "--yes");
-    assert.equal(initMcp.status, 0, initMcp.stderr);
+    assert.equal(initMcp.status, 1, initMcp.stderr);
     assert.match(initMcp.stdout, /\[5\/5\] Done\./);
     assert.match(initMcp.stdout, /agents create fixer --harness codex -- /);
     assert.match(
@@ -169,6 +169,22 @@ test("init with no agent CLI (#489): none usable, how to get one, exit 0 and the
     );
     assert.match(init.stdout, /Until then the config, the read-only commands, agents create and the dashboard work/);
     assert.ok(existsSync(s.yaml));
+
+    // --mcp with no agent CLI at all: the registration's bootstrap throws; init still reaches the
+    // summary and the install advice, repeats the failure and exits 1 (no unhandled rejection).
+    const initMcp = s.cli("init", "--yes", "--mcp", "claude-desktop");
+    assert.equal(initMcp.status, 1, initMcp.stderr);
+    assert.match(initMcp.stdout, /\[5\/5\] Done\./);
+    assert.match(initMcp.stdout, /No agent CLI is installed: install one of/);
+    assert.match(
+      initMcp.stderr,
+      /\[4\/5\] MCP registration failed \(.+\); run it again with: duskfleet mcp register --target claude-desktop/,
+    );
+    assert.match(
+      initMcp.stderr,
+      /\n\nMCP registration failed \(.+\); run it again with: duskfleet mcp register --target claude-desktop\n?$/,
+    );
+    assert.doesNotMatch(initMcp.stderr, /UnhandledPromiseRejection|^\s+at /m);
   } finally {
     rmSync(s.root, { recursive: true, force: true });
   }

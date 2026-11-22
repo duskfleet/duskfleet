@@ -185,8 +185,10 @@ written or loaded stops with the fix and exit 1:
 `--mcp claude-desktop`; without `--mcp` it never writes a Claude config file. `--harness
 claude|copilot|codex` picks the guided first run's CLI without asking. It too succeeds
 without a login, so a script can prepare a machine before anyone logs in; a config that
-cannot be written or loaded exits non-zero; a failed `--mcp` registration does not (it is
-printed on stderr, after the summary too). On something that is not a terminal (a script) without `--yes`, step 4 is
+cannot be written or loaded exits non-zero at once. A failed `--mcp` registration (or a
+target picked at the prompt) does not stop `init`: it is printed on stderr, the first run and the
+summary still follow, the failure is repeated after the summary, and `init` exits 1 so a script
+sees that nothing was registered. A skipped or declined registration exits 0. On something that is not a terminal (a script) without `--yes`, step 4 is
 skipped.
 
 ## Guided first run
