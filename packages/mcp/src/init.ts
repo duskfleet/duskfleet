@@ -3,37 +3,34 @@
  * written or loaded stops with the fix (exit 1):
  *
  *   1. Node: the version (the >= 24 check already ran in cli.ts, before this code loaded).
- *   2. Claude Code: binary (the executor's lookup), version, login (`claude auth status --json`).
- *      Not blocking (#349): without Claude Code or its login init goes on, repeats the fix after
- *      the summary and exits 0.
+ *   2. Agent CLIs (#489): one line per shipped harness (Claude Code, GitHub Copilot CLI, Codex
+ *      CLI), found or not, version, login where a verified command exists (`agent-clis.ts`).
+ *      Satisfied by any one usable CLI; the missing ones are optional. Not blocking (#349):
+ *      without a usable CLI init goes on, repeats the fix after the summary and exits 0.
  *   3. Config and data: the user-level directories with the starter duskfleet.yaml
  *      (`initUserConfig`); an existing config is reported and left untouched.
  *   4. MCP registration, optional: asked on a terminal; under --yes only with --mcp <target>.
  *      Then, on a terminal only and never under --yes, the optional guided first run
- *      (`first-run.ts`: a read-only `first-run` agent on haiku, cost stated before asking).
+ *      (`first-run.ts`: a read-only `first-run` agent on one of the usable CLIs, cost stated
+ *      before asking).
  *   5. What was created, where, and the next commands.
  *
  * Duskfleet ships no agent (owner decision 2026-10-26): the next commands start with
  * `agents create`. No prompt library: `node:readline/promises`.
  */
-import { execFile } from "node:child_process";
 import { existsSync } from "node:fs";
 import path from "node:path";
-import {
-  type ConfigLocation,
-  childEnv,
-  initUserConfig,
-  loadConfig,
-  locateConfig,
-  resolveClaudeBinary,
-} from "@duskfleet/core";
+import { type ConfigLocation, initUserConfig, loadConfig, locateConfig } from "@duskfleet/core";
+import { type AgentCli, type CliSettings, detectAgentClis } from "./agent-clis.js";
 import { MCP_TARGETS, type McpTarget } from "./mcp-register.js";
 
 export interface InitOptions {
   /** No prompts: steps 1-3 and the summary; MCP registration only with `mcp`. */
   yes: boolean;
-  /** `--mcp claude-code|claude-desktop`: register without asking. */
+  /** `--mcp <target>`: register without asking. */
   mcp: McpTarget | null;
+  /** `--harness <name>`: the guided first run's CLI, without asking. */
+  harness?: string | null;
   /** Where the CLI runs from (locates a repo-local config like every other command). */
   entryFileUrl: string;
   /** Step 4, run once the config exists; returns the exit code of `mcp register`. */
@@ -41,126 +38,103 @@ export interface InitOptions {
   /**
    * The optional guided first run after step 4 (`first-run.ts`, the same code as `run --first`):
    * asks before spending anything; returns its exit code. Only on a terminal, never under --yes.
+   * `usable` = the harnesses step 2 found usable, in their order.
    */
-  firstRun(): Promise<number>;
-}
-
-export interface LoginStatus {
-  loggedIn: boolean;
-  /** `authMethod` of the JSON, when given (claude.ai, console, api key...). */
-  method: string | null;
+  firstRun(usable: string[]): Promise<number>;
 }
 
 const out = (s: string) => process.stdout.write(`${s}\n`);
 const fail = (s: string) => process.stderr.write(`${s}\n`);
 
-/**
- * Reads `claude auth status --json` (verified against `claude auth status --help` on 2026-10-21).
- * Logged in = the JSON says `loggedIn: true`; logged out = `loggedIn: false` (the command then
- * also exits 1). Anything else (no JSON at all) throws: the login cannot be told.
- */
-export function readLoginStatus(binary: string, env: NodeJS.ProcessEnv): Promise<LoginStatus> {
-  return new Promise((resolve, reject) => {
-    execFile(binary, ["auth", "status", "--json"], { timeout: 15_000, env }, (err, stdout, stderr) => {
-      let parsed: unknown = null;
-      try {
-        parsed = JSON.parse(String(stdout).trim());
-      } catch {
-        // handled below
-      }
-      if (parsed && typeof parsed === "object" && typeof (parsed as { loggedIn?: unknown }).loggedIn === "boolean") {
-        const p = parsed as { loggedIn: boolean; authMethod?: unknown };
-        resolve({ loggedIn: p.loggedIn, method: typeof p.authMethod === "string" ? p.authMethod : null });
-        return;
-      }
-      const detail = String(stderr).trim() || (err ? err.message : `unexpected output: ${String(stdout).trim()}`);
-      reject(new Error(`could not read the login status (claude auth status --json): ${detail}`));
-    });
-  });
-}
-
-function claudeVersion(binary: string, env: NodeJS.ProcessEnv): Promise<string> {
-  return new Promise((resolve, reject) => {
-    execFile(binary, ["--version"], { timeout: 15_000, env }, (err, stdout) => {
-      if (err) reject(err);
-      else resolve(String(stdout).trim());
-    });
-  });
-}
-
-/** claude.binary and claude.env_passthrough of an existing config, so a second init sees what runs see. */
-function existingClaudeSettings(location: ConfigLocation): { binary: string | null; passthrough: string[] } {
-  if (!existsSync(path.join(location.configDir, "duskfleet.yaml"))) return { binary: null, passthrough: [] };
+/** The binaries and env_passthrough of an existing config, so a second init sees what runs see. */
+function existingSettings(location: ConfigLocation): CliSettings {
+  const none: CliSettings = { claudeBinary: null, copilotBinary: null, codexBinary: null, envPassthrough: [] };
+  if (!existsSync(path.join(location.configDir, "duskfleet.yaml"))) return none;
   try {
     const config = loadConfig(location.configDir);
-    return { binary: config.claude.binary, passthrough: config.claude.envPassthrough };
+    return {
+      claudeBinary: config.claude.binary,
+      copilotBinary: config.copilot?.binary ?? null,
+      codexBinary: config.codex?.binary ?? null,
+      envPassthrough: config.claude.envPassthrough,
+    };
   } catch {
-    return { binary: null, passthrough: [] }; // step 3 reports the config; doctor explains a broken one
+    return none; // step 3 reports the config; doctor explains a broken one
   }
+}
+
+/** The answers `askMcpTarget` takes for each host, besides its name. */
+const MCP_TARGET_ALIASES: Readonly<Record<McpTarget, readonly string[]>> = {
+  "claude-code": ["code", "claude code", "c"],
+  "claude-desktop": ["desktop", "claude desktop", "d"],
+};
+
+/** An answer to the MCP question: a host `mcp register` supports, or null (skip). */
+export function parseMcpAnswer(answer: string): McpTarget | null {
+  const a = answer.trim().toLowerCase();
+  return MCP_TARGETS.find((t) => t === a || MCP_TARGET_ALIASES[t].includes(a)) ?? null;
 }
 
 async function askMcpTarget(): Promise<McpTarget | null> {
   const { createInterface } = await import("node:readline/promises");
   const rl = createInterface({ input: process.stdin, output: process.stdout });
   try {
-    const answer = (
-      await rl.question("Register the MCP server in Claude Code / Claude Desktop / skip? [code/desktop/skip] ")
-    )
-      .trim()
-      .toLowerCase();
-    if (["code", "claude-code", "claude code", "c"].includes(answer)) return "claude-code";
-    if (["desktop", "claude-desktop", "claude desktop", "d"].includes(answer)) return "claude-desktop";
-    return null;
+    return parseMcpAnswer(await rl.question(`Register the MCP server? [${[...MCP_TARGETS, "skip"].join("/")}] `));
   } finally {
     rl.close();
   }
 }
 
 /**
- * Step 2: binary, version, login. Prints the result (stdout when logged in, stderr otherwise) and
- * returns null when runs can start, else the fix to repeat after the summary.
+ * Step 2 as printed: a header (stdout when one CLI is usable, else stderr) and one line per CLI
+ * (stderr for a CLI found but not usable, stdout otherwise).
  */
-async function checkClaude(location: ConfigLocation): Promise<string | null> {
-  const settings = existingClaudeSettings(location);
-  const env = childEnv(settings.passthrough);
-  const then = "then check it with: duskfleet doctor --probe";
-  let binary: string;
-  try {
-    binary = resolveClaudeBinary(settings.binary);
-  } catch (err) {
-    fail(`[2/5] Claude Code: not found\n${err instanceof Error ? err.message : String(err)}`);
-    return `Claude Code is not installed: install it (https://docs.claude.com/en/docs/claude-code), log in (claude auth login), ${then}`;
-  }
-  let version: string;
-  try {
-    version = await claudeVersion(binary, env);
-  } catch (err) {
-    fail(`[2/5] Claude Code: ${binary} --version failed: ${err instanceof Error ? err.message : String(err)}`);
-    return `Claude Code does not start: reinstall it or point CLAUDE_BIN at a working binary, ${then}`;
-  }
-  let login: LoginStatus;
-  try {
-    login = await readLoginStatus(binary, env);
-  } catch (err) {
-    fail(`[2/5] Claude Code ${version}: ${err instanceof Error ? err.message : String(err)}`);
-    return `The Claude Code login could not be read: update Claude Code (claude update), ${then}`;
-  }
-  if (!login.loggedIn) {
-    fail(`[2/5] Claude Code ${version} (${binary}): not logged in`);
-    return `Claude Code is not logged in: run claude auth login, ${then}`;
-  }
-  out(`[2/5] Claude Code ${version} (${binary}): logged in${login.method ? ` (${login.method})` : ""}`);
-  return null;
+export function agentClisReport(clis: readonly AgentCli[]): { stream: "out" | "err"; text: string }[] {
+  const usable = clis.filter((c) => c.usable);
+  const lines: { stream: "out" | "err"; text: string }[] = [
+    usable.length > 0
+      ? { stream: "out", text: `[2/5] Agent CLIs: ${usable.map((c) => c.label).join(", ")} usable` }
+      : { stream: "err", text: "[2/5] Agent CLIs: none usable" },
+  ];
+  for (const c of clis) lines.push({ stream: c.binary && !c.usable ? "err" : "out", text: `      ${c.line}` });
+  return lines;
 }
 
-/** The guided first run spends money: offered on a terminal only, never under --yes. */
+/**
+ * What to repeat after the summary: the fix of each CLI found but not usable, then either the
+ * optional ones that are missing (one usable CLI is enough) or, with none usable, how to get one.
+ */
+export function agentClisAdvice(clis: readonly AgentCli[]): string[] {
+  const usable = clis.some((c) => c.usable);
+  const missing = clis.filter((c) => !c.binary);
+  const lines = clis.flatMap((c) => (c.fix ? [c.fix] : []));
+  if (usable) {
+    if (missing.length > 0) {
+      lines.push(
+        `Optional, not installed: ${missing.map((c) => `${c.label} (harness: ${c.harness})`).join(", ")}. One agent CLI is enough; install another to run agents on it too.`,
+      );
+    }
+    return lines;
+  }
+  if (missing.length > 0) {
+    lines.push(
+      `No agent CLI is installed: install one of ${missing.map((c) => c.label).join(", ")} (any one is enough; Claude Code: https://docs.claude.com/en/docs/claude-code), log in, then check it with: duskfleet doctor --probe`,
+    );
+  }
+  lines.push(
+    "Until then the config, the read-only commands, agents create and the dashboard work; run, serve and schedules need a usable agent CLI.",
+  );
+  return lines;
+}
+
+/** The guided first run spends money or plan usage: offered on a terminal only, never under --yes. */
 export function offersFirstRun(yes: boolean, isTTY: boolean): boolean {
   return !yes && isTTY;
 }
 
 /**
  * Runs the setup; returns the exit code (0, or 1 when the config cannot be written or loaded).
- * A missing or logged-out Claude Code is not a failure: the hint is printed and the exit is 0.
+ * No usable agent CLI is not a failure: the hint is printed and the exit is 0.
  */
 export async function runInit(options: InitOptions): Promise<number> {
   if (options.mcp && !MCP_TARGETS.includes(options.mcp)) {
@@ -173,10 +147,12 @@ export async function runInit(options: InitOptions): Promise<number> {
   // 1. Node
   out(`[1/5] Node ${process.version}: ok`);
 
-  // 2. Claude Code: same lookup and environment allow-list as the executor. Not blocking (owner
+  // 2. Agent CLIs: same lookup and environment allow-list as the executors. Not blocking (owner
   // decision 2026-11-02, #349): the config, the read-only commands and the dashboard need no
   // login, only runs do. A problem here is printed now and repeated after the summary.
-  const claudeFix = await checkClaude(location);
+  const clis = await detectAgentClis(existingSettings(location));
+  for (const line of agentClisReport(clis)) (line.stream === "out" ? out : fail)(line.text);
+  const usable = clis.filter((c) => c.usable).map((c) => c.harness);
 
   // 3. Config and data
   const yamlPath = path.join(location.configDir, "duskfleet.yaml");
@@ -199,11 +175,12 @@ export async function runInit(options: InitOptions): Promise<number> {
     return 1;
   }
 
-  // 4. MCP registration (optional)
+  // 4. MCP registration (optional): the hosts `mcp register` supports.
+  const hosts = MCP_TARGETS.join("|");
   let target = options.mcp;
   if (!target && !options.yes) {
     if (process.stdin.isTTY) target = await askMcpTarget();
-    else out("[4/5] MCP registration: skipped (not a terminal; pass --mcp claude-code|claude-desktop)");
+    else out(`[4/5] MCP registration: skipped (not a terminal; pass --mcp ${hosts})`);
   }
   if (target) {
     out(`[4/5] MCP registration: ${target}`);
@@ -215,17 +192,17 @@ export async function runInit(options: InitOptions): Promise<number> {
       return code;
     }
   } else if (options.yes || process.stdin.isTTY) {
-    out("[4/5] MCP registration: skipped (later: duskfleet mcp register --target claude-code|claude-desktop)");
+    out(`[4/5] MCP registration: skipped (later: duskfleet mcp register --target ${hosts})`);
   }
 
   // Guided first run (optional, interactive only): asks first, says what it costs. A refused
   // path or a failed run is reported by the step itself and does not undo the setup above.
-  // Not offered when step 2 found no usable Claude Code: the run would only fail (#349).
-  if (offersFirstRun(options.yes, process.stdin.isTTY === true) && claudeFix) {
-    out("Guided first run: skipped until Claude Code is logged in (then: duskfleet run --first)");
+  // Not offered when step 2 found no usable agent CLI: the run would only fail (#349).
+  if (offersFirstRun(options.yes, process.stdin.isTTY === true) && usable.length === 0) {
+    out("Guided first run: skipped until an agent CLI is usable (then: duskfleet run --first)");
   } else if (offersFirstRun(options.yes, process.stdin.isTTY === true)) {
     try {
-      await options.firstRun();
+      await options.firstRun(usable);
     } catch (err) {
       fail(`First run: ${err instanceof Error ? err.message : String(err)} (try again: duskfleet run --first)`);
     }
@@ -233,20 +210,20 @@ export async function runInit(options: InitOptions): Promise<number> {
 
   // 5. Summary and next commands
   out(`[5/5] Done. ${created.length ? `Created: ${created.join(", ")}` : "Nothing was created."}`);
+  const onOther = usable.length > 0 && !usable.includes("claude") ? ` --harness ${usable[0]}` : "";
   out(
     [
       "",
       "Next:",
       "  duskfleet doctor",
-      '  duskfleet agents create fixer --model haiku -- "You fix failing tests. Run the tests, fix the code, run them again."',
+      onOther
+        ? `  duskfleet agents create fixer${onOther} -- "You fix failing tests. Run the tests, fix the code, run them again."`
+        : '  duskfleet agents create fixer --model haiku -- "You fix failing tests. Run the tests, fix the code, run them again."',
       '  duskfleet run --project <path> --agent fixer -- "Make the tests pass"',
     ].join("\n"),
   );
-  if (claudeFix) {
-    // stdout like the summary, so a reader of `init` output alone sees why `run` will fail.
-    out(
-      `\n${claudeFix}\nUntil then the config, the read-only commands, agents create and the dashboard work; run, serve and schedules need the login.`,
-    );
-  }
+  const advice = agentClisAdvice(clis);
+  // stdout like the summary, so a reader of `init` output alone sees why `run` would fail.
+  if (advice.length > 0) out(`\n${advice.join("\n")}`);
   return 0;
 }

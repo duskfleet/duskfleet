@@ -4,7 +4,7 @@
  */
 import assert from "node:assert/strict";
 import { spawn, spawnSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, readdirSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { hostname, tmpdir } from "node:os";
 import path from "node:path";
 import { test } from "node:test";
@@ -684,6 +684,68 @@ test("agents create refuses an existing id without --force, home paths, secrets 
     assert.notEqual(badId.status, 0);
 
     assert.deepEqual(files(), ["fixer.md"], "no file left behind by a refused create");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+for (const harness of ["copilot", "codex"]) {
+  test(`agents create --harness ${harness} (#489): defaults that harness honours, the agent loads and runs through the fake CLI`, () => {
+    const { root, configDir, project } = makeFreshRoot();
+    const env = { CLAUDE_BIN: fakeBinary };
+    try {
+      const created = cli(
+        configDir,
+        ["agents", "create", "x", "--harness", harness, "--json", "--", "You fix tests."],
+        env,
+      );
+      assert.equal(created.status, 0, created.stderr);
+      const agent = JSON.parse(created.stdout).agent;
+      assert.equal(agent.harness, harness);
+      assert.equal(agent.maxBudgetUsd, undefined, "no dollar budget by default");
+      assert.equal(agent.timeoutMinutes, 10);
+      if (harness === "copilot") {
+        assert.equal(agent.permissionMode, "dontAsk");
+        assert.ok(agent.allowedTools.includes("read") && agent.allowedTools.includes("shell(npm test)"));
+        assert.ok(!agent.allowedTools.some((t) => t.startsWith("Bash(")), "Copilot's own rules, never Claude's");
+      } else {
+        assert.equal(agent.permissionMode, "acceptEdits", "the workspace-write sandbox");
+        assert.equal(agent.allowedTools, undefined, "Codex takes no tool rules");
+      }
+      const run = cli(configDir, ["run", "--project", project, "--agent", "x", "--json", "--", "Fix it"], env);
+      assert.equal(run.status, 0, run.stderr);
+      const r = JSON.parse(run.stdout);
+      assert.equal(r.status, "completed");
+      assert.equal(r.harness, harness);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+}
+
+test("agents create --harness refuses a flag the harness cannot honour by name, and an unknown harness", () => {
+  const { root, configDir, agentsDir } = makeFreshRoot();
+  const env = { CLAUDE_BIN: fakeBinary };
+  try {
+    const cases = [
+      [["--harness", "codex", "--budget", "1"], /max_budget_usd is not supported by harness codex/],
+      [["--harness", "codex", "--allowed-tools", "Read"], /allowed_tools is not supported by harness codex/],
+      [["--harness", "codex", "--permission-mode", "plan"], /permission_mode plan is not supported by harness codex/],
+      [["--harness", "copilot", "--budget", "1"], /max_budget_usd is not supported by harness copilot/],
+      [
+        ["--harness", "copilot", "--allowed-tools", "Bash(npm test:*)"],
+        /"Bash\(npm test:\*\)" is not a Copilot tool rule/,
+      ],
+    ];
+    for (const [flags, message] of cases) {
+      const res = cli(configDir, ["agents", "create", "x", ...flags, "--", "Hi."], env);
+      assert.notEqual(res.status, 0, flags.join(" "));
+      assert.match(res.stderr, message, flags.join(" "));
+    }
+    const unknown = cli(configDir, ["agents", "create", "x", "--harness", "cursor", "--", "Hi."], env);
+    assert.equal(unknown.status, 2);
+    assert.match(unknown.stderr, /--harness must be one of claude, copilot, codex, got "cursor"/);
+    assert.equal(existsSync(agentsDir) ? readdirSync(agentsDir).length : 0, 0, "no file left behind");
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

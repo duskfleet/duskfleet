@@ -55,12 +55,114 @@ function sandbox() {
   return { root, home, env, cli, yaml };
 }
 
+/**
+ * Leaves only the named CLIs findable: the others point at a missing file (an override that does
+ * not exist finds nothing), and PATH holds only `node`, so no real `claude` on the machine is found.
+ */
+function only(s, ...present) {
+  const missing = path.join(s.root, "no-such-binary");
+  if (!present.includes("claude")) {
+    s.env.CLAUDE_BIN = missing;
+    const bin = path.join(s.root, "bin");
+    mkdirSync(bin, { recursive: true });
+    if (!existsSync(path.join(bin, "node"))) symlinkSync(process.execPath, path.join(bin, "node"));
+    s.env.PATH = bin;
+  }
+  if (!present.includes("copilot")) s.env.COPILOT_BIN = missing;
+  if (!present.includes("codex")) s.env.CODEX_BIN = missing;
+}
+
+test("init with only Claude Code (#489): usable, the other two named as optional, exit 0", () => {
+  const s = sandbox();
+  try {
+    only(s, "claude");
+    const init = s.cli("init", "--yes");
+    assert.equal(init.status, 0, init.stderr);
+    assert.match(init.stdout, /\[2\/5\] Agent CLIs: Claude Code usable/);
+    assert.match(init.stdout, /^ {6}GitHub Copilot CLI: not found \(optional; harness: copilot\)$/m);
+    assert.match(init.stdout, /^ {6}Codex CLI: not found \(optional; harness: codex\)$/m);
+    assert.match(
+      init.stdout,
+      /Optional, not installed: GitHub Copilot CLI \(harness: copilot\), Codex CLI \(harness: codex\)\. One agent CLI is enough/,
+    );
+    assert.doesNotMatch(init.stdout + init.stderr, /none usable|Until then/);
+  } finally {
+    rmSync(s.root, { recursive: true, force: true });
+  }
+});
+
+test("init with only Codex CLI (#489): usable and logged in, nothing reported broken, next commands on codex", () => {
+  const s = sandbox();
+  try {
+    only(s, "codex");
+    const init = s.cli("init", "--yes");
+    assert.equal(init.status, 0, init.stderr);
+    assert.match(init.stdout, /\[2\/5\] Agent CLIs: Codex CLI usable/);
+    assert.match(init.stdout, /^ {6}Claude Code: not found \(optional; harness: claude\)$/m);
+    assert.match(init.stdout, /^ {6}Codex CLI codex-cli 0\.167\.1 \(.+\): logged in \(ChatGPT\)$/m);
+    assert.equal(init.stderr, "", "nothing on stderr: no problem to report");
+    assert.doesNotMatch(init.stdout, /none usable|not installed: install|Until then|not logged in/);
+    assert.match(init.stdout, /agents create fixer --harness codex -- /);
+
+    // The next command of the summary works as printed (no extra flag) and the agent runs on the fake CLI.
+    const create = s.cli("agents", "create", "fixer", "--harness", "codex", "--", "You fix failing tests.");
+    assert.equal(create.status, 0, create.stderr);
+    const project = path.join(s.root, "project");
+    mkdirSync(project);
+    const run = s.cli("run", "--project", project, "--agent", "fixer", "--json", "--", "Make the tests pass");
+    assert.equal(run.status, 0, run.stderr);
+    const recorded = JSON.parse(run.stdout);
+    assert.equal(recorded.status, "completed");
+    assert.equal(recorded.harness, "codex");
+  } finally {
+    rmSync(s.root, { recursive: true, force: true });
+  }
+});
+
+test("init with no agent CLI (#489): none usable, how to get one, exit 0 and the config written", () => {
+  const s = sandbox();
+  try {
+    only(s);
+    const init = s.cli("init", "--yes");
+    assert.equal(init.status, 0, init.stderr);
+    assert.match(init.stderr, /\[2\/5\] Agent CLIs: none usable/);
+    for (const label of ["Claude Code", "GitHub Copilot CLI", "Codex CLI"]) {
+      assert.match(init.stdout, new RegExp(`^ {6}${label}: not found \\(optional`, "m"));
+    }
+    assert.match(
+      init.stdout,
+      /No agent CLI is installed: install one of Claude Code, GitHub Copilot CLI, Codex CLI \(any one is enough/,
+    );
+    assert.match(init.stdout, /Until then the config, the read-only commands, agents create and the dashboard work/);
+    assert.ok(existsSync(s.yaml));
+  } finally {
+    rmSync(s.root, { recursive: true, force: true });
+  }
+});
+
+test("init --harness: an unknown name is a usage error (exit 2)", () => {
+  const s = sandbox();
+  try {
+    const bad = s.cli("init", "--yes", "--harness", "cursor");
+    assert.equal(bad.status, 2);
+    assert.match(bad.stderr, /--harness must be one of claude, copilot, codex, got "cursor"/);
+  } finally {
+    rmSync(s.root, { recursive: true, force: true });
+  }
+});
+
 test("init --yes from an empty directory: starter config, exit 0, doctor works, no agent shipped", () => {
   const s = sandbox();
   try {
     const init = s.cli("init", "--yes");
     assert.equal(init.status, 0, init.stderr);
-    assert.match(init.stdout, /\[2\/5\] Claude Code 9\.9\.9 \(fake\).*logged in/);
+    // All three CLIs found (fake-claude, and COPILOT_BIN / CODEX_BIN from helpers.js): three lines.
+    assert.match(init.stdout, /\[2\/5\] Agent CLIs: Claude Code, GitHub Copilot CLI, Codex CLI usable/);
+    assert.match(init.stdout, /^ {6}Claude Code 9\.9\.9 \(fake\) \(.+\): logged in \(claude\.ai\)$/m);
+    assert.match(init.stdout, /^ {6}GitHub Copilot CLI 1\.0\.112\. \(.+\): login not checked/m);
+    assert.match(init.stdout, /^ {6}Codex CLI codex-cli 0\.167\.1 \(.+\): logged in \(ChatGPT\)$/m);
+    assert.doesNotMatch(init.stdout, /Optional, not installed|Until then/);
+    assert.match(init.stdout, /agents create fixer --model haiku/, "Claude Code stays the worked example");
     assert.match(init.stdout, /\[3\/5\] Config: created .*duskfleet\.yaml/);
     assert.match(init.stdout, /\[4\/5\] MCP registration: skipped/);
     assert.match(init.stdout, /duskfleet agents create/);
@@ -143,7 +245,7 @@ test("init with Claude Code logged out (#349): config written, login hint, exit 
     for (const args of [["init", "--yes"], ["init"]]) {
       const init = s.cli(...args);
       assert.equal(init.status, 0, `${args.join(" ")}: ${init.stderr}`);
-      assert.match(init.stderr, /\[2\/5\] Claude Code 9\.9\.9 \(fake\).*not logged in/);
+      assert.match(init.stderr, /^ {6}Claude Code 9\.9\.9 \(fake\) \(.+\): not logged in$/m);
       assert.match(init.stdout, /\[3\/5\] Config: (created|.*already exists)/);
       assert.match(
         init.stdout,

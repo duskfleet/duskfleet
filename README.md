@@ -62,6 +62,9 @@ Requirements: a supported platform (below), Node.js **24+** (built-in `node:sqli
 addons; `.nvmrc` pins it, and an older Node gets `Duskfleet needs Node 24 or newer; you have
 vX.Y.Z`), and [Claude Code](https://docs.anthropic.com/en/docs/claude-code) installed and
 **logged in** for the user that runs Duskfleet (Duskfleet does not manage authentication).
+GitHub Copilot CLI or Codex CLI works too: **any one of the three is enough** (`init` lists
+what it found; the steps below use Claude Code, see [Harnesses](docs/harnesses.md) and
+[`agents create --harness`](docs/cli.md#agents-create) for the others).
 Only runs need the login: before it, `init`, `doctor`, `agents create`, the other read-only
 commands and the dashboard already work, and `init` ends with the command to log in.
 
@@ -78,7 +81,7 @@ This table is the one place that states platform support; other pages link here.
 Nothing to clone: the CLI comes from npm.
 
 ```bash
-npx duskfleet init             # checks Node and the Claude Code login, creates the config and data directories
+npx duskfleet init             # checks Node and the agent CLIs (Claude Code, Copilot, Codex), creates the config and data directories
 npx duskfleet doctor           # Claude binary, version, where config and data live
 ```
 
