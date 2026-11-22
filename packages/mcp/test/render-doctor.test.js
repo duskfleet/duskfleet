@@ -169,6 +169,13 @@ test("doctor: a missing binary is the only error, `not found` in bright red", ()
   assert.equal(failing[0], "doctor · 1 warning · 0 errors", "a binary that fails otherwise is a warning");
 });
 
+test("doctor: Claude Code missing while another agent CLI is registered (#489) is optional, not an error", () => {
+  const optional = { ...HEALTHY, claudeVersion: null, error: null, claudeOptional: "claude binary not found" };
+  const lines = renderDoctor(optional, plain);
+  assert.equal(lines[0], "doctor · 0 warnings · 0 errors");
+  assert.equal(lines[3], "✓ claude          not installed (optional: another agent CLI is registered)");
+});
+
 const NOTE = "doctor --probe makes one real Claude run on haiku";
 
 test("doctor --probe: the probe check last, ok or a warning with its advice", () => {

@@ -422,6 +422,14 @@ async function mcpRegister(
   );
 
   if (target === "claude-code") {
+    // Registering in Claude Code runs `claude mcp add`: without the CLI there is nothing to run
+    // (a Codex-only or Copilot-only machine, #489). Refuse before printing a plan.
+    if (!app.executor) {
+      process.stderr.write(
+        "Registering in Claude Code needs the Claude Code CLI (claude), which was not found; nothing was changed.\nInstall Claude Code, or register with Claude Desktop instead: --target claude-desktop\n",
+      );
+      return 1;
+    }
     const plan = planClaudeCode(entry);
     if (plan.upToDate) {
       out(`Claude Code already has "duskfleet" with this command; nothing to do.`);
@@ -437,7 +445,7 @@ async function mcpRegister(
     out(`will run:\n  ${plan.display}`);
     if (dryRun) return 0;
     if (!yes && !(await confirm("Run it?"))) return 1;
-    return runClaudeCodeAdd(app.executor?.binary ?? "claude", plan.args);
+    return runClaudeCodeAdd(app.executor.binary, plan.args);
   }
 
   const plan = planDesktop(desktopConfigPath(), entry);
@@ -716,15 +724,15 @@ async function main(): Promise<void> {
       const app = await open();
       let version: string | null = null;
       let error: string | null = null;
+      // Claude Code not found while another agent CLI is (#489): optional, not an error, and out of
+      // the exit code (bootstrap throws when no CLI at all is found).
+      const claudeOptional = app.executor ? null : (app.claudeMissing ?? "Claude Code binary not found");
       if (app.executor) {
         try {
           version = await app.executor.version();
         } catch (err) {
           error = String(err);
         }
-      } else {
-        // Claude Code not found, another agent CLI is (#489): reported as not found.
-        error = app.claudeMissing ?? "Claude Code binary not found";
       }
       const service = serviceStatus(process.platform);
       const lease = app.scheduler.status().lease;
@@ -755,7 +763,16 @@ async function main(): Promise<void> {
       };
       // Opt-in live run: the only part of doctor that costs money, so say so before spending it.
       let probe: ProbeReport | null = null;
-      if (doctorFlags.probe && (error || !app.executor)) {
+      if (doctorFlags.probe && !app.executor) {
+        process.stderr.write(
+          "doctor --probe skipped: the probe runs Claude Code, which is not installed (nothing was spent)\n",
+        );
+        probe = probeNotRun(
+          "skipped",
+          "Claude Code not installed",
+          "the probe runs a Claude Code session; install Claude Code to probe it",
+        );
+      } else if (doctorFlags.probe && error) {
         process.stderr.write("doctor --probe skipped: claude --version failed, fix that first (nothing was spent)\n");
         probe = probeNotRun(
           "skipped",
@@ -785,6 +802,7 @@ async function main(): Promise<void> {
         path: effectivePath(process.env["PATH"]),
         pathDefaulted: pathDefaulted(process.env["PATH"]),
         error,
+        claudeOptional,
         configDir: app.config.configDir,
         // env (DUSKFLEET_CONFIG) > repo (config/ found walking up) > user (user-level directory)
         configSource: app.location.source,

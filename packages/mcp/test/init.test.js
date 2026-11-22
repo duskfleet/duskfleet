@@ -114,6 +114,30 @@ test("init with only Codex CLI (#489): usable and logged in, nothing reported br
     const recorded = JSON.parse(run.stdout);
     assert.equal(recorded.status, "completed");
     assert.equal(recorded.harness, "codex");
+
+    // doctor: Claude Code is optional here, not a red "not found", and not in the exit code.
+    const doctor = s.cli("doctor");
+    assert.equal(doctor.status, 0, doctor.stdout + doctor.stderr);
+    assert.match(doctor.stdout, /claude +not installed \(optional: another agent CLI is registered\)/);
+    assert.doesNotMatch(doctor.stdout, /claude +not found/);
+    const doctorJson = JSON.parse(s.cli("doctor", "--json").stdout);
+    assert.equal(doctorJson.error, null);
+    assert.match(doctorJson.claudeOptional, /./);
+
+    // Registering in Claude Code needs its CLI: refused before any plan, Claude Desktop suggested.
+    for (const args of [
+      ["mcp", "register", "--target", "claude-code", "--yes"],
+      ["init", "--mcp", "claude-code", "--yes"],
+    ]) {
+      const register = s.cli(...args);
+      assert.doesNotMatch(register.stdout, /will run:/, args.join(" "));
+      assert.match(
+        register.stderr,
+        /Registering in Claude Code needs the Claude Code CLI.*\n.*--target claude-desktop/,
+      );
+      assert.doesNotMatch(register.stderr, /ENOENT/);
+    }
+    assert.equal(s.cli("mcp", "register", "--target", "claude-code", "--yes").status, 1);
   } finally {
     rmSync(s.root, { recursive: true, force: true });
   }
