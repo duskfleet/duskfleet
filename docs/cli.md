@@ -172,7 +172,9 @@ written or loaded stops with the fix and exit 1:
 4. **MCP registration** (optional): on a terminal it asks `Register the MCP server?
    [claude-code/claude-desktop/skip]` (the hosts `mcp register` supports) and then does what
    `mcp register --target ... --yes` does (preview, backup of an existing file, write; see
-   [MCP server](mcp-server.md)).
+   [MCP server](mcp-server.md)). A failed registration (for example `claude-code` without the
+   Claude Code CLI) is reported, repeated after the summary with the command to retry, and
+   does not stop `init`.
    Then, on a terminal only, it offers the [guided first run](#guided-first-run) on one of the
    usable CLIs (a real run, its cost stated first; the answer defaults to no).
 5. What was created, where, and the next commands: `doctor`, `agents create`, `run` (with
@@ -183,7 +185,8 @@ written or loaded stops with the fix and exit 1:
 `--mcp claude-desktop`; without `--mcp` it never writes a Claude config file. `--harness
 claude|copilot|codex` picks the guided first run's CLI without asking. It too succeeds
 without a login, so a script can prepare a machine before anyone logs in; a config that
-cannot be written or loaded, or a failed `--mcp` registration, exits non-zero. On something that is not a terminal (a script) without `--yes`, step 4 is
+cannot be written or loaded exits non-zero; a failed `--mcp` registration does not (it is
+printed on stderr, after the summary too). On something that is not a terminal (a script) without `--yes`, step 4 is
 skipped.
 
 ## Guided first run

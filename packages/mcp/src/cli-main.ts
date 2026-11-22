@@ -611,6 +611,10 @@ async function main(): Promise<void> {
       const app = await open();
       const target = {
         ...serviceTarget(app.executor?.binary ?? null, app.config.dataDir, app.config.configDir, app.config.dataSource),
+        // Every registered harness's binary, not only Claude Code's (#490): without Claude Code,
+        // serve would otherwise not find a Codex or Copilot outside the unit's PATH and crash-loop.
+        copilotBin: app.harnesses.get("copilot")?.binary ?? null,
+        codexBin: app.harnesses.get("codex")?.binary ?? null,
         // macOS only, default on: serve runs under caffeinate -i -s
         keepAwake: !values["no-keep-awake"],
       };

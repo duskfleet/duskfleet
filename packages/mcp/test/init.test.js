@@ -138,6 +138,16 @@ test("init with only Codex CLI (#489): usable and logged in, nothing reported br
       assert.doesNotMatch(register.stderr, /ENOENT/);
     }
     assert.equal(s.cli("mcp", "register", "--target", "claude-code", "--yes").status, 1);
+
+    // init does not abort on it: exit 0, the summary printed, the failure repeated after it.
+    const initMcp = s.cli("init", "--mcp", "claude-code", "--yes");
+    assert.equal(initMcp.status, 0, initMcp.stderr);
+    assert.match(initMcp.stdout, /\[5\/5\] Done\./);
+    assert.match(initMcp.stdout, /agents create fixer --harness codex -- /);
+    assert.match(
+      initMcp.stderr,
+      /\n\nMCP registration failed \(exit 1\); run it again with: duskfleet mcp register --target claude-code\n?$/,
+    );
   } finally {
     rmSync(s.root, { recursive: true, force: true });
   }
