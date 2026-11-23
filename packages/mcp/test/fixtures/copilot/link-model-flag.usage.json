@@ -1,0 +1,139 @@
+{
+  "totalPremiumRequestCost": 0.33,
+  "totalUserRequests": 1,
+  "totalNanoAiu": 2154500000,
+  "aiCreditsStatus": "complete",
+  "tokenDetails": {
+    "input": {
+      "tokenCount": 10
+    },
+    "cache_read": {
+      "tokenCount": 0
+    },
+    "cache_write": {
+      "tokenCount": 17040
+    },
+    "output": {
+      "tokenCount": 47
+    }
+  },
+  "totalApiDurationMs": 1046,
+  "sessionStartTime": "2026-11-23T23:18:38.959Z",
+  "codeChanges": {
+    "linesAdded": 0,
+    "linesRemoved": 0,
+    "filesModifiedCount": 0,
+    "filesModified": []
+  },
+  "modelMetrics": {
+    "claude-haiku-4.5": {
+      "requests": {
+        "count": 1,
+        "cost": 0.33
+      },
+      "usage": {
+        "inputTokens": 17050,
+        "outputTokens": 47,
+        "cacheReadTokens": 0,
+        "cacheWriteTokens": 17040,
+        "reasoningTokens": 41
+      },
+      "cacheExpiresAt": "2026-11-23T23:23:40.270Z",
+      "totalNanoAiu": 2154500000,
+      "aiCreditsStatus": "complete",
+      "tokenDetails": {
+        "input": {
+          "tokenCount": 10
+        },
+        "cache_read": {
+          "tokenCount": 0
+        },
+        "cache_write": {
+          "tokenCount": 17040
+        },
+        "output": {
+          "tokenCount": 47
+        }
+      }
+    }
+  },
+  "agentMetrics": {
+    "main": {
+      "totalApiDurationMs": 1046,
+      "totalNanoAiu": 2154500000,
+      "modelMetrics": {
+        "claude-haiku-4.5": {
+          "requests": {
+            "count": 1,
+            "cost": 0.33
+          },
+          "usage": {
+            "inputTokens": 17050,
+            "outputTokens": 47,
+            "cacheReadTokens": 0,
+            "cacheWriteTokens": 17040,
+            "reasoningTokens": 41
+          },
+          "totalNanoAiu": 2154500000,
+          "tokenDetails": {
+            "input": {
+              "tokenCount": 10
+            },
+            "cache_read": {
+              "tokenCount": 0
+            },
+            "cache_write": {
+              "tokenCount": 17040
+            },
+            "output": {
+              "tokenCount": 47
+            }
+          }
+        }
+      }
+    }
+  },
+  "providerModelMetrics": [
+    {
+      "provider": {
+        "id": "copilot",
+        "label": "GitHub Copilot",
+        "kind": "copilot"
+      },
+      "modelId": "claude-haiku-4.5",
+      "metrics": {
+        "requests": {
+          "count": 1,
+          "cost": 0.33
+        },
+        "usage": {
+          "inputTokens": 17050,
+          "outputTokens": 47,
+          "cacheReadTokens": 0,
+          "cacheWriteTokens": 17040,
+          "reasoningTokens": 41
+        },
+        "totalNanoAiu": 2154500000,
+        "aiCreditsStatus": "complete",
+        "tokenDetails": {
+          "input": {
+            "tokenCount": 10
+          },
+          "cache_read": {
+            "tokenCount": 0
+          },
+          "cache_write": {
+            "tokenCount": 17040
+          },
+          "output": {
+            "tokenCount": 47
+          }
+        }
+      },
+      "modelDisplayName": "Claude Haiku 4.5"
+    }
+  ],
+  "currentModel": "claude-haiku-4.5",
+  "lastCallInputTokens": 17050,
+  "lastCallOutputTokens": 47
+}
