@@ -36,7 +36,10 @@ function groupOf(name: string): ToolCatalogEntry["group"] {
   return "other";
 }
 
-/** Registration never touches the context, so an empty one is enough to list tools. */
+/**
+ * Registration only reads `runs` for the harnesses registered on this host (left out of the
+ * `harness` description when absent), so an empty context is enough to list tools.
+ */
 export async function buildToolCatalog(): Promise<ToolCatalog> {
   const server = createMcpServer({} as ToolContext);
   const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();

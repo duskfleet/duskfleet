@@ -5,6 +5,7 @@
  * fixture: a first line `fixture:<name>` (default `edit`).
  *
  * - `failed-model` exits 1, as the real run did; every other fixture exits 0.
+ * - `mcp add` / `mcp remove` / `mcp list --json` work on `FAKE_CODEX_MCP_STATE` (issue #477).
  * - `killed` prints its two lines, then waits; SIGTERM ends it with exit 143 and nothing more
  *   (the real run printed no terminal event either).
  * - `exec resume ... <thread id> -` (issue #485) replays `resume` (or the fixture the prompt
@@ -15,12 +16,69 @@
  * - `FAKE_CODEX_RECORD=<file>` (passed through by the test config) receives the argv, the
  *   environment's names and the prompt.
  */
-import { readdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const fixtures = path.join(path.dirname(fileURLToPath(import.meta.url)), "fixtures", "codex");
 const argv = process.argv.slice(2);
+
+// `codex mcp add <name> [--env K=V]... -- <command>...`, `mcp remove <name>`, `mcp list --json`
+// (issue #477, forms checked by hand on 0.167.1). The servers live in the JSON array of
+// FAKE_CODEX_MCP_STATE, in the listing's shape, never in the real ~/.codex/config.toml.
+if (argv[0] === "mcp") {
+  const file = process.env.FAKE_CODEX_MCP_STATE;
+  const servers = file && existsSync(file) ? JSON.parse(readFileSync(file, "utf8")) : [];
+  const save = () => {
+    if (!file) {
+      process.stderr.write("fake-codex: FAKE_CODEX_MCP_STATE is not set\n");
+      process.exit(2);
+    }
+    writeFileSync(file, `${JSON.stringify(servers, null, 2)}\n`);
+  };
+  const end = argv.indexOf("--");
+  const head = end === -1 ? argv.slice(2) : argv.slice(2, end);
+  const env = {};
+  const names = [];
+  for (let i = 0; i < head.length; i++) {
+    if (head[i] === "--env") {
+      const [k, ...v] = head[++i].split("=");
+      env[k] = v.join("=");
+    } else if (head[i] !== "--json") names.push(head[i]);
+  }
+  const at = servers.findIndex((s) => s.name === names[0]);
+  if (argv[1] === "list" && argv.includes("--json")) {
+    process.stdout.write(`${JSON.stringify(servers, null, 2)}\n`);
+  } else if (argv[1] === "remove") {
+    if (at === -1) {
+      process.stderr.write(`Error: No MCP server named '${names[0]}' found.\n`);
+      process.exit(1);
+    }
+    servers.splice(at, 1);
+    save();
+    process.stdout.write(`Removed global MCP server '${names[0]}'.\n`);
+  } else if (argv[1] === "add" && end !== -1) {
+    const [command, ...args] = argv.slice(end + 1);
+    const transport = { type: "stdio", command, args, env: Object.keys(env).length ? env : null };
+    const entry = {
+      name: names[0],
+      enabled: true,
+      disabled_reason: null,
+      transport,
+      startup_timeout_sec: null,
+      tool_timeout_sec: null,
+      auth_status: "unsupported",
+    };
+    if (at === -1) servers.push(entry);
+    else servers[at] = entry;
+    save();
+    process.stdout.write(`Added global MCP server '${names[0]}'.\n`);
+  } else {
+    process.stderr.write(`fake-codex: unsupported mcp call ${JSON.stringify(argv)}\n`);
+    process.exit(2);
+  }
+  process.exit(0);
+}
 
 if (argv[0] === "--version") {
   process.stdout.write("codex-cli 0.167.1\n");

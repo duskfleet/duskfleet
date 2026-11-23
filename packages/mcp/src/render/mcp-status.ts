@@ -1,17 +1,15 @@
 /**
  * `duskfleet mcp status` for a human (DS-33): one row per MCP host (its config file cut in the
  * middle, whether it holds a duskfleet entry, what that entry runs), a `└` line for a config that
- * cannot be read, and the register command for the first host without an entry. Env keys only,
- * never their values (`--json` prints the entry as the host's config holds it).
+ * cannot be read, the config and data directories a registered entry resolves to, a host's caveat
+ * (Copilot's organization policy, a CLI not installed), then one warning per host that opens
+ * another database than this install (issue #477), and the register command for the first host
+ * without an entry. Env keys only, never their values (`--json` prints the entry as the host's
+ * config holds it).
  */
-import type { McpTarget, McpTargetStatus } from "../mcp-register.js";
+import { HOST_TITLE, type McpTargetStatus } from "../mcp-register.js";
 import { type Cell, type Column, followUp, jsonLine, type RenderOpts, table, tildePath } from "./primitives.js";
 import { GLYPH, paint, stateSegments } from "./theme.js";
-
-const TARGET_TITLE: Readonly<Record<McpTarget, string>> = {
-  "claude-code": "Claude Code",
-  "claude-desktop": "Claude Desktop",
-};
 
 const COLUMNS: readonly Column[] = [
   { header: "HOST", width: 22 },
@@ -33,9 +31,14 @@ function runsText(s: McpTargetStatus): string {
   return envKeys.length ? `${command} · env ${envKeys.join(", ")}` : command;
 }
 
-export function renderMcpStatus(statuses: readonly McpTargetStatus[], opts: RenderOpts): string[] {
+/** `warnings`: `dataDirWarnings` of the same statuses (hosts that open another database). */
+export function renderMcpStatus(
+  statuses: readonly McpTargetStatus[],
+  opts: RenderOpts,
+  warnings: readonly string[] = [],
+): string[] {
   const rows = statuses.map((s): Cell[] => [
-    TARGET_TITLE[s.target] ?? s.target,
+    HOST_TITLE[s.target] ?? s.target,
     tildePath(s.configPath),
     entryCell(s),
     runsText(s),
@@ -44,9 +47,18 @@ export function renderMcpStatus(statuses: readonly McpTargetStatus[], opts: Rend
   const lines = [header!];
   body.forEach((line, i) => {
     lines.push(line);
-    const error = statuses[i]!.error;
-    if (error) lines.push(followUp(error, 2, opts));
+    const s = statuses[i]!;
+    if (s.error) lines.push(followUp(s.error, 2, opts));
+    if (s.dataDir) {
+      lines.push(followUp(`data ${tildePath(s.dataDir)}`, 2, opts));
+      if (s.configDir) lines.push(followUp(`config ${tildePath(s.configDir)}`, 2, opts));
+    }
+    if (s.note) lines.push(followUp(s.note, 2, opts));
   });
+  if (warnings.length) {
+    lines.push("");
+    for (const w of warnings) lines.push(`${paint("warn", GLYPH.warn, opts)} ${w}`);
+  }
   const missing = statuses.find((s) => !s.registered);
   lines.push("");
   if (missing) {

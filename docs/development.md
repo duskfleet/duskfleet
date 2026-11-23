@@ -377,6 +377,23 @@ local run-data handling, and recommended configuration.
   Never passed: `--dangerously-bypass-approvals-and-sandbox`, `--dangerously-bypass-hook-trust`,
   `-s danger-full-access`, `--skip-git-repo-check`, `--ephemeral`, and never `exec resume`
   without `-c sandbox_mode`.
+- **Copilot CLI and Codex CLI as MCP hosts** (`duskfleet mcp register --target copilot|codex`,
+  issue #477, `mcp-register.ts`): checked by hand on GitHub Copilot CLI 1.0.114 and codex-cli
+  0.167.1 (2026-11-22). Tests go through `fake-copilot.js` / `fake-codex.js`, whose user
+  configuration is a temp file (`FAKE_COPILOT_MCP_STATE`, `FAKE_CODEX_MCP_STATE`).
+
+  | Command | Use in Duskfleet |
+  |---|---|
+  | `copilot mcp add <name> --env KEY=VALUE ... -- <command> [args...]` | register (user configuration, `~/.copilot/mcp-config.json`); other options not used: `--header`, `--json`, `--show-secrets`, `--timeout`, `--tools`, `--transport http` |
+  | `copilot mcp remove <name>` | named in the refusal when an entry differs (user configuration only) |
+  | `copilot mcp list --json` | status and conflict check: `{ "mcpServers": { "<name>": { "type": "stdio", "command", "args", "source": "user" \| "builtin", "enabled", ... } } }` |
+  | `codex mcp add <name> --env KEY=VALUE ... -- <command>...` | register (`~/.codex/config.toml`, or `$CODEX_HOME`); `--env` only with stdio servers |
+  | `codex mcp remove <name>` | named in the refusal |
+  | `codex mcp list --json` | status: `[{ "name", "enabled", "disabled_reason", "transport": { "type": "stdio", "command", "args", "env", ... }, "startup_timeout_sec", "tool_timeout_sec", "auth_status" }]` |
+
+  Not verified: whether Copilot's listing carries the entry's `env` (Duskfleet then compares
+  command and arguments only, and says so), the shape of `mcp get <name> --json` (not used), the
+  exact TOML `codex mcp add` writes, and a live session of either CLI listing the Duskfleet tools.
 - **Claude CLI flags**: verify every flag against `claude --help` before using it. The ones the
   executor uses, checked against `claude --help` of Claude Code 2.1.285:
 

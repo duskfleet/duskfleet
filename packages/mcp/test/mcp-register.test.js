@@ -29,12 +29,17 @@ import {
   applyDesktop,
   backupPath,
   claudeCodeAddArgs,
+  dataDirWarnings,
   desktopConfigPath,
+  hostBinEnv,
+  hostCliAddArgs,
   lineDiff,
   mcpStatus,
+  parseHostListing,
   planClaudeCode,
   planDesktop,
   serverEntry,
+  withDirs,
   writeAtomically,
 } from "../dist/mcp-register.js";
 import { testEnv } from "./helpers.js";
@@ -317,6 +322,103 @@ test("claude mcp add: name first (before the variadic -e), user scope, env flags
   }
 });
 
+test("copilot / codex mcp add: name first, --env per variable, -- then the command; listings of both CLIs", () => {
+  assert.deepEqual(hostCliAddArgs(entry), [
+    "mcp",
+    "add",
+    "duskfleet",
+    "--env",
+    "CLAUDE_BIN=/opt/claude",
+    "--",
+    "/opt/node/bin/node",
+    "/opt/duskfleet/dist/index.js",
+  ]);
+  // Copilot: { mcpServers: { name: {...} } }; a builtin server of that name is not ours.
+  const copilot = JSON.stringify({
+    mcpServers: {
+      "github-mcp-server": { type: "http", source: "builtin", enabled: true },
+      duskfleet: { type: "stdio", command: "/n", args: ["/i.js"], source: "user", enabled: true },
+    },
+  });
+  assert.deepEqual(parseHostListing("copilot", copilot), { command: "/n", args: ["/i.js"], env: {}, envKnown: false });
+  assert.equal(
+    parseHostListing("copilot", JSON.stringify({ mcpServers: { duskfleet: { type: "http", source: "builtin" } } })),
+    null,
+  );
+  // Only source "user" is the registration: a workspace or plugin server of that name is not.
+  for (const source of ["workspace", "plugin"]) {
+    const other = { mcpServers: { duskfleet: { type: "stdio", command: "/n", args: ["/i.js"], source } } };
+    assert.equal(parseHostListing("copilot", JSON.stringify(other)), null, source);
+  }
+  assert.equal(parseHostListing("copilot", JSON.stringify({ mcpServers: {} })), null);
+  assert.throws(() => parseHostListing("copilot", "[]"), /mcpServers/);
+  // Codex: [{ name, transport: { type, command, args, env } }]; env null = none, known.
+  const codex = JSON.stringify([
+    { name: "other", enabled: true, transport: { type: "stdio", command: "o", args: [], env: null } },
+    { name: "duskfleet", enabled: true, transport: { type: "stdio", command: "/n", args: ["/i.js"], env: null } },
+  ]);
+  assert.deepEqual(parseHostListing("codex", codex), { command: "/n", args: ["/i.js"], env: {}, envKnown: true });
+  assert.equal(parseHostListing("codex", "[]"), null);
+  assert.throws(() => parseHostListing("codex", "{}"), /not an array/);
+  // COPILOT_BIN / CODEX_BIN only when the binary was not found on PATH.
+  assert.deepEqual(hostBinEnv("copilot", "/x/copilot", null, {}), {});
+  assert.deepEqual(hostBinEnv("copilot", "/x/copilot", "/x/copilot", {}), { COPILOT_BIN: "/x/copilot" });
+  assert.deepEqual(hostBinEnv("codex", "/y/codex", null, { CODEX_BIN: "/y/codex" }), { CODEX_BIN: "/y/codex" });
+});
+
+test("one database: hosts on the same directories give no warning; another data directory is named with both paths", () => {
+  const root = tempDir("duskfleet-dirs-");
+  try {
+    const config = path.join(root, "config");
+    mkdirSync(config);
+    writeFileSync(path.join(config, "duskfleet.yaml"), "data_dir: ../data\n");
+    const data = path.join(root, "data");
+    const host = (target, env) => ({
+      target,
+      configPath: "/x",
+      registered: true,
+      command: "/n",
+      args: ["/nowhere/dist/index.js"],
+      env,
+      error: null,
+    });
+    const same = withDirs(
+      [host("claude-code", { DUSKFLEET_CONFIG: config }), host("codex", { DUSKFLEET_CONFIG: config })],
+      data,
+    );
+    assert.deepEqual(
+      same.map((s) => [s.configDir, s.dataDir, s.sameData]),
+      [
+        [config, data, true],
+        [config, data, true],
+      ],
+    );
+    assert.deepEqual(dataDirWarnings(same, data), []);
+
+    const other = path.join(root, "elsewhere");
+    const mixed = withDirs(
+      [
+        host("claude-code", { DUSKFLEET_CONFIG: config }),
+        host("copilot", { DUSKFLEET_CONFIG: config, DUSKFLEET_DATA: other }),
+        { ...host("claude-desktop", {}), registered: false, command: null },
+      ],
+      data,
+    );
+    assert.deepEqual(
+      mixed.map((s) => s.sameData),
+      [true, false, null],
+    );
+    const warnings = dataDirWarnings(mixed, data);
+    assert.equal(warnings.length, 1);
+    assert.match(warnings[0], /^Copilot CLI uses the data directory /);
+    assert.ok(warnings[0].includes(other) && warnings[0].includes(data), warnings[0]);
+    // Without a config of this install, the first registered host is the reference.
+    assert.equal(dataDirWarnings(withDirs(mixed, null), null).length, 1);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 // ---- through the CLI ----------------------------------------------------------------
 
 function makeHome() {
@@ -425,8 +527,178 @@ test("cli: claude-code --dry-run prints the claude mcp add command; mcp status r
       [
         ["claude-code", false],
         ["claude-desktop", false],
+        ["copilot", false],
+        ["codex", false],
       ],
     );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+// Copilot CLI and Codex CLI (issue #477): through fake-copilot.js / fake-codex.js (COPILOT_BIN and
+// CODEX_BIN from helpers.js), their user configuration in a temp file, never the real CLI.
+for (const [target, title] of [
+  ["copilot", "Copilot CLI"],
+  ["codex", "Codex CLI"],
+]) {
+  const stateVar = target === "copilot" ? "FAKE_COPILOT_MCP_STATE" : "FAKE_CODEX_MCP_STATE";
+  const binVar = target === "copilot" ? "COPILOT_BIN" : "CODEX_BIN";
+  /** The duskfleet entry the fake holds, in its own shape. */
+  const registered = (state) => {
+    if (!existsSync(state)) return null;
+    const raw = JSON.parse(readFileSync(state, "utf8"));
+    return target === "copilot"
+      ? (raw.mcpServers.duskfleet ?? null)
+      : (raw.find((s) => s.name === "duskfleet")?.transport ?? null);
+  };
+
+  test(`cli: ${target} --dry-run prints the ${target} mcp add command and the directories, writes nothing`, () => {
+    const { root, env } = makeHome();
+    try {
+      const state = path.join(root, "state.json");
+      const r = cli({ ...env, [stateVar]: state }, ["mcp", "register", "--target", target, "--dry-run"]);
+      assert.equal(r.status, 0, r.stderr);
+      assert.match(r.stdout, new RegExp(`\\nconfig: ${path.join(root, "config").replace(/[\\/.]/g, "\\$&")}\\n`));
+      assert.match(r.stdout, new RegExp(`\\ndata: ${path.join(root, "data").replace(/[\\/.]/g, "\\$&")}\\n`));
+      assert.match(
+        r.stdout,
+        new RegExp(`will run:\\n {2}${target} mcp add duskfleet --env .*${binVar}=.* -- \\S+ \\S+index\\.js\\n`),
+      );
+      assert.equal(existsSync(state), false);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  test(`cli: ${target} --yes registers through the CLI; again = nothing to do; a different entry is refused; status reports it`, () => {
+    const { root, env } = makeHome();
+    try {
+      const state = path.join(root, "state.json");
+      const e = { ...env, [stateVar]: state };
+      const asked = cli(e, ["mcp", "register", "--target", target]);
+      assert.equal(asked.status, 1);
+      assert.match(asked.stderr, /pass --yes/);
+      assert.equal(existsSync(state), false);
+
+      const r = cli(e, ["mcp", "register", "--target", target, "--yes"]);
+      assert.equal(r.status, 0, r.stderr);
+      assert.match(r.stdout, new RegExp(`registered in ${title}`));
+      if (target === "copilot")
+        assert.match(r.stdout, /organization's Copilot policy may disable third-party MCP servers/);
+      else assert.doesNotMatch(r.stdout, /policy/);
+      const added = registered(state);
+      assert.equal(added.command, process.execPath);
+      assert.ok(added.args[0].endsWith(path.join("dist", "index.js")));
+      assert.equal(added.env[binVar], process.env[binVar]);
+      assert.equal(added.env.DUSKFLEET_CONFIG, path.join(root, "config"));
+
+      const again = cli(e, ["mcp", "register", "--target", target, "--yes"]);
+      assert.equal(again.status, 0, again.stderr);
+      assert.match(again.stdout, /nothing to do/);
+
+      const s = cli(e, ["mcp", "status", "--json"]);
+      assert.equal(s.status, 0, s.stderr);
+      const row = JSON.parse(s.stdout).find((t) => t.target === target);
+      assert.equal(row.registered, true);
+      assert.equal(row.command, process.execPath);
+      assert.equal(row.dataDir, path.join(root, "data"));
+      assert.equal(row.sameData, true);
+      const human = cli(e, ["mcp", "status"]);
+      assert.equal(human.status, 0, human.stderr);
+      assert.match(human.stdout, new RegExp(`\\n${title} +\\S.* +✓ yes +\\S`));
+      assert.match(human.stdout, /\n {2}└ data \S+\n {2}└ config \S+/);
+      assert.doesNotMatch(human.stdout, /another database/);
+
+      // Someone registered another install: refused, with the command that removes it.
+      const other = JSON.parse(readFileSync(state, "utf8"));
+      if (target === "copilot") other.mcpServers.duskfleet.args = ["/elsewhere/dist/index.js"];
+      else other[0].transport.args = ["/elsewhere/dist/index.js"];
+      writeFileSync(state, JSON.stringify(other));
+      const refused = cli(e, ["mcp", "register", "--target", target, "--yes"]);
+      assert.equal(refused.status, 1);
+      assert.match(refused.stderr, new RegExp(`Remove it first \\(${target} mcp remove duskfleet\\)`));
+      assert.deepEqual(registered(state).args, ["/elsewhere/dist/index.js"]);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+}
+
+test("cli: a failing copilot mcp list with an empty stderr is an error, never an empty listing", () => {
+  const { root, env } = makeHome();
+  try {
+    const state = path.join(root, "state.json");
+    const e = {
+      ...env,
+      FAKE_COPILOT_MCP_STATE: state,
+      FAKE_COPILOT_MCP_LIST_EXIT: "1",
+      FAKE_COPILOT_MCP_LIST_QUIET: "1",
+    };
+    const r = cli(e, ["mcp", "register", "--target", "copilot", "--yes"]);
+    assert.equal(r.status, 1);
+    assert.match(r.stderr, /mcp list --json failed: exit 1/);
+    assert.equal(existsSync(state), false, "no mcp add after a failed listing");
+    const s = JSON.parse(cli(e, ["mcp", "status", "--json"]).stdout).find((t) => t.target === "copilot");
+    assert.equal(s.registered, false);
+    assert.match(s.error, /failed: exit 1$/);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("cli: a copilot workspace server named duskfleet is not the registration; register adds the user entry", () => {
+  const { root, env } = makeHome();
+  try {
+    const state = path.join(root, "state.json");
+    const workspace = { duskfleet: { type: "stdio", command: process.execPath, args: ["/repo/dist/index.js"] } };
+    const e = { ...env, FAKE_COPILOT_MCP_STATE: state, FAKE_COPILOT_MCP_WORKSPACE: JSON.stringify(workspace) };
+    const before = JSON.parse(cli(e, ["mcp", "status", "--json"]).stdout).find((t) => t.target === "copilot");
+    assert.equal(before.registered, false);
+    const r = cli(e, ["mcp", "register", "--target", "copilot", "--yes"]);
+    assert.equal(r.status, 0, r.stderr);
+    assert.doesNotMatch(r.stdout, /nothing to do/);
+    assert.doesNotMatch(r.stderr, /Remove it first/);
+    assert.ok(JSON.parse(readFileSync(state, "utf8")).mcpServers.duskfleet, "the user entry was added");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("cli: a host on another data directory is named by mcp status and by doctor's advice line", () => {
+  const { root, env } = makeHome();
+  try {
+    const state = path.join(root, "codex.json");
+    const elsewhere = path.join(root, "other-data");
+    writeFileSync(
+      state,
+      JSON.stringify([
+        {
+          name: "duskfleet",
+          enabled: true,
+          transport: {
+            type: "stdio",
+            command: process.execPath,
+            args: ["/elsewhere/dist/index.js"],
+            env: { DUSKFLEET_CONFIG: path.join(root, "config"), DUSKFLEET_DATA: elsewhere },
+          },
+        },
+      ]),
+    );
+    const e = { ...env, FAKE_CODEX_MCP_STATE: state };
+    const human = cli(e, ["mcp", "status"]);
+    assert.equal(human.status, 0, human.stderr);
+    assert.match(human.stdout, /Codex CLI uses the data directory \S*other-data, this install uses \S*data: /);
+    const json = JSON.parse(cli(e, ["mcp", "status", "--json"]).stdout);
+    const codex = json.find((t) => t.target === "codex");
+    assert.equal(codex.dataDir, elsewhere);
+    assert.equal(codex.sameData, false);
+
+    const doctor = cli(e, ["doctor", "--json"]);
+    const report = JSON.parse(doctor.stdout);
+    assert.deepEqual(report.mcpHosts.registered, ["codex"]);
+    assert.equal(report.mcpHosts.warnings.length, 1);
+    assert.match(report.mcpHosts.warnings[0], /^Codex CLI uses the data directory /);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
