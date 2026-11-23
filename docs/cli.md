@@ -32,8 +32,8 @@ npx duskfleet dashboard [--port 4777] [--no-open] [--no-install]   # install @du
 npx duskfleet serve                                      # long-running scheduler process
 duskfleet install-service [--print] [--no-keep-awake]    # global install only: register `serve` with launchd / systemd --user / Task Scheduler
 duskfleet uninstall-service
-npx duskfleet mcp register --target claude-desktop --dry-run   # or claude-code; preview, then --yes to apply (see mcp-server.md)
-npx duskfleet mcp status                                 # which Claude hosts have a duskfleet entry; no config needed
+npx duskfleet mcp register --target claude-desktop --dry-run   # or claude-code, copilot, codex; preview, then --yes to apply (see mcp-server.md)
+npx duskfleet mcp status                                 # which MCP hosts have a duskfleet entry, which database each opens; no config needed
 npx duskfleet tools                                      # the MCP tool catalogue
 npx duskfleet --help                                     # the usage (also -h); no config needed
 npx duskfleet run --help                                 # one command's usage, options, example and doc link (any command)
@@ -93,7 +93,9 @@ Colour follows Node's rules for the stream: only on a terminal, never in a pipe
 glyphs, words and columns are the same. `--json`, anywhere before a `--` and on any command,
 prints exactly the JSON these commands printed before (`tools` and `repair-subagents` print JSON
 either way for now; `install-service --print` prints the raw unit). `mcp status` shows the names
-of an entry's env keys, never their values; `--json` prints the entry as the host's config holds it.
+of an entry's env keys, never their values; `--json` prints the entry as the host's config holds it
+(Copilot CLI and Codex CLI: as their `mcp list --json` reports it), plus `configDir`, `dataDir` and
+`sameData` (false = that host opens another database than this install; `doctor` warns too).
 Scripts, git hooks and CI should always pass it:
 
 ```bash

@@ -158,13 +158,25 @@ function presentAgent(a: AgentDefinition, config: DuskFleetConfig) {
   };
 }
 
-const agentFields = {
-  name: z.string().min(1).optional().describe("Display name; defaults to the id"),
-  harness: harnessNameSchema
+/**
+ * The `harness` parameter, described with the harnesses registered on this host (issue #477), so
+ * a chat host (Claude Code, Claude Desktop, Copilot, Codex) can create an agent on any of them.
+ */
+export function harnessField(registered: readonly string[] | null) {
+  const here = registered ? `; registered on this host: ${registered.join(", ") || "none"}` : "";
+  return harnessNameSchema
     .optional()
     .describe(
-      "Agent CLI that runs the agent: claude (default, the only harness that ships). A field the harness cannot honour is refused",
-    ),
+      `Agent CLI that runs the agent: claude (default), copilot (GitHub Copilot CLI) or codex (Codex CLI)${here}. ` +
+        "The agent runs on its harness whatever MCP host asks. A field the harness cannot honour is refused by name, never dropped: " +
+        "copilot takes Copilot's own tool rules in allowed_tools / disallowed_tools (not Claude rules) and has no dollar budget (no max_budget_usd); " +
+        "codex has no tool rules, only its sandbox from permission_mode (dontAsk = read-only, acceptEdits = workspace-write)",
+    );
+}
+
+const agentFields = {
+  name: z.string().min(1).optional().describe("Display name; defaults to the id"),
+  harness: harnessField(null),
   description: z.string().optional().describe("One or two sentences: what the agent is for. Shown by list_agents"),
   model: z
     .string()
@@ -310,6 +322,8 @@ const agentFields = {
 };
 
 export function registerAgentTools(server: McpServer, ctx: ToolContext): void {
+  // The tool catalogue registers with an empty context: the harness list is then left out.
+  const harness = harnessField(ctx.runs?.harnesses.names() ?? null);
   server.registerTool(
     "list_agents",
     {
@@ -361,6 +375,7 @@ export function registerAgentTools(server: McpServer, ctx: ToolContext): void {
             "REQUIRED choice. 'own': new agent, persona in system_prompt. 'link': reuse <folder>/.claude/agents/<claude_agent>.md; requires claude_agent plus the folder as project_path (or an already registered project id)",
           ),
         ...agentFields,
+        harness,
         overwrite: z
           .boolean()
           .optional()
@@ -410,6 +425,7 @@ export function registerAgentTools(server: McpServer, ctx: ToolContext): void {
           .optional()
           .describe("Change the kind; the resulting agent is validated like create_agent"),
         ...agentFields,
+        harness,
         clear: z
           .array(
             z.enum([

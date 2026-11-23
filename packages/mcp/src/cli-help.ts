@@ -155,11 +155,11 @@ export const COMMAND_HELP: Readonly<Record<string, CommandHelp>> = {
   },
   mcp: {
     usage: [
-      "duskfleet mcp register --target claude-code|claude-desktop [--dry-run] [--yes]",
+      "duskfleet mcp register --target claude-code|claude-desktop|copilot|codex [--dry-run] [--yes]",
       "duskfleet mcp status [--json]",
     ],
     options: [
-      "--target <host>   claude-code or claude-desktop",
+      "--target <host>   claude-code, claude-desktop, copilot (Copilot CLI) or codex (Codex CLI)",
       "--dry-run         show the change, write nothing",
       "--yes             apply without asking",
       "--json            status: one entry per host as JSON (env values included)",

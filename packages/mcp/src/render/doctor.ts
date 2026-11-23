@@ -67,6 +67,8 @@ export interface DoctorReport {
   harnesses?: HarnessReport;
   /** Link agents whose allowed_tools name tools the project agent does not declare (issue #458). */
   linkTools?: LinkToolsReport;
+  /** MCP hosts with a duskfleet entry, and one warning per host on another database (issue #477). */
+  mcpHosts?: { registered: string[]; warnings: string[] };
   probe?: ProbeReport | null;
 }
 
@@ -302,6 +304,14 @@ function probeCheck(p: ProbeReport, opts: RenderOpts): Check {
   return p.ok ? ok("probe", parts.join(" · "), advice) : warn("probe", parts.join(" · "), advice);
 }
 
+/** The registered MCP hosts; the database warnings of `mcp status` repeated in one advice line. */
+function mcpHostsCheck(m: NonNullable<DoctorReport["mcpHosts"]>): Check {
+  const value = m.registered.length ? m.registered.join(", ") : "none registered";
+  return m.warnings.length
+    ? warn("mcp hosts", value, [`${m.warnings.join(" · ")} (details: duskfleet mcp status)`])
+    : ok("mcp hosts", value);
+}
+
 function checks(r: DoctorReport, opts: RenderOpts): Check[] {
   const dupes = r.scheduler.duplicateSchedules;
   const unpriced = r.unpricedRuns.reduce((n, b) => n + b.runs.length, 0);
@@ -346,6 +356,7 @@ function checks(r: DoctorReport, opts: RenderOpts): Check[] {
   if (r.harnesses) list.push(harnessCheck(r.harnesses));
   const links = r.linkTools ? linkToolsCheck(r.linkTools) : null;
   if (links) list.push(links);
+  if (r.mcpHosts) list.push(mcpHostsCheck(r.mcpHosts));
   if (r.probe) list.push(probeCheck(r.probe, opts));
   return list;
 }

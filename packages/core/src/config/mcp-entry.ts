@@ -10,9 +10,11 @@
  * with npx's absolute path next to node: pinned, survives the eviction, needs the network on
  * the host's first start.
  */
+import { existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import path from "node:path";
-import { dataDirFor, findRepoRoot } from "./loader.js";
+import { parse as parseYaml } from "yaml";
+import { dataDirFor, findRepoRoot, locateConfig } from "./loader.js";
 import type { LocationContext } from "./locations.js";
 import type { DataSource } from "./types.js";
 
@@ -168,6 +170,48 @@ export function desktopConfigPath(
 export function claudeCodeAddArgs(entry: McpServerEntry): string[] {
   const env = Object.entries(entry.env).flatMap(([k, v]) => ["-e", `${k}=${v}`]);
   return ["mcp", "add", SERVER_NAME, "--scope", "user", ...env, "--", entry.command, ...entry.args];
+}
+
+/**
+ * Arguments of `copilot mcp add` and `codex mcp add` for the entry (issue #477; both forms checked
+ * by hand on Copilot CLI 1.0.114 and codex-cli 0.167.1, see docs/development.md): the name first,
+ * `--env KEY=VALUE` once per variable, `--` then the command. Both register in the user's config.
+ */
+export function hostCliAddArgs(entry: McpServerEntry): string[] {
+  const env = Object.entries(entry.env).flatMap(([k, v]) => ["--env", `${k}=${v}`]);
+  return ["mcp", "add", SERVER_NAME, ...env, "--", entry.command, ...entry.args];
+}
+
+/**
+ * The config and data directories a process started from `entry` would use, the way the server
+ * resolves them (`locateConfig`, then `dataDirFor` with the config's `data_dir`), with only the
+ * entry's env (a host does not pass this shell's DUSKFLEET_* or XDG_* variables; Windows keeps
+ * APPDATA / LOCALAPPDATA, as in `exportedDataDir`). The npx form has no checkout above it. Null
+ * when the config the entry points at does not parse.
+ */
+export function entryDirs(
+  entry: { command: string | null; args: string[]; env: Record<string, string> },
+  ctx: LocationContext = {},
+): { configDir: string; dataDir: string } | null {
+  const env = ctx.env ?? process.env;
+  const hostEnv: NodeJS.ProcessEnv = { APPDATA: env["APPDATA"], LOCALAPPDATA: env["LOCALAPPDATA"], ...entry.env };
+  const local = { ...ctx, env: hostEnv };
+  const script = entry.args.find((a) => path.isAbsolute(a) && a.endsWith(".js"));
+  const configDir = locateConfig(script ?? path.parse(process.cwd()).root, local).configDir;
+  let dataDirSetting: string | null = null;
+  const yamlPath = path.join(configDir, "duskfleet.yaml");
+  if (existsSync(yamlPath)) {
+    try {
+      const raw = parseYaml(readFileSync(yamlPath, "utf8")) as { data_dir?: unknown } | null;
+      if (typeof raw?.data_dir === "string") dataDirSetting = raw.data_dir;
+    } catch {
+      return null;
+    }
+  }
+  return {
+    configDir: path.resolve(configDir),
+    dataDir: path.resolve(dataDirFor(configDir, dataDirSetting, local).dataDir),
+  };
 }
 
 /** Shell-readable rendering of a command, for the preview. */
