@@ -158,10 +158,13 @@ written or loaded stops with the fix and exit 1:
    (`Optional, not installed: ...`), not as a failure. None usable does **not** stop `init`
    either: the problem is printed here, the config is written anyway, the fix is repeated after
    the summary (`Claude Code is not logged in: run claude auth login, then check it with:
-   duskfleet doctor --probe`, or how to install one) and the exit code is 0. Before a CLI is
-   usable, `doctor`, `agents`, `projects`, `runs`, `schedules`, `budgets`, `agents create` and
-   the dashboard work; `run`, `serve` and scheduled runs fail (a logged-out Claude with
-   `auth_required` and the same fix, `errorCode`, [what a run records](#what-a-run-records)).
+   duskfleet doctor --probe`, or how to install one) and the exit code is 0. While a CLI is
+   installed but not usable (logged out), `doctor`, `agents`, `projects`, `runs`, `schedules`,
+   `budgets`, `agents create` and the dashboard work; `run`, `serve` and scheduled runs fail (a
+   logged-out Claude with `auth_required` and the same fix, `errorCode`,
+   [what a run records](#what-a-run-records)). With no agent CLI installed at all, only `init`,
+   `mcp register --target claude-desktop` and the dashboard work; every other command stops
+   with the Claude Code lookup error until one is installed.
    With Claude Code missing but another CLI present, every command starts and agents on that
    CLI run; a Claude Code agent is refused as an unregistered harness.
 3. **Config and data**: creates the user-level config directory with a starter `duskfleet.yaml`
@@ -178,7 +181,8 @@ written or loaded stops with the fix and exit 1:
    Then, on a terminal only, it offers the [guided first run](#guided-first-run) on one of the
    usable CLIs (a real run, its cost stated first; the answer defaults to no).
 5. What was created, where, and the next commands: `doctor`, `agents create`, `run` (with
-   `--harness <name>` when Claude Code is not usable). Duskfleet ships no agent; the only one
+   `--harness <name>`: the CLI given to `init --harness` when it is usable, else none for Claude
+   Code, else the first usable CLI). Duskfleet ships no agent; the only one
    `init` can create is `first-run`, and only when you accept the guided first run.
 
 `init --yes` asks nothing: steps 1-3 and the summary, step 4 only with `--mcp claude-code` or

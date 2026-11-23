@@ -121,8 +121,13 @@ export function agentClisAdvice(clis: readonly AgentCli[]): string[] {
       `No agent CLI is installed: install one of ${missing.map((c) => c.label).join(", ")} (any one is enough; Claude Code: https://docs.claude.com/en/docs/claude-code), log in, then check it with: duskfleet doctor --probe`,
     );
   }
+  // A CLI found but not usable (logged out) still registers its executor, so every command starts
+  // and only runs fail. With none installed, bootstrap throws (#490): only init, mcp register
+  // (allowNoHarness) and the dashboard do without.
   lines.push(
-    "Until then the config, the read-only commands, agents create and the dashboard work; run, serve and schedules need a usable agent CLI.",
+    missing.length < clis.length
+      ? "Until then the config, the read-only commands, agents create and the dashboard work; run, serve and schedules need a usable agent CLI."
+      : "Until then the config, mcp register --target claude-desktop and the dashboard work; every other command (doctor, agents, projects, schedules, budgets, run, serve) needs an agent CLI installed.",
   );
   return lines;
 }
@@ -184,7 +189,8 @@ export async function runInit(options: InitOptions): Promise<number> {
   }
   // A failed registration does not stop init (#349, #490): the config is written, so init goes on
   // to the first run and the summary, repeats the failure after it and exits 1 so a script sees it.
-  // A throw (bootstrap finds no agent CLI at all) is a failure like a non-zero exit.
+  // A throw (a database that does not open, say) is a failure like a non-zero exit. No agent CLI
+  // at all is not one: the registration bootstraps with allowNoHarness.
   let mcpFailure: string | null = null;
   if (target) {
     out(`[4/5] MCP registration: ${target}`);
@@ -218,7 +224,15 @@ export async function runInit(options: InitOptions): Promise<number> {
 
   // 5. Summary and next commands
   out(`[5/5] Done. ${created.length ? `Created: ${created.join(", ")}` : "Nothing was created."}`);
-  const onOther = usable.length > 0 && !usable.includes("claude") ? ` --harness ${usable[0]}` : "";
+  // The agents create hint names the CLI the user picked with --harness when it is usable, else
+  // Claude Code when usable (the default harness, no flag), else the first usable one (#490).
+  const hinted =
+    options.harness && usable.includes(options.harness)
+      ? options.harness
+      : usable.includes("claude")
+        ? "claude"
+        : (usable[0] ?? null);
+  const onOther = hinted && hinted !== "claude" ? ` --harness ${hinted}` : "";
   out(
     [
       "",

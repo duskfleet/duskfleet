@@ -50,6 +50,12 @@ export interface App {
 export interface BootstrapOptions {
   /** How this process shows up as the scheduler lease holder (`serve`, `mcp`, `cli`). */
   role?: SchedulerRole;
+  /**
+   * Start with an empty harness registry when no agent CLI is found at all, instead of throwing
+   * the Claude Code lookup error (#490). Only for commands that never start a run: `mcp register`
+   * (Claude Desktop needs no agent CLI) and init's registration step.
+   */
+  allowNoHarness?: boolean;
 }
 
 export async function bootstrap(entryFileUrl: string, options: BootstrapOptions = {}): Promise<App> {
@@ -95,9 +101,10 @@ export async function bootstrap(entryFileUrl: string, options: BootstrapOptions 
     log.info("codex executor ready", { binary: codexBinary });
   }
   // Claude Code follows the same rule since #489 (any one agent CLI is enough), as long as another
-  // CLI is there: with none at all, the Claude Code lookup error stays the start-up error.
+  // CLI is there: with none at all, the Claude Code lookup error stays the start-up error (unless
+  // the caller never starts a run, `allowNoHarness`).
   if (claudeMissing !== null) {
-    if (executors.length === 0) throw new Error(claudeMissing);
+    if (executors.length === 0 && !options.allowNoHarness) throw new Error(claudeMissing);
     log.info("claude not found; running with the other harnesses", { error: claudeMissing });
   }
   const harnesses = new HarnessRegistry(executors);

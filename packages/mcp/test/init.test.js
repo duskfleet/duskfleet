@@ -167,24 +167,33 @@ test("init with no agent CLI (#489): none usable, how to get one, exit 0 and the
       init.stdout,
       /No agent CLI is installed: install one of Claude Code, GitHub Copilot CLI, Codex CLI \(any one is enough/,
     );
-    assert.match(init.stdout, /Until then the config, the read-only commands, agents create and the dashboard work/);
+    assert.match(
+      init.stdout,
+      /Until then the config, mcp register --target claude-desktop and the dashboard work; every other command \(doctor, agents, projects, schedules, budgets, run, serve\) needs an agent CLI installed\./,
+    );
     assert.ok(existsSync(s.yaml));
 
-    // --mcp with no agent CLI at all: the registration's bootstrap throws; init still reaches the
-    // summary and the install advice, repeats the failure and exits 1 (no unhandled rejection).
+    // The advice is what happens: a command that bootstraps refuses with the lookup error.
+    for (const args of [["agents"], ["agents", "create", "fixer", "--", "You fix failing tests."], ["projects"]]) {
+      const r = s.cli(...args);
+      assert.notEqual(r.status, 0, `${args.join(" ")} works without an agent CLI: fix the advice`);
+    }
+
+    // --mcp claude-desktop with no agent CLI at all (#490): Desktop needs none, so it registers,
+    // init reaches the summary and the install advice, and exits 0.
+    const desktop = desktopConfigPath(process.platform, s.home, s.env);
     const initMcp = s.cli("init", "--yes", "--mcp", "claude-desktop");
-    assert.equal(initMcp.status, 1, initMcp.stderr);
+    assert.equal(initMcp.status, 0, initMcp.stderr);
+    assert.match(initMcp.stdout, /\[4\/5\] MCP registration: claude-desktop/);
     assert.match(initMcp.stdout, /\[5\/5\] Done\./);
     assert.match(initMcp.stdout, /No agent CLI is installed: install one of/);
-    assert.match(
-      initMcp.stderr,
-      /\[4\/5\] MCP registration failed \(.+\); run it again with: duskfleet mcp register --target claude-desktop/,
-    );
-    assert.match(
-      initMcp.stderr,
-      /\n\nMCP registration failed \(.+\); run it again with: duskfleet mcp register --target claude-desktop\n?$/,
-    );
-    assert.doesNotMatch(initMcp.stderr, /UnhandledPromiseRejection|^\s+at /m);
+    assert.doesNotMatch(initMcp.stderr, /MCP registration failed|UnhandledPromiseRejection|^\s+at /m);
+    assert.ok(JSON.parse(readFileSync(desktop, "utf8")).mcpServers?.duskfleet, "the desktop entry is written");
+    // Same for mcp register itself; claude-code still refuses (it runs claude mcp add).
+    assert.equal(s.cli("mcp", "register", "--target", "claude-desktop", "--yes").status, 0);
+    const code = s.cli("mcp", "register", "--target", "claude-code", "--yes");
+    assert.equal(code.status, 1);
+    assert.match(code.stderr, /Registering in Claude Code needs the Claude Code CLI/);
   } finally {
     rmSync(s.root, { recursive: true, force: true });
   }
@@ -196,6 +205,29 @@ test("init --harness: an unknown name is a usage error (exit 2)", () => {
     const bad = s.cli("init", "--yes", "--harness", "cursor");
     assert.equal(bad.status, 2);
     assert.match(bad.stderr, /--harness must be one of claude, copilot, codex, got "cursor"/);
+  } finally {
+    rmSync(s.root, { recursive: true, force: true });
+  }
+});
+
+test("init --harness (#490): the agents create hint names that CLI when usable, else a usable one", () => {
+  const s = sandbox();
+  try {
+    // All three usable: --harness codex wins over Claude Code, the default.
+    const codex = s.cli("init", "--yes", "--harness", "codex");
+    assert.equal(codex.status, 0, codex.stderr);
+    assert.match(codex.stdout, /agents create fixer --harness codex -- /);
+    const copilot = s.cli("init", "--yes", "--harness", "copilot");
+    assert.match(copilot.stdout, /agents create fixer --harness copilot -- /);
+    // --harness claude is the default harness: the worked example, no flag.
+    const claude = s.cli("init", "--yes", "--harness", "claude");
+    assert.match(claude.stdout, /agents create fixer --model haiku/);
+
+    // Only Codex usable: an unusable --harness falls back to a usable CLI, never names a missing one.
+    only(s, "codex");
+    const fallback = s.cli("init", "--yes", "--harness", "copilot");
+    assert.equal(fallback.status, 0, fallback.stderr);
+    assert.match(fallback.stdout, /agents create fixer --harness codex -- /);
   } finally {
     rmSync(s.root, { recursive: true, force: true });
   }

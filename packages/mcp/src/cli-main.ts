@@ -557,7 +557,8 @@ async function main(): Promise<void> {
       harness: values.harness ?? null,
       entryFileUrl: import.meta.url,
       registerMcp: async (target) => {
-        const app = await bootstrap(import.meta.url, { role: "cli" });
+        // Claude Desktop needs no agent CLI (#490); mcpRegister refuses claude-code without one.
+        const app = await bootstrap(import.meta.url, { role: "cli", allowNoHarness: true });
         try {
           // init --yes, or the user just picked the target: no second confirmation.
           return await mcpRegister(app, target, false, true);
@@ -587,7 +588,11 @@ async function main(): Promise<void> {
   // invocation is named (exit 2) before any config load, with or without a config.
   let opened: Awaited<ReturnType<typeof bootstrap>> | null = null;
   const open = async () => {
-    opened ??= await bootstrap(import.meta.url, { role: command === "serve" ? "serve" : "cli" });
+    opened ??= await bootstrap(import.meta.url, {
+      role: command === "serve" ? "serve" : "cli",
+      // mcp register starts no run: Claude Desktop needs no agent CLI (#490).
+      allowNoHarness: command === "mcp",
+    });
     return opened;
   };
   const done = (code = 0) => {
