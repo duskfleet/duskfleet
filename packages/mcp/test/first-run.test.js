@@ -61,8 +61,9 @@ function cli(configDir, args, input = "", extraEnv = {}) {
 }
 
 /**
- * Env where only Codex CLI is found: Claude and Copilot point at a missing file, PATH holds only
- * `node` (no real `claude` of the machine) and HOME is empty (no ~/.local/bin/claude).
+ * Env where only Codex CLI is found: no CLAUDE_BIN (undefined is not passed to the child),
+ * Copilot points at a missing file, PATH holds only `node` (no real `claude` of the machine) and
+ * HOME is empty (no ~/.local/bin/claude).
  */
 function onlyCodexEnv(root) {
   const bin = path.join(root, "bin");
@@ -71,7 +72,7 @@ function onlyCodexEnv(root) {
   const home = path.join(root, "home");
   mkdirSync(home, { recursive: true });
   const missing = path.join(root, "no-such-binary");
-  return { CLAUDE_BIN: missing, COPILOT_BIN: missing, PATH: bin, HOME: home };
+  return { CLAUDE_BIN: undefined, COPILOT_BIN: missing, PATH: bin, HOME: home };
 }
 
 test("run --first end to end: registers the project, creates the agent, runs haiku, prints the summary, deletes on n", () => {
@@ -291,8 +292,15 @@ for (const [harness, cost, label] of [
       assert.equal(info.harness, harness);
       assert.equal(info.modelRequested ?? null, null);
 
-      // The same agent on another harness is not this step's agent.
-      const other = cli(configDir, ["run", "--first", "--project", project], "\n");
+      // A later plain run --first (Claude usable too) reuses the kept agent on its own harness (#490).
+      const again = cli(configDir, ["run", "--first", "--project", project], "\n");
+      assert.equal(again.status, 0, again.stderr + again.stdout);
+      assert.match(again.stdout, /Agent "first-run" already exists/);
+      assert.match(again.stdout, new RegExp(`started on "my-app" with ${label}; waiting`));
+      assert.doesNotMatch(again.stderr, /runs on harness/);
+
+      // An explicit --harness for another CLI is not this step's agent.
+      const other = cli(configDir, ["run", "--first", "--harness", "claude", "--project", project], "\n");
       assert.equal(other.status, 1, other.stderr + other.stdout);
       assert.match(other.stderr, new RegExp(`it runs on harness ${harness}, not claude`));
     } finally {

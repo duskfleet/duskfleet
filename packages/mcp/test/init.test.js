@@ -56,13 +56,14 @@ function sandbox() {
 }
 
 /**
- * Leaves only the named CLIs findable: the others point at a missing file (an override that does
- * not exist finds nothing), and PATH holds only `node`, so no real `claude` on the machine is found.
+ * Leaves only the named CLIs findable: Claude Code gets no CLAUDE_BIN (a configured binary that
+ * does not exist is a start-up error, not "not installed") and a PATH holding only `node`, so no
+ * real `claude` on the machine is found; the others point at a missing file.
  */
 function only(s, ...present) {
   const missing = path.join(s.root, "no-such-binary");
   if (!present.includes("claude")) {
-    s.env.CLAUDE_BIN = missing;
+    delete s.env.CLAUDE_BIN;
     const bin = path.join(s.root, "bin");
     mkdirSync(bin, { recursive: true });
     if (!existsSync(path.join(bin, "node"))) symlinkSync(process.execPath, path.join(bin, "node"));
@@ -148,6 +149,21 @@ test("init with only Codex CLI (#489): usable and logged in, nothing reported br
       initMcp.stderr,
       /\n\nMCP registration failed \(exit 1\); run it again with: duskfleet mcp register --target claude-code\n?$/,
     );
+  } finally {
+    rmSync(s.root, { recursive: true, force: true });
+  }
+});
+
+test("a configured Claude Code binary that does not resolve stays a start-up error with Codex installed (#490)", () => {
+  const s = sandbox();
+  try {
+    only(s, "codex");
+    assert.equal(s.cli("init", "--yes").status, 0);
+    assert.equal(s.cli("agents").status, 0, "not configured: Claude Code is simply not installed");
+    s.env.CLAUDE_BIN = path.join(s.root, "no-such-claude");
+    const agents = s.cli("agents");
+    assert.notEqual(agents.status, 0);
+    assert.match(agents.stderr, /Claude Code binary not found/);
   } finally {
     rmSync(s.root, { recursive: true, force: true });
   }

@@ -83,6 +83,10 @@ export async function bootstrap(entryFileUrl: string, options: BootstrapOptions 
     });
     log.info("executor ready", { binary: executor.binary });
   } catch (err) {
+    // A binary the user named (claude.binary, CLAUDE_BIN) that resolves to nothing is a
+    // misconfiguration, not "Claude Code not installed": it stays a start-up error, so Claude
+    // agents never fail later as an unregistered harness with only doctor saying why (#490).
+    if (config.claude.binary || process.env["CLAUDE_BIN"]) throw err;
     claudeMissing = err instanceof Error ? err.message : String(err);
   }
   // One adapter per harness (issue #445); RunManager picks per run from the agent's `harness:`.

@@ -219,6 +219,14 @@ function refuseExistingAgent(app: App, input: string, harness: string): string |
   return `the existing "${FIRST_RUN_AGENT_ID}" agent (${existing.sourcePath}) is not the read-only, cheap agent this step promises: ${problems.join("; ")}. Delete or rename it (duskfleet agents), then try again.`;
 }
 
+/** The harness of an existing `first-run` agent when that CLI is usable here, else null. */
+function existingAgentHarness(app: App, usable: readonly string[]): string | null {
+  const existing = app.runs.reloadConfig().agents.get(FIRST_RUN_AGENT_ID);
+  if (!existing) return null;
+  const runsOn = harnessOf(existing);
+  return usable.includes(runsOn) ? runsOn : null;
+}
+
 /** Creates the agent unless it exists; true when this step wrote the file. */
 function ensureAgent(app: App, harness: string): boolean {
   const config = app.runs.reloadConfig();
@@ -347,6 +355,11 @@ export async function runFirstRun(app: App, options: FirstRunOptions, prompter: 
     });
     usable = clis.filter((c) => c.usable).map((c) => c.harness);
   }
+  // Without --harness, an existing first-run agent on a usable CLI keeps its harness (#490): init
+  // may have made it on Codex, and a later plain run --first must not refuse the agent it wrote.
+  // Its own checks still apply (refuseExistingAgent); a mismatch is refused only for --harness.
+  const kept = options.harness ? null : existingAgentHarness(app, usable);
+  if (kept) options = { ...options, harness: kept, askHarness: false };
   // The cost stated before the first question is the default CLI's; a different choice restates it.
   const stated = options.harness && usable.includes(options.harness) ? options.harness : defaultHarness(usable);
   if (options.askToStart) {

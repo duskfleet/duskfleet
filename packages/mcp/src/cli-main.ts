@@ -301,7 +301,8 @@ function parseAgentCreate(args: string[]): { id: string; fields: Record<string, 
   const [id, ...words] = positionals;
   if (!id) commandUsage("agents", 'agents create needs an agent id: agents create <id> -- "<system prompt>"');
   const harness = values.harness ?? DEFAULT_HARNESS;
-  const defaults = AGENT_CREATE_DEFAULTS[harness];
+  // Own keys only: a plain-object lookup would let --harness toString or __proto__ through.
+  const defaults = Object.hasOwn(AGENT_CREATE_DEFAULTS, harness) ? AGENT_CREATE_DEFAULTS[harness] : undefined;
   if (!defaults) {
     commandUsage("agents", `--harness must be one of ${SHIPPED_HARNESSES.join(", ")}, got "${values.harness}"`);
   }

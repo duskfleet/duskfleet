@@ -166,7 +166,10 @@ written or loaded stops with the fix and exit 1:
    `mcp register --target claude-desktop` and the dashboard work; every other command stops
    with the Claude Code lookup error until one is installed.
    With Claude Code missing but another CLI present, every command starts and agents on that
-   CLI run; a Claude Code agent is refused as an unregistered harness.
+   CLI run; a Claude Code agent is refused as an unregistered harness. When you named a Claude
+   Code binary (`claude.binary` or `CLAUDE_BIN`) and the lookup still finds none, that is a
+   misconfiguration, not a missing CLI: every command stops with the lookup error, whatever other
+   CLI is installed.
 3. **Config and data**: creates the user-level config directory with a starter `duskfleet.yaml`
    and the data directory ([where config and data live](configuration.md#where-config-and-data-live)).
    A config that already exists (user-level, a checkout's `config/`, or `DUSKFLEET_CONFIG`) is
@@ -237,7 +240,9 @@ skips that question), then:
    to change. On the other CLIs the agent has only fields that CLI honours: Copilot gets
    `harness: copilot`, no model, no budget, `allowed_tools: [read]`, `disallowed_tools: [write,
    shell]`; Codex gets `harness: codex`, no model, no budget, no tool rules, and `dontAsk` (its
-   read-only sandbox). An existing `first-run` on another harness than the chosen one is refused.
+   read-only sandbox). Without `--harness`, an existing `first-run` whose CLI is usable here
+   keeps its harness (the step asks no CLI question); an existing `first-run` on another harness
+   than the one `--harness` names is refused.
 4. Runs it (with `--model haiku` on Claude Code, the CLI's default model elsewhere) and the
    prompt `Describe this project in three sentences. Do not
    change any file.`, waits, and prints the status, the duration, the tokens, the cost (or API
