@@ -67,6 +67,8 @@ function existingSettings(location: ConfigLocation): CliSettings {
 const MCP_TARGET_ALIASES: Readonly<Record<McpTarget, readonly string[]>> = {
   "claude-code": ["code", "claude code", "c"],
   "claude-desktop": ["desktop", "claude desktop", "d"],
+  copilot: ["github copilot", "copilot cli"],
+  codex: ["codex cli"],
 };
 
 /** An answer to the MCP question: a host `mcp register` supports, or null (skip). */

@@ -21,6 +21,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
+import { parseMcpAnswer } from "../dist/init.js";
 import { desktopConfigPath } from "../dist/mcp-register.js";
 import { testEnv } from "./helpers.js";
 
@@ -312,10 +313,26 @@ test("init --yes never writes a Claude config file unless --mcp is given", () =>
 
     const bad = s.cli("init", "--yes", "--mcp", "vscode");
     assert.equal(bad.status, 2);
-    assert.match(bad.stderr, /--mcp must be claude-code or claude-desktop/);
+    assert.match(bad.stderr, /--mcp must be claude-code or claude-desktop or copilot or codex/);
   } finally {
     rmSync(s.root, { recursive: true, force: true });
   }
+});
+
+test("init's MCP question takes every mcp register target, by name or alias", () => {
+  const cases = [
+    ["claude-code", "claude-code"],
+    ["code", "claude-code"],
+    ["D", "claude-desktop"],
+    ["copilot", "copilot"],
+    ["GitHub Copilot", "copilot"],
+    ["codex", "codex"],
+    [" codex cli ", "codex"],
+    ["skip", null],
+    ["", null],
+    ["vscode", null],
+  ];
+  for (const [answer, target] of cases) assert.equal(parseMcpAnswer(answer), target, answer);
 });
 
 test("init with Claude Code logged out (#349): config written, login hint, exit 0; read-only commands work, run is auth_required", () => {

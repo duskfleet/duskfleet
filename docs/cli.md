@@ -8,7 +8,7 @@ repository (after `npm run build`) the same command is `npm run cli -- <command>
 
 ```bash
 npx duskfleet init                                       # guided setup; see "init" below
-npx duskfleet init --yes [--mcp claude-code|claude-desktop]   # the same without prompts (scripts, CI)
+npx duskfleet init --yes [--mcp claude-code|claude-desktop|copilot|codex]   # the same without prompts (scripts, CI)
 npx duskfleet doctor                                     # Claude binary, version, config and data paths
 npx duskfleet doctor --probe                             # plus one real hello run on haiku (costs cents)
 npx duskfleet run --project ~/Documents/Projects/my-app -- "Add a README section describing the build"
@@ -190,8 +190,9 @@ written or loaded stops with the fix and exit 1:
    Code, else the first usable CLI). Duskfleet ships no agent; the only one
    `init` can create is `first-run`, and only when you accept the guided first run.
 
-`init --yes` asks nothing: steps 1-3 and the summary, step 4 only with `--mcp claude-code` or
-`--mcp claude-desktop`; without `--mcp` it never writes a Claude config file. `--harness
+`init --yes` asks nothing: steps 1-3 and the summary, step 4 only with `--mcp <host>`
+(`claude-code`, `claude-desktop`, `copilot` or `codex`, the targets of `mcp register`); without
+`--mcp` it never writes a host's config. `--harness
 claude|copilot|codex` picks the guided first run's CLI without asking. It too succeeds
 without a login, so a script can prepare a machine before anyone logs in; a config that
 cannot be written or loaded exits non-zero at once. A failed `--mcp` registration (or a

@@ -5,7 +5,7 @@ import { fileURLToPath } from "node:url";
  * Small local CLI. Same orchestration layer as the MCP server, useful for
  * testing without an MCP client.
  *
- *   duskfleet init [--yes] [--mcp claude-code|claude-desktop]   # guided setup (init.ts)
+ *   duskfleet init [--yes] [--mcp claude-code|claude-desktop|copilot|codex]   # guided setup (init.ts)
  *   duskfleet agents
  *   duskfleet agents create <id> [--model <m>] [--budget <usd>] [...] [--force] -- "<system prompt>"
  *   duskfleet projects
@@ -172,7 +172,7 @@ function usage(asked = false): never {
       "Duskfleet - A fleet of agents for your own machine.",
       "",
       "Usage:",
-      "  duskfleet init [--yes] [--mcp claude-code|claude-desktop] [--harness claude|copilot|codex]",
+      "  duskfleet init [--yes] [--mcp claude-code|claude-desktop|copilot|codex] [--harness claude|copilot|codex]",
       "  duskfleet agents",
       "  duskfleet agents create <id> [--harness claude|copilot|codex] [--model <m>] [--budget <usd>] [--permission-mode <mode>]",
       "                          [--allowed-tools <a,b>] [--disallowed-tools <a,b>] [--timeout <minutes>]",
