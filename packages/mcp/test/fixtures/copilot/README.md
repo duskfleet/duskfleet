@@ -113,7 +113,84 @@ repository's own `AGENTS.md` held the code word QUINCE.
   `tool.execution_complete.data.result.content` (`[cost: ...]`) comes from a hook of the machine
   the fixtures were captured on, not from Copilot.
 
+## Project agents (`link-*`)
+
+Real runs of **GitHub Copilot CLI 1.0.114** on macOS, captured on 2026-11-23 for link agents on
+Copilot (issue #466): the persona is an agent the project itself defines, selected with
+`--agent <name>`. Same account, same common flags as above, in a scratch git repository holding
+`README.md`, `AGENTS.md` (code word QUINCE) and these files under `.github/agents/`:
+
+| Agent file             | Frontmatter besides `name`, `description`      | Body               |
+| ---------------------- | ---------------------------------------------- | ------------------ |
+| `pim.agent.md`         | none                                           | code word MEDLAR   |
+| `tooly.agent.md`       | `tools: ["execute", "read", "edit", "search"]` | "run the commands" |
+| `reader.agent.md`      | `tools: ["read"]`                              | "answer questions" |
+| `modeled.agent.md`     | `model: claude-haiku-4.5`                      | "answer briefly"   |
+| `modeled-big.agent.md` | `model: claude-sonnet-5.5`                     | "answer briefly"   |
+
+No run passes `--add-dir` for the project itself: the working directory is the project.
+
+| Fixture                   | Flags besides the common ones                           | Prompt                                 | Exit | Premium requests |
+| ------------------------- | ------------------------------------------------------- | -------------------------------------- | ---- | ---------------- |
+| `link`                    | `--agent pim`                                           | "list every code word"                 | 0    | 0.33             |
+| `link-unknown`            | `--agent nope`                                          | "Say hi"                               | 1    | 0                |
+| `link-add-dir`            | `--agent pim --add-dir <extra>`                         | "list every code word"                 | 0    | 0.33             |
+| `link-shadowed`           | `--agent pim --add-dir <shadow>`                        | "list every code word"                 | 0    | 0.33             |
+| `link-tools-declared`     | `--agent tooly`                                         | run `touch marker.txt`                 | 0    | 0.33             |
+| `link-tools-narrow-shell` | `--agent reader --allow-tool 'shell(ls)'`               | run `ls -la .`, or say "NO SHELL TOOL" | 0    | 0.33             |
+| `link-model`              | `--agent modeled`, **no `--model`**                     | "Reply with exactly: ok"               | 0    | 0.33             |
+| `link-model-flag`         | `--agent modeled-big` (with `--model claude-haiku-4.5`) | "Reply with exactly: ok"               | 0    | 0.33             |
+
+`<extra>` held `AGENTS.md` (code word PLUM), `.github/copilot-instructions.md` (FIG) and
+`.github/instructions/words.instructions.md` with `applyTo: "**"` (DAMSON). `<shadow>` held its
+own `.github/agents/pim.agent.md` (code word SLOE).
+
+**Finding the agent**
+
+- `--agent <name>` loads `<cwd>/.github/agents/<name>.agent.md` in an untrusted folder, with no
+  `--add-dir` and no `--trust-folder` (`link` answers QUINCE and MEDLAR).
+- A name the project does not define ends before any model call: **nothing on stdout**, exit 1,
+  and stderr names what exists (`link-unknown.stderr`: `No such agent: nope, available: modeled,
+  pim, reader, tooly`). No session, no `result` line.
+- The stream of a link run has no event naming the agent: `session.start` is the same as without
+  `--agent`.
+
+**Extra instructions next to a project agent**
+
+- `--add-dir <extra>` adds nothing to the prompt: neither that directory's `AGENTS.md`, nor its
+  `.github/copilot-instructions.md`, nor a `.github/instructions/*.instructions.md` (`link-add-dir`
+  answers QUINCE and MEDLAR only).
+- An agent of the same name in an added directory does not replace the project's: the project's
+  file wins (`link-shadowed` answers MEDLAR, never SLOE).
+- `--agent` is given once and there is no system prompt flag, so on 1.0.114 nothing but the prompt
+  itself carries instructions written outside the project agent's file.
+
+**Tools the agent file declares**
+
+- `tools:` grants no permission. With shell and edit declared and no `--allow-tool`,
+  `touch marker.txt` is denied like in `denied` (`link-tools-declared`, `error.code: "denied"`,
+  the file is not created).
+- `tools:` narrows what exists. With `tools: ["read"]` the model has no shell tool although
+  `--allow-tool 'shell(ls)'` allows one (`link-tools-narrow-shell` answers "NO SHELL TOOL" and
+  makes no tool call).
+- So a run can do what the file declares **and** the rules allow: the file cannot widen the rules.
+- Seen in `link-tools-declared`, not specific to agents: after the denial the model ran
+  `ls -la marker.txt 2>/dev/null || echo "..."` and it executed with no allow rule
+  (`success: true`). Copilot runs some read-only shell commands without one.
+
+**Model**
+
+- No `--model`, agent file with `model:`: the file's model runs. `session.start` has no
+  `selectedModel`, then two `session.model_change` events: `source: "startup"` (the account
+  default) and `source: "agent"` with `previousModel` (`link-model`).
+- `--model` and a different `model:` in the file: the flag wins, `selectedModel` and every
+  `assistant.message` carry the flag's model and there is no `session.model_change`
+  (`link-model-flag`).
+
 ## What was changed after capture
+
+In the `link-*` fixtures paths under the scratch repository became `/work` and other paths under
+the capture directory became `/capture`; the rest is as described below.
 
 Paths under the capture directory became `/work`, the account name in `ls` output became `me`,
 the user-level MCP server names became `user-server-N`, and the encrypted reasoning blobs
