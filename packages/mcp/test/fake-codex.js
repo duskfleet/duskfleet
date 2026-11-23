@@ -12,6 +12,7 @@
  *   names) with `thread_id` set to the id asked for, as the real CLI reports the same id. A thread
  *   no fixture started, or any thread when `FAKE_CODEX_FORGET=1`, is unknown: nothing on stdout,
  *   `resume-unknown.stderr` on stderr (the id swapped in), exit 1.
+ * - `login status` prints "Logged in using ChatGPT" (verified on codex-cli 0.167.1).
  * - `FAKE_CODEX_RECORD=<file>` (passed through by the test config) receives the argv, the
  *   environment's names and the prompt.
  */
@@ -81,6 +82,12 @@ if (argv[0] === "mcp") {
 
 if (argv[0] === "--version") {
   process.stdout.write("codex-cli 0.167.1\n");
+  process.exit(0);
+}
+// `codex login status` (duskfleet init, #489): the answer verified on codex-cli 0.167.1. No
+// logged-out form is replayed: its output was never captured, so init does not interpret one.
+if (argv[0] === "login" && argv[1] === "status") {
+  process.stdout.write("Logged in using ChatGPT\n");
   process.exit(0);
 }
 if (argv[0] !== "exec" || argv.at(-1) !== "-") {

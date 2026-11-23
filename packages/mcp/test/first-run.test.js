@@ -19,8 +19,16 @@ import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
-import { loadConfig } from "@duskfleet/core";
-import { FIRST_RUN_PROMPT, firstRunAgentProblems } from "../dist/first-run.js";
+import { builtinHarnesses, harnessRefusal, loadConfig } from "@duskfleet/core";
+import { defaultHarness } from "../dist/agent-clis.js";
+import {
+  FIRST_RUN_COST_NOTE,
+  FIRST_RUN_PROMPT,
+  firstRunAgentFields,
+  firstRunAgentProblems,
+  firstRunCostNote,
+  harnessFromAnswer,
+} from "../dist/first-run.js";
 import { offersFirstRun } from "../dist/init.js";
 import { testEnv } from "./helpers.js";
 
@@ -44,12 +52,27 @@ function makeRoot(extraYaml = "") {
   return { root, configDir, project: realpathSync(project), agentFile };
 }
 
-function cli(configDir, args, input = "") {
+function cli(configDir, args, input = "", extraEnv = {}) {
   return spawnSync(process.execPath, [cliEntry, ...args], {
-    env: testEnv({ DUSKFLEET_CONFIG: configDir, DUSKFLEET_LOG_LEVEL: "warn", CLAUDE_BIN: fakeBinary }),
+    env: testEnv({ DUSKFLEET_CONFIG: configDir, DUSKFLEET_LOG_LEVEL: "warn", CLAUDE_BIN: fakeBinary, ...extraEnv }),
     encoding: "utf8",
     input,
   });
+}
+
+/**
+ * Env where only Codex CLI is found: no CLAUDE_BIN (undefined is not passed to the child),
+ * Copilot points at a missing file, PATH holds only `node` (no real `claude` of the machine) and
+ * HOME is empty (no ~/.local/bin/claude).
+ */
+function onlyCodexEnv(root) {
+  const bin = path.join(root, "bin");
+  mkdirSync(bin, { recursive: true });
+  symlinkSync(process.execPath, path.join(bin, "node"));
+  const home = path.join(root, "home");
+  mkdirSync(home, { recursive: true });
+  const missing = path.join(root, "no-such-binary");
+  return { CLAUDE_BIN: undefined, COPILOT_BIN: missing, PATH: bin, HOME: home };
 }
 
 test("run --first end to end: registers the project, creates the agent, runs haiku, prints the summary, deletes on n", () => {
@@ -236,6 +259,96 @@ test("run --first refuses a path outside allowed_project_roots with the config h
   } finally {
     rmSync(root, { recursive: true, force: true });
     rmSync(allowed, { recursive: true, force: true });
+  }
+});
+
+for (const [harness, cost, label] of [
+  ["codex", /Codex subscription's usage; no dollar cost is reported/, "Codex CLI"],
+  ["copilot", /premium request of your Copilot plan; no dollar cost is reported/, "GitHub Copilot CLI"],
+]) {
+  test(`run --first --harness ${harness} (#489): an agent with only fields the harness honours, run through the fake CLI`, () => {
+    const { root, configDir, project } = makeRoot();
+    try {
+      const res = cli(configDir, ["run", "--first", "--harness", harness, "--project", project], "\n");
+      assert.equal(res.status, 0, res.stderr + res.stdout);
+      assert.match(res.stdout, new RegExp(`First run on ${label}: `));
+      assert.match(res.stdout, cost);
+      assert.match(res.stdout, new RegExp(`started on "my-app" with ${label}; waiting`));
+      assert.match(res.stdout, /Run \S+: completed/);
+      assert.match(res.stdout, /no cost in dollars reported/);
+      const agent = loadConfig(configDir).agents.get("first-run");
+      assert.equal(agent.harness, harness);
+      assert.equal(agent.permissionMode, "dontAsk", "read-only: Codex's read-only sandbox, Copilot's deny by default");
+      assert.equal(agent.maxBudgetUsd, undefined, "no dollar budget: the harness cannot honour one");
+      assert.equal(agent.model, undefined, "the CLI's own default model");
+      if (harness === "copilot") {
+        assert.deepEqual(agent.allowedTools, ["read"]);
+        assert.deepEqual(agent.disallowedTools, ["write", "shell"]);
+      } else {
+        assert.equal(agent.allowedTools, undefined, "Codex takes no tool rules");
+      }
+      const runs = JSON.parse(cli(configDir, ["runs", "--json"]).stdout);
+      const info = JSON.parse(cli(configDir, ["run-info", runs[0].id, "--json"]).stdout);
+      assert.equal(info.harness, harness);
+      assert.equal(info.modelRequested ?? null, null);
+
+      // A later plain run --first (Claude usable too) reuses the kept agent on its own harness (#490).
+      const again = cli(configDir, ["run", "--first", "--project", project], "\n");
+      assert.equal(again.status, 0, again.stderr + again.stdout);
+      assert.match(again.stdout, /Agent "first-run" already exists/);
+      assert.match(again.stdout, new RegExp(`started on "my-app" with ${label}; waiting`));
+      assert.doesNotMatch(again.stderr, /runs on harness/);
+
+      // An explicit --harness for another CLI is not this step's agent.
+      const other = cli(configDir, ["run", "--first", "--harness", "claude", "--project", project], "\n");
+      assert.equal(other.status, 1, other.stderr + other.stdout);
+      assert.match(other.stderr, new RegExp(`it runs on harness ${harness}, not claude`));
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+}
+
+test("run --first with only Codex CLI found (#489): defaults to it", () => {
+  const { root, configDir, project } = makeRoot();
+  try {
+    const res = cli(configDir, ["run", "--first", "--project", project], "\n", onlyCodexEnv(root));
+    assert.equal(res.status, 0, res.stderr + res.stdout);
+    assert.match(res.stdout, /First run on Codex CLI: /);
+    assert.equal(loadConfig(configDir).agents.get("first-run").harness, "codex");
+
+    // A CLI that is not found is refused by name, before anything is written.
+    const refused = cli(configDir, ["run", "--first", "--harness", "copilot", "--project", project], "", {
+      ...onlyCodexEnv(path.join(root, "again")),
+    });
+    assert.equal(refused.status, 1);
+    assert.match(refused.stderr, /GitHub Copilot CLI is not usable here \(GitHub Copilot CLI: not found/);
+    const unknown = cli(configDir, ["run", "--first", "--harness", "cursor", "--project", project]);
+    assert.equal(unknown.status, 1);
+    assert.match(unknown.stderr, /--harness must be one of claude, copilot, codex, got "cursor"/);
+    assert.equal(JSON.parse(cli(configDir, ["runs", "--json"]).stdout).length, 1, "nothing else run");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("first run harness choice: Claude Code by default when usable, else the first found; answers by name", () => {
+  assert.equal(defaultHarness(["claude", "copilot", "codex"]), "claude");
+  assert.equal(defaultHarness(["copilot", "codex"]), "copilot");
+  assert.equal(defaultHarness(["codex"]), "codex");
+  assert.equal(defaultHarness([]), null);
+  const usable = ["claude", "codex"];
+  assert.equal(harnessFromAnswer("", usable, "claude"), "claude");
+  assert.equal(harnessFromAnswer(null, usable, "claude"), "claude");
+  assert.equal(harnessFromAnswer(" Codex ", usable, "claude"), "codex");
+  assert.equal(harnessFromAnswer("copilot", usable, "claude"), null, "not one of the usable ones");
+  assert.equal(firstRunCostNote("claude"), FIRST_RUN_COST_NOTE);
+});
+
+test("the first-run agent of each harness passes that harness's checks", () => {
+  for (const harness of ["claude", "copilot", "codex"]) {
+    const fields = firstRunAgentFields(harness);
+    assert.equal(harnessRefusal(fields, builtinHarnesses), null, harness);
   }
 });
 

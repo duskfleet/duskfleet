@@ -27,6 +27,11 @@ export interface DoctorReport {
   path: string;
   pathDefaulted: boolean;
   error: string | null;
+  /**
+   * Claude Code was not found but another agent CLI is registered (#489): the lookup error, shown
+   * as optional, never an error nor in the exit code. Null (or absent in older reports) otherwise.
+   */
+  claudeOptional?: string | null;
   configDir: string;
   configSource: ConfigSource;
   configLookup: { env: string | null; repo: string | null; user: string };
@@ -246,6 +251,8 @@ const warn = (name: string, value: string, advice: string[] = []): Check => ({ l
 const looksMissing = (error: string) => /ENOENT|not found|no such file/i.test(error);
 
 function claudeCheck(r: DoctorReport, opts: RenderOpts): Check {
+  // Another agent CLI is registered: Claude Code is optional, like the other missing harnesses.
+  if (r.claudeOptional) return ok("claude", "not installed (optional: another agent CLI is registered)");
   if (r.error) {
     const missing = looksMissing(r.error);
     const advice = [`${r.claudeBinary}: ${oneLine(r.error)}`];

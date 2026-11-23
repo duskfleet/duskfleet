@@ -5,14 +5,14 @@ import { fileURLToPath } from "node:url";
  * Small local CLI. Same orchestration layer as the MCP server, useful for
  * testing without an MCP client.
  *
- *   duskfleet init [--yes] [--mcp claude-code|claude-desktop]   # guided setup (init.ts)
+ *   duskfleet init [--yes] [--mcp claude-code|claude-desktop|copilot|codex]   # guided setup (init.ts)
  *   duskfleet agents
  *   duskfleet agents create <id> [--model <m>] [--budget <usd>] [...] [--force] -- "<system prompt>"
  *   duskfleet projects
  *   duskfleet run --project <id or path> [--agent <id>] [--model <m>] [--no-wait] [--json [--full]] -- "<prompt>"
  *   (every command takes --json and --verbose; run, runs, run-info, agents, projects, schedules and
  *   budgets print a human view without --json)
- *   duskfleet run --first [--project <absolute path>]   # the guided first run of init (first-run.ts)
+ *   duskfleet run --first [--project <absolute path>] [--harness <name>]   # the guided first run of init (first-run.ts)
  *   duskfleet runs [--status <s>] [--limit <n>]
  *   duskfleet run-info <run_id> [--events]
  *   duskfleet repair-subagents # backfill subagent rows of finished runs from their logs
@@ -35,11 +35,14 @@ import {
   assertAgentIdFree,
   type BudgetInput,
   budgetLabel,
+  CODEX_HARNESS,
+  COPILOT_HARNESS,
   ConfigNotFoundError,
   costTotals,
   costTotalsLine,
   createAgentFromFields,
   type DataSource,
+  DEFAULT_HARNESS,
   effectiveAgentFields,
   effectivePath,
   findRepoRoot,
@@ -57,6 +60,7 @@ import {
   resolveConfigDir,
   runCostLabel,
   runLabel,
+  SHIPPED_HARNESSES,
   sandboxSupport,
   setDefaultLogLevel,
   subagentView,
@@ -168,14 +172,14 @@ function usage(asked = false): never {
       "Duskfleet - A fleet of agents for your own machine.",
       "",
       "Usage:",
-      "  duskfleet init [--yes] [--mcp claude-code|claude-desktop]",
+      "  duskfleet init [--yes] [--mcp claude-code|claude-desktop|copilot|codex] [--harness claude|copilot|codex]",
       "  duskfleet agents",
-      "  duskfleet agents create <id> [--model <m>] [--budget <usd>] [--permission-mode <mode>]",
+      "  duskfleet agents create <id> [--harness claude|copilot|codex] [--model <m>] [--budget <usd>] [--permission-mode <mode>]",
       "                          [--allowed-tools <a,b>] [--disallowed-tools <a,b>] [--timeout <minutes>]",
       '                          [--description <text>] [--force] (-- "<system prompt>" | --prompt-file <file>)',
       "  duskfleet projects",
       '  duskfleet run --project <id or path> [--agent <id>] [--model <m>] [--no-wait] [--json [--full]] -- "<prompt>"',
-      "  duskfleet run --first [--project <absolute path>]",
+      "  duskfleet run --first [--project <absolute path>] [--harness claude|copilot|codex]",
       "  duskfleet runs [--status <status>] [--limit <n>] [--agent <id>]",
       "  duskfleet run-info <run_id> [--events]",
       "  duskfleet repair-subagents",
@@ -194,6 +198,8 @@ function usage(asked = false): never {
       "  duskfleet doctor [--probe]",
       "  duskfleet --help",
       "  duskfleet --version",
+      "",
+      "Agents run on Claude Code, GitHub Copilot CLI or Codex CLI: any one of the three is enough.",
       "",
       "Any command takes --verbose: info logs on stderr (default: warnings and errors only,",
       "except serve). DUSKFLEET_LOG_LEVEL=debug|info|warn|error overrides both.",
@@ -214,31 +220,63 @@ function commandUsage(command: string, problem: string): never {
   process.exit(2);
 }
 
+interface AgentCreateDefaults {
+  /** Absent = the harness has no dollar cap (`hardBudgetUsd`): no max_budget_usd is written. */
+  maxBudgetUsd?: number;
+  permissionMode: string;
+  timeoutMinutes: number;
+  /** Absent = the harness takes no tool rules (`toolAllowList`): no allowed_tools is written. */
+  allowedTools?: readonly string[];
+}
+
 /**
- * Defaults of `agents create` when a flag is not given: what makes the README Quick start safe
- * with only `--model haiku` (a small budget, no prompts, file tools plus the common test runners).
+ * Defaults of `agents create` when a flag is not given, per harness (#489), each with only fields
+ * that harness honours. Claude Code: what makes the README Quick start safe with only
+ * `--model haiku` (a small budget, no prompts, file tools plus the common test runners). Copilot:
+ * no dollar budget, its own rules (read, write, the same test runners; Copilot matches a shell
+ * command by its first subcommand, so `npm run` is left out: it would allow every script).
+ * Codex: no budget, no tool rules, the workspace-write sandbox (`acceptEdits`, network off), the
+ * closest to the Claude default (edit files, run the tests).
  */
-const AGENT_CREATE_DEFAULTS = {
-  maxBudgetUsd: 0.5,
-  permissionMode: "dontAsk",
-  timeoutMinutes: 10,
-  allowedTools: [
-    "Read",
-    "Grep",
-    "Glob",
-    "Edit",
-    "Write",
-    "Bash(npm test:*)",
-    "Bash(npm run test:*)",
-    "Bash(npx vitest:*)",
-    "Bash(npx jest:*)",
-    "Bash(pytest:*)",
-    "Bash(python -m pytest:*)",
-    "Bash(cargo test:*)",
-    "Bash(go test:*)",
-    "Bash(make test:*)",
-  ],
-} as const;
+const AGENT_CREATE_DEFAULTS: Readonly<Record<string, AgentCreateDefaults>> = {
+  [DEFAULT_HARNESS]: {
+    maxBudgetUsd: 0.5,
+    permissionMode: "dontAsk",
+    timeoutMinutes: 10,
+    allowedTools: [
+      "Read",
+      "Grep",
+      "Glob",
+      "Edit",
+      "Write",
+      "Bash(npm test:*)",
+      "Bash(npm run test:*)",
+      "Bash(npx vitest:*)",
+      "Bash(npx jest:*)",
+      "Bash(pytest:*)",
+      "Bash(python -m pytest:*)",
+      "Bash(cargo test:*)",
+      "Bash(go test:*)",
+      "Bash(make test:*)",
+    ],
+  },
+  [COPILOT_HARNESS]: {
+    permissionMode: "dontAsk",
+    timeoutMinutes: 10,
+    allowedTools: [
+      "read",
+      "write",
+      "shell(npm test)",
+      "shell(npx vitest)",
+      "shell(npx jest)",
+      "shell(pytest)",
+      "shell(cargo test)",
+      "shell(go test)",
+      "shell(make test)",
+    ],
+  },
+  [CODEX_HARNESS]: { permissionMode: "acceptEdits", timeoutMinutes: 10 },
+};
 
 function csv(value: string): string[] {
   return value
@@ -267,11 +305,18 @@ function parseAgentCreate(args: string[]): { id: string; fields: Record<string, 
       timeout: { type: "string" },
       description: { type: "string" },
       "prompt-file": { type: "string" },
+      harness: { type: "string" },
       force: { type: "boolean", default: false },
     },
   });
   const [id, ...words] = positionals;
   if (!id) commandUsage("agents", 'agents create needs an agent id: agents create <id> -- "<system prompt>"');
+  const harness = values.harness ?? DEFAULT_HARNESS;
+  // Own keys only: a plain-object lookup would let --harness toString or __proto__ through.
+  const defaults = Object.hasOwn(AGENT_CREATE_DEFAULTS, harness) ? AGENT_CREATE_DEFAULTS[harness] : undefined;
+  if (!defaults) {
+    commandUsage("agents", `--harness must be one of ${SHIPPED_HARNESSES.join(", ")}, got "${values.harness}"`);
+  }
   // Same rule as create_agent: bypassPermissions stays a hand-edited, config-gated choice.
   if (values["permission-mode"] === "bypassPermissions") {
     throw new Error("--permission-mode bypassPermissions cannot be set here; edit the agent file by hand");
@@ -285,16 +330,17 @@ function parseAgentCreate(args: string[]): { id: string; fields: Record<string, 
       'agents create needs a system prompt: the persona of the agent, after -- ("...") or in a file with --prompt-file',
     );
   }
+  // A flag the harness cannot honour is still written: createAgentFromFields refuses it by name.
+  const allowed = values["allowed-tools"] !== undefined ? csv(values["allowed-tools"]) : defaults.allowedTools;
+  const budget = values.budget !== undefined ? numberFlag("budget", values.budget) : defaults.maxBudgetUsd;
   const fields: Record<string, unknown> = {
     id,
     description: values.description ?? "",
-    permission_mode: values["permission-mode"] ?? AGENT_CREATE_DEFAULTS.permissionMode,
-    allowed_tools:
-      values["allowed-tools"] !== undefined ? csv(values["allowed-tools"]) : [...AGENT_CREATE_DEFAULTS.allowedTools],
-    timeout_minutes:
-      values.timeout !== undefined ? numberFlag("timeout", values.timeout) : AGENT_CREATE_DEFAULTS.timeoutMinutes,
-    max_budget_usd:
-      values.budget !== undefined ? numberFlag("budget", values.budget) : AGENT_CREATE_DEFAULTS.maxBudgetUsd,
+    ...(harness !== DEFAULT_HARNESS ? { harness } : {}),
+    permission_mode: values["permission-mode"] ?? defaults.permissionMode,
+    ...(allowed !== undefined ? { allowed_tools: [...allowed] } : {}),
+    timeout_minutes: values.timeout !== undefined ? numberFlag("timeout", values.timeout) : defaults.timeoutMinutes,
+    ...(budget !== undefined ? { max_budget_usd: budget } : {}),
     system_prompt: systemPrompt,
   };
   if (values.model) fields["model"] = values.model;
@@ -376,7 +422,7 @@ async function mcpRegister(
   const { entry, form } = mcpServerConfig({
     nodeBin: process.execPath,
     serverEntry: path.join(path.dirname(fileURLToPath(import.meta.url)), "index.js"),
-    claudeBin: app.executor.binary,
+    claudeBin: app.executor?.binary ?? null,
     config: app.config,
     version: packageVersion(),
   });
@@ -391,6 +437,14 @@ async function mcpRegister(
   if (isHostCliTarget(target)) return registerHostCli(app, target, entry, dryRun, yes);
 
   if (target === "claude-code") {
+    // Registering in Claude Code runs `claude mcp add`: without the CLI there is nothing to run
+    // (a Codex-only or Copilot-only machine, #489). Refuse before printing a plan.
+    if (!app.executor) {
+      process.stderr.write(
+        "Registering in Claude Code needs the Claude Code CLI (claude), which was not found; nothing was changed.\nInstall Claude Code, or register with Claude Desktop instead: --target claude-desktop\n",
+      );
+      return 1;
+    }
     const plan = planClaudeCode(entry);
     if (plan.upToDate) {
       out(`Claude Code already has "duskfleet" with this command; nothing to do.`);
@@ -406,7 +460,7 @@ async function mcpRegister(
     out(`will run:\n  ${plan.display}`);
     if (dryRun) return 0;
     if (!yes && !(await confirm("Run it?"))) return 1;
-    return runClaudeCodeAdd(app.executor.binary ?? "claude", plan.args);
+    return runClaudeCodeAdd(app.executor.binary, plan.args);
   }
 
   const plan = planDesktop(desktopConfigPath(), entry);
@@ -575,14 +629,23 @@ async function main(): Promise<void> {
   if (command === "init") {
     const { values } = parseArgs({
       args: rest,
-      options: { yes: { type: "boolean", short: "y", default: false }, mcp: { type: "string" } },
+      options: {
+        yes: { type: "boolean", short: "y", default: false },
+        mcp: { type: "string" },
+        harness: { type: "string" },
+      },
     });
+    if (values.harness !== undefined && !SHIPPED_HARNESSES.includes(values.harness)) {
+      commandUsage("init", `--harness must be one of ${SHIPPED_HARNESSES.join(", ")}, got "${values.harness}"`);
+    }
     const code = await runInit({
       yes: values.yes,
       mcp: (values.mcp as McpTarget | undefined) ?? null,
+      harness: values.harness ?? null,
       entryFileUrl: import.meta.url,
       registerMcp: async (target) => {
-        const app = await bootstrap(import.meta.url, { role: "cli" });
+        // Claude Desktop needs no agent CLI (#490); mcpRegister refuses claude-code without one.
+        const app = await bootstrap(import.meta.url, { role: "cli", allowNoHarness: true });
         try {
           // init --yes, or the user just picked the target: no second confirmation.
           return await mcpRegister(app, target, false, true);
@@ -590,11 +653,15 @@ async function main(): Promise<void> {
           app.close();
         }
       },
-      firstRun: async () => {
+      firstRun: async (usable) => {
         const app = await bootstrap(import.meta.url, { role: "cli" });
         const prompter = stdinPrompter();
         try {
-          return await runFirstRun(app, { askToStart: true }, prompter);
+          return await runFirstRun(
+            app,
+            { askToStart: true, usable, harness: values.harness ?? null, askHarness: process.stdin.isTTY === true },
+            prompter,
+          );
         } finally {
           prompter.close();
           app.close();
@@ -608,7 +675,11 @@ async function main(): Promise<void> {
   // invocation is named (exit 2) before any config load, with or without a config.
   let opened: Awaited<ReturnType<typeof bootstrap>> | null = null;
   const open = async () => {
-    opened ??= await bootstrap(import.meta.url, { role: command === "serve" ? "serve" : "cli" });
+    opened ??= await bootstrap(import.meta.url, {
+      role: command === "serve" ? "serve" : "cli",
+      // mcp register starts no run: Claude Desktop needs no agent CLI (#490).
+      allowNoHarness: command === "mcp",
+    });
     return opened;
   };
   const done = (code = 0) => {
@@ -631,7 +702,11 @@ async function main(): Promise<void> {
       }
       const app = await open();
       const target = {
-        ...serviceTarget(app.executor.binary, app.config.dataDir, app.config.configDir, app.config.dataSource),
+        ...serviceTarget(app.executor?.binary ?? null, app.config.dataDir, app.config.configDir, app.config.dataSource),
+        // Every registered harness's binary, not only Claude Code's (#490): without Claude Code,
+        // serve would otherwise not find a Codex or Copilot outside the unit's PATH and crash-loop.
+        copilotBin: app.harnesses.get("copilot")?.binary ?? null,
+        codexBin: app.harnesses.get("codex")?.binary ?? null,
         // macOS only, default on: serve runs under caffeinate -i -s
         keepAwake: !values["no-keep-awake"],
       };
@@ -747,10 +822,15 @@ async function main(): Promise<void> {
       const app = await open();
       let version: string | null = null;
       let error: string | null = null;
-      try {
-        version = await app.executor.version();
-      } catch (err) {
-        error = String(err);
+      // Claude Code not found while another agent CLI is (#489): optional, not an error, and out of
+      // the exit code (bootstrap throws when no CLI at all is found).
+      const claudeOptional = app.executor ? null : (app.claudeMissing ?? "Claude Code binary not found");
+      if (app.executor) {
+        try {
+          version = await app.executor.version();
+        } catch (err) {
+          error = String(err);
+        }
       }
       const service = serviceStatus(process.platform);
       const lease = app.scheduler.status().lease;
@@ -781,7 +861,16 @@ async function main(): Promise<void> {
       };
       // Opt-in live run: the only part of doctor that costs money, so say so before spending it.
       let probe: ProbeReport | null = null;
-      if (doctorFlags.probe && error) {
+      if (doctorFlags.probe && !app.executor) {
+        process.stderr.write(
+          "doctor --probe skipped: the probe runs Claude Code, which is not installed (nothing was spent)\n",
+        );
+        probe = probeNotRun(
+          "skipped",
+          "Claude Code not installed",
+          "the probe runs a Claude Code session; install Claude Code to probe it",
+        );
+      } else if (doctorFlags.probe && error) {
         process.stderr.write("doctor --probe skipped: claude --version failed, fix that first (nothing was spent)\n");
         probe = probeNotRun(
           "skipped",
@@ -791,7 +880,7 @@ async function main(): Promise<void> {
       } else if (doctorFlags.probe) {
         process.stderr.write(`${PROBE_COST_NOTE}...\n`);
         try {
-          probe = await runProbe(app.executor, app.config.claude);
+          probe = await runProbe(app.executor!, app.config.claude);
           // Ctrl-C / kill: the paid child is cancelled and the temp dir gone; no report.
           if (probe.outcome === "interrupted") return done(130);
         } catch (err) {
@@ -804,13 +893,14 @@ async function main(): Promise<void> {
       }
       const report: DoctorReport = {
         node: process.version,
-        claudeBinary: app.executor.binary,
+        claudeBinary: app.executor?.binary ?? "claude",
         claudeVersion: version,
         // What the claude lookup and every run use; defaulted = the inherited PATH was missing or
         // minimal (GUI-launched host) and the usual install directories were put in front.
         path: effectivePath(process.env["PATH"]),
         pathDefaulted: pathDefaulted(process.env["PATH"]),
         error,
+        claudeOptional,
         configDir: app.config.configDir,
         // env (DUSKFLEET_CONFIG) > repo (config/ found walking up) > user (user-level directory)
         configSource: app.location.source,
@@ -900,8 +990,12 @@ async function main(): Promise<void> {
           "no-wait": { type: "boolean", default: false },
           full: { type: "boolean", default: false },
           first: { type: "boolean", default: false },
+          harness: { type: "string" },
         },
       });
+      if (values.harness !== undefined && !values.first) {
+        throw new Error("--harness belongs to run --first (or agents create); a run uses its agent's harness");
+      }
       if (values.first) {
         // The guided first run of init, again: fixed agent, model and prompt (first-run.ts).
         if (
@@ -913,12 +1007,25 @@ async function main(): Promise<void> {
           values["no-wait"] ||
           values.full
         ) {
-          throw new Error("run --first takes only --project <absolute path>; agent, model and prompt are fixed");
+          throw new Error(
+            "run --first takes only --project <absolute path> and --harness <name>; agent, model and prompt are fixed",
+          );
         }
         const app = await open();
         const prompter = stdinPrompter();
         try {
-          return done(await runFirstRun(app, { askToStart: false, projectPath: values.project }, prompter));
+          return done(
+            await runFirstRun(
+              app,
+              {
+                askToStart: false,
+                projectPath: values.project,
+                harness: values.harness ?? null,
+                askHarness: process.stdin.isTTY === true,
+              },
+              prompter,
+            ),
+          );
         } finally {
           prompter.close();
         }

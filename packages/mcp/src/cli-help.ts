@@ -16,10 +16,11 @@ interface CommandHelp {
 
 export const COMMAND_HELP: Readonly<Record<string, CommandHelp>> = {
   init: {
-    usage: ["duskfleet init [--yes] [--mcp claude-code|claude-desktop]"],
+    usage: ["duskfleet init [--yes] [--mcp claude-code|claude-desktop] [--harness claude|copilot|codex]"],
     options: [
-      "-y, --yes        ask nothing (scripts, CI)",
-      "--mcp <target>   register the MCP server in claude-code or claude-desktop",
+      "-y, --yes          ask nothing (scripts, CI)",
+      "--mcp <target>     register the MCP server in claude-code or claude-desktop",
+      "--harness <name>   the agent CLI of the guided first run (default: claude when usable, else the first found)",
     ],
     example: "duskfleet init",
     doc: `${DOCS}/cli.md#init`,
@@ -27,16 +28,18 @@ export const COMMAND_HELP: Readonly<Record<string, CommandHelp>> = {
   agents: {
     usage: [
       "duskfleet agents [--json]",
-      "duskfleet agents create <id> [--model <m>] [--budget <usd>] [--permission-mode <mode>]",
-      "                       [--allowed-tools <a,b>] [--disallowed-tools <a,b>] [--timeout <minutes>]",
-      '                       [--description <text>] [--force] [--json] (-- "<system prompt>" | --prompt-file <file>)',
+      "duskfleet agents create <id> [--harness claude|copilot|codex] [--model <m>] [--budget <usd>]",
+      "                       [--permission-mode <mode>] [--allowed-tools <a,b>] [--disallowed-tools <a,b>]",
+      '                       [--timeout <minutes>] [--description <text>] [--force] [--json] (-- "<system prompt>" | --prompt-file <file>)',
     ],
     options: [
       "--json                      the agents (or { created, overrode, agent }) as JSON on stdout",
-      "-m, --model <m>             model of the agent (none: the Claude Code default)",
-      "--budget <usd>              max_budget_usd per run (default 0.5)",
-      "--permission-mode <mode>    default dontAsk",
-      "--allowed-tools <a,b>       default: file tools and the common test runners",
+      "--harness <name>            the agent CLI: claude (default), copilot or codex; the defaults follow it",
+      "-m, --model <m>             model of the agent (none: the CLI's default)",
+      "--budget <usd>              max_budget_usd per run (claude: default 0.5; refused by copilot and codex)",
+      "--permission-mode <mode>    default dontAsk (codex: acceptEdits, the workspace-write sandbox)",
+      "--allowed-tools <a,b>       default: file tools and the common test runners, in the harness's own rules",
+      "                            (codex: none, it takes no tool rules)",
       "--disallowed-tools <a,b>",
       "--timeout <minutes>         default 10",
       "--description <text>",
@@ -55,6 +58,7 @@ export const COMMAND_HELP: Readonly<Record<string, CommandHelp>> = {
   run: {
     usage: [
       'duskfleet run --project <id or path> [--agent <id>] [--model <m>] [--title <text>] [--no-wait] [--json [--full]] -- "<prompt>"',
+      "duskfleet run --first [--project <absolute path>] [--harness claude|copilot|codex]",
     ],
     options: [
       "-p, --project <id or path>   registered project id or absolute path",
@@ -65,6 +69,8 @@ export const COMMAND_HELP: Readonly<Record<string, CommandHelp>> = {
       "--no-wait                    print the run id and exit (the run is not recorded once the CLI exits)",
       "--json                       the run record as JSON on stdout (trimmed: no argv, no raw result)",
       "--full                       the whole run record as JSON (implies --json)",
+      "--first                      the guided first run of init (read-only first-run agent, fixed prompt)",
+      "--harness <name>             with --first: the agent CLI (default: claude when usable, else the first found)",
     ],
     example: 'duskfleet run --project my-app --agent fixer --model haiku -- "Fix the failing test"',
     doc: `${DOCS}/cli.md#first-run`,

@@ -8,7 +8,7 @@ repository (after `npm run build`) the same command is `npm run cli -- <command>
 
 ```bash
 npx duskfleet init                                       # guided setup; see "init" below
-npx duskfleet init --yes [--mcp claude-code|claude-desktop]   # the same without prompts (scripts, CI)
+npx duskfleet init --yes [--mcp claude-code|claude-desktop|copilot|codex]   # the same without prompts (scripts, CI)
 npx duskfleet doctor                                     # Claude binary, version, config and data paths
 npx duskfleet doctor --probe                             # plus one real hello run on haiku (costs cents)
 npx duskfleet run --project ~/Documents/Projects/my-app -- "Add a README section describing the build"
@@ -144,44 +144,85 @@ both defaults and `--verbose`
 written or loaded stops with the fix and exit 1:
 
 1. **Node**: the version (Node 24+ is checked before any command runs).
-2. **Claude Code**: the binary (same lookup as runs: `CLAUDE_BIN`, `claude.binary`, `PATH`,
-   `~/.local/bin/claude`), its version, and the login from `claude auth status --json`. Not
-   installed, not starting or not logged in does **not** stop `init`: the problem is printed
-   here, the config is written anyway, the fix is repeated after the summary (`Claude Code is not
-   logged in: run claude auth login, then check it with: duskfleet doctor --probe`) and the exit
-   code is 0. Before the login, `doctor`, `agents`, `projects`, `runs`, `schedules`, `budgets`,
-   `agents create` and the dashboard work; `run`, `serve` and scheduled runs fail with
-   `auth_required` and the same fix (`errorCode`, [what a run records](#what-a-run-records)).
+2. **Agent CLIs**: one line per CLI Duskfleet has a [harness](harnesses.md) for (Claude Code,
+   GitHub Copilot CLI, Codex CLI), found or not, with its version and binary (same lookup as
+   runs: `CLAUDE_BIN`, `claude.binary`, `PATH`, `~/.local/bin/claude`; `COPILOT_BIN` /
+   `copilot.binary` / `PATH`; `CODEX_BIN` / `codex.binary` / `PATH`), and the login where a
+   verified command exists:
+
+   | CLI | Login check | Usable when |
+   |---|---|---|
+   | Claude Code | `claude auth status --json` | found, starts, logged in |
+   | Codex CLI | `codex login status` (`Logged in using ChatGPT` on codex-cli 0.167.1); any other answer is reported as `login not checked`, never as logged out | found, starts |
+   | GitHub Copilot CLI | none verified yet: `login not checked` | found, starts |
+
+   **Any one usable CLI is enough**: the step names the missing ones as optional
+   (`Optional, not installed: ...`), not as a failure. None usable does **not** stop `init`
+   either: the problem is printed here, the config is written anyway, the fix is repeated after
+   the summary (`Claude Code is not logged in: run claude auth login, then check it with:
+   duskfleet doctor --probe`, or how to install one) and the exit code is 0. While a CLI is
+   installed but not usable (logged out), `doctor`, `agents`, `projects`, `runs`, `schedules`,
+   `budgets`, `agents create` and the dashboard work; `run`, `serve` and scheduled runs fail (a
+   logged-out Claude with `auth_required` and the same fix, `errorCode`,
+   [what a run records](#what-a-run-records)). With no agent CLI installed at all, only `init`,
+   `mcp register --target claude-desktop` and the dashboard work; every other command stops
+   with the Claude Code lookup error until one is installed.
+   With Claude Code missing but another CLI present, every command starts and agents on that
+   CLI run; a Claude Code agent is refused as an unregistered harness. When you named a Claude
+   Code binary (`claude.binary` or `CLAUDE_BIN`) and the lookup still finds none, that is a
+   misconfiguration, not a missing CLI: every command stops with the lookup error, whatever other
+   CLI is installed.
 3. **Config and data**: creates the user-level config directory with a starter `duskfleet.yaml`
    and the data directory ([where config and data live](configuration.md#where-config-and-data-live)).
    A config that already exists (user-level, a checkout's `config/`, or `DUSKFLEET_CONFIG`) is
    reported and left untouched, so running `init` twice is safe. `DUSKFLEET_CONFIG` pointing at
    a directory without `duskfleet.yaml` is an error: `init` writes only the user-level directory.
-4. **MCP registration** (optional): on a terminal it asks `Register the MCP server in Claude Code
-   / Claude Desktop / skip?` and then does what `mcp register --target ... --yes` does (preview,
-   backup of an existing file, write; see [MCP server](mcp-server.md)).
-   Then, on a terminal only, it offers the [guided first run](#guided-first-run) (a real run
-   on haiku that costs cents; the answer defaults to no).
-5. What was created, where, and the next commands: `doctor`, `agents create`, `run`. Duskfleet
-   ships no agent; the only one `init` can create is `first-run`, and only when you accept the
-   guided first run.
+4. **MCP registration** (optional): on a terminal it asks `Register the MCP server?
+   [claude-code/claude-desktop/skip]` (the hosts `mcp register` supports) and then does what
+   `mcp register --target ... --yes` does (preview, backup of an existing file, write; see
+   [MCP server](mcp-server.md)). A failed registration (for example `claude-code` without the
+   Claude Code CLI) is reported, repeated after the summary with the command to retry, and
+   does not stop `init`.
+   Then, on a terminal only, it offers the [guided first run](#guided-first-run) on one of the
+   usable CLIs (a real run, its cost stated first; the answer defaults to no).
+5. What was created, where, and the next commands: `doctor`, `agents create`, `run` (with
+   `--harness <name>`: the CLI given to `init --harness` when it is usable, else none for Claude
+   Code, else the first usable CLI). Duskfleet ships no agent; the only one
+   `init` can create is `first-run`, and only when you accept the guided first run.
 
-`init --yes` asks nothing: steps 1-3 and the summary, step 4 only with `--mcp claude-code` or
-`--mcp claude-desktop`; without `--mcp` it never writes a Claude config file. It too succeeds
-without a Claude login, so a script can prepare a machine before anyone logs in; a config that
-cannot be written or loaded, or a failed `--mcp` registration, exits non-zero. On something that is not a terminal (a script) without `--yes`, step 4 is
+`init --yes` asks nothing: steps 1-3 and the summary, step 4 only with `--mcp <host>`
+(`claude-code`, `claude-desktop`, `copilot` or `codex`, the targets of `mcp register`); without
+`--mcp` it never writes a host's config. `--harness
+claude|copilot|codex` picks the guided first run's CLI without asking. It too succeeds
+without a login, so a script can prepare a machine before anyone logs in; a config that
+cannot be written or loaded exits non-zero at once. A failed `--mcp` registration (or a
+target picked at the prompt) does not stop `init`: it is printed on stderr, the first run and the
+summary still follow, the failure is repeated after the summary, and `init` exits 1 so a script
+sees that nothing was registered. A skipped or declined registration exits 0. On something that is not a terminal (a script) without `--yes`, step 4 is
 skipped.
 
 ## Guided first run
 
 The last, optional step of an interactive `init` (never under `--yes`, and skipped with one line
-when step 2 found Claude Code missing or logged out), and `run --first` to repeat it at any time
-(same code). **It costs real money**: one run on haiku, usually a few cents, stated before you
+when step 2 found no usable agent CLI), and `run --first` to repeat it at any time
+(same code). **It is a real run**, and it says what it costs in the CLI's own terms before you
 answer:
 
 ```text
 Try a first run on a project of yours? It creates a read-only "first-run" agent, runs it with haiku and costs cents. [y/N]
 ```
+
+| CLI | Cost stated |
+|---|---|
+| Claude Code (`claude`) | one run on haiku, usually a few cents |
+| GitHub Copilot CLI (`copilot`) | a premium request of your Copilot plan (its default model); no dollar cost is reported |
+| Codex CLI (`codex`) | your Codex subscription's usage (its default model); no dollar cost is reported |
+
+The CLI is Claude Code when it is usable, else the first usable one in that order. With several
+usable, a terminal asks `Run it on which agent CLI? [claude/codex] (default claude)` after `y`
+(and restates the cost when the answer changes the CLI); `--harness <name>` (`init` or `run
+--first`) picks it without asking, and a CLI that is not usable here is refused with its step-2
+line, before anything is written.
 
 On `y` it asks for the absolute path of a project directory (`run --first --project <path>`
 skips that question), then:
@@ -199,10 +240,16 @@ skips that question), then:
    step's promise: `permission_mode: dontAsk`, Edit, Write and NotebookEdit disallowed, no
    write, Bash or MCP tool allowed, `inherit_mcp` off, a budget of at most $0.25, and no binding
    to another project. Otherwise the step stops before registering anything and names what
-   to change.
-4. Runs it with `--model haiku` and the prompt `Describe this project in three sentences. Do not
+   to change. On the other CLIs the agent has only fields that CLI honours: Copilot gets
+   `harness: copilot`, no model, no budget, `allowed_tools: [read]`, `disallowed_tools: [write,
+   shell]`; Codex gets `harness: codex`, no model, no budget, no tool rules, and `dontAsk` (its
+   read-only sandbox). Without `--harness`, an existing `first-run` whose CLI is usable here
+   keeps its harness (the step asks no CLI question); an existing `first-run` on another harness
+   than the one `--harness` names is refused.
+4. Runs it (with `--model haiku` on Claude Code, the CLI's default model elsewhere) and the
+   prompt `Describe this project in three sentences. Do not
    change any file.`, waits, and prints the status, the duration, the tokens, the cost (or API
-   value on a subscription), what the agent said, and `duskfleet run-info <run id>` /
+   value on a subscription; "no cost in dollars reported" on Copilot and Codex), what the agent said, and `duskfleet run-info <run id>` /
    `duskfleet dashboard` to see more. A run that needs review gets one line saying why, with a
    link to [the dashboard page](dashboard.md). When the run is refused before it starts (agent
    or project busy, a daily cap, a spent monthly budget), the step prints the reason, runs
@@ -212,7 +259,8 @@ skips that question), then:
    its agent id either way. An agent that existed before is never offered for deletion.
 
 `run --first` exits 0 when the run completed, 1 when the path or the run was refused or the run did not
-complete. It takes no `--agent`, `--model` or prompt: those are fixed.
+complete. It takes no `--agent`, `--model` or prompt: those are fixed; only `--project` and
+`--harness`.
 
 ## First run
 
@@ -270,12 +318,18 @@ and secret-looking values are refused in every field, and the file is removed ag
 config no longer loads. An existing id is refused unless `--force` is given. For a **link**
 agent use `create_agent` over MCP ([Agents](agents.md)).
 
+The defaults follow `--harness` (Claude Code when omitted), and each harness gets only fields
+it can honour, so `agents create fixer --harness codex -- "<prompt>"` works without more flags.
+A flag the harness cannot honour is refused by name (`max_budget_usd is not supported by
+harness codex`), as for `create_agent`; see [Harnesses](harnesses.md).
+
 | Flag | Frontmatter field | Default when omitted |
 |---|---|---|
-| `--model <m>` | `model` | none: the Claude Code default, which can be the most expensive model |
-| `--budget <usd>` | `max_budget_usd` | `0.5` |
-| `--permission-mode <mode>` | `permission_mode` | `dontAsk` (`bypassPermissions` is refused, as in `create_agent`) |
-| `--allowed-tools <a,b>` | `allowed_tools` | `Read`, `Grep`, `Glob`, `Edit`, `Write` and `Bash(...)` for `npm test`, `npm run test`, `npx vitest`, `npx jest`, `pytest`, `python -m pytest`, `cargo test`, `go test`, `make test` |
+| `--harness <name>` | `harness` | `claude`; or `copilot`, `codex` (written only when not `claude`) |
+| `--model <m>` | `model` | none: the CLI's default, which can be the most expensive model |
+| `--budget <usd>` | `max_budget_usd` | `0.5` on Claude Code; none on Copilot and Codex (refused there: no dollar cap) |
+| `--permission-mode <mode>` | `permission_mode` | `dontAsk` (`bypassPermissions` is refused, as in `create_agent`); Codex: `acceptEdits`, its workspace-write sandbox (network off) |
+| `--allowed-tools <a,b>` | `allowed_tools` | Claude Code: `Read`, `Grep`, `Glob`, `Edit`, `Write` and `Bash(...)` for `npm test`, `npm run test`, `npx vitest`, `npx jest`, `pytest`, `python -m pytest`, `cargo test`, `go test`, `make test`. Copilot, in its own rules: `read`, `write`, `shell(npm test)`, `shell(npx vitest)`, `shell(npx jest)`, `shell(pytest)`, `shell(cargo test)`, `shell(go test)`, `shell(make test)` (no `npm run`: Copilot matches the first subcommand only, so it would allow every script). Codex: none (it takes no tool rules) |
 | `--disallowed-tools <a,b>` | `disallowed_tools` | none |
 | `--timeout <minutes>` | `timeout_minutes` | `10` |
 | `--description <text>` | `description` | empty |

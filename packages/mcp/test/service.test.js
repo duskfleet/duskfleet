@@ -185,6 +185,35 @@ test("systemd user unit: quoted ExecStart, Restart=always, log append, no CLAUDE
   assert.match(u.content, /^Environment="PATH=\/opt\/node\/bin:\/usr\/local\/bin/m);
 });
 
+test("units export the other harnesses' binaries and put their directories on PATH (#490)", () => {
+  const t = {
+    ...base,
+    claudeBin: null,
+    codexBin: "/home/me/.nvm/versions/node/v24/bin/codex",
+    copilotBin: "/home/me/.npm-global/bin/copilot",
+  };
+  const mac = renderService({ ...t, platform: "darwin" });
+  assert.match(
+    mac.content,
+    /<key>CODEX_BIN<\/key><string>\/home\/me\/\.nvm\/versions\/node\/v24\/bin\/codex<\/string>/,
+  );
+  assert.match(mac.content, /<key>COPILOT_BIN<\/key><string>\/home\/me\/\.npm-global\/bin\/copilot<\/string>/);
+  assert.doesNotMatch(mac.content, /CLAUDE_BIN/);
+  assert.match(
+    mac.content,
+    /<key>PATH<\/key><string>\/opt\/node\/bin:\/home\/me\/\.npm-global\/bin:\/home\/me\/\.nvm\/versions\/node\/v24\/bin:/,
+  );
+  const lin = renderService({ ...t, platform: "linux" });
+  assert.match(lin.content, /^Environment="CODEX_BIN=\/home\/me\/\.nvm\/versions\/node\/v24\/bin\/codex"$/m);
+  assert.match(lin.content, /^Environment="COPILOT_BIN=\/home\/me\/\.npm-global\/bin\/copilot"$/m);
+  assert.match(
+    lin.content,
+    /^Environment="PATH=\/opt\/node\/bin:\/home\/me\/\.npm-global\/bin:\/home\/me\/\.nvm\/versions\/node\/v24\/bin:\/usr\/local\/bin/m,
+  );
+  // None registered: the unit is unchanged.
+  assert.doesNotMatch(renderService({ ...base, platform: "linux" }).content, /CODEX_BIN|COPILOT_BIN/);
+});
+
 test("Task Scheduler XML: logon trigger, no time limit, restart on failure, cmd wrapper appends the log", () => {
   const u = renderService({
     ...base,

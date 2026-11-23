@@ -19,7 +19,10 @@ Paths below are the Linux and macOS defaults (`~/.config/duskfleet`, `~/.local/s
 
 - Node.js **24 or newer** (`node --version`).
 - [Claude Code](https://code.claude.com/docs/en/overview) installed and **logged in** for
-  your user: `claude auth status` says so; `claude auth login` logs in.
+  your user: `claude auth status` says so; `claude auth login` logs in. GitHub Copilot CLI or
+  Codex CLI works too, **any one of the three is enough**; this page uses Claude Code (on
+  another CLI, create the agent with `agents create fixer --harness copilot|codex -- "..."`,
+  [CLI](cli.md#agents-create)).
 - macOS or Linux ([platform support](../README.md#platform-support)).
 
 Nothing to clone: the CLI comes from npm. Install it only from the
@@ -32,15 +35,18 @@ npx duskfleet init --yes
 
 ```text
 [1/5] Node v24.x.y: ok
-[2/5] Claude Code 2.x.y (Claude Code) (/home/<you>/.local/bin/claude): logged in
+[2/5] Agent CLIs: Claude Code usable
+      Claude Code 2.x.y (Claude Code) (/home/<you>/.local/bin/claude): logged in (claude.ai)
+      GitHub Copilot CLI: not found (optional; harness: copilot)
+      Codex CLI: not found (optional; harness: codex)
 [3/5] Config: created /home/<you>/.config/duskfleet/duskfleet.yaml
       Data directory: /home/<you>/.local/share/duskfleet
 [4/5] MCP registration: skipped (later: duskfleet mcp register --target claude-code|claude-desktop)
 [5/5] Done. Created: ...
 ```
 
-From 0.2.0, a `not logged in` on line 2 does not stop `init`; it writes the config and ends with
-the command to log in. Duskfleet 0.1.0 stops at line 2 instead and writes nothing: run
+From 0.2.0, a `not logged in` in step 2 does not stop `init`; it writes the config and ends with
+the command to log in. The CLIs that are not found are optional: one usable CLI is enough. Duskfleet 0.1.0 stops at line 2 instead and writes nothing: run
 `claude auth login`, then `init` again. Either way, log in before step 5. Without `--yes`, `init`
 asks whether to register the MCP server (step 5 here) and offers a guided first run
 ([`init`](cli.md#init)).

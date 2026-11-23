@@ -47,6 +47,13 @@ export interface ServiceTarget {
   logPath: string;
   /** Resolved claude binary, exported as CLAUDE_BIN so the service never depends on PATH. */
   claudeBin: string | null;
+  /**
+   * Resolved binaries of the other registered harnesses (#490), exported as COPILOT_BIN / CODEX_BIN
+   * with their directories on PATH: a CLI under an npm-global or nvm directory is not on the
+   * unit's PATH, and without Claude Code it is the only harness `serve` can start with.
+   */
+  copilotBin?: string | null;
+  codexBin?: string | null;
   home?: string;
   /** Windows only: account the task runs as; defaults to the current user. */
   user?: string;
@@ -143,9 +150,18 @@ export function assertNotNpxCache(cliEntry: string): void {
 
 function searchPath(t: ServiceTarget, extra: string[]): string {
   const dirs = [path.dirname(t.nodeBin)];
-  if (t.claudeBin) dirs.push(path.dirname(t.claudeBin));
+  for (const [, bin] of binEnv(t)) dirs.push(path.dirname(bin));
   dirs.push(...extra);
   return [...new Set(dirs)].join(":");
+}
+
+/** The agent CLI binaries the unit exports, so the service never depends on PATH to find them. */
+function binEnv(t: ServiceTarget): Array<[string, string]> {
+  const env: Array<[string, string]> = [];
+  if (t.claudeBin) env.push(["CLAUDE_BIN", t.claudeBin]);
+  if (t.copilotBin) env.push(["COPILOT_BIN", t.copilotBin]);
+  if (t.codexBin) env.push(["CODEX_BIN", t.codexBin]);
+  return env;
 }
 
 export function renderService(t: ServiceTarget): ServiceUnit {
@@ -162,7 +178,7 @@ export function renderService(t: ServiceTarget): ServiceUnit {
     const env: Array<[string, string]> = [
       ["PATH", searchPath(t, ["/opt/homebrew/bin", "/usr/local/bin", "/usr/bin", "/bin"])],
     ];
-    if (t.claudeBin) env.push(["CLAUDE_BIN", t.claudeBin]);
+    env.push(...binEnv(t));
     if (t.configDir) env.push(["DUSKFLEET_CONFIG", t.configDir]);
     if (t.dataDir) env.push(["DUSKFLEET_DATA", t.dataDir]);
     const keepAwake = t.keepAwake !== false;
@@ -231,7 +247,7 @@ export function renderService(t: ServiceTarget): ServiceUnit {
       "Restart=always",
       "RestartSec=5",
       `Environment=${quote(`PATH=${pathEnv}`)}`,
-      ...(t.claudeBin ? [`Environment=${quote(`CLAUDE_BIN=${t.claudeBin}`)}`] : []),
+      ...binEnv(t).map(([k, v]) => `Environment=${quote(`${k}=${v}`)}`),
       ...(t.configDir ? [`Environment=${quote(`DUSKFLEET_CONFIG=${t.configDir}`)}`] : []),
       ...(t.dataDir ? [`Environment=${quote(`DUSKFLEET_DATA=${t.dataDir}`)}`] : []),
       `StandardOutput=append:${t.logPath}`,

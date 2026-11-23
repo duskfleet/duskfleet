@@ -15,7 +15,7 @@ async function main(): Promise<void> {
 
   let version: string | null = null;
   try {
-    version = await app.executor.version();
+    if (app.executor) version = await app.executor.version();
   } catch (err) {
     log.warn("could not read claude version", { err: String(err) });
   }
@@ -26,7 +26,12 @@ async function main(): Promise<void> {
     },
     runs: app.runs,
     scheduler: app.scheduler,
-    executorInfo: { name: app.executor.name, binary: app.executor.binary, version },
+    // Claude Code not found but another agent CLI is (#489): say so instead of a path.
+    executorInfo: {
+      name: app.executor?.name ?? "claude-code",
+      binary: app.executor?.binary ?? "claude (not found)",
+      version,
+    },
   });
   // The host (Claude Desktop, Claude Code) keeps this process alive, so it can tick.
   // If a `duskfleet serve` is also running, the SQLite lease decides who fires.
