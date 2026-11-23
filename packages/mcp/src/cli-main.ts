@@ -46,6 +46,7 @@ import {
   effectiveAgentFields,
   effectivePath,
   findRepoRoot,
+  harnessGrantWarnings,
   harnessOf,
   type LogLevel,
   linkProjectPath,
@@ -691,6 +692,8 @@ async function main(): Promise<void> {
           );
         }
         print({ created: true, overrode: existing?.source ?? null, agent: shown }, renderAgentCreated);
+        // What a Codex agent's codex_network / env_passthrough grant (#488): on stderr, never a refusal.
+        for (const w of harnessGrantWarnings(agent)) process.stderr.write(`warning: ${w}\n`);
         return done();
       }
       if (sub) commandUsage("agents", `unknown agents subcommand: ${sub}`);

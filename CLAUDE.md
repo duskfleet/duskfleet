@@ -228,8 +228,8 @@ npm workspaces, one `config/` and one SQLite database shared by three deliverabl
   `packages/mcp/test/fixtures/copilot/`. `test/helpers.js` sets `COPILOT_BIN` to `fake-copilot.js`
   so tests never launch a real `copilot`; `childEnv` drops `COPILOT_BIN`, the adapter `COPILOT_ALLOW_ALL`.
   Codex (`harness: codex`, #50, `execution/codex.ts`, parser `codex-jsonl.ts`) has no tool rules,
-  only its sandbox (`dontAsk` = `-s read-only`, `acceptEdits` = `-s workspace-write`, network always
-  off), always `--ignore-user-config --ignore-rules`, the body as `-c developer_instructions` (a
+  only its sandbox (`dontAsk` = `-s read-only`, `acceptEdits` = `-s workspace-write`, network off
+  unless `codex_network: true`, #488: `acceptEdits` only, every host, the `networkModes` capability), always `--ignore-user-config --ignore-rules`, the body as `-c developer_instructions` (a
   TOML string, `tomlString`); Codex picks the session id (`thread.started`). Resume (#485) is
   `codex exec resume ... <thread_id> -`, always with `-c sandbox_mode` from `permission_mode` (resume
   has no `-s`; never the resume form without it); an unknown thread is `sessionNotFound`

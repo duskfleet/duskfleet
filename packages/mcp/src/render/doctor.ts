@@ -179,6 +179,8 @@ export interface HarnessReport {
   unknown: { agentId: string; harness: string }[];
   /** Harnesses Duskfleet ships whose CLI was not found (`copilot` without a binary); absent in older reports. */
   notInstalled?: string[];
+  /** Agents with `codex_network: true` (#488): their runs reach every host; absent in older reports. */
+  networked?: string[];
 }
 
 /**
@@ -201,7 +203,14 @@ function harnessCheck(h: HarnessReport): Check {
         : `agent ${u.agentId} sets harness: ${u.harness}, which is not registered: its runs are refused`,
     ),
   ];
-  return advice.length ? warn("harnesses", value, advice) : ok("harnesses", value);
+  // Not a problem to fix, a grant to keep in view: an ok check still shows it.
+  const networked = h.networked ?? [];
+  const grant = networked.length
+    ? [
+        `codex_network: ${networked.join(", ")}: every host, with the credentials of the user who runs Duskfleet (gh login, SSH keys); see docs/security.md`,
+      ]
+    : [];
+  return advice.length ? warn("harnesses", value, [...advice, ...grant]) : ok("harnesses", value, grant);
 }
 
 function sandboxCheck(s: SandboxReport): Check {
