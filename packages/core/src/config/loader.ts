@@ -189,6 +189,7 @@ const agentFrontmatterSchema = z.object({
   sandbox: z.boolean().optional(),
   sandbox_allowed_domains: sandboxAllowedDomainsSchema.optional(),
   sandbox_weaker_network_isolation: z.boolean().optional(),
+  codex_network: z.boolean().optional(),
   // A name only; whether a harness of that name is registered is checked on create / update and at
   // run start, never on load (the loader does not know the executors).
   harness: harnessNameSchema.optional(),
@@ -442,6 +443,7 @@ export function loadAgentDir(
     if (fm.sandbox_allowed_domains !== undefined) agent.sandboxAllowedDomains = fm.sandbox_allowed_domains;
     if (fm.sandbox_weaker_network_isolation !== undefined)
       agent.sandboxWeakerNetworkIsolation = fm.sandbox_weaker_network_isolation;
+    if (fm.codex_network !== undefined) agent.codexNetwork = fm.codex_network;
     if (fm.harness !== undefined) agent.harness = fm.harness;
     agents.set(id, agent);
   }

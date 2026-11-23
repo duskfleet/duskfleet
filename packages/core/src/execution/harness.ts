@@ -49,6 +49,11 @@ export interface HarnessCapabilities {
   /** `sandbox`, `sandbox_allowed_domains`, `sandbox_weaker_network_isolation`. */
   sandbox: boolean;
   /**
+   * `permission_mode` values under which `codex_network: true` (network on, every host) is honoured
+   * (issue #488). Absent or empty = the field is refused on this harness.
+   */
+  networkModes?: readonly PermissionMode[];
+  /**
    * Why one `allowed_tools` / `disallowed_tools` entry is refused, or null when the CLI takes it
    * as written. Absent = every entry is accepted (Claude Code validates its own rules).
    */
@@ -69,6 +74,7 @@ export const HARNESS_CAPABILITY_KEYS = [
   "skills",
   "effort",
   "sandbox",
+  "networkModes",
 ] as const satisfies readonly (keyof HarnessCapabilities)[];
 
 /**
@@ -123,7 +129,8 @@ export const CODEX_HARNESS = "codex";
  * (`dontAsk` = read-only, `acceptEdits` = workspace-write, network off), no dollars (every run
  * `unpriced`), no project-defined agents (nothing in the CLI loads one from a project folder).
  * Resumable (#485): `codex exec resume` with `-c sandbox_mode` keeps the agent's sandbox on the
- * resumed turn; `resume_budget_usd` stays refused (no `hardBudgetUsd`).
+ * resumed turn; `resume_budget_usd` stays refused (no `hardBudgetUsd`). `codex_network: true`
+ * (#488) only with `acceptEdits`: what `read-only` plus network means in Codex was never checked.
  */
 export const CODEX_CAPABILITIES: HarnessCapabilities = Object.freeze({
   toolAllowList: false,
@@ -138,7 +145,40 @@ export const CODEX_CAPABILITIES: HarnessCapabilities = Object.freeze({
   skills: false,
   effort: true,
   sandbox: false,
+  networkModes: ["acceptEdits"] as const,
 });
+
+/**
+ * What `codex_network: true` grants (issue #488), verified by hand on codex-cli 0.167.1
+ * (docs/security.md "Codex agents and the network").
+ */
+export const CODEX_NETWORK_GRANT =
+  "codex_network: true gives every command of this agent's runs the network, every host (Codex has no host allow-list and no tool allow-list), acting with the credentials of the user who runs Duskfleet: the gh keyring login, SSH keys, git credential helpers. It can push to every repository that login can. Prefer a dedicated machine user or a scoped login, and isolated worktrees (docs/security.md)";
+
+/**
+ * Codex drops every variable whose name contains KEY, SECRET or TOKEN from the environment of the
+ * commands a run executes (verified on codex-cli 0.167.1, #488; no `shell_environment_policy`
+ * override tried brought one back).
+ */
+const CODEX_DROPPED_ENV = /KEY|SECRET|TOKEN/i;
+
+/**
+ * Advice that never refuses the write, for create / update and `agents create`: what a Codex
+ * agent's `codex_network` grants, and the `env_passthrough` names Codex does not hand to commands.
+ */
+export function harnessGrantWarnings(
+  agent: Pick<AgentDefinition, "harness" | "codexNetwork" | "envPassthrough">,
+): string[] {
+  if (harnessOf(agent) !== CODEX_HARNESS) return [];
+  const warnings: string[] = [];
+  if (agent.codexNetwork) warnings.push(CODEX_NETWORK_GRANT);
+  const dropped = (agent.envPassthrough ?? []).filter((name) => CODEX_DROPPED_ENV.test(name));
+  if (dropped.length)
+    warnings.push(
+      `env_passthrough ${dropped.join(", ")}: Codex removes variables whose name contains KEY, SECRET or TOKEN from the environment of the commands it runs, so ${dropped.length === 1 ? "this one has" : "these have"} no effect inside a Codex run (docs/agents.md "Codex agents")`,
+    );
+  return warnings;
+}
 
 /** The harnesses Duskfleet ships an adapter for, in the order `doctor` lists them. */
 export const SHIPPED_HARNESSES: readonly string[] = [DEFAULT_HARNESS, COPILOT_HARNESS, CODEX_HARNESS];
@@ -180,6 +220,7 @@ type FitFields = Pick<
   | "sandbox"
   | "sandbox_allowed_domains"
   | "sandbox_weaker_network_isolation"
+  | "codex_network"
 >;
 
 /**
@@ -227,6 +268,14 @@ export function harnessRefusal(
   if (spec.sandbox_allowed_domains !== undefined && !caps.sandbox) return refuse("sandbox_allowed_domains");
   if (spec.sandbox_weaker_network_isolation !== undefined && !caps.sandbox)
     return refuse("sandbox_weaker_network_isolation");
+  if (spec.codex_network === true) {
+    const modes = caps.networkModes ?? [];
+    if (!modes.length) return refuse("codex_network");
+    // The schema's default mode when the spec leaves it out.
+    const mode = spec.permission_mode ?? "acceptEdits";
+    if (!modes.includes(mode))
+      return `codex_network needs permission_mode ${modes.join(" or ")} on harness ${name} (this agent has ${mode}): the network is not offered to a read-only agent`;
+  }
   if (project?.inheritMcp && !caps.mcpInherit) return `${refuse("inherit_mcp")} (set by project ${project.id})`;
   if (project?.addDirs?.length && !caps.addDirs) return `${refuse("add_dirs")} (set by project ${project.id})`;
   return null;

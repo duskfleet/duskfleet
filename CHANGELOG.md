@@ -8,6 +8,10 @@ All notable changes to Duskfleet are listed here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- `codex_network: true` for Codex agents with `permission_mode: acceptEdits`: the run's sandbox gets the network, every host, so a Codex agent can push, open pull requests and install. It acts with the credentials of the user who runs Duskfleet; create / update warn, `doctor` lists such agents, each run records a note, and the field is refused on other harnesses and on `dontAsk` (#488). A token-like `env_passthrough` name on a Codex agent now warns: Codex drops it from its commands' environment.
+
 ## [0.5.0] - 2026-11-16
 
 Two schema migrations (30 and 31) run on the first open of an existing database; nothing to do by hand.

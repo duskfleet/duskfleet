@@ -167,7 +167,8 @@ The capability set, as the shipped adapters declare it:
 |---|---|---|---|---|
 | `toolAllowList` | `allowed_tools` / `disallowed_tools` are enforced | yes | no: Codex has a sandbox mode, no tool rules | yes, Copilot's own rules (`--allow-tool` / `--deny-tool`) |
 | `toolRule` | which entries the CLI takes as written | any | | `shell`, `shell(<cmd>)`, `write`, `write(<path>)`, `read`, `read(<path>)`, `url(<domain>)`, `memory`; anything else refused by name |
-| `permissionModes` | `permission_mode` values it accepts | all (`bypassPermissions` still needs `claude.allow_bypass_permissions`) | `dontAsk` (`-s read-only`), `acceptEdits` (`-s workspace-write`); the network off in both | `dontAsk` (the rules only), `acceptEdits` (the rules plus `write`) |
+| `permissionModes` | `permission_mode` values it accepts | all (`bypassPermissions` still needs `claude.allow_bypass_permissions`) | `dontAsk` (`-s read-only`), `acceptEdits` (`-s workspace-write`); the network off in both unless `codex_network` | `dontAsk` (the rules only), `acceptEdits` (the rules plus `write`) |
+| `networkModes` | modes under which `codex_network: true` is honoured | none: refused | `acceptEdits` only (`-c sandbox_workspace_write.network_access=true`, every host) | none: refused |
 | `resumeSession` | a session can be continued | yes | yes (`codex exec resume <thread_id>`, always with `-c sandbox_mode` from `permission_mode`) | yes (`--resume=<id>`) |
 | `hardBudgetUsd` | the CLI stops at `max_budget_usd` | yes | no | no (its cap is in AI credits) |
 | `reportsCostUsd` | the result carries a cost in dollars | yes | no (the stream has tokens only) | no (premium requests) |
@@ -218,7 +219,7 @@ as its full `max_budget_usd` (or `claude.default_max_budget_usd`). A unit other 
 | Unattended command | `claude -p --output-format stream-json` | `codex exec --json --ignore-user-config --ignore-rules ... -`, prompt on stdin | `copilot --output-format json`, prompt on stdin |
 | Stream | stream-json lines | JSONL events (`thread.started`, `item.started` / `item.completed`, `turn.completed` / `turn.failed`) | JSONL events (`session.start`, `assistant.message`, `tool.execution_start` / `_complete`) |
 | End of run | a `result` line | `turn.completed` or `turn.failed`; none = failed; 30 min without output = timed out (backstop) | a `result` line (`exitCode`), also after SIGTERM; none = failed |
-| Permissions | allow-list per tool, `--permission-prompts none` | sandbox mode (`read-only` / `workspace-write`), network off | deny by default in a non-interactive run, `--allow-tool` / `--deny-tool` rules verbatim; `--allow-all*` never |
+| Permissions | allow-list per tool, `--permission-prompts none` | sandbox mode (`read-only` / `workspace-write`), network off unless `codex_network: true` | deny by default in a non-interactive run, `--allow-tool` / `--deny-tool` rules verbatim; `--allow-all*` never |
 | System prompt | `--append-system-prompt` | `-c developer_instructions="<TOML string>"` | a per-run agent file, `--add-dir <tmp> --agent duskfleet-agent` |
 | Session id | chosen by Duskfleet (`--session-id`) | chosen by Codex (`thread.started`'s `thread_id`) | chosen by Duskfleet (`--session-id`) |
 | Cost | dollars, reported or estimated | unpriced; tokens from `turn.completed.usage` | unpriced (premium requests); tokens from `--usage-output-file` |
@@ -243,7 +244,12 @@ replayed by `fake-codex.js`. What it does and does not do:
   fixture ran in one).
 - A command the sandbox blocked is an ordinary failed command (`status: "failed"` and its own
   error text, exit 0): nothing in the stream names the sandbox, so it is not counted as a
-  sandbox violation or a denial. The network stays off; an agent that needs it is a later issue.
+  sandbox violation or a denial.
+- The network is off (`-c sandbox_workspace_write.network_access=false`) unless the agent sets
+  `codex_network: true` (#488): then `=true`, on fresh and resumed runs alike, with a note on the
+  run. It is all or nothing: nothing in `codex exec --help` limits it to a list of hosts. Only
+  with `acceptEdits`; a `dontAsk` agent with it is refused (what `read-only` plus network means in
+  Codex was never checked). [Security](security.md#codex-agents-harness-codex) says what it grants.
 - Sessions resume (`on_failure: resume_once`, a continued schedule, `run_agent { resume_run_id }`)
   with `codex exec resume ... <thread_id> -`. Resume has no `-s`; `-c sandbox_mode="<mode>"` decides
   the resumed turn's sandbox (verified by hand: a `workspace-write` session resumed as `read-only`

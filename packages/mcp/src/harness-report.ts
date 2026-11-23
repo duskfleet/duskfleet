@@ -37,5 +37,7 @@ export async function harnessReport(
   const unknown = agents.filter((a) => !known.has(harnessOf(a))).map((a) => ({ agentId: a.id, harness: harnessOf(a) }));
   // A harness that ships but whose CLI was not found at start-up (bootstrap registers only what resolves).
   const notInstalled = SHIPPED_HARNESSES.filter((name) => !known.has(name));
-  return { registered, unknown, notInstalled };
+  // Codex agents whose runs have the network, every host (#488): listed so the owner sees the grant.
+  const networked = agents.filter((a) => a.codexNetwork === true).map((a) => a.id);
+  return { registered, unknown, notInstalled, networked };
 }

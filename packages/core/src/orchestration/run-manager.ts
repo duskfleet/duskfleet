@@ -625,6 +625,8 @@ export class RunManager {
       request.sandbox = { allowedDomains: agent.sandboxAllowedDomains ?? [] };
       if (agent.sandboxWeakerNetworkIsolation) request.sandbox.weakerNetworkIsolation = true;
     }
+    // Codex's network opt-in (#488); the harness check above refused it anywhere it cannot be honoured.
+    if (agent.codexNetwork) request.network = true;
     // The adapter's own pre-flight (Claude: the link's project agent, MCP servers, shadowed skills).
     if (executor.prepare) {
       try {
