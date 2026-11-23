@@ -95,6 +95,7 @@ export const agentSpecSchema = z.object({
   sandbox: z.boolean().optional(),
   sandbox_allowed_domains: sandboxAllowedDomainsSchema.optional(),
   sandbox_weaker_network_isolation: z.boolean().optional(),
+  codex_network: z.boolean().optional(),
   harness: harnessNameSchema.optional(),
   system_prompt: z.string().default(""),
 });
@@ -173,6 +174,7 @@ export function agentToSpec(a: AgentDefinition): AgentSpec {
   if (a.sandboxAllowedDomains !== undefined) spec.sandbox_allowed_domains = a.sandboxAllowedDomains;
   if (a.sandboxWeakerNetworkIsolation !== undefined)
     spec.sandbox_weaker_network_isolation = a.sandboxWeakerNetworkIsolation;
+  if (a.codexNetwork !== undefined) spec.codex_network = a.codexNetwork;
   if (a.harness !== undefined) spec.harness = a.harness;
   return spec;
 }

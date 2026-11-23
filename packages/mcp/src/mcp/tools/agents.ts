@@ -17,6 +17,7 @@ import {
   EFFORT_LEVELS,
   effectiveAgentFields,
   envPassthroughSchema,
+  harnessGrantWarnings,
   harnessNameSchema,
   harnessOf,
   linkProjectPath,
@@ -90,12 +91,18 @@ function projectFromFolder(
   return id;
 }
 
-/** Advice that never refuses the write: a link's allowed_tools entries its project agent does not declare. */
+/**
+ * Advice that never refuses the write: a link's allowed_tools entries its project agent does not
+ * declare, and what a Codex agent's codex_network / env_passthrough do and do not grant (#488).
+ */
 function agentWarnings(a: AgentDefinition, config: DuskFleetConfig): string[] {
-  return linkToolWarnings(
-    { claude_agent: a.claudeAgent, allowed_tools: a.allowedTools },
-    linkProjectPath(a, config.projects),
-  );
+  return [
+    ...linkToolWarnings(
+      { claude_agent: a.claudeAgent, allowed_tools: a.allowedTools },
+      linkProjectPath(a, config.projects),
+    ),
+    ...harnessGrantWarnings(a),
+  ];
 }
 
 function presentAgent(a: AgentDefinition, config: DuskFleetConfig) {
@@ -142,6 +149,8 @@ function presentAgent(a: AgentDefinition, config: DuskFleetConfig) {
     sandboxAllowedDomains: a.sandboxAllowedDomains ?? [],
     /** enableWeakerNetworkIsolation in the sandbox settings: gh can verify TLS on macOS, isolation is weaker. */
     sandboxWeakerNetworkIsolation: a.sandboxWeakerNetworkIsolation ?? false,
+    /** Codex only: the run's workspace-write sandbox has the network, every host (#488). */
+    codexNetwork: a.codexNetwork ?? false,
     /** The agent CLI that runs it (`harness:`); claude unless the file says otherwise. */
     harness: harnessOf(a),
     systemPrompt: a.systemPrompt,
@@ -303,6 +312,12 @@ const agentFields = {
     .describe(
       "true = add enableWeakerNetworkIsolation to the sandbox settings: on macOS, gh (and other Go tools) can then verify TLS inside the sandbox; without it every gh call fails with an x509 error. Weakens the network isolation for every command of the run. Needs sandbox: true. Default false",
     ),
+  codex_network: z
+    .boolean()
+    .optional()
+    .describe(
+      "harness codex only, permission_mode acceptEdits only: true = the run's workspace-write sandbox gets the network, EVERY host (Codex has no host or tool allow-list), and its commands act with the credentials of the user who runs Duskfleet (gh login, SSH keys): it can push wherever that login can. Needed to push, open pull requests or install. Default false (network off)",
+    ),
   system_prompt: z.string().optional().describe("Appended to Claude Code's system prompt for every run of this agent"),
 };
 
@@ -434,6 +449,7 @@ export function registerAgentTools(server: McpServer, ctx: ToolContext): void {
               "sandbox",
               "sandbox_allowed_domains",
               "sandbox_weaker_network_isolation",
+              "codex_network",
               "harness",
             ]),
           )

@@ -120,6 +120,12 @@ export interface AgentDefinition {
    */
   sandboxWeakerNetworkIsolation?: boolean;
   /**
+   * `codex_network: true` (issue #488): a Codex agent's `workspace-write` sandbox gets the network,
+   * every host, with the credentials of the user who runs Duskfleet. Codex only, `acceptEdits` only;
+   * absent = network off, today's argv.
+   */
+  codexNetwork?: boolean;
+  /**
    * The agent CLI that runs this agent (`harness:`): the name of a registered executor. Unset =
    * `DEFAULT_HARNESS` (Claude Code). Left out of the definition when the file does not set it, so
    * the agent hash of every existing agent stays what it was.
