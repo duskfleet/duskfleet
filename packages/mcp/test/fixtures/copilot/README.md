@@ -120,26 +120,26 @@ Copilot (issue #466): the persona is an agent the project itself defines, select
 `--agent <name>`. Same account, same common flags as above, in a scratch git repository holding
 `README.md`, `AGENTS.md` (code word QUINCE) and these files under `.github/agents/`:
 
-| Agent file             | Frontmatter besides `name`, `description`      | Body                 |
-| ---------------------- | ---------------------------------------------- | -------------------- |
-| `pim.agent.md`         | none                                           | code word MEDLAR     |
-| `tooly.agent.md`       | `tools: ["execute", "read", "edit", "search"]` | "run the commands"   |
-| `reader.agent.md`      | `tools: ["read"]`                              | "answer questions"   |
-| `modeled.agent.md`     | `model: claude-haiku-4.5`                      | "answer briefly"     |
-| `modeled-big.agent.md` | `model: claude-sonnet-5.5`                     | "answer briefly"     |
+| Agent file             | Frontmatter besides `name`, `description`      | Body               |
+| ---------------------- | ---------------------------------------------- | ------------------ |
+| `pim.agent.md`         | none                                           | code word MEDLAR   |
+| `tooly.agent.md`       | `tools: ["execute", "read", "edit", "search"]` | "run the commands" |
+| `reader.agent.md`      | `tools: ["read"]`                              | "answer questions" |
+| `modeled.agent.md`     | `model: claude-haiku-4.5`                      | "answer briefly"   |
+| `modeled-big.agent.md` | `model: claude-sonnet-5.5`                     | "answer briefly"   |
 
 No run passes `--add-dir` for the project itself: the working directory is the project.
 
-| Fixture                   | Flags besides the common ones                          | Prompt                                    | Exit | Premium requests |
-| ------------------------- | ------------------------------------------------------ | ----------------------------------------- | ---- | ---------------- |
-| `link`                    | `--agent pim`                                          | "list every code word"                    | 0    | 0.33             |
-| `link-unknown`            | `--agent nope`                                         | "Say hi"                                  | 1    | 0                |
-| `link-add-dir`            | `--agent pim --add-dir <extra>`                        | "list every code word"                    | 0    | 0.33             |
-| `link-shadowed`           | `--agent pim --add-dir <shadow>`                       | "list every code word"                    | 0    | 0.33             |
-| `link-tools-declared`     | `--agent tooly`                                        | run `touch marker.txt`                    | 0    | 0.33             |
-| `link-tools-narrow-shell` | `--agent reader --allow-tool 'shell(ls)'`              | run `ls -la .`, or say "NO SHELL TOOL"    | 0    | 0.33             |
-| `link-model`              | `--agent modeled`, **no `--model`**                    | "Reply with exactly: ok"                  | 0    | 0.33             |
-| `link-model-flag`         | `--agent modeled-big` (with `--model claude-haiku-4.5`) | "Reply with exactly: ok"                  | 0    | 0.33             |
+| Fixture                   | Flags besides the common ones                           | Prompt                                 | Exit | Premium requests |
+| ------------------------- | ------------------------------------------------------- | -------------------------------------- | ---- | ---------------- |
+| `link`                    | `--agent pim`                                           | "list every code word"                 | 0    | 0.33             |
+| `link-unknown`            | `--agent nope`                                          | "Say hi"                               | 1    | 0                |
+| `link-add-dir`            | `--agent pim --add-dir <extra>`                         | "list every code word"                 | 0    | 0.33             |
+| `link-shadowed`           | `--agent pim --add-dir <shadow>`                        | "list every code word"                 | 0    | 0.33             |
+| `link-tools-declared`     | `--agent tooly`                                         | run `touch marker.txt`                 | 0    | 0.33             |
+| `link-tools-narrow-shell` | `--agent reader --allow-tool 'shell(ls)'`               | run `ls -la .`, or say "NO SHELL TOOL" | 0    | 0.33             |
+| `link-model`              | `--agent modeled`, **no `--model`**                     | "Reply with exactly: ok"               | 0    | 0.33             |
+| `link-model-flag`         | `--agent modeled-big` (with `--model claude-haiku-4.5`) | "Reply with exactly: ok"               | 0    | 0.33             |
 
 `<extra>` held `AGENTS.md` (code word PLUM), `.github/copilot-instructions.md` (FIG) and
 `.github/instructions/words.instructions.md` with `applyTo: "**"` (DAMSON). `<shadow>` held its
