@@ -42,6 +42,7 @@ import {
   resolveCopilotBinary,
   SERVER_NAME,
   shellLine,
+  spawnPlan,
 } from "@duskfleet/core";
 
 export {
@@ -400,10 +401,13 @@ function hostCliStatus(
   if (!binary) {
     return { ...base, note: `${HOST_TITLE[target]} not found (${BIN_VAR[target]}, ${target}.binary or PATH)` };
   }
-  const r = spawnSync(binary, ["mcp", "list", "--json"], {
+  // A Windows npm shim (copilot.cmd, codex.cmd) needs cmd.exe: Node refuses a batch file without it.
+  const plan = spawnPlan(binary, ["mcp", "list", "--json"]);
+  const r = spawnSync(plan.file, plan.args, {
     encoding: "utf8",
     timeout: 15_000,
     windowsHide: true,
+    windowsVerbatimArguments: plan.windowsVerbatimArguments,
     env: process.env,
   });
   // The exit status decides, not the text: a CLI that exits non-zero (or is killed) with an empty
@@ -542,7 +546,13 @@ export function planClaudeCode(entry: McpServerEntry, home = homedir()): ClaudeC
 
 /** Run `claude mcp add` (or `copilot` / `codex mcp add`), its output on this terminal. Returns the exit status. */
 export function runClaudeCodeAdd(claudeBin: string, args: string[]): number {
-  const r = spawnSync(claudeBin, args, { stdio: "inherit", windowsHide: true });
+  // A Windows npm shim (copilot.cmd, codex.cmd) needs cmd.exe: Node refuses a batch file without it.
+  const plan = spawnPlan(claudeBin, args);
+  const r = spawnSync(plan.file, plan.args, {
+    stdio: "inherit",
+    windowsHide: true,
+    windowsVerbatimArguments: plan.windowsVerbatimArguments,
+  });
   if (r.error) throw new Error(`could not run ${claudeBin}: ${r.error.message}`);
   return r.status ?? 1;
 }
