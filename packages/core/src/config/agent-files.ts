@@ -275,9 +275,7 @@ export function listProjectAgents(
  * name; a file without one is listed by file name with the reason.
  */
 function tomlProjectAgent(full: string, file: string): ProjectAgentInfo {
-  const text = readFileSync(full, "utf8");
-  // Top-level keys end at the first table header.
-  const top = text.split(/^\s*\[/m)[0] ?? "";
+  const top = tomlTopLevelLines(readFileSync(full, "utf8")).join("\n");
   const key = (k: string): string | null => {
     const m = new RegExp(`^\\s*${k}\\s*=\\s*(?:"((?:[^"\\\\]|\\\\.)*)"|'([^']*)')\\s*(?:#.*)?$`, "m").exec(top);
     if (!m) return null;
@@ -297,6 +295,65 @@ function tomlProjectAgent(full: string, file: string): ProjectAgentInfo {
     path: full,
     frontmatterError: name === null ? 'no top-level name = "..." key: Codex identifies an agent by it' : null,
   };
+}
+
+/**
+ * The lines of a TOML file's top-level region, string-aware: the region ends at the first `[` or
+ * `[[` table header outside a string, and the lines inside a multi-line string (`"""` or `'''`)
+ * are left out, so neither a Markdown `[ ] todo` nor a `name = "x"` inside developer_instructions
+ * is taken for a header or a key. The line that opens a multi-line string is kept.
+ */
+function tomlTopLevelLines(text: string): string[] {
+  const out: string[] = [];
+  let open: '"""' | "'''" | null = null;
+  for (const line of text.split(/\r?\n/)) {
+    if (open === null) {
+      if (/^\s*\[/.test(line)) break;
+      out.push(line);
+    }
+    let i = 0;
+    while (i < line.length) {
+      if (open !== null) {
+        const close = tomlMultiClose(line, i, open);
+        if (close < 0) break;
+        i = close + 3;
+        open = null;
+        continue;
+      }
+      const c = line[i];
+      if (c === "#") break;
+      if (line.startsWith('"""', i) || line.startsWith("'''", i)) {
+        open = line.startsWith('"""', i) ? '"""' : "'''";
+        i += 3;
+        continue;
+      }
+      if (c === '"') {
+        i++;
+        while (i < line.length && line[i] !== '"') i += line[i] === "\\" ? 2 : 1;
+        i++;
+        continue;
+      }
+      if (c === "'") {
+        const end = line.indexOf("'", i + 1);
+        i = end < 0 ? line.length : end + 1;
+        continue;
+      }
+      i++;
+    }
+  }
+  return out;
+}
+
+/** Index of the delimiter that closes a multi-line TOML string on this line from `from`, or -1. */
+function tomlMultiClose(line: string, from: number, delim: '"""' | "'''"): number {
+  if (delim === "'''") return line.indexOf("'''", from);
+  let j = from;
+  while (j < line.length) {
+    if (line[j] === "\\") j += 2;
+    else if (line.startsWith('"""', j)) return j;
+    else j++;
+  }
+  return -1;
 }
 
 /** What `linkToolGaps` found: allow-list entries the project agent does not declare, or why it could not tell. */
