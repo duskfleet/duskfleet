@@ -14,7 +14,9 @@ import {
   type FailureCode,
   isClaudeNotFound,
   isOrphaned,
+  linkFolder,
   type ProjectAgentChange,
+  projectAgentFile,
   REVIEW_REASON_LABELS,
   type Run,
   type Schedule,
@@ -192,7 +194,7 @@ export interface PersonaItem extends ItemBase {
   scheduleId: string;
   name: string;
   agentId: string;
-  /** `.claude/agents/<name>.md`, or null when the agent is no longer a link. */
+  /** The project agent file in the harness's folder (`.claude/agents/<name>.md`), or null when the agent is no longer a link. */
   personaFile: string | null;
   detail: string;
   /** The run that started with the changed file; the row opens it. */
@@ -288,8 +290,10 @@ export interface AttentionPersonaChange {
   scheduleId: string;
   name: string;
   agentId: string;
-  /** The link's `claude_agent` today, or null when the agent is gone or no longer a link. */
+  /** The link's `claude_agent` / `project_agent` today, or null when the agent is gone or no longer a link. */
   claudeAgent: string | null;
+  /** The agent's `harness:` (Claude Code when absent): it decides the project agent's folder. */
+  harness?: string | undefined;
   runId: string;
   /** When the last run started. */
   at: string;
@@ -572,7 +576,8 @@ function personaItems(changes: AttentionPersonaChange[], since: number): Persona
   const items: PersonaItem[] = [];
   for (const c of changes) {
     if (!c.change.changed || Date.parse(c.at) < since) continue;
-    const personaFile = c.claudeAgent ? `.claude/agents/${c.claudeAgent}.md` : null;
+    // The harness's folder (Copilot: .github/agents/<name>.agent.md), as the run read it.
+    const personaFile = c.claudeAgent ? projectAgentFile(linkFolder(c), c.claudeAgent) : null;
     items.push({
       kind: "personas",
       key: `persona:${c.scheduleId}`,

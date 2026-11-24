@@ -9,6 +9,7 @@ import { DEFAULT_NOOP_PATTERN, parseNoopPattern } from "../scheduler/idle.js";
 import { logger } from "../util/log.js";
 import {
   AGENT_ID_PATTERN,
+  BOTH_PROJECT_AGENT_FIELDS,
   envPassthroughSchema,
   harnessNameSchema,
   maxConcurrentSchema,
@@ -160,40 +161,47 @@ const globalSchema = z.object({
     .prefault({}),
 });
 
-const agentFrontmatterSchema = z.object({
-  id: z.string().regex(AGENT_ID_PATTERN, "agent id must be lowercase letters, digits, - or _").optional(),
-  name: z.string().optional(),
-  description: z.string().default(""),
-  model: z.string().optional(),
-  permission_mode: z.enum(PERMISSION_MODES).default("acceptEdits"),
-  allowed_tools: z.array(z.string()).optional(),
-  disallowed_tools: z.array(z.string()).optional(),
-  effort: z.enum(EFFORT_LEVELS).optional(),
-  timeout_minutes: z.number().positive().optional(),
-  max_budget_usd: z.number().positive().optional(),
-  wrap_up_reserve_usd: z.number().nonnegative().optional(),
-  on_failure: z.enum(ON_FAILURE_POLICIES).optional(),
-  resume_budget_usd: z.number().positive().optional(),
-  inherit_mcp: z.boolean().optional(),
-  add_dirs: z.array(z.string()).optional(),
-  claude_agent: z.string().min(1).optional(),
-  project: z.string().min(1).optional(),
-  max_concurrent: maxConcurrentSchema.optional(),
-  isolated: z.boolean().optional(),
-  max_daily_runs: maxDailyRunsSchema.optional(),
-  max_daily_cost_usd: maxDailyCostUsdSchema.optional(),
-  env_passthrough: envPassthroughSchema.optional(),
-  // Names only; whether they exist is checked on create / update, never on load (a deleted skill
-  // must not break every config reload) and skipped with a note at run start.
-  skills: skillsSchema.optional(),
-  sandbox: z.boolean().optional(),
-  sandbox_allowed_domains: sandboxAllowedDomainsSchema.optional(),
-  sandbox_weaker_network_isolation: z.boolean().optional(),
-  codex_network: z.boolean().optional(),
-  // A name only; whether a harness of that name is registered is checked on create / update and at
-  // run start, never on load (the loader does not know the executors).
-  harness: harnessNameSchema.optional(),
-});
+const agentFrontmatterSchema = z
+  .object({
+    id: z.string().regex(AGENT_ID_PATTERN, "agent id must be lowercase letters, digits, - or _").optional(),
+    name: z.string().optional(),
+    description: z.string().default(""),
+    model: z.string().optional(),
+    permission_mode: z.enum(PERMISSION_MODES).default("acceptEdits"),
+    allowed_tools: z.array(z.string()).optional(),
+    disallowed_tools: z.array(z.string()).optional(),
+    effort: z.enum(EFFORT_LEVELS).optional(),
+    timeout_minutes: z.number().positive().optional(),
+    max_budget_usd: z.number().positive().optional(),
+    wrap_up_reserve_usd: z.number().nonnegative().optional(),
+    on_failure: z.enum(ON_FAILURE_POLICIES).optional(),
+    resume_budget_usd: z.number().positive().optional(),
+    inherit_mcp: z.boolean().optional(),
+    add_dirs: z.array(z.string()).optional(),
+    // The link field (issue #466): `project_agent`, or its older name `claude_agent`; never both.
+    project_agent: z.string().min(1).optional(),
+    claude_agent: z.string().min(1).optional(),
+    project: z.string().min(1).optional(),
+    max_concurrent: maxConcurrentSchema.optional(),
+    isolated: z.boolean().optional(),
+    max_daily_runs: maxDailyRunsSchema.optional(),
+    max_daily_cost_usd: maxDailyCostUsdSchema.optional(),
+    env_passthrough: envPassthroughSchema.optional(),
+    // Names only; whether they exist is checked on create / update, never on load (a deleted skill
+    // must not break every config reload) and skipped with a note at run start.
+    skills: skillsSchema.optional(),
+    sandbox: z.boolean().optional(),
+    sandbox_allowed_domains: sandboxAllowedDomainsSchema.optional(),
+    sandbox_weaker_network_isolation: z.boolean().optional(),
+    codex_network: z.boolean().optional(),
+    // A name only; whether a harness of that name is registered is checked on create / update and at
+    // run start, never on load (the loader does not know the executors).
+    harness: harnessNameSchema.optional(),
+  })
+  .refine((fm) => fm.project_agent === undefined || fm.claude_agent === undefined, {
+    message: BOTH_PROJECT_AGENT_FIELDS,
+    path: ["project_agent"],
+  });
 
 const projectsSchema = z.object({
   projects: z
@@ -431,7 +439,9 @@ export function loadAgentDir(
     if (fm.resume_budget_usd !== undefined) agent.resumeBudgetUsd = fm.resume_budget_usd;
     if (fm.inherit_mcp !== undefined) agent.inheritMcp = fm.inherit_mcp;
     if (fm.add_dirs !== undefined) agent.addDirs = fm.add_dirs.map(expandHome);
-    if (fm.claude_agent !== undefined) agent.claudeAgent = fm.claude_agent;
+    // Either name loads into the same field: same definition, same agent_hash.
+    const projectAgent = fm.project_agent ?? fm.claude_agent;
+    if (projectAgent !== undefined) agent.claudeAgent = projectAgent;
     if (fm.project !== undefined) agent.project = fm.project;
     if (fm.max_concurrent !== undefined) agent.maxConcurrent = fm.max_concurrent;
     if (fm.isolated !== undefined) agent.isolated = fm.isolated;

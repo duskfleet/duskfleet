@@ -4,7 +4,14 @@
  * expose a new tool.
  */
 
-import type { DuskFleetConfig, RunManager, Scheduler } from "@duskfleet/core";
+import {
+  builtinHarnesses,
+  type DuskFleetConfig,
+  projectAgentGuidance,
+  type RunManager,
+  type Scheduler,
+  SHIPPED_HARNESSES,
+} from "@duskfleet/core";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { registerAgentTools } from "./tools/agents.js";
 import { registerBudgetTools } from "./tools/budgets.js";
@@ -25,9 +32,12 @@ export const SERVER_INSTRUCTIONS =
   "Use list_agents and list_projects to discover what is available, run_agent to start a run " +
   "(returns immediately with a run_id unless wait_seconds is set), and get_run / list_runs to inspect results. " +
   "create_agent / update_agent manage agent definitions: an agent is either kind 'own' (new persona written in Duskfleet) " +
-  "or kind 'link' (reuses an agent the project defines in .claude/agents/, see list_project_agents) — always choose explicitly. " +
+  "or kind 'link' (project_agent: reuses an agent the project defines for the agent's harness, see list_project_agents) — always choose explicitly. " +
   "create_schedule / list_schedules manage cron schedules. set_budget / list_budgets manage monthly budgets (global, agent, project). " +
-  "An agent runs on the harness its file names (claude, copilot or codex), whatever MCP host is asking.";
+  "An agent runs on the harness its file names (claude, copilot or codex), whatever MCP host is asking. " +
+  `Each harness has its own folder of project agents (${projectAgentGuidance(SHIPPED_HARNESSES, builtinHarnesses)}): ` +
+  "only that folder is ever the place for an agent of that harness, and a harness without links takes kind 'own' only (the persona goes in system_prompt). " +
+  "Settle the agent's harness before choosing link (ask when the project does not make it clear); Duskfleet never writes agent files into a project.";
 
 export function createMcpServer(ctx: ToolContext): McpServer {
   const server = new McpServer({ name: "duskfleet", version: SERVER_VERSION }, { instructions: SERVER_INSTRUCTIONS });

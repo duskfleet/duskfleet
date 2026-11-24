@@ -320,6 +320,12 @@ test("a changed persona is one item per schedule, linking to the run and naming 
   assert.deepEqual(attentionBadge(s), { count: 2, tone: "warn" });
 });
 
+test("a Copilot link's persona item names its .github/agents file, not Claude Code's", () => {
+  const [item] = allItems(sections({ personaChanges: [persona({ claudeAgent: "pim", harness: "copilot" })] }));
+  assert.equal(item.personaFile, ".github/agents/pim.agent.md");
+  assert.equal(item.detail, ".github/agents/pim.agent.md changed since the previous run (r-old)");
+});
+
 test("no persona item when the file did not change, the run is out of the window, or there is none", () => {
   assert.deepEqual(sections({ personaChanges: [persona({ change: { previousRunId: "r-old", changed: false } })] }), []);
   assert.deepEqual(sections({ personaChanges: [persona({ at: ago(49 * 60) })] }), []);

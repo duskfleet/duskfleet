@@ -11,6 +11,7 @@ import {
   type ConfigSource,
   type DataSource,
   effectiveAgentFields,
+  linkFolder,
   linkProjectPath,
   type SandboxSupport,
 } from "@duskfleet/core";
@@ -127,13 +128,13 @@ export interface LinkModelOverride {
  * on a cheaper model), but the two copies disagree, so `doctor` says which one runs.
  */
 export function linkModelOverrides(
-  agents: Iterable<Pick<AgentDefinition, "id" | "model" | "claudeAgent" | "project" | "description">>,
+  agents: Iterable<Pick<AgentDefinition, "id" | "model" | "claudeAgent" | "project" | "description" | "harness">>,
   projects: ReadonlyMap<string, { path: string }>,
 ): LinkModelOverride[] {
   const out: LinkModelOverride[] = [];
   for (const a of agents) {
     if (!a.claudeAgent || a.model === undefined) continue;
-    const { projectAgentModel } = effectiveAgentFields(a, linkProjectPath(a, projects));
+    const { projectAgentModel } = effectiveAgentFields(a, linkProjectPath(a, projects), linkFolder(a));
     if (projectAgentModel === null || projectAgentModel === a.model) continue;
     out.push({
       agentId: a.id,

@@ -281,6 +281,6 @@ Code, `claude mcp remove duskfleet`.
 
 - [Schedules](schedules.md): gates that skip a tick cheaply when there is no work, auto-pause,
   budgets, what happens when the agent is busy.
-- [Agents](agents.md): link an agent your project already defines in `.claude/agents/`.
+- [Agents](agents.md): link an agent your project already defines for Claude Code (`.claude/agents/`).
 - [Security](security.md): set `allowed_project_roots` before you point agents at real projects.
 - [Troubleshooting](troubleshooting.md): a run that failed, timed out or never started.
