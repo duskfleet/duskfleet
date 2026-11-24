@@ -32,7 +32,7 @@ export const SERVER_INSTRUCTIONS =
   "Use list_agents and list_projects to discover what is available, run_agent to start a run " +
   "(returns immediately with a run_id unless wait_seconds is set), and get_run / list_runs to inspect results. " +
   "create_agent / update_agent manage agent definitions: an agent is either kind 'own' (new persona written in Duskfleet) " +
-  "or kind 'link' (reuses an agent the project defines for the agent's harness, see list_project_agents) — always choose explicitly. " +
+  "or kind 'link' (project_agent: reuses an agent the project defines for the agent's harness, see list_project_agents) — always choose explicitly. " +
   "create_schedule / list_schedules manage cron schedules. set_budget / list_budgets manage monthly budgets (global, agent, project). " +
   "An agent runs on the harness its file names (claude, copilot or codex), whatever MCP host is asking. " +
   `Each harness has its own folder of project agents (${projectAgentGuidance(SHIPPED_HARNESSES, builtinHarnesses)}): ` +

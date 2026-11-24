@@ -54,10 +54,7 @@ test("the server instructions and the agent tool schemas tie .claude/agents to t
 });
 
 test("a link on a harness without links is refused with the remedy and its own folder", () => {
-  for (const [harness, folder] of [
-    ["codex", /\.codex\/agents/],
-    ["copilot", /\.github\/agents/],
-  ]) {
+  for (const [harness, folder] of [["codex", /\.codex\/agents/]]) {
     const why = harnessRefusal({ harness, claude_agent: "x", permission_mode: "acceptEdits" }, builtinHarnesses);
     assert.match(why, new RegExp(`^claude_agent is not supported by harness ${harness}`));
     assert.match(why, folder);
@@ -68,6 +65,11 @@ test("a link on a harness without links is refused with the remedy and its own f
     harnessRefusal({ claude_agent: "x", permission_mode: "acceptEdits" }, builtinHarnesses),
     null,
     "a Claude link still fits",
+  );
+  assert.equal(
+    harnessRefusal({ harness: "copilot", claude_agent: "x", permission_mode: "acceptEdits" }, builtinHarnesses),
+    null,
+    "a Copilot link fits since #466",
   );
 });
 
@@ -114,6 +116,12 @@ test("list_project_agents and create_agent over MCP answer for the agent's harne
     path.join(project, ".claude", "agents", "coordinator.md"),
     "---\nname: coordinator\n---\nCoordinate.\n",
   );
+  // A Copilot agent too (#466): each harness lists only its own folder.
+  mkdirSync(path.join(project, ".github", "agents"), { recursive: true });
+  writeFileSync(
+    path.join(project, ".github", "agents", "reviewer.agent.md"),
+    "---\ndescription: Reviews\n---\nReview.\n",
+  );
   writeFileSync(
     path.join(configDir, "duskfleet.yaml"),
     `data_dir: ../data\ndefault_agent: coder\nclaude:\n  binary: "${fakeBinary}"\n`,
@@ -153,11 +161,8 @@ test("list_project_agents and create_agent over MCP answer for the agent's harne
     assert.match(codex.hint, /\.codex\/agents/);
     assert.doesNotMatch(codex.hint, /\.claude/);
 
-    // a Codex / Copilot link is refused before the folder is searched, with the remedy
-    for (const [harness, folder] of [
-      ["codex", /\.codex\/agents/],
-      ["copilot", /\.github\/agents/],
-    ]) {
+    // a Codex link is refused before the folder is searched, with the remedy
+    for (const [harness, folder] of [["codex", /\.codex\/agents/]]) {
       const refused = await call("create_agent", {
         id: `${harness}-link`,
         kind: "link",
@@ -171,6 +176,39 @@ test("list_project_agents and create_agent over MCP answer for the agent's harne
       assert.match(text, folder);
       assert.match(text, new RegExp(`kind "own" on harness ${harness}`));
     }
+
+    // copilot lists .github/agents only, and can link since #466
+    const listed = json(await call("list_project_agents", { project_path: project, harness: "copilot" }));
+    assert.deepEqual(
+      listed.agents.map((a) => a.name),
+      ["reviewer"],
+    );
+    assert.equal(listed.linkable, true);
+    assert.match(listed.hint, /project_agent: <name>/);
+
+    // a Copilot link reads Copilot's folder only: the Claude agent is not one of its agents
+    const copilot = await call("create_agent", {
+      id: "copilot-link",
+      kind: "link",
+      harness: "copilot",
+      project_agent: "coordinator",
+      project_path: project,
+    });
+    assert.equal(copilot.isError, true);
+    assert.match(copilot.content[0].text, /\.github\/agents has no agent "coordinator" \(available: reviewer\)/);
+    const copilotLink = json(
+      await call("create_agent", {
+        id: "copilot-link",
+        kind: "link",
+        harness: "copilot",
+        project_agent: "reviewer",
+        permission_mode: "dontAsk",
+        project_path: project,
+      }),
+    );
+    assert.equal(copilotLink.agent.projectAgent, "reviewer");
+    assert.equal(copilotLink.agent.projectAgentFile, ".github/agents/reviewer.agent.md");
+    assert.equal(copilotLink.agent.description, "Reviews", "the project agent's description");
 
     // the Claude link still works as before
     const link = json(

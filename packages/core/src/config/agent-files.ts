@@ -20,6 +20,7 @@ import { ENV_PASSTHROUGH_PATTERN } from "../execution/child-env.js";
 import { SANDBOX_DOMAIN_MESSAGE, SANDBOX_DOMAIN_PATTERN } from "../execution/sandbox.js";
 import {
   CLAUDE_PROJECT_AGENTS,
+  COPILOT_PROJECT_AGENTS,
   type ProjectAgentFolder,
   projectAgentFile,
   projectAgentSuffix,
@@ -73,8 +74,12 @@ export const harnessNameSchema = z
   .string()
   .regex(/^[a-z0-9][a-z0-9-_]*$/, "harness must be lowercase letters, digits, - or _ (e.g. claude)");
 
-/** Everything an agent file can contain, flattened (frontmatter + body). */
-export const agentSpecSchema = z.object({
+/** Refusal when an agent file or a create / update sets both names of the link field (issue #466). */
+export const BOTH_PROJECT_AGENT_FIELDS =
+  "set project_agent or claude_agent, not both: claude_agent is the older name of the same field";
+
+/** Everything an agent file can contain, flattened (frontmatter + body), before the alias is folded. */
+const agentSpecInputSchema = z.object({
   id: z.string().regex(AGENT_ID_PATTERN, "agent id must be lowercase letters, digits, - or _"),
   name: z.string().min(1).optional(),
   description: z.string().default(""),
@@ -90,6 +95,9 @@ export const agentSpecSchema = z.object({
   resume_budget_usd: z.number().positive().optional(),
   inherit_mcp: z.boolean().optional(),
   add_dirs: z.array(z.string().min(1)).optional(),
+  /** The project's agent a link runs, whatever the harness (issue #466). */
+  project_agent: z.string().min(1).optional(),
+  /** The older name of `project_agent`, still what files are written with (same field, same hash). */
   claude_agent: z.string().min(1).optional(),
   project: z.string().min(1).optional(),
   max_concurrent: maxConcurrentSchema.optional(),
@@ -105,7 +113,21 @@ export const agentSpecSchema = z.object({
   harness: harnessNameSchema.optional(),
   system_prompt: z.string().default(""),
 });
-export type AgentSpec = z.infer<typeof agentSpecSchema>;
+
+/**
+ * An agent spec: `project_agent` is folded into `claude_agent`, the one field the definition loads
+ * (`AgentDefinition.claudeAgent`), so a link given with either name is the same agent with the same
+ * `agent_hash`. Both set is refused.
+ */
+export const agentSpecSchema = agentSpecInputSchema
+  .refine((s) => s.project_agent === undefined || s.claude_agent === undefined, {
+    message: BOTH_PROJECT_AGENT_FIELDS,
+    path: ["project_agent"],
+  })
+  .transform(({ project_agent, ...rest }) =>
+    project_agent === undefined ? rest : { ...rest, claude_agent: project_agent },
+  );
+export type AgentSpec = z.output<typeof agentSpecSchema>;
 
 export function agentFilePath(dir: string, id: string): string {
   if (!AGENT_ID_PATTERN.test(id)) throw new Error(`invalid agent id "${id}"`);
@@ -342,6 +364,8 @@ function covers(declared: string, allowed: string): boolean {
 export function linkToolGaps(
   allowedTools: readonly string[] | undefined,
   projectAgent: Pick<ProjectAgentInfo, "tools" | "frontmatterError">,
+  /** Whose folder the project agent was read from: Copilot's `tools:` use Copilot's names. */
+  folder: ProjectAgentFolder = CLAUDE_PROJECT_AGENTS,
 ): LinkToolGaps {
   // Nothing to check: no note either, even when the project agent does not parse.
   if (!allowedTools || allowedTools.length === 0) return { missing: [], skipped: null };
@@ -350,12 +374,30 @@ export function linkToolGaps(
   }
   if (projectAgent.tools === null) return { missing: [], skipped: null };
   const declared = projectAgent.tools.map(toolName).filter(Boolean);
+  if (folder.dir === COPILOT_PROJECT_AGENTS.dir) {
+    const gaps = allowedTools.filter((rule) => {
+      const names = COPILOT_DECLARED_FOR_RULE[toolName(rule)];
+      return names !== undefined && !declared.some((d) => names.includes(d));
+    });
+    return { missing: gaps, skipped: null };
+  }
   const missing = allowedTools.filter((rule) => {
     const name = toolName(rule);
     return !declared.some((d) => covers(d, name));
   });
   return { missing, skipped: null };
 }
+
+/**
+ * Copilot: the `tools:` names of an agent file that make a rule kind's tool exist (issue #466,
+ * 1.0.114: `execute` gives the shell tool, `tools: ["read"]` leaves none). Rule kinds left out
+ * (`url`, `memory`) are not checked.
+ */
+const COPILOT_DECLARED_FOR_RULE: Readonly<Record<string, readonly string[]>> = Object.freeze({
+  shell: ["execute", "shell"],
+  write: ["edit", "write"],
+  read: ["read"],
+});
 
 /** `linkToolGaps` for a link, with the project agent file it was checked against. */
 export interface LinkToolCheck extends LinkToolGaps {
@@ -371,11 +413,13 @@ export interface LinkToolCheck extends LinkToolGaps {
 export function linkToolCheck(
   spec: { claude_agent?: string | undefined; allowed_tools?: readonly string[] | undefined },
   projectPath: string | null,
+  /** The agent's harness's folder (`linkFolder`); Claude Code's when omitted. */
+  folder: ProjectAgentFolder = CLAUDE_PROJECT_AGENTS,
 ): LinkToolCheck | null {
   if (!spec.claude_agent || !projectPath) return null;
-  const projectAgent = findProjectAgent(projectPath, spec.claude_agent);
+  const projectAgent = findProjectAgent(projectPath, spec.claude_agent, folder);
   if (!projectAgent) return null;
-  return { file: projectAgent.path, ...linkToolGaps(spec.allowed_tools, projectAgent) };
+  return { file: projectAgent.path, ...linkToolGaps(spec.allowed_tools, projectAgent, folder) };
 }
 
 /**
@@ -385,8 +429,9 @@ export function linkToolCheck(
 export function linkToolWarnings(
   spec: { claude_agent?: string | undefined; allowed_tools?: readonly string[] | undefined },
   projectPath: string | null,
+  folder: ProjectAgentFolder = CLAUDE_PROJECT_AGENTS,
 ): string[] {
-  const check = linkToolCheck(spec, projectPath);
+  const check = linkToolCheck(spec, projectPath, folder);
   if (!check) return [];
   if (check.skipped) return [`allowed_tools not checked against ${check.file}: ${check.skipped}`];
   return check.missing.map(
@@ -421,8 +466,11 @@ export interface EffectiveAgentFields {
 export function effectiveAgentFields(
   agent: Pick<AgentDefinition, "description" | "model" | "claudeAgent">,
   projectPath: string | null,
+  /** The agent's harness's folder (`linkFolder`); Claude Code's when omitted. */
+  folder: ProjectAgentFolder = CLAUDE_PROJECT_AGENTS,
 ): EffectiveAgentFields {
-  const projectAgent = agent.claudeAgent && projectPath ? findProjectAgent(projectPath, agent.claudeAgent) : undefined;
+  const projectAgent =
+    agent.claudeAgent && projectPath ? findProjectAgent(projectPath, agent.claudeAgent, folder) : undefined;
   const ownDescription = agent.description.trim() ? agent.description : "";
   const description = ownDescription || projectAgent?.description || "";
   // `model: inherit` in a project agent means "the caller's model": no model of its own.
@@ -439,12 +487,17 @@ export function effectiveAgentFields(
 }
 
 /**
- * The project agent named `name`, undefined when the folder cannot be read (`.claude/agents` a
- * plain file, a directory named `x.md`, an unreadable file): a listing never fails on a project.
+ * The project agent named `name` in a harness's folder, undefined when the folder cannot be read
+ * (`.claude/agents` a plain file, a directory named `x.md`, an unreadable file): a listing never
+ * fails on a project.
  */
-function findProjectAgent(projectPath: string, name: string): ProjectAgentInfo | undefined {
+function findProjectAgent(
+  projectPath: string,
+  name: string,
+  folder: ProjectAgentFolder = CLAUDE_PROJECT_AGENTS,
+): ProjectAgentInfo | undefined {
   try {
-    return listProjectAgents(projectPath).find((a) => a.name === name);
+    return listProjectAgents(projectPath, folder).find((a) => a.name === name);
   } catch {
     return undefined;
   }
@@ -460,14 +513,29 @@ export function linkProjectPath(
 }
 
 /**
- * Short content hash of `<project>/.claude/agents/<name>.md`, so a recorded subagent
- * invocation can be tied to the exact persona that ran. Null when the name is not a
- * project agent (builtins such as `claude` or `Explore`, or a name chosen in frontmatter).
+ * The file of the project agent `name` in a harness's folder: `<dir>/<name><suffix>` when the
+ * folder names files after the agent (Claude Code, Copilot), else the listed file whose `name` it
+ * is (Codex). Null when it cannot be told.
  */
-export function projectAgentDefinitionHash(projectPath: string, name: string): string | null {
+function projectAgentFilePath(projectPath: string, folder: ProjectAgentFolder, name: string): string | null {
+  if (folder.file.startsWith("<name>")) return path.join(projectPath, ...projectAgentFile(folder, name).split("/"));
+  return findProjectAgent(projectPath, name, folder)?.path ?? null;
+}
+
+/**
+ * Short content hash of `<project>/.claude/agents/<name>.md` (or the project agent file of another
+ * harness's `folder`), so a recorded subagent invocation or a link's persona can be tied to the
+ * exact file that ran. Null when the name is not a project agent (builtins such as `claude` or
+ * `Explore`, or a name chosen in frontmatter).
+ */
+export function projectAgentDefinitionHash(
+  projectPath: string,
+  name: string,
+  folder: ProjectAgentFolder = CLAUDE_PROJECT_AGENTS,
+): string | null {
   if (!/^[A-Za-z0-9._-]+$/.test(name)) return null;
-  const file = path.join(projectPath, ".claude", "agents", `${name}.md`);
-  if (!existsSync(file)) return null;
+  const file = projectAgentFilePath(projectPath, folder, name);
+  if (!file || !existsSync(file)) return null;
   try {
     return createHash("sha256").update(readFileSync(file)).digest("hex").slice(0, 12);
   } catch {
@@ -478,10 +546,16 @@ export function projectAgentDefinitionHash(projectPath: string, name: string): s
 /**
  * Short hash of what an agent run is made of (`runs.agent_hash`): the loaded spec (every field
  * except where it was loaded from, keys sorted, so moving or reformatting the file keeps the hash)
- * and, for a link, the content of `<project>/.claude/agents/<claude_agent>.md`, the persona that
- * actually runs. Two runs with the same hash ran the same agent; an edit to either part changes it.
+ * and, for a link, the content of its project agent file (`<project>/.claude/agents/<name>.md` for
+ * Claude Code; `folder` is the agent's harness's), the persona that actually runs. Two runs with
+ * the same hash ran the same agent; an edit to either part changes it. `project_agent:` and
+ * `claude_agent:` load into the same field, so either name gives the same hash.
  */
-export function agentDefinitionHash(agent: AgentDefinition, projectPath: string): string {
+export function agentDefinitionHash(
+  agent: AgentDefinition,
+  projectPath: string,
+  folder: ProjectAgentFolder = CLAUDE_PROJECT_AGENTS,
+): string {
   const { source: _source, sourcePath: _sourcePath, ...spec } = agent;
   // An explicit `harness: claude` is the same agent as no harness line: same hash, so a
   // continuation (continueMismatch) still resumes the session of an existing agent.
@@ -489,8 +563,9 @@ export function agentDefinitionHash(agent: AgentDefinition, projectPath: string)
   const h = createHash("sha256").update(stableJson(spec));
   if (agent.claudeAgent) {
     h.update("\0");
-    const file = path.join(projectPath, ".claude", "agents", `${agent.claudeAgent}.md`);
+    const file = projectAgentFilePath(projectPath, folder, agent.claudeAgent);
     try {
+      if (!file) throw new Error("not found");
       h.update(readFileSync(file));
     } catch {
       h.update("(missing)");

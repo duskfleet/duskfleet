@@ -8,16 +8,21 @@ Claude Code's system prompt.
 
 | Kind | What it is | Required | Not allowed |
 |---|---|---|---|
-| **own** | A new agent whose persona lives in Duskfleet: the Markdown body is the system prompt | `system_prompt` (body) | `claude_agent` |
-| **link** | A reference to an agent that a project **folder** already defines for the agent's harness (claude: `.claude/agents/<name>.md`, see [the table below](#project-agents-per-harness)). The run starts as `claude --agent <name>` in that folder: the project agent brings prompt, tools and model; Duskfleet adds only the unattended envelope (permissions, allow-list, budget, MCP, optional extra instructions) | `claude_agent` + the folder: `project_path` (absolute; registered as a project on the fly if new) or a registered `project` id. The target file is verified to exist | — |
+| **own** | A new agent whose persona lives in Duskfleet: the Markdown body is the system prompt | `system_prompt` (body) | `project_agent` |
+| **link** | A reference to an agent that a project **folder** already defines for the agent's harness (claude: `.claude/agents/<name>.md`, copilot: `.github/agents/<name>.agent.md`, see [the table below](#project-agents-per-harness)). The run starts as `claude --agent <name>` / `copilot --agent <name>` in that folder: the project agent brings prompt, tools and model; Duskfleet adds only the unattended envelope (permissions, allow-list, budget, MCP, optional extra instructions on `claude`) | `project_agent` (older name `claude_agent`, same field: set one, never both) + the folder: `project_path` (absolute; registered as a project on the fly if new) or a registered `project` id. The target file is verified to exist | — |
 
 `create_agent` makes you say which one (`kind: "own" | "link"`) and rejects inconsistent
 combinations; `list_agents` reports `kind` for every agent and the dashboard shows
 "link → name" or "own prompt". Rule of thumb, per harness: settle the agent's harness first. On
-`claude`, if the project already has a `.claude/agents/` entry that does the job, link it; write a
-persona only when nothing exists. On a harness that cannot run a link yet (`copilot`, `codex`
-today), the agent is `own`: the persona goes in `system_prompt`, even when the project defines
-agents in that harness's folder.
+`claude` or `copilot`, if the project already has an entry in that harness's folder that does the
+job, link it; write a persona only when nothing exists. On a harness that cannot run a link yet
+(`codex` today), the agent is `own`: the persona goes in `system_prompt`, even when the project
+defines agents in that harness's folder.
+
+`project_agent:` is the field's name whatever the harness; `claude_agent:` is its older name and
+stays accepted. Both load into the same definition, so an existing agent file keeps its
+`agent_hash` and its continued sessions; a file or a create / update that sets both is refused.
+Files written by `create_agent` / `update_agent` keep the `claude_agent:` key.
 
 ### Project agents per harness
 
@@ -25,10 +30,10 @@ Each harness has one folder of project agents, and it is the only place guidance
 docs name for that harness. Whether a link can run there is a separate capability
 (`projectAgents`, [Harnesses](harnesses.md)):
 
-| Harness | Folder in the project repository | Link (`claude_agent`) |
+| Harness | Folder in the project repository | Link (`project_agent`) |
 |---|---|---|
 | `claude` | `.claude/agents/<name>.md` | yes, `claude --agent <name>` |
-| `copilot` | `.github/agents/<name>.agent.md` | not yet: `own` only |
+| `copilot` | `.github/agents/<name>.agent.md` | yes, `copilot --agent <name>`, without a body ([Copilot links](#copilot-links)) |
 | `codex` | `.codex/agents/<file>.toml` (the `name` field identifies the agent, not the file name) | not yet: `own` only |
 
 `list_project_agents { harness }` reads that harness's folder only (default `claude`) and says
@@ -195,12 +200,46 @@ Keep CHANGELOG.md in order. Never touch other files.
   `gh pr merge` too. Write the narrowest rule Copilot can express and know that is its granularity.
 - **Two modes.** `dontAsk`: only the rules (a non-interactive Copilot run denies anything that
   would prompt). `acceptEdits` (the default): the rules plus `write`. Every other mode is refused.
-- **The body is the persona**: written to a per-run agent file and loaded with `--agent`. The
-  project's own `AGENTS.md` is loaded too, as `CLAUDE.md` is for Claude.
+- **The body is the persona** of an own agent: written to a per-run agent file and loaded with
+  `--agent`. The project's own `AGENTS.md` is loaded too, as `CLAUDE.md` is for Claude.
 - **Refused**: `max_budget_usd`, `wrap_up_reserve_usd`, `resume_budget_usd`, `max_daily_cost_usd`
   (no dollars: every run is `unpriced` and budgets count it as its cap), `inherit_mcp`, `add_dirs`,
-  `skills`, `sandbox*`, `claude_agent`. Allowed: `model`, `effort`, `on_failure: resume_once`,
-  continued sessions, `env_passthrough`, `timeout_minutes`, the concurrency and daily-run caps.
+  `skills`, `sandbox*`, a body next to `project_agent`. Allowed: `model`, `effort`,
+  `on_failure: resume_once`, continued sessions, `env_passthrough`, `timeout_minutes`, the
+  concurrency and daily-run caps, `project_agent` ([Copilot links](#copilot-links)).
+
+#### Copilot links
+
+A project that ships Copilot agents in `.github/agents/<name>.agent.md` can be linked like a
+Claude project agent:
+
+```markdown
+---
+harness: copilot
+project_agent: reviewer     # <project>/.github/agents/reviewer.agent.md
+project: my-app
+permission_mode: dontAsk
+allowed_tools: ["shell(git)", "read"]
+---
+```
+
+The run is `copilot --agent reviewer` in the project folder (no `--add-dir`). What was verified on
+real runs of Copilot CLI 1.0.114 ([Development](development.md#extending), "Copilot CLI flags"):
+
+- **No body.** Copilot has no channel for instructions next to a project agent (`--agent` is given
+  once, there is no system prompt flag, an added directory's instruction files are not read), so a
+  Copilot link with a non-empty body is refused at create, update and run start, `system_prompt`
+  named. Put the instructions in the project agent's file, or in the run's prompt.
+- **The file cannot widen the envelope.** Its `tools:` grant no permission (a declared shell tool
+  is still denied without an `--allow-tool` rule) and only narrow what exists (`tools: ["read"]`
+  leaves no shell tool even with `shell(ls)` allowed). A run can do what the file declares *and*
+  `allowed_tools` allows. `create_agent` warns about an `allowed_tools` rule whose tool the file
+  does not declare (`shell` needs `execute` or `shell`, `write` needs `edit` or `write`, `read`
+  needs `read`; `url` and `memory` are not checked).
+- **Model.** The Duskfleet `model` wins (`--model`); without one, the file's `model:` runs, and the
+  run records it.
+- A name the project does not define is refused before the run is recorded, with the names
+  available.
 - **No MCP servers.** Before each run Duskfleet asks `copilot mcp list --json` (in the project
   folder) which servers are configured, user-level, workspace (a trusted folder's `.mcp.json` or
   `.github/mcp.json`) or plugin, and passes one `--disable-mcp-server <name>` per server, so a
@@ -566,12 +605,12 @@ through `create_agent`.
 
 Projects often ship their own Claude Code agents in `.claude/agents/*.md` (persona, tools,
 model). Instead of copying that prompt into Duskfleet, link to it (harness `claude`; see
-[Project agents per harness](#project-agents-per-harness) for the others):
+[Project agents per harness](#project-agents-per-harness) and [Copilot links](#copilot-links) for the others):
 
 ```markdown
 ---
 id: my-agent
-claude_agent: my-agent     # <project>/.claude/agents/my-agent.md
+project_agent: my-agent    # <project>/.claude/agents/my-agent.md (older name: claude_agent)
 project: my-app
 permission_mode: acceptEdits
 inherit_mcp: true

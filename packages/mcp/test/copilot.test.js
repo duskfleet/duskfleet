@@ -165,7 +165,6 @@ test("every field Copilot cannot honour is refused, by name", () => {
     [{ wrap_up_reserve_usd: 0 }, "wrap_up_reserve_usd"],
     [{ resume_budget_usd: 1 }, "resume_budget_usd"],
     [{ max_daily_cost_usd: 1 }, "max_daily_cost_usd"],
-    [{ claude_agent: "x" }, "claude_agent"],
     [{ inherit_mcp: true }, "inherit_mcp"],
     [{ add_dirs: ["/tmp"] }, "add_dirs"],
     [{ skills: ["s"] }, "skills"],
@@ -174,11 +173,14 @@ test("every field Copilot cannot honour is refused, by name", () => {
   ];
   for (const [fields, name] of cases) {
     const why = harnessRefusal({ harness: "copilot", ...fields }, builtinHarnesses);
-    // claude_agent adds the remedy after a colon (#494); every other field is the bare refusal.
-    if (name === "claude_agent")
-      assert.match(why, /^claude_agent is not supported by harness copilot: .*\.github\/agents.*kind "own"/);
-    else assert.equal(why, `${name} is not supported by harness copilot`);
+    assert.equal(why, `${name} is not supported by harness copilot`);
   }
+  // A link fits since #466, without a body only.
+  assert.equal(harnessRefusal({ harness: "copilot", claude_agent: "x" }, builtinHarnesses), null);
+  assert.match(
+    harnessRefusal({ harness: "copilot", claude_agent: "x", system_prompt: "Be brief." }, builtinHarnesses),
+    /^system_prompt \(the agent file's body\) is not supported next to project_agent by harness copilot: the run is \.github\/agents\/x\.agent\.md/,
+  );
   for (const mode of ["plan", "auto", "default", "bypassPermissions"]) {
     assert.match(harnessRefusal({ harness: "copilot", permission_mode: mode }, builtinHarnesses), /^permission_mode /);
   }

@@ -2,7 +2,6 @@ import path from "node:path";
 import {
   AGENT_ID_PATTERN,
   type AgentDefinition,
-  type AgentSpec,
   agentKind,
   agentSpecSchema,
   agentToSpec,
@@ -22,6 +21,7 @@ import {
   harnessGrantWarnings,
   harnessNameSchema,
   harnessOf,
+  linkFolder,
   linkProjectPath,
   linkRefusal,
   linkToolWarnings,
@@ -114,6 +114,7 @@ function agentWarnings(a: AgentDefinition, config: DuskFleetConfig): string[] {
     ...linkToolWarnings(
       { claude_agent: a.claudeAgent, allowed_tools: a.allowedTools },
       linkProjectPath(a, config.projects),
+      linkFolder(a),
     ),
     ...harnessGrantWarnings(a),
   ];
@@ -121,15 +122,16 @@ function agentWarnings(a: AgentDefinition, config: DuskFleetConfig): string[] {
 
 function presentAgent(a: AgentDefinition, config: DuskFleetConfig) {
   // A link that leaves description / model out lists the project agent's (issue #459).
-  const effective = effectiveAgentFields(a, linkProjectPath(a, config.projects));
+  const folder = linkFolder(a);
+  const effective = effectiveAgentFields(a, linkProjectPath(a, config.projects), folder);
   return {
     id: a.id,
     name: a.name,
     description: effective.description,
-    /** "agent" = this file, "project agent" = a link's .claude/agents/<claudeAgent>.md, null = none. */
+    /** "agent" = this file, "project agent" = a link's project agent file (projectAgentFile), null = none. */
     descriptionSource: effective.descriptionSource,
     source: a.source,
-    /** "own" = persona defined in Duskfleet; "link" = reuses the project's .claude/agents/<claudeAgent>.md */
+    /** "own" = persona defined in Duskfleet; "link" = reuses the project's agent file (projectAgentFile) */
     kind: agentKind(a),
     model: effective.model,
     /** "agent" = this file, "project agent" = a link's project agent, null = the CLI default. */
@@ -146,7 +148,12 @@ function presentAgent(a: AgentDefinition, config: DuskFleetConfig) {
     resumeBudgetUsd: a.resumeBudgetUsd ?? null,
     inheritMcp: a.inheritMcp ?? false,
     addDirs: a.addDirs ?? [],
+    /** The project agent a link runs (`project_agent:`, older name `claude_agent:`); null for an own agent. */
+    projectAgent: a.claudeAgent ?? null,
+    /** Same value as projectAgent, under its older name. */
     claudeAgent: a.claudeAgent ?? null,
+    /** Where the agent's harness reads that project agent, relative to the project. */
+    projectAgentFile: a.claudeAgent ? projectAgentFile(folder, a.claudeAgent) : null,
     project: a.project ?? null,
     /** Runs of this agent allowed at once: its own max_concurrent, else the global max_concurrent_per_agent. */
     maxConcurrent: a.maxConcurrent ?? config.maxConcurrentPerAgent,
@@ -201,13 +208,18 @@ function linkFields(guidance: string) {
       .describe(
         `For kind 'link': absolute path of the project FOLDER that defines the agent in its harness's folder (${guidance}). If that folder is not a registered project yet it is registered in the private registry (id = \`project\` if given, else the folder name) and the agent is bound to it`,
       ),
-    claude_agent: z
+    project_agent: z
       .string()
       .min(1)
       .optional()
       .describe(
-        `Reuse an agent the target project already defines for the agent's harness (${guidance}; see list_project_agents): the run adopts its prompt, tools and model (claude: \`claude --agent\`). This Duskfleet agent then only supplies the unattended envelope: permissions, allow-list, budget, MCP. A harness without links refuses it: use kind 'own' there`,
+        `Reuse an agent the target project already defines for the agent's harness (${guidance}; see list_project_agents): the run adopts its prompt, tools and model (\`claude --agent\`, \`copilot --agent\`). This Duskfleet agent then only supplies the unattended envelope: permissions, allow-list, budget, MCP. On copilot the envelope cannot add instructions: leave system_prompt empty. A harness without links refuses it: use kind 'own' there`,
       ),
+    claude_agent: z
+      .string()
+      .min(1)
+      .optional()
+      .describe("Older name of project_agent, same meaning. Set one or the other, never both"),
   };
 }
 
@@ -390,10 +402,10 @@ export function registerAgentTools(server: McpServer, ctx: ToolContext): void {
       title: "Create agent",
       description:
         "Create an agent. FIRST decide its kind: " +
-        "'own' = a NEW agent whose persona you write here (system_prompt required, no claude_agent); " +
+        "'own' = a NEW agent whose persona you write here (system_prompt required, no project_agent); " +
         "'link' = a LINK to an agent the target project already defines for the agent's harness " +
-        `(${guidance}; claude_agent + project required; check list_project_agents with the same harness first). A link reuses the project's prompt, tools and model ` +
-        "and only adds the unattended envelope: permission_mode, allowed_tools, budget, inherit_mcp, optional extra instructions in system_prompt. " +
+        `(${guidance}; project_agent + project required; check list_project_agents with the same harness first). A link reuses the project's prompt, tools and model ` +
+        "and only adds the unattended envelope: permission_mode, allowed_tools, budget, inherit_mcp, optional extra instructions in system_prompt (claude only: a copilot link has no body). " +
         "A harness without links takes kind 'own' only. " +
         "The file is written to user_agents_dir (outside the repo) and is available to run_agent immediately. " +
         "Fails if the id exists unless overwrite is true; overwriting a builtin id creates a user override. bypassPermissions cannot be set here.",
@@ -402,7 +414,7 @@ export function registerAgentTools(server: McpServer, ctx: ToolContext): void {
         kind: z
           .enum(["own", "link"])
           .describe(
-            "REQUIRED choice. 'own': new agent, persona in system_prompt. 'link': reuse the agent <claude_agent> the project defines in its harness's folder (see claude_agent); requires claude_agent plus the folder as project_path (or an already registered project id)",
+            "REQUIRED choice. 'own': new agent, persona in system_prompt. 'link': reuse the agent <project_agent> the project defines in its harness's folder (see project_agent); requires project_agent plus the folder as project_path (or an already registered project id)",
           ),
         ...agentFields,
         ...link,
@@ -423,7 +435,7 @@ export function registerAgentTools(server: McpServer, ctx: ToolContext): void {
           fields.project = projectFromFolder(ctx, config, project_path, fields.project, {
             id: args.id,
             harness: fields.harness,
-            claudeAgent: fields.claude_agent,
+            claudeAgent: fields.project_agent ?? fields.claude_agent,
           });
           registeredProject = fields.project;
         }
@@ -450,7 +462,7 @@ export function registerAgentTools(server: McpServer, ctx: ToolContext): void {
       title: "Update agent",
       description:
         "Change fields of a user agent; omitted fields keep their value. The agent keeps its kind unless you pass one: " +
-        "kind 'link' (with claude_agent, project) turns an own agent into a link; kind 'own' (with a system_prompt) or clear: [\"claude_agent\"] " +
+        "kind 'link' (with project_agent, project) turns an own agent into a link; kind 'own' (with a system_prompt) or clear: [\"project_agent\"] " +
         "turns a link back into an own agent. Builtin agents are versioned in config/agents and are not edited by tools: " +
         "create_agent with the same id and overwrite: true makes a user override instead.",
       inputSchema: {
@@ -476,6 +488,7 @@ export function registerAgentTools(server: McpServer, ctx: ToolContext): void {
               "resume_budget_usd",
               "inherit_mcp",
               "add_dirs",
+              "project_agent",
               "claude_agent",
               "project",
               "max_daily_runs",
@@ -519,13 +532,22 @@ export function registerAgentTools(server: McpServer, ctx: ToolContext): void {
           changes.project = projectFromFolder(ctx, config, project_path, changes.project, {
             id: args.id,
             harness: changes.harness ?? (clear?.includes("harness") ? undefined : existing.harness),
-            claudeAgent: changes.claude_agent ?? (clear?.includes("claude_agent") ? undefined : existing.claudeAgent),
+            claudeAgent:
+              changes.project_agent ??
+              changes.claude_agent ??
+              (clear?.includes("claude_agent") || clear?.includes("project_agent") ? undefined : existing.claudeAgent),
           });
         const cfgNow = ctx.config;
         const stored = agentToSpec(existing);
-        const merged: AgentSpec = { ...stored };
-        for (const [k, v] of Object.entries(changes)) if (v !== undefined) (merged as Record<string, unknown>)[k] = v;
-        for (const k of clear ?? []) delete (merged as Record<string, unknown>)[k];
+        const merged: Record<string, unknown> = { ...stored };
+        // The stored link field is `claude_agent`: a value under its new name replaces it.
+        if (changes.project_agent !== undefined) delete merged["claude_agent"];
+        for (const [k, v] of Object.entries(changes)) if (v !== undefined) merged[k] = v;
+        // Either name clears the one field.
+        for (const k of clear ?? []) {
+          delete merged[k];
+          if (k === "project_agent") delete merged["claude_agent"];
+        }
         const spec = assertAgentSpecClean(agentSpecSchema.parse(merged));
         const kind = requestedKind ?? agentKind(spec);
         assertAgentWritable(kind, spec, cfgNow, stored.skills ?? [], ctx.runs.harnesses.lookup);
@@ -603,7 +625,7 @@ export function registerAgentTools(server: McpServer, ctx: ToolContext): void {
       title: "List project agents",
       description:
         `List the agents a project defines for one harness, in that harness's own folder (${guidance}): name, description, tools, model. ` +
-        "When linkable is true, pass one of these names as claude_agent to create_agent (same harness) to reuse it instead of writing a new persona; " +
+        "When linkable is true, pass one of these names as project_agent to create_agent (same harness) to reuse it instead of writing a new persona; " +
         "when false, the harness cannot run a link: use kind 'own'.",
       inputSchema: {
         project_id: z.string().optional().describe("Id from list_projects"),
@@ -650,7 +672,7 @@ export function registerAgentTools(server: McpServer, ctx: ToolContext): void {
           hint: !linkable
             ? `Harness ${harness} cannot run a link yet (its agents live in ${where}): use kind "own" on harness ${harness}, the persona goes in system_prompt.`
             : agents.length
-              ? `Reuse one with create_agent { id, kind: "link", harness: "${harness}", claude_agent: <name>, permission_mode, allowed_tools, inherit_mcp }. Tool names in the project file that are not allow-listed here are denied in unattended runs.`
+              ? `Reuse one with create_agent { id, kind: "link", harness: "${harness}", project_agent: <name>, permission_mode, allowed_tools${caps.projectAgentInstructions === false ? " } and no system_prompt (this harness takes nothing next to a project agent)" : ", inherit_mcp }"}. Tool names in the project file that are not allow-listed here are denied in unattended runs.`
               : `This project defines no agents in ${where} (harness ${harness}). Write the persona in system_prompt (kind "own") instead.`,
         });
       } catch (err) {
