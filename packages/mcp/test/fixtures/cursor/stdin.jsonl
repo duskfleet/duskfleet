@@ -1,0 +1,9 @@
+{"type":"system","subtype":"init","apiKeySource":"login","cwd":"/work","session_id":"e8f54f41-b76d-48e5-807c-2e8446b09e32","model":"Auto","permissionMode":"default"}
+{"type":"user","message":{"role":"user","content":[{"type":"text","text":"Reply with exactly: stdin works"}]},"session_id":"e8f54f41-b76d-48e5-807c-2e8446b09e32"}
+{"type":"thinking","subtype":"delta","text":"The","session_id":"e8f54f41-b76d-48e5-807c-2e8446b09e32","timestamp_ms":1795522097219}
+{"type":"thinking","subtype":"delta","text":" user","session_id":"e8f54f41-b76d-48e5-807c-2e8446b09e32","timestamp_ms":1795522097224}
+{"type":"thinking","subtype":"delta","text":" wants","session_id":"e8f54f41-b76d-48e5-807c-2e8446b09e32","timestamp_ms":1795522097235}
+{"type":"thinking","subtype":"delta","text":" me to reply with exactly \"stdin works\".","session_id":"e8f54f41-b76d-48e5-807c-2e8446b09e32","timestamp_ms":1795522097450}
+{"type":"thinking","subtype":"completed","session_id":"e8f54f41-b76d-48e5-807c-2e8446b09e32","timestamp_ms":1795522097450}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"stdin works"}]},"session_id":"e8f54f41-b76d-48e5-807c-2e8446b09e32"}
+{"type":"result","subtype":"success","duration_ms":11184,"duration_api_ms":11184,"is_error":false,"result":"stdin works","session_id":"e8f54f41-b76d-48e5-807c-2e8446b09e32","request_id":"2900349c-b92f-4079-b581-10575372a446","usage":{"inputTokens":11352,"outputTokens":32,"cacheReadTokens":3968,"cacheWriteTokens":0,"reasoningTokens":30}}

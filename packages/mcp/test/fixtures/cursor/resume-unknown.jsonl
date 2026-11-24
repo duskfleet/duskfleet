@@ -1,0 +1,7 @@
+{"type":"system","subtype":"init","apiKeySource":"login","cwd":"/work","session_id":"00000000-0000-4000-8000-000000000000","model":"Auto","permissionMode":"default"}
+{"type":"user","message":{"role":"user","content":[{"type":"text","text":"Say hi"}]},"session_id":"00000000-0000-4000-8000-000000000000"}
+{"type":"thinking","subtype":"delta","text":"The","session_id":"00000000-0000-4000-8000-000000000000","timestamp_ms":1795522017760}
+{"type":"thinking","subtype":"delta","text":" user simply wants me to say hi.","session_id":"00000000-0000-4000-8000-000000000000","timestamp_ms":1795522017826}
+{"type":"thinking","subtype":"completed","session_id":"00000000-0000-4000-8000-000000000000","timestamp_ms":1795522017827}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"Hi! How can I help you today?"}]},"session_id":"00000000-0000-4000-8000-000000000000"}
+{"type":"result","subtype":"success","duration_ms":1921,"duration_api_ms":1921,"is_error":false,"result":"Hi! How can I help you today?","session_id":"00000000-0000-4000-8000-000000000000","request_id":"37ca6134-dca3-4a76-8292-91d25dcbd7a7","usage":{"inputTokens":724,"outputTokens":32,"cacheReadTokens":14592,"cacheWriteTokens":0,"reasoningTokens":23}}

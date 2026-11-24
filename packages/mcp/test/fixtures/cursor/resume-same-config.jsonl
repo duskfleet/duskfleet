@@ -1,0 +1,12 @@
+{"type":"system","subtype":"init","apiKeySource":"login","cwd":"/work","session_id":"5c132010-390f-4b6b-a3a2-1878064db95f","model":"Auto","permissionMode":"default"}
+{"type":"user","message":{"role":"user","content":[{"type":"text","text":"Which shell command did you run earlier in this conversation? One short sentence."}]},"session_id":"5c132010-390f-4b6b-a3a2-1878064db95f"}
+{"type":"thinking","subtype":"delta","text":"The","session_id":"5c132010-390f-4b6b-a3a2-1878064db95f","timestamp_ms":1795522074683}
+{"type":"thinking","subtype":"delta","text":" user","session_id":"5c132010-390f-4b6b-a3a2-1878064db95f","timestamp_ms":1795522074754}
+{"type":"thinking","subtype":"delta","text":" wants","session_id":"5c132010-390f-4b6b-a3a2-1878064db95f","timestamp_ms":1795522074815}
+{"type":"thinking","subtype":"delta","text":" to know","session_id":"5c132010-390f-4b6b-a3a2-1878064db95f","timestamp_ms":1795522074958}
+{"type":"thinking","subtype":"delta","text":" which","session_id":"5c132010-390f-4b6b-a3a2-1878064db95f","timestamp_ms":1795522075104}
+{"type":"thinking","subtype":"delta","text":" shell","session_id":"5c132010-390f-4b6b-a3a2-1878064db95f","timestamp_ms":1795522075178}
+{"type":"thinking","subtype":"delta","text":" command I ran earlier in this conversation.\n\nI ran `git status --short .`.","session_id":"5c132010-390f-4b6b-a3a2-1878064db95f","timestamp_ms":1795522075488}
+{"type":"thinking","subtype":"completed","session_id":"5c132010-390f-4b6b-a3a2-1878064db95f","timestamp_ms":1795522075488}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"I ran `git status --short .`."}]},"session_id":"5c132010-390f-4b6b-a3a2-1878064db95f"}
+{"type":"result","subtype":"success","duration_ms":1863,"duration_api_ms":1863,"is_error":false,"result":"I ran `git status --short .`.","session_id":"5c132010-390f-4b6b-a3a2-1878064db95f","request_id":"3b66bfc3-2187-4ce4-b91a-9a7e37f36737","usage":{"inputTokens":190,"outputTokens":40,"cacheReadTokens":15360,"cacheWriteTokens":0,"reasoningTokens":31}}

@@ -1,0 +1,18 @@
+{"type":"system","subtype":"init","apiKeySource":"login","cwd":"/work","session_id":"5c132010-390f-4b6b-a3a2-1878064db95f","model":"Auto","permissionMode":"default"}
+{"type":"user","message":{"role":"user","content":[{"type":"text","text":"Which shell command did you run earlier in this conversation? One short sentence."}]},"session_id":"5c132010-390f-4b6b-a3a2-1878064db95f"}
+{"type":"thinking","subtype":"delta","text":"The","session_id":"5c132010-390f-4b6b-a3a2-1878064db95f","timestamp_ms":1795522059173}
+{"type":"thinking","subtype":"delta","text":" user","session_id":"5c132010-390f-4b6b-a3a2-1878064db95f","timestamp_ms":1795522059177}
+{"type":"thinking","subtype":"delta","text":" is","session_id":"5c132010-390f-4b6b-a3a2-1878064db95f","timestamp_ms":1795522059213}
+{"type":"thinking","subtype":"delta","text":" asking","session_id":"5c132010-390f-4b6b-a3a2-1878064db95f","timestamp_ms":1795522059291}
+{"type":"thinking","subtype":"delta","text":" which","session_id":"5c132010-390f-4b6b-a3a2-1878064db95f","timestamp_ms":1795522059376}
+{"type":"thinking","subtype":"delta","text":" shell","session_id":"5c132010-390f-4b6b-a3a2-1878064db95f","timestamp_ms":1795522059449}
+{"type":"thinking","subtype":"delta","text":" command","session_id":"5c132010-390f-4b6b-a3a2-1878064db95f","timestamp_ms":1795522059555}
+{"type":"thinking","subtype":"delta","text":" I ran","session_id":"5c132010-390f-4b6b-a3a2-1878064db95f","timestamp_ms":1795522059755}
+{"type":"thinking","subtype":"delta","text":" earlier","session_id":"5c132010-390f-4b6b-a3a2-1878064db95f","timestamp_ms":1795522059833}
+{"type":"thinking","subtype":"delta","text":" in this","session_id":"5c132010-390f-4b6b-a3a2-1878064db95f","timestamp_ms":1795522059903}
+{"type":"thinking","subtype":"delta","text":" conversation.\n\nThis appears to be","session_id":"5c132010-390f-4b6b-a3a2-1878064db95f","timestamp_ms":1795522060009}
+{"type":"thinking","subtype":"delta","text":" the first message in","session_id":"5c132010-390f-4b6b-a3a2-1878064db95f","timestamp_ms":1795522060123}
+{"type":"thinking","subtype":"delta","text":" this conversation, so no shell command was run earlier.","session_id":"5c132010-390f-4b6b-a3a2-1878064db95f","timestamp_ms":1795522060533}
+{"type":"thinking","subtype":"completed","session_id":"5c132010-390f-4b6b-a3a2-1878064db95f","timestamp_ms":1795522060534}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"I haven’t run any shell command in this conversation yet."}]},"session_id":"5c132010-390f-4b6b-a3a2-1878064db95f"}
+{"type":"result","subtype":"success","duration_ms":3089,"duration_api_ms":3089,"is_error":false,"result":"I haven’t run any shell command in this conversation yet.","session_id":"5c132010-390f-4b6b-a3a2-1878064db95f","request_id":"b0d34d6c-1ad4-496d-8fcb-1e38e685fa20","usage":{"inputTokens":608,"outputTokens":100,"cacheReadTokens":14720,"cacheWriteTokens":0,"reasoningTokens":89}}

@@ -1,0 +1,7 @@
+{"type":"system","subtype":"init","apiKeySource":"login","cwd":"/work","session_id":"63ec49c7-29c9-4b96-ab98-f7063b83a03e","model":"Auto","permissionMode":"default"}
+{"type":"user","message":{"role":"user","content":[{"type":"text","text":"Say hi in three words."}]},"session_id":"63ec49c7-29c9-4b96-ab98-f7063b83a03e"}
+{"type":"thinking","subtype":"delta","text":"The","session_id":"63ec49c7-29c9-4b96-ab98-f7063b83a03e","timestamp_ms":1795522361409}
+{"type":"thinking","subtype":"delta","text":" user wants me to say hi in three words.","session_id":"63ec49c7-29c9-4b96-ab98-f7063b83a03e","timestamp_ms":1795522361494}
+{"type":"thinking","subtype":"completed","session_id":"63ec49c7-29c9-4b96-ab98-f7063b83a03e","timestamp_ms":1795522361495}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"Hi there, friend."}]},"session_id":"63ec49c7-29c9-4b96-ab98-f7063b83a03e"}
+{"type":"result","subtype":"success","duration_ms":7736,"duration_api_ms":7736,"is_error":false,"result":"Hi there, friend.","session_id":"63ec49c7-29c9-4b96-ab98-f7063b83a03e","request_id":"f752f6bb-4531-405b-a31b-272d3b6f0760","usage":{"inputTokens":3159,"outputTokens":33,"cacheReadTokens":12160,"cacheWriteTokens":0,"reasoningTokens":28}}
