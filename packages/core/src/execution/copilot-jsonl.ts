@@ -120,6 +120,11 @@ export function ingestCopilotLine(state: CopilotStreamState, line: string): Exec
       state.started = true;
       state.model = str(data["selectedModel"]) ?? state.model;
       break;
+    case "session.model_change":
+      // A link whose agent file names a model and no --model (fixture link-model, 1.0.114):
+      // session.start has no selectedModel, then a `startup` (account default) and an `agent` change.
+      state.model = str(data["newModel"]) ?? state.model;
+      break;
     case "session.mcp_servers_loaded": {
       const servers = Array.isArray(data["servers"]) ? data["servers"] : [];
       state.mcpServers = servers

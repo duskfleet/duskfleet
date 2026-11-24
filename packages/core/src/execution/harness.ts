@@ -10,6 +10,13 @@
  */
 import { type AgentSpec, agentToSpec } from "../config/agent-files.js";
 import {
+  CLAUDE_PROJECT_AGENTS,
+  CODEX_PROJECT_AGENTS,
+  COPILOT_PROJECT_AGENTS,
+  type ProjectAgentFolder,
+  projectAgentFile,
+} from "../config/project-agent-folder.js";
+import {
   type AgentDefinition,
   DEFAULT_HARNESS,
   PERMISSION_MODES,
@@ -38,8 +45,20 @@ export interface HarnessCapabilities {
   subagents: boolean;
   /** `inherit_mcp` (agent or project) gives the run the user's MCP connectors. */
   mcpInherit: boolean;
-  /** `link` agents: `claude_agent`, a persona defined by the project itself. */
+  /** `link` agents: `project_agent` (older name `claude_agent`), a persona defined by the project itself. */
   projectAgents: boolean;
+  /**
+   * A link's body (the Duskfleet file's extra instructions) reaches the run next to the project
+   * agent. `false` = a link with a non-empty body is refused (`system_prompt` named), never run
+   * without it. Absent = taken (Claude Code: `--append-system-prompt`).
+   */
+  projectAgentInstructions?: boolean;
+  /**
+   * Where this harness's agent definitions live in a project repository (issue #494), whether or
+   * not a link can run them (`projectAgents`). Every text naming that folder is built from it.
+   * Absent (an older test double) = no folder to name.
+   */
+  projectAgentFolder?: ProjectAgentFolder;
   /** `add_dirs` (agent or project). */
   addDirs: boolean;
   /** `skills:` (a bundle passed as one more directory). */
@@ -90,6 +109,7 @@ export const CLAUDE_CAPABILITIES: HarnessCapabilities = Object.freeze({
   subagents: true,
   mcpInherit: true,
   projectAgents: true,
+  projectAgentFolder: CLAUDE_PROJECT_AGENTS,
   addDirs: true,
   skills: true,
   effort: true,
@@ -103,7 +123,9 @@ export const COPILOT_HARNESS = "copilot";
  * GitHub Copilot CLI (1.0.112, docs/harnesses.md): its own tool rules (`toolRule`), deny by
  * default in a non-interactive run (`dontAsk`; `acceptEdits` adds `write`), resumable sessions, no
  * dollars (every run `unpriced`), none of the Claude-only fields. `addDirs` stays false: Copilot's
- * `--add-dir` also trusts that directory's skills and agents, not the same promise.
+ * `--add-dir` also trusts that directory's skills and agents, not the same promise. Links (#466,
+ * 1.0.114): `copilot --agent <name>` runs the project's `.github/agents/<name>.agent.md`; nothing
+ * else carries instructions next to it, so a link with a body is refused.
  */
 export const COPILOT_CAPABILITIES: HarnessCapabilities = Object.freeze({
   toolAllowList: true,
@@ -113,7 +135,9 @@ export const COPILOT_CAPABILITIES: HarnessCapabilities = Object.freeze({
   reportsCostUsd: false,
   subagents: false,
   mcpInherit: false,
-  projectAgents: false,
+  projectAgents: true,
+  projectAgentInstructions: false,
+  projectAgentFolder: COPILOT_PROJECT_AGENTS,
   addDirs: false,
   skills: false,
   effort: true,
@@ -141,6 +165,7 @@ export const CODEX_CAPABILITIES: HarnessCapabilities = Object.freeze({
   subagents: false,
   mcpInherit: false,
   projectAgents: false,
+  projectAgentFolder: CODEX_PROJECT_AGENTS,
   addDirs: false,
   skills: false,
   effort: true,
@@ -221,6 +246,7 @@ type FitFields = Pick<
   | "sandbox_allowed_domains"
   | "sandbox_weaker_network_isolation"
   | "codex_network"
+  | "system_prompt"
 >;
 
 /**
@@ -260,7 +286,10 @@ export function harnessRefusal(
   // The daily cost cap sums reported costs: without them it would read 0 and never refuse.
   if (spec.max_daily_cost_usd !== undefined && !caps.reportsCostUsd) return refuse("max_daily_cost_usd");
   if (spec.inherit_mcp === true && !caps.mcpInherit) return refuse("inherit_mcp");
-  if (spec.claude_agent !== undefined && !caps.projectAgents) return refuse("claude_agent");
+  if (spec.claude_agent !== undefined && !caps.projectAgents) return linkRefusal(name, harnesses);
+  // A link's body is extra instructions for the project agent: refused where the CLI cannot take both.
+  if (spec.claude_agent !== undefined && spec.system_prompt?.trim() && caps.projectAgentInstructions === false)
+    return linkBodyRefusal(name, caps, spec.claude_agent);
   if (spec.add_dirs?.length && !caps.addDirs) return refuse("add_dirs");
   if (spec.skills?.length && !caps.skills) return refuse("skills");
   if (spec.effort !== undefined && !caps.effort) return refuse("effort");
@@ -279,6 +308,76 @@ export function harnessRefusal(
   if (project?.inheritMcp && !caps.mcpInherit) return `${refuse("inherit_mcp")} (set by project ${project.id})`;
   if (project?.addDirs?.length && !caps.addDirs) return `${refuse("add_dirs")} (set by project ${project.id})`;
   return null;
+}
+
+/**
+ * What to do instead of a link on a harness that cannot run one (issue #494): an own agent on that
+ * harness, or the default harness when the project really defines an agent for it. Names the
+ * harness's own folder, never another harness's.
+ */
+function linkRemedy(name: string, caps: HarnessCapabilities, harnesses: HarnessLookup): string {
+  const own = caps.projectAgentFolder ? ` (its agents live in ${projectAgentFile(caps.projectAgentFolder)})` : "";
+  const parts = [
+    `Duskfleet cannot start a ${name} session as a project agent${own}`,
+    `use kind "own" on harness ${name}, the persona goes in system_prompt`,
+  ];
+  const claude = harnesses(DEFAULT_HARNESS);
+  if (name !== DEFAULT_HARNESS && claude?.projectAgents && claude.projectAgentFolder)
+    parts.push(
+      `or harness: ${DEFAULT_HARNESS} if the project defines a Claude Code agent in ${projectAgentFile(claude.projectAgentFolder)}`,
+    );
+  return `${parts.join("; ")}.`;
+}
+
+/**
+ * Why a link (`claude_agent`) cannot run on harness `name`, with the remedy; null when it can, or
+ * when the harness is unknown (`harnessRefusal` names that). The one message for create, update,
+ * `agents create` and `startRun`.
+ */
+export function linkRefusal(name: string, harnesses: HarnessLookup): string | null {
+  const caps = harnesses(name);
+  if (!caps || caps.projectAgents) return null;
+  return `claude_agent is not supported by harness ${name}: ${linkRemedy(name, caps, harnesses)}`;
+}
+
+/**
+ * A link with a body on a harness whose CLI takes nothing next to the project agent (#466, Copilot
+ * 1.0.114): the field named, and where the instructions can go instead.
+ */
+export function linkBodyRefusal(name: string, caps: HarnessCapabilities, projectAgent: string): string {
+  const file = caps.projectAgentFolder ? projectAgentFile(caps.projectAgentFolder, projectAgent) : "the project agent";
+  return `system_prompt (the agent file's body) is not supported next to project_agent by harness ${name}: the run is ${file} and nothing else reaches it. Move the instructions into that file, or leave the body empty`;
+}
+
+/** The folder a harness's project agents live in; undefined for an unknown harness or one that names none. */
+export function projectAgentFolderOf(name: string, harnesses: HarnessLookup): ProjectAgentFolder | undefined {
+  return harnesses(name)?.projectAgentFolder;
+}
+
+/**
+ * The folder a link's project agent is read from: its harness's (`projectAgentFolderOf`), Claude
+ * Code's for a harness that names none. For the read-side helpers of `agent-files.ts`.
+ */
+export function linkFolder(
+  agent: { harness?: string | undefined },
+  harnesses: HarnessLookup = builtinHarnesses,
+): ProjectAgentFolder {
+  return projectAgentFolderOf(harnessOf(agent), harnesses) ?? CLAUDE_PROJECT_AGENTS;
+}
+
+/**
+ * One line per harness: where its project agents live and whether a link can run them, for the
+ * server instructions and the create / list tool descriptions. `names` = the harnesses to describe.
+ */
+export function projectAgentGuidance(names: readonly string[], harnesses: HarnessLookup): string {
+  const lines: string[] = [];
+  for (const name of names) {
+    const caps = harnesses(name);
+    if (!caps?.projectAgentFolder) continue;
+    const file = projectAgentFile(caps.projectAgentFolder);
+    lines.push(caps.projectAgents ? `${name}: ${file}` : `${name}: ${file}, kind 'own' only (no link yet)`);
+  }
+  return lines.join("; ");
 }
 
 /** Throws `harnessRefusal`'s reason, prefixed with the agent id. Create / update and `startRun` call it. */

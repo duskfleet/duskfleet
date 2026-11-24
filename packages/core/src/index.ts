@@ -25,6 +25,7 @@ export {
   assertAgentKind,
   assertSandboxSpec,
   assertWrapUpReserve,
+  BOTH_PROJECT_AGENT_FIELDS,
   deleteAgentFile,
   deleteAgentFileAt,
   type EffectiveAgentFields,
@@ -104,6 +105,13 @@ export {
   serviceDirs,
   shellLine,
 } from "./config/mcp-entry.js";
+export {
+  CLAUDE_PROJECT_AGENTS,
+  CODEX_PROJECT_AGENTS,
+  COPILOT_PROJECT_AGENTS,
+  type ProjectAgentFolder,
+  projectAgentFile,
+} from "./config/project-agent-folder.js";
 export {
   PROJECT_ID_PATTERN,
   projectIdFromPath,
@@ -191,6 +199,11 @@ export {
   harnessGrantWarnings,
   harnessOf,
   harnessRefusal,
+  linkBodyRefusal,
+  linkFolder,
+  linkRefusal,
+  projectAgentFolderOf,
+  projectAgentGuidance,
   SHIPPED_HARNESSES,
 } from "./execution/harness.js";
 export {

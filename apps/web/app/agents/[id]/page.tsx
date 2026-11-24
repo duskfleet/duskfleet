@@ -112,7 +112,7 @@ export default async function AgentPage({ params, searchParams }: Params) {
               className={`ac-kind ${a.claudeAgent ? "link" : ""}`}
               title={
                 a.claudeAgent
-                  ? `Runs as the project's ${a.claudeAgent} (claude --agent)`
+                  ? `Runs as the project's ${a.claudeAgent} (${a.linked?.command ?? `claude --agent ${a.claudeAgent}`})`
                   : "Persona written in Duskfleet"
               }
             >
@@ -233,7 +233,7 @@ export default async function AgentPage({ params, searchParams }: Params) {
               <dl className="kv ad-kv">
                 <dt>runs as</dt>
                 <dd>
-                  <code>claude --agent {a.claudeAgent}</code>
+                  <code>{a.linked?.command}</code>
                 </dd>
                 <dt>in project</dt>
                 <dd>
@@ -249,13 +249,11 @@ export default async function AgentPage({ params, searchParams }: Params) {
                 <dd>
                   {a.linked?.found ? (
                     <>
-                      <code>.claude/agents/{a.claudeAgent}.md</code>{" "}
+                      <code>{a.linked.file}</code>{" "}
                       <span className="muted">(in the repo; Duskfleet owns only the unattended envelope)</span>
                     </>
                   ) : (
-                    <span className="warn-text">
-                      missing .claude/agents/{a.claudeAgent}.md: run_agent will refuse to start it
-                    </span>
+                    <span className="warn-text">missing {a.linked?.file}: run_agent will refuse to start it</span>
                   )}
                 </dd>
                 {d.systemPrompt.trim() && (

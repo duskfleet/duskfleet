@@ -227,10 +227,10 @@ test("every field Codex cannot honour is refused, by name", () => {
     [{ sandbox_allowed_domains: ["x.org"] }, "sandbox_allowed_domains"],
   ];
   for (const [fields, name] of cases) {
-    assert.equal(
-      harnessRefusal({ harness: "codex", ...fields }, builtinHarnesses),
-      `${name} is not supported by harness codex`,
-    );
+    const why = harnessRefusal({ harness: "codex", ...fields }, builtinHarnesses);
+    // claude_agent adds the remedy after a colon (#494); every other field is the bare refusal.
+    if (name === "claude_agent") assert.match(why, /^claude_agent is not supported by harness codex: .*kind "own"/);
+    else assert.equal(why, `${name} is not supported by harness codex`);
   }
   for (const mode of ["plan", "auto", "default", "bypassPermissions"]) {
     assert.match(harnessRefusal({ harness: "codex", permission_mode: mode }, builtinHarnesses), /^permission_mode /);

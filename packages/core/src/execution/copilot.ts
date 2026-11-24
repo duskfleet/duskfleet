@@ -13,9 +13,12 @@
  * - `allowed_tools` / `disallowed_tools` hold Copilot's own rules, passed verbatim to
  *   `--allow-tool` / `--deny-tool` (copilot-rules.ts); `acceptEdits` adds `--allow-tool write`.
  *   In a non-interactive run a permission request that would prompt is denied: deny by default;
- * - the agent's system prompt becomes a Copilot agent file in a per-run temp directory, passed
+ * - an own agent's system prompt becomes a Copilot agent file in a per-run temp directory, passed
  *   with `--add-dir <tmp> --agent <name>` (there is no system prompt flag, and
  *   `COPILOT_CUSTOM_INSTRUCTIONS_DIRS` is not applied in an untrusted folder);
+ * - a link (`project_agent`, #466, 1.0.114) is `--agent <name>` alone: the project's
+ *   `.github/agents/<name>.agent.md`, found from the working directory. Its `tools:` only narrow
+ *   what the rules allow (fixtures `link-tools-*`); a link with a body is refused;
  * - `--usage-output-file` into the same temp directory: tokens per model for the result.
  *
  * Never passed: `--trust-folder`, `--allow-all-tools`, `--allow-all`, `--yolo`, `--autopilot`;
@@ -26,6 +29,8 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { createInterface } from "node:readline";
+import { listProjectAgents } from "../config/agent-files.js";
+import { COPILOT_PROJECT_AGENTS } from "../config/project-agent-folder.js";
 import { classifyFailure } from "../observability/failure.js";
 import type { RecordedCommand } from "../observability/run.js";
 import { logger } from "../util/log.js";
@@ -39,7 +44,7 @@ import {
   sumUsage,
 } from "./copilot-jsonl.js";
 import { copilotRuleRefusal } from "./copilot-rules.js";
-import { COPILOT_CAPABILITIES, COPILOT_HARNESS } from "./harness.js";
+import { COPILOT_CAPABILITIES, COPILOT_HARNESS, linkBodyRefusal } from "./harness.js";
 import { CappedLogWriter, DEFAULT_MAX_LOG_BYTES } from "./log-caps.js";
 import { effectivePath } from "./search-path.js";
 import type {
@@ -99,8 +104,19 @@ export class CopilotExecutor implements Executor {
     // The capability check refuses these fields first; a request built elsewhere must not slip through.
     if (request.addDirs?.length) throw new Error("add_dirs is not supported by harness copilot");
     if (request.inheritMcp) throw new Error("inherit_mcp is not supported by harness copilot");
-    if (request.claudeAgent) throw new Error("claude_agent is not supported by harness copilot");
     if (request.sandbox) throw new Error("sandbox is not supported by harness copilot");
+    if (request.claudeAgent) {
+      // A link runs the project's own agent file. An unknown name ends the CLI before any model
+      // call with nothing on stdout (fixture link-unknown): check it here, before the run row exists.
+      if (request.appendSystemPrompt)
+        throw new Error(linkBodyRefusal(COPILOT_HARNESS, COPILOT_CAPABILITIES, request.claudeAgent));
+      const available = listProjectAgents(request.cwd, COPILOT_PROJECT_AGENTS).map((a) => a.name);
+      if (!available.includes(request.claudeAgent)) {
+        throw new Error(
+          `runs as project agent "${request.claudeAgent}", but ${request.cwd}/${COPILOT_PROJECT_AGENTS.dir} has ${available.length ? available.join(", ") : "no agents"}`,
+        );
+      }
+    }
     // User-level and (trusted folder) workspace servers: one --disable-mcp-server each. A listing
     // that fails refuses the run: starting without knowing what would load is not an option.
     const disable = copilotMcpServersToDisable(this.listMcpServers(request));
@@ -163,7 +179,13 @@ export class CopilotExecutor implements Executor {
     if (req.permissionMode === "acceptEdits") argv.push("--allow-tool", "write");
     for (const rule of req.allowedTools ?? []) argv.push("--allow-tool", rule);
     for (const rule of req.disallowedTools ?? []) argv.push("--deny-tool", rule);
-    if (req.appendSystemPrompt) argv.push("--add-dir", workDir, "--agent", COPILOT_PERSONA_AGENT);
+    if (req.claudeAgent) {
+      // A link (#466): the project's `.github/agents/<name>.agent.md`, found from the working
+      // directory, no --add-dir. Nothing can join it, so a body never gets this far.
+      if (req.appendSystemPrompt)
+        throw new Error(linkBodyRefusal(COPILOT_HARNESS, COPILOT_CAPABILITIES, req.claudeAgent));
+      argv.push("--agent", req.claudeAgent);
+    } else if (req.appendSystemPrompt) argv.push("--add-dir", workDir, "--agent", COPILOT_PERSONA_AGENT);
     argv.push("--usage-output-file", path.join(workDir, "usage.json"));
     return argv;
   }
@@ -182,7 +204,7 @@ export class CopilotExecutor implements Executor {
     let argv: string[];
     try {
       argv = this.buildArgv(req, workDir);
-      if (req.appendSystemPrompt) writePersona(workDir, req.appendSystemPrompt);
+      if (req.appendSystemPrompt && !req.claudeAgent) writePersona(workDir, req.appendSystemPrompt);
     } catch (err) {
       cleanup();
       throw err;
