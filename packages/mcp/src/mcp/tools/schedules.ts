@@ -2,6 +2,7 @@ import {
   CATCH_UP_POLICIES,
   CONCURRENCY_POLICIES,
   describeCron,
+  EFFORT_LEVELS,
   type IdleStats,
   MAX_SCHEDULER_PAUSE_MINUTES,
   ON_FAILURE_POLICIES,
@@ -58,6 +59,10 @@ const gateSchema = z
           ),
         budget_usd: z.number().positive().optional().describe("--max-budget-usd of the gate run, default 0.5"),
         model: z.string().min(1).optional().describe("Model override for the gate run"),
+        effort: z
+          .enum(EFFORT_LEVELS)
+          .optional()
+          .describe("Effort override for the gate run; default the gate agent's effort"),
         marker: z
           .string()
           .min(1)
@@ -81,6 +86,7 @@ function toGate(g: z.infer<typeof gateSchema>): ScheduleGate {
     const a: NonNullable<ScheduleGate["agent"]> = { agentId: g.agent.agent_id, prompt: g.agent.prompt };
     if (g.agent.budget_usd !== undefined) a.budgetUsd = g.agent.budget_usd;
     if (g.agent.model !== undefined) a.model = g.agent.model;
+    if (g.agent.effort !== undefined) a.effort = g.agent.effort;
     if (g.agent.marker !== undefined) a.marker = g.agent.marker;
     gate.agent = a;
   }
@@ -104,6 +110,12 @@ const scheduleFields = {
   time_zone: z.string().min(1).optional().describe("IANA zone, default from config (Europe/London)"),
   project_id: z.string().min(1).optional().describe("Required unless the agent is bound to a project"),
   model: z.string().min(1).optional().describe("Model alias/id override for scheduled runs"),
+  effort: z
+    .enum(EFFORT_LEVELS)
+    .optional()
+    .describe(
+      "Effort override for scheduled runs, over the agent's effort (refused on a harness without effort). Like model, an edit after a budget_exhausted / timed_out run makes the next fire start fresh instead of resuming",
+    ),
   enabled: z.boolean().optional().describe("Default true"),
   on_failure: z
     .enum(ON_FAILURE_POLICIES)
@@ -195,6 +207,7 @@ export function registerScheduleTools(server: McpServer, ctx: ToolContext): void
         else input.timeZone = ctx.config.scheduler.defaultTimeZone;
         if (args.project_id !== undefined) input.projectId = args.project_id;
         if (args.model !== undefined) input.model = args.model;
+        if (args.effort !== undefined) input.effort = args.effort;
         if (args.enabled !== undefined) input.enabled = args.enabled;
         if (args.on_failure !== undefined) input.onFailure = args.on_failure;
         if (args.resume_budget_usd !== undefined) input.resumeBudgetUsd = args.resume_budget_usd;
@@ -228,6 +241,7 @@ export function registerScheduleTools(server: McpServer, ctx: ToolContext): void
         time_zone: scheduleFields.time_zone,
         project_id: scheduleFields.project_id,
         model: scheduleFields.model,
+        effort: scheduleFields.effort,
         enabled: scheduleFields.enabled,
         on_failure: scheduleFields.on_failure,
         resume_budget_usd: scheduleFields.resume_budget_usd,
@@ -244,6 +258,7 @@ export function registerScheduleTools(server: McpServer, ctx: ToolContext): void
         catch_up_policy: scheduleFields.catch_up_policy,
         trigger_kind: scheduleFields.trigger_kind,
         clear_model: z.boolean().optional().describe("Remove the model override"),
+        clear_effort: z.boolean().optional().describe("Remove the effort override: the agent's effort applies again"),
         clear_on_failure: z
           .boolean()
           .optional()
@@ -257,6 +272,9 @@ export function registerScheduleTools(server: McpServer, ctx: ToolContext): void
         }
         if (args.gate !== undefined && args.clear_gate) {
           throw new Error("gate and clear_gate cannot be used together");
+        }
+        if (args.effort !== undefined && args.clear_effort) {
+          throw new Error("effort and clear_effort cannot be used together");
         }
         const patch: Parameters<typeof ctx.scheduler.update>[1] = {};
         if (args.on_failure !== undefined) patch.onFailure = args.on_failure;
@@ -279,6 +297,8 @@ export function registerScheduleTools(server: McpServer, ctx: ToolContext): void
         if (args.project_id !== undefined) patch.projectId = args.project_id;
         if (args.model !== undefined) patch.model = args.model;
         if (args.clear_model) patch.model = null;
+        if (args.effort !== undefined) patch.effort = args.effort;
+        else if (args.clear_effort) patch.effort = null;
         if (args.enabled !== undefined) patch.enabled = args.enabled;
         if (args.concurrency_policy !== undefined) patch.concurrencyPolicy = args.concurrency_policy;
         if (args.catch_up_policy !== undefined) patch.catchUpPolicy = args.catch_up_policy;

@@ -494,6 +494,7 @@ export class Scheduler {
       const input: Parameters<RunManager["startRun"]>[0] = { prompt: s.prompt, agentId: s.agentId, scheduleId: s.id };
       if (s.projectId) input.projectId = s.projectId;
       if (s.model) input.model = s.model;
+      if (s.effort) input.effort = s.effort;
       if (s.title) input.title = s.title;
       // continue: the session of the last ended run, whatever its outcome. startRun checks it can
       // be continued and still matches (agent, project path, agent hash); otherwise it starts a

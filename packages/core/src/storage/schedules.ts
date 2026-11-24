@@ -6,6 +6,7 @@
 
 import { randomUUID } from "node:crypto";
 import type { DatabaseSync } from "node:sqlite";
+import type { EffortLevel } from "../config/types.js";
 import { normalizeRunTitle } from "../observability/run.js";
 import {
   type CatchUpPolicy,
@@ -38,6 +39,7 @@ interface ScheduleRow {
   project_id: string | null;
   prompt: string;
   model: string | null;
+  effort?: string | null;
   cron: string;
   time_zone: string;
   enabled: number;
@@ -110,6 +112,7 @@ function rowToSchedule(r: ScheduleRow): Schedule {
     projectId: r.project_id,
     prompt: r.prompt,
     model: r.model,
+    effort: (r.effort as EffortLevel | null | undefined) ?? null,
     cron: r.cron,
     timeZone: r.time_zone,
     enabled: r.enabled === 1,
@@ -197,8 +200,8 @@ export class ScheduleRepository {
       .prepare(
         `INSERT INTO schedules (id, name, agent_id, project_id, prompt, model, cron, time_zone, enabled, created_at, updated_at, next_run_at,
            last_fired_at, last_outcome, last_error, last_run_id, fires, skips, on_failure, resume_budget_usd, noop_pattern, gate_json,
-           concurrency_policy, catch_up_policy, trigger_kind, continue_session, title)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, NULL, NULL, 0, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+           concurrency_policy, catch_up_policy, trigger_kind, continue_session, title, effort)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, NULL, NULL, 0, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         id,
@@ -222,6 +225,7 @@ export class ScheduleRepository {
         input.triggerKind ?? DEFAULT_TRIGGER_KIND,
         input.continueSession ? 1 : 0,
         normalizeRunTitle(input.title),
+        input.effort ?? null,
       );
     return this.get(id)!;
   }
@@ -235,6 +239,7 @@ export class ScheduleRepository {
       projectId: "project_id",
       prompt: "prompt",
       model: "model",
+      effort: "effort",
       cron: "cron",
       timeZone: "time_zone",
       enabled: "enabled",

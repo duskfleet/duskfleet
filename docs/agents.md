@@ -174,7 +174,11 @@ silently and never approximated: an allow-list a CLI ignored would be a permissi
 Claude Code has every capability, so a Claude agent runs exactly as before the field existed. The
 run records its harness (`harness` in `get_run` / `run-info --json`, a line on the run page).
 It also records the effort it was started with (`effort` in `get_run`, `list_runs` and `run-info`):
-the agent's `effort:` as passed to the CLI, null when the agent sets none (the CLI's default).
+the value passed to the CLI, null when none was (the CLI's default). That is the agent's `effort:`,
+unless the run overrides it: `run_agent { effort }`, `run --effort`, a schedule's `effort` or a
+gate's `gate.agent.effort` (one of the same five levels; refused on a harness without `effort`,
+never dropped). `agents create --effort <level>` writes the field. A resume (`on_failure:
+resume_once`) keeps the effort of the run it resumes.
 
 ### Copilot agents
 

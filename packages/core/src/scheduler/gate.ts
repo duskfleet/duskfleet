@@ -17,6 +17,7 @@ import { spawn } from "node:child_process";
 import { skippedAgentError } from "../config/loader.js";
 import type { DuskFleetConfig } from "../config/types.js";
 import { childEnv, mergeEnvPassthrough } from "../execution/child-env.js";
+import { effortRefusal } from "../execution/harness.js";
 import { BudgetError } from "../orchestration/budget.js";
 import { BusyError } from "../orchestration/busy.js";
 import { DailyCapError } from "../orchestration/daily-cap.js";
@@ -77,6 +78,8 @@ export function validateGate(config: DuskFleetConfig, gate: ScheduleGate, schedu
   if (!a.prompt?.trim()) throw new Error("gate.agent.prompt is required");
   if (a.budgetUsd !== undefined && !(a.budgetUsd > 0)) throw new Error("gate.agent.budget_usd must be positive");
   if (a.marker !== undefined && !a.marker.trim()) throw new Error("gate.agent.marker is empty");
+  const effortError = effortRefusal(a.effort, "gate.agent.effort", agent);
+  if (effortError) throw new Error(effortError);
   if (agent.project && scheduleProjectId && agent.project !== scheduleProjectId) {
     throw new Error(
       `gate agent "${a.agentId}" belongs to project "${agent.project}"; the schedule runs on "${scheduleProjectId}"`,
@@ -201,6 +204,7 @@ export async function runAgentGate(
   const projectId = scheduleProjectId(s, runs.config.agents.get(s.agentId));
   if (projectId) input.projectId = projectId;
   if (gate.model) input.model = gate.model;
+  if (gate.effort) input.effort = gate.effort;
   let startedId: string;
   try {
     startedId = (await runs.startRun(input)).id;

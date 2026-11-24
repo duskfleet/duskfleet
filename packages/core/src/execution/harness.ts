@@ -19,6 +19,7 @@ import {
 import {
   type AgentDefinition,
   DEFAULT_HARNESS,
+  EFFORT_LEVELS,
   PERMISSION_MODES,
   type PermissionMode,
   type ProjectDefinition,
@@ -220,6 +221,27 @@ export const builtinHarnesses: HarnessLookup = (name) =>
       : name === CODEX_HARNESS
         ? CODEX_CAPABILITIES
         : undefined;
+
+/**
+ * Why an effort override (`run_agent { effort }`, a schedule's `effort`, `gate.agent.effort`;
+ * issue #497) cannot be used with `agent`, or null when it can or is not set: a value outside
+ * EFFORT_LEVELS, or a harness whose capabilities lack `effort` (named by `field`, never dropped).
+ * An unknown harness is left to `harnessRefusal`, which names it.
+ */
+export function effortRefusal(
+  effort: unknown,
+  field: string,
+  agent: Pick<AgentDefinition, "id" | "harness">,
+  harnesses: HarnessLookup = builtinHarnesses,
+): string | null {
+  if (effort === undefined || effort === null) return null;
+  if (typeof effort !== "string" || !(EFFORT_LEVELS as readonly string[]).includes(effort))
+    return `${field} must be one of ${EFFORT_LEVELS.join(", ")}`;
+  const name = harnessOf(agent);
+  const caps = harnesses(name);
+  if (caps && !caps.effort) return `agent "${agent.id}": ${field} is not supported by harness ${name}`;
+  return null;
+}
 
 /** The agent's harness name (`harness:`, else the default). */
 export function harnessOf(agent: { harness?: string | undefined }): string {

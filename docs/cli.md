@@ -13,6 +13,7 @@ npx duskfleet doctor                                     # Claude binary, versio
 npx duskfleet doctor --probe                             # plus one real hello run on haiku (costs cents)
 npx duskfleet run --project ~/Documents/Projects/my-app -- "Add a README section describing the build"
 npx duskfleet run --project my-app --agent my-reviewer --model sonnet -- "Review src/ for obvious bugs"   # registered id or path (--project-id is the explicit form)
+npx duskfleet run --project my-app --agent my-reviewer --effort low -- "..."   # override the agent's effort for this run (low, medium, high, xhigh, max)
 npx duskfleet run --no-wait --project /path -- "..."     # return immediately (see the note below)
 npx duskfleet run --project my-app --title "fix #381" -- "..."   # list the run under a title instead of the first prompt line (max 120 chars)
 npx duskfleet run --project . --agent fixer -- "..."     # relative path: resolved from the shell's directory
@@ -327,6 +328,7 @@ harness codex`), as for `create_agent`; see [Harnesses](harnesses.md).
 |---|---|---|
 | `--harness <name>` | `harness` | `claude`; or `copilot`, `codex` (written only when not `claude`) |
 | `--model <m>` | `model` | none: the CLI's default, which can be the most expensive model |
+| `--effort <level>` | `effort` | none: the CLI's default (`low`, `medium`, `high`, `xhigh` or `max`) |
 | `--budget <usd>` | `max_budget_usd` | `0.5` on Claude Code; none on Copilot and Codex (refused there: no dollar cap) |
 | `--permission-mode <mode>` | `permission_mode` | `dontAsk` (`bypassPermissions` is refused, as in `create_agent`); Codex: `acceptEdits`, its workspace-write sandbox (network off) |
 | `--allowed-tools <a,b>` | `allowed_tools` | Claude Code: `Read`, `Grep`, `Glob`, `Edit`, `Write` and `Bash(...)` for `npm test`, `npm run test`, `npx vitest`, `npx jest`, `pytest`, `python -m pytest`, `cargo test`, `go test`, `make test`. Copilot, in its own rules: `read`, `write`, `shell(npm test)`, `shell(npx vitest)`, `shell(npx jest)`, `shell(pytest)`, `shell(cargo test)`, `shell(go test)`, `shell(make test)` (no `npm run`: Copilot matches the first subcommand only, so it would allow every script). Codex: none (it takes no tool rules) |

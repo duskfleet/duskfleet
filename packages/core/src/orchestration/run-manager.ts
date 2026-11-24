@@ -14,10 +14,18 @@ import {
   type AgentDefinition,
   DEFAULT_HARNESS,
   type DuskFleetConfig,
+  EFFORT_LEVELS,
+  type EffortLevel,
   type ProjectDefinition,
 } from "../config/types.js";
 import { mergeEnvPassthrough } from "../execution/child-env.js";
-import { assertAgentFitsHarness, type HarnessCapabilities, HarnessRegistry, harnessOf } from "../execution/harness.js";
+import {
+  assertAgentFitsHarness,
+  effortRefusal,
+  type HarnessCapabilities,
+  HarnessRegistry,
+  harnessOf,
+} from "../execution/harness.js";
 import { type LogMetadata, logMetadata } from "../execution/log-caps.js";
 import { mergeSubagent, needsRepair, sameSubagent, subagentsFromLog } from "../execution/log-replay.js";
 import { mcpToolPrefix } from "../execution/mcp.js";
@@ -92,6 +100,11 @@ export interface StartRunInput {
   projectId?: string;
   agentId?: string;
   model?: string;
+  /**
+   * Overrides the agent's `effort:` for this run only (issue #497): one of EFFORT_LEVELS, refused
+   * by field name on a harness without the `effort` capability. Stored as `runs.effort`.
+   */
+  effort?: EffortLevel;
   /** Set by the scheduler. */
   scheduleId?: string;
   /** Internal: continue the session of an earlier run instead of starting a new one (see resumeRun). */
@@ -140,6 +153,8 @@ export interface ContinueRunInput {
   projectPath?: string;
   /** Default: the agent's model. */
   model?: string;
+  /** Default: the agent's `effort:`. */
+  effort?: EffortLevel;
   scheduleId?: string;
   /** The new run's title (see StartRunInput.title); not inherited from the original run. */
   title?: string | null;
@@ -244,6 +259,11 @@ function summarizeSubagent(s: SubagentRecord) {
     toolCalls: s.toolCalls,
     durationMs: s.durationMs,
   };
+}
+
+/** A stored `runs.effort` as an EffortLevel; anything else (NULL, an unknown value) = none. */
+function storedEffort(value: string | null | undefined): EffortLevel | undefined {
+  return value && (EFFORT_LEVELS as readonly string[]).includes(value) ? (value as EffortLevel) : undefined;
 }
 
 /** A path separator, a leading ~ or a drive letter: anything else given as a project path is a project id. */
@@ -516,6 +536,14 @@ export class RunManager {
     // honour, is refused here (no row, no spawn), as it was at create time.
     const harness = harnessOf(agent);
     assertAgentFitsHarness(agent, this.harnesses.lookup, project);
+    // An effort for this run only is refused like the agent's own effort: never dropped.
+    const effortError = effortRefusal(
+      input.effort,
+      input.kind === "gate" ? "gate.agent.effort" : "effort",
+      agent,
+      this.harnesses.lookup,
+    );
+    if (effortError) throw new Error(effortError);
     const executor = this.harnesses.get(harness) as Executor;
     const caps = this.harnesses.capabilities(harness) as HarnessCapabilities;
     if (input.resume && !caps.resumeSession)
@@ -604,7 +632,8 @@ export class RunManager {
     if (model) request.model = model;
     if (agent.allowedTools) request.allowedTools = agent.allowedTools;
     if (agent.disallowedTools) request.disallowedTools = agent.disallowedTools;
-    if (agent.effort) request.effort = agent.effort;
+    const effort = input.effort ?? agent.effort;
+    if (effort) request.effort = effort;
     if (agent.systemPrompt) request.appendSystemPrompt = agent.systemPrompt;
     if (agent.inheritMcp || project?.inheritMcp) request.inheritMcp = true;
     if (agent.claudeAgent) request.claudeAgent = agent.claudeAgent;
@@ -896,6 +925,9 @@ export class RunManager {
           resume,
         };
     if (fromRun.modelRequested) startInput.model = fromRun.modelRequested;
+    // The retry continues the same task with the effort the original run was started with.
+    const effort = storedEffort(fromRun.effort);
+    if (effort) startInput.effort = effort;
     if (input.scheduleId) startInput.scheduleId = input.scheduleId;
     // The retry of the same task keeps the original run's title.
     if (fromRun.title) startInput.title = fromRun.title;
@@ -927,6 +959,9 @@ export class RunManager {
     else start.projectPath = fromRun.projectPath;
     const model = input.model ?? fromRun.modelRequested;
     if (model) start.model = model;
+    // A new task: the effort given for it, else the agent's (runs.effort cannot tell an override
+    // from the agent's own value, so the original run's is not carried over).
+    if (input.effort) start.effort = input.effort;
     if (input.scheduleId) start.scheduleId = input.scheduleId;
     if (input.title != null) start.title = input.title;
     return this.startRun(start);

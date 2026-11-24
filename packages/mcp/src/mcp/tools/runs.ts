@@ -1,5 +1,6 @@
 import {
   costTotals,
+  EFFORT_LEVELS,
   RUN_STATUSES,
   RUN_TITLE_MAX,
   type Run,
@@ -82,6 +83,12 @@ export function registerRunTools(server: McpServer, ctx: ToolContext): void {
           .string()
           .optional()
           .describe("Claude model alias or id, e.g. 'sonnet', 'opus'. Omit to use the agent/CLI default"),
+        effort: z
+          .enum(EFFORT_LEVELS)
+          .optional()
+          .describe(
+            "Reasoning effort for this run only, over the agent's effort (passed to the agent's harness CLI; refused on a harness without effort). Omit for the agent's effort, else the CLI default",
+          ),
         resume_run_id: z
           .string()
           .optional()
@@ -104,6 +111,7 @@ export function registerRunTools(server: McpServer, ctx: ToolContext): void {
         if (args.project_id !== undefined) input.projectId = args.project_id;
         if (args.agent_id !== undefined) input.agentId = args.agent_id;
         if (args.model !== undefined) input.model = args.model;
+        if (args.effort !== undefined) input.effort = args.effort;
         if (args.title !== undefined) input.title = args.title;
         let run =
           args.resume_run_id !== undefined
