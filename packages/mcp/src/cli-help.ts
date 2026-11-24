@@ -28,7 +28,7 @@ export const COMMAND_HELP: Readonly<Record<string, CommandHelp>> = {
   agents: {
     usage: [
       "duskfleet agents [--json]",
-      "duskfleet agents create <id> [--harness claude|copilot|codex] [--model <m>] [--budget <usd>]",
+      "duskfleet agents create <id> [--harness claude|copilot|codex] [--model <m>] [--effort <level>] [--budget <usd>]",
       "                       [--permission-mode <mode>] [--allowed-tools <a,b>] [--disallowed-tools <a,b>]",
       '                       [--timeout <minutes>] [--description <text>] [--force] [--json] (-- "<system prompt>" | --prompt-file <file>)',
     ],
@@ -36,6 +36,7 @@ export const COMMAND_HELP: Readonly<Record<string, CommandHelp>> = {
       "--json                      the agents (or { created, overrode, agent }) as JSON on stdout",
       "--harness <name>            the agent CLI: claude (default), copilot or codex; the defaults follow it",
       "-m, --model <m>             model of the agent (none: the CLI's default)",
+      "--effort <level>            low, medium, high, xhigh or max (none: the CLI's default)",
       "--budget <usd>              max_budget_usd per run (claude: default 0.5; refused by copilot and codex)",
       "--permission-mode <mode>    default dontAsk (codex: acceptEdits, the workspace-write sandbox)",
       "--allowed-tools <a,b>       default: file tools and the common test runners, in the harness's own rules",
@@ -57,7 +58,7 @@ export const COMMAND_HELP: Readonly<Record<string, CommandHelp>> = {
   },
   run: {
     usage: [
-      'duskfleet run --project <id or path> [--agent <id>] [--model <m>] [--title <text>] [--no-wait] [--json [--full]] -- "<prompt>"',
+      'duskfleet run --project <id or path> [--agent <id>] [--model <m>] [--effort <level>] [--title <text>] [--no-wait] [--json [--full]] -- "<prompt>"',
       "duskfleet run --first [--project <absolute path>] [--harness claude|copilot|codex]",
     ],
     options: [
@@ -65,6 +66,7 @@ export const COMMAND_HELP: Readonly<Record<string, CommandHelp>> = {
       "--project-id <id>            the explicit form of a registered id",
       "-a, --agent <id>             the agent to run (default: default_agent)",
       "-m, --model <m>              override the agent's model",
+      "--effort <level>             override the agent's effort: low, medium, high, xhigh or max",
       "--title <text>               what the run is for, listed instead of the first prompt line (max 120)",
       "--no-wait                    print the run id and exit (the run is not recorded once the CLI exits)",
       "--json                       the run record as JSON on stdout (trimmed: no argv, no raw result)",

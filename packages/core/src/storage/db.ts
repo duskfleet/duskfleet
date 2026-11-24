@@ -461,6 +461,13 @@ const MIGRATIONS: ReadonlyArray<{ version: number; sql: string; backfill?: (db: 
       ALTER TABLE runs ADD COLUMN effort TEXT;
     `,
   },
+  {
+    // A schedule's effort override (issue #497), next to its model: NULL = the agent's `effort:`.
+    version: 35,
+    sql: `
+      ALTER TABLE schedules ADD COLUMN effort TEXT;
+    `,
+  },
 ];
 
 /**

@@ -6,7 +6,7 @@ dashboard's **Schedules** page pauses and resumes, edits the cron and time zone,
 runs now; the CLI lists them (`duskfleet schedules`) and fires one
 (`duskfleet schedules run-now <id or name>`). A schedule is: agent, prompt, 5-field cron,
 IANA time zone (default `Europe/London`), optional project (not needed when the agent is bound
-to one) and model override.
+to one) and model and effort overrides.
 
 ```
 0 8-20 * * 1-5     weekdays 08–20 on the hour
@@ -20,6 +20,15 @@ candidate minute, so a schedule at 08:00 fires at 08:00 on both sides of a clock
 Coming from `claude -p` in cron, launchd or a systemd timer? The guide
 [Run Claude Code on a schedule on your own machine](guides/run-claude-code-on-a-schedule.md)
 compares the plain approach with what a schedule here adds.
+
+## Model and effort overrides
+
+`model` and `effort` on a schedule (`create_schedule` / `update_schedule`; `clear_model`,
+`clear_effort` remove them) apply to every run it fires, over the agent's `model:` and
+`effort:`; without them the agent's apply. `effort` is one of `low`, `medium`, `high`,
+`xhigh`, `max` and is refused, by name, when the agent's harness cannot take one. A gate
+agent takes its own `model` and `effort` (`gate.agent.effort`). Each run records the effort it
+was started with (`effort` in `get_run`).
 
 ## One schedule per agent
 
@@ -157,8 +166,10 @@ tick instead **resumes the session** of the run it last started, once:
   resume, and the retry row is the claim (`resumed_from_run_id` is unique), so two processes
   firing the same schedule at once cannot both resume it. A retry that fails to spawn gives
   the claim back;
-- editing the schedule's agent, project, prompt or model after the failure cancels the
-  resume: the next fire starts fresh with the new values. A resume refused for any other
+- editing the schedule's agent, project, prompt, model or effort after the failure cancels the
+  resume: the next fire starts fresh with the new values (effort is compared as it would be
+  passed now, the schedule's else the agent's, with the failed run's `effort`). A resume runs
+  with the effort of the run it resumes. A resume refused for any other
   reason than busy (the agent was deleted, the project unregistered) also starts fresh, with
   a note on the new run, so it cannot block the schedule;
 - `list_schedules` shows the policy in force (`effectiveOnFailure`) and, when the next fire

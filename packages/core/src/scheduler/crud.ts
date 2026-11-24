@@ -12,6 +12,7 @@ import {
   ON_FAILURE_POLICIES,
   type OnFailurePolicy,
 } from "../config/types.js";
+import { effortRefusal } from "../execution/harness.js";
 import { isResumable, type LastRunSummary, lastRunSummary, normalizeRunTitle, type Run } from "../observability/run.js";
 import type { ScheduleRepository } from "../storage/schedules.js";
 import { assertTimeZone, CronError, nextFire, parseCron } from "./cron.js";
@@ -77,6 +78,8 @@ export function validateScheduleInput(
       `agent "${input.agentId}" belongs to project "${agent.project}", cannot schedule it on "${input.projectId}"`,
     );
   }
+  const effortError = effortRefusal(input.effort, "effort", agent);
+  if (effortError) throw new Error(effortError);
   if (input.onFailure != null && !(ON_FAILURE_POLICIES as readonly string[]).includes(input.onFailure)) {
     throw new Error(`on_failure must be one of ${ON_FAILURE_POLICIES.join(", ")}`);
   }
@@ -188,23 +191,28 @@ export function effectiveOnFailure(
  * Whether the schedule's next fire resumes `lastRun` (the run it last started) instead of
  * starting fresh: policy `resume_once`, the run ended budget_exhausted or timed_out, it is
  * not itself a resume, and nothing resumed it yet. One retry; a second failure is final.
- * The run must also still match the schedule: an edit of its agent, project, prompt or model
- * after the failure means the next fire starts fresh with the new values.
+ * The run must also still match the schedule: an edit of its agent, project, prompt, model or
+ * effort after the failure means the next fire starts fresh with the new values. Effort is
+ * compared as it would be passed now (the schedule's, else the agent's) with the run's `effort`.
  */
 export function willResume(
-  schedule: Pick<Schedule, "onFailure" | "agentId" | "projectId" | "prompt" | "model">,
-  agent: Pick<AgentDefinition, "onFailure" | "project"> | undefined,
-  lastRun: Pick<
-    Run,
-    | "status"
-    | "terminationReason"
-    | "claudeSessionId"
-    | "resumedFromRunId"
-    | "agentId"
-    | "projectId"
-    | "prompt"
-    | "modelRequested"
-  > | null,
+  schedule: Pick<Schedule, "onFailure" | "agentId" | "projectId" | "prompt" | "model"> &
+    Partial<Pick<Schedule, "effort">>,
+  agent: (Pick<AgentDefinition, "onFailure" | "project"> & Partial<Pick<AgentDefinition, "effort">>) | undefined,
+  lastRun:
+    | (Pick<
+        Run,
+        | "status"
+        | "terminationReason"
+        | "claudeSessionId"
+        | "resumedFromRunId"
+        | "agentId"
+        | "projectId"
+        | "prompt"
+        | "modelRequested"
+      > &
+        Partial<Pick<Run, "effort">>)
+    | null,
   alreadyResumed: boolean,
 ): boolean {
   if (!lastRun || effectiveOnFailure(schedule, agent) !== "resume_once") return false;
@@ -213,7 +221,8 @@ export function willResume(
     lastRun.agentId === schedule.agentId &&
     lastRun.projectId === scheduleProjectId(schedule, agent) &&
     lastRun.prompt === schedule.prompt.trim() &&
-    lastRun.modelRequested === (schedule.model ?? null)
+    lastRun.modelRequested === (schedule.model ?? null) &&
+    (lastRun.effort ?? null) === (schedule.effort ?? agent?.effort ?? null)
   );
 }
 
@@ -290,6 +299,7 @@ export function updateSchedule(
     projectId: patch.projectId === undefined ? existing.projectId : patch.projectId,
     prompt: patch.prompt ?? existing.prompt,
     model: patch.model === undefined ? existing.model : patch.model,
+    effort: patch.effort === undefined ? existing.effort : patch.effort,
     cron: patch.cron ?? existing.cron,
     timeZone: patch.timeZone ?? existing.timeZone,
     enabled: patch.enabled ?? existing.enabled,

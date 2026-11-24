@@ -6,7 +6,7 @@
  * occurrence; `scheduler.defer_busy`) or `skipped_busy`, never queued.
  */
 
-import type { OnFailurePolicy } from "../config/types.js";
+import type { EffortLevel, OnFailurePolicy } from "../config/types.js";
 
 /**
  * `resumed` = started as a resume of the previous run (on_failure: resume_once); counts as a fire.
@@ -60,6 +60,8 @@ export interface ScheduleGate {
     /** --max-budget-usd of the gate run. Default 0.5. */
     budgetUsd?: number;
     model?: string;
+    /** Effort of the gate run (one of EFFORT_LEVELS); default the gate agent's `effort:`. */
+    effort?: EffortLevel;
     /** The last line of the gate's final message that means "no work" (case-insensitive). Default NO_WORK. */
     marker?: string;
   };
@@ -128,6 +130,8 @@ export interface Schedule {
   projectId: string | null;
   prompt: string;
   model: string | null;
+  /** Effort override of every run it fires (migration 35); null = the agent's `effort:`. */
+  effort: EffortLevel | null;
   /** 5-field cron expression, evaluated in `timeZone`. */
   cron: string;
   /** IANA zone, e.g. Europe/London. */
@@ -205,6 +209,8 @@ export interface ScheduleInput {
   projectId?: string | null;
   prompt: string;
   model?: string | null;
+  /** One of EFFORT_LEVELS; null = the agent's `effort:`. */
+  effort?: EffortLevel | null;
   cron: string;
   timeZone?: string;
   enabled?: boolean;

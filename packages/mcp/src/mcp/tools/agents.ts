@@ -245,7 +245,12 @@ const agentFields = {
     .optional()
     .describe('Claude Code --allowedTools entries, e.g. "Bash(npm test:*)". Needed for Bash under acceptEdits'),
   disallowed_tools: z.array(z.string().min(1)).optional().describe('e.g. ["Edit","Write"] for a read-only agent'),
-  effort: z.enum(EFFORT_LEVELS).optional().describe("Claude Code --effort level; omit for the CLI default"),
+  effort: z
+    .enum(EFFORT_LEVELS)
+    .optional()
+    .describe(
+      "Reasoning effort passed to the agent's harness CLI (refused on a harness without effort); omit for the CLI default. run_agent and schedules can override it per run",
+    ),
   timeout_minutes: z
     .number()
     .positive()

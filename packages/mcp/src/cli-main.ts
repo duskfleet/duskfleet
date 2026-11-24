@@ -9,7 +9,7 @@ import { fileURLToPath } from "node:url";
  *   duskfleet agents
  *   duskfleet agents create <id> [--model <m>] [--budget <usd>] [...] [--force] -- "<system prompt>"
  *   duskfleet projects
- *   duskfleet run --project <id or path> [--agent <id>] [--model <m>] [--no-wait] [--json [--full]] -- "<prompt>"
+ *   duskfleet run --project <id or path> [--agent <id>] [--model <m>] [--effort <level>] [--no-wait] [--json [--full]] -- "<prompt>"
  *   (every command takes --json and --verbose; run, runs, run-info, agents, projects, schedules and
  *   budgets print a human view without --json)
  *   duskfleet run --first [--project <absolute path>] [--harness <name>]   # the guided first run of init (first-run.ts)
@@ -43,6 +43,8 @@ import {
   createAgentFromFields,
   type DataSource,
   DEFAULT_HARNESS,
+  EFFORT_LEVELS,
+  type EffortLevel,
   effectiveAgentFields,
   effectivePath,
   findRepoRoot,
@@ -175,11 +177,11 @@ function usage(asked = false): never {
       "Usage:",
       "  duskfleet init [--yes] [--mcp claude-code|claude-desktop|copilot|codex] [--harness claude|copilot|codex]",
       "  duskfleet agents",
-      "  duskfleet agents create <id> [--harness claude|copilot|codex] [--model <m>] [--budget <usd>] [--permission-mode <mode>]",
+      "  duskfleet agents create <id> [--harness claude|copilot|codex] [--model <m>] [--effort <level>] [--budget <usd>] [--permission-mode <mode>]",
       "                          [--allowed-tools <a,b>] [--disallowed-tools <a,b>] [--timeout <minutes>]",
       '                          [--description <text>] [--force] (-- "<system prompt>" | --prompt-file <file>)',
       "  duskfleet projects",
-      '  duskfleet run --project <id or path> [--agent <id>] [--model <m>] [--no-wait] [--json [--full]] -- "<prompt>"',
+      '  duskfleet run --project <id or path> [--agent <id>] [--model <m>] [--effort <level>] [--no-wait] [--json [--full]] -- "<prompt>"',
       "  duskfleet run --first [--project <absolute path>] [--harness claude|copilot|codex]",
       "  duskfleet runs [--status <status>] [--limit <n>] [--agent <id>]",
       "  duskfleet run-info <run_id> [--events]",
@@ -299,6 +301,7 @@ function parseAgentCreate(args: string[]): { id: string; fields: Record<string, 
     allowPositionals: true,
     options: {
       model: { type: "string", short: "m" },
+      effort: { type: "string" },
       budget: { type: "string" },
       "permission-mode": { type: "string" },
       "allowed-tools": { type: "string" },
@@ -345,6 +348,8 @@ function parseAgentCreate(args: string[]): { id: string; fields: Record<string, 
     system_prompt: systemPrompt,
   };
   if (values.model) fields["model"] = values.model;
+  // Validated (EFFORT_LEVELS, the harness's capability) by the one create path, like create_agent.
+  if (values.effort !== undefined) fields["effort"] = values.effort;
   if (values["disallowed-tools"] !== undefined) fields["disallowed_tools"] = csv(values["disallowed-tools"]);
   return { id, fields, force: values.force };
 }
@@ -992,6 +997,7 @@ async function main(): Promise<void> {
           "project-id": { type: "string" },
           agent: { type: "string", short: "a" },
           model: { type: "string", short: "m" },
+          effort: { type: "string" },
           title: { type: "string" },
           "no-wait": { type: "boolean", default: false },
           full: { type: "boolean", default: false },
@@ -1008,6 +1014,7 @@ async function main(): Promise<void> {
           positionals.length ||
           values.agent ||
           values.model ||
+          values.effort !== undefined ||
           values.title !== undefined ||
           values["project-id"] ||
           values["no-wait"] ||
@@ -1050,6 +1057,12 @@ async function main(): Promise<void> {
       if (values["project-id"]) input.projectId = values["project-id"];
       if (values.agent) input.agentId = values.agent;
       if (values.model) input.model = values.model;
+      if (values.effort !== undefined) {
+        // Checked again by startRun (with the harness's capability); here for a usage error first.
+        if (!(EFFORT_LEVELS as readonly string[]).includes(values.effort))
+          commandUsage("run", `--effort must be one of ${EFFORT_LEVELS.join(", ")}, got "${values.effort}"`);
+        input.effort = values.effort as EffortLevel;
+      }
       if (values.title !== undefined) input.title = values.title;
 
       let run = await app.runs.startRun(input);
