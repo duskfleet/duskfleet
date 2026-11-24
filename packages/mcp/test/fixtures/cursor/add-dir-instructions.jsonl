@@ -1,0 +1,13 @@
+{"type":"system","subtype":"init","apiKeySource":"login","cwd":"/work","session_id":"57cdbff2-ad96-454a-9464-70fba379e4fc","model":"Auto","permissionMode":"default"}
+{"type":"user","message":{"role":"user","content":[{"type":"text","text":"Say hi in three words."}]},"session_id":"57cdbff2-ad96-454a-9464-70fba379e4fc"}
+{"type":"thinking","subtype":"delta","text":"The","session_id":"57cdbff2-ad96-454a-9464-70fba379e4fc","timestamp_ms":1795522307147}
+{"type":"thinking","subtype":"delta","text":" user","session_id":"57cdbff2-ad96-454a-9464-70fba379e4fc","timestamp_ms":1795522307150}
+{"type":"thinking","subtype":"delta","text":" wants","session_id":"57cdbff2-ad96-454a-9464-70fba379e4fc","timestamp_ms":1795522307197}
+{"type":"thinking","subtype":"delta","text":" me","session_id":"57cdbff2-ad96-454a-9464-70fba379e4fc","timestamp_ms":1795522307276}
+{"type":"thinking","subtype":"delta","text":" to say","session_id":"57cdbff2-ad96-454a-9464-70fba379e4fc","timestamp_ms":1795522307387}
+{"type":"thinking","subtype":"delta","text":" hi","session_id":"57cdbff2-ad96-454a-9464-70fba379e4fc","timestamp_ms":1795522307437}
+{"type":"thinking","subtype":"delta","text":" in","session_id":"57cdbff2-ad96-454a-9464-70fba379e4fc","timestamp_ms":1795522307529}
+{"type":"thinking","subtype":"delta","text":" three words.","session_id":"57cdbff2-ad96-454a-9464-70fba379e4fc","timestamp_ms":1795522307837}
+{"type":"thinking","subtype":"completed","session_id":"57cdbff2-ad96-454a-9464-70fba379e4fc","timestamp_ms":1795522307838}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"Hi there, friend!"}]},"session_id":"57cdbff2-ad96-454a-9464-70fba379e4fc"}
+{"type":"result","subtype":"success","duration_ms":12513,"duration_api_ms":12513,"is_error":false,"result":"Hi there, friend!","session_id":"57cdbff2-ad96-454a-9464-70fba379e4fc","request_id":"958ef707-be4f-4d83-a62a-c6c9762146de","usage":{"inputTokens":11390,"outputTokens":34,"cacheReadTokens":3968,"cacheWriteTokens":0,"reasoningTokens":29}}
