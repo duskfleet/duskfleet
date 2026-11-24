@@ -71,6 +71,7 @@ import {
 } from "./attention";
 import { cliCommand, detectInstall, type Install, usableMcpEntry } from "./cli";
 import { DEFAULT_HARNESS_NAME, type HostHarnesses, harnessInfo } from "./harness";
+import { linkTarget } from "./link-target";
 import { ACTIVE_SQL, ACTIVE_STATUSES, RUNNING_COUNT_SQL } from "./running";
 import { costModel, listScoped, scopeList } from "./scope";
 import { mergeSeries } from "./trends";
@@ -129,40 +130,55 @@ export function budgetAlerts(): Array<BudgetStatus & { cost: CostSplit }> {
 }
 
 /**
- * What a linked agent (`claude_agent`) adopts from the project's own
- * `.claude/agents/<name>.md`. `found: false` means the link points at a name
- * the project does not define, which `run_agent` would refuse.
+ * What a linked agent (`claude_agent` / `project_agent`) adopts from the project's own agent
+ * file in its harness's folder (`.claude/agents/<name>.md`, `.github/agents/<name>.agent.md`).
+ * `found: false` means the link points at a name the project does not define, which `run_agent`
+ * would refuse.
  */
 export interface LinkedAgentInfo {
   name: string;
   found: boolean;
   model: string | null;
   path: string | null;
-  /** The project agent's own frontmatter description (what `claude --agent` actually runs as). */
+  /** The project agent's own frontmatter description (what `<harness> --agent` actually runs as). */
   description: string | null;
+  /** The project agent's file relative to the project root, in the agent's harness's folder. */
+  file: string;
+  /** What the run is: `claude --agent <name>`, `copilot --agent <name>`. */
+  command: string;
 }
 
 function resolveLink(
   cfg: DuskFleetConfig,
   cache: Map<string, ProjectAgentInfo[]>,
-  projectId: string | undefined,
+  agent: { harness?: string | undefined; project?: string | undefined },
   name: string,
 ): LinkedAgentInfo {
-  const project = projectId ? cfg.projects.get(projectId) : undefined;
-  if (!project) return { name, found: false, model: null, path: null, description: null };
-  let list = cache.get(project.id);
+  const target = linkTarget(agent, name);
+  const miss = {
+    name,
+    found: false,
+    model: null,
+    path: null,
+    description: null,
+    file: target.file,
+    command: target.command,
+  };
+  const project = agent.project ? cfg.projects.get(agent.project) : undefined;
+  if (!project) return miss;
+  // One read per project and harness folder.
+  const key = `${project.id}\0${target.folder.dir}`;
+  let list = cache.get(key);
   if (!list) {
     try {
-      list = listProjectAgents(project.path);
+      list = listProjectAgents(project.path, target.folder);
     } catch {
       list = [];
     }
-    cache.set(project.id, list);
+    cache.set(key, list);
   }
   const hit = list.find((p) => p.name === name);
-  return hit
-    ? { name, found: true, model: hit.model, path: hit.path, description: hit.description || null }
-    : { name, found: false, model: null, path: null, description: null };
+  return hit ? { ...miss, found: true, model: hit.model, path: hit.path, description: hit.description || null } : miss;
 }
 
 /**
@@ -176,7 +192,7 @@ export function agentSummary(
   const cfg = config();
   const a = cfg.agents.get(id);
   if (!a) return null;
-  const linked = a.claudeAgent ? resolveLink(cfg, new Map(), a.project, a.claudeAgent) : null;
+  const linked = a.claudeAgent ? resolveLink(cfg, new Map(), a, a.claudeAgent) : null;
   const parts = [a.description, linked?.description].filter((d): d is string => Boolean(d));
   return { id: a.id, name: a.name, claudeAgent: a.claudeAgent ?? null, description: [...new Set(parts)].join(" · ") };
 }
@@ -213,7 +229,7 @@ export function hostHarnesses(cfg: DuskFleetConfig = config()): HostHarnesses {
 export function listAgents() {
   const cfg = config();
   const host = hostHarnesses(cfg);
-  // .claude/agents is read once per project per request, not once per agent.
+  // A project's agent folder is read once per harness per request, not once per agent.
   const projectAgents = new Map<string, ProjectAgentInfo[]>();
 
   // A user file with a builtin's id overrides it: the card says so.
@@ -222,7 +238,7 @@ export function listAgents() {
   const fileLabel = agentFileLabeller();
 
   return [...cfg.agents.values()].map(({ systemPrompt, ...a }) => {
-    const linked = a.claudeAgent ? resolveLink(cfg, projectAgents, a.project, a.claudeAgent) : null;
+    const linked = a.claudeAgent ? resolveLink(cfg, projectAgents, a, a.claudeAgent) : null;
     // What a run actually starts with: this file's model overrides, otherwise
     // the project agent's own model, otherwise the Claude Code default.
     const effectiveModel = a.model ?? linked?.model ?? null;
@@ -1129,11 +1145,13 @@ function personaChanges(
     if (!run || run.kind !== "run" || !run.projectAgentHash || run.createdAt < since) continue;
     const change = compareProjectAgent(run.projectAgentHash, runs.previousRunOfSchedule(s.id, run));
     if (!change) continue;
+    const agent = cfg.agents.get(run.agentId);
     out.push({
       scheduleId: s.id,
       name: s.name,
       agentId: run.agentId,
-      claudeAgent: cfg.agents.get(run.agentId)?.claudeAgent ?? null,
+      claudeAgent: agent?.claudeAgent ?? null,
+      harness: agent?.harness,
       runId: run.id,
       at: run.createdAt,
       change,

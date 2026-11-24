@@ -375,9 +375,12 @@ export function linkToolGaps(
   if (projectAgent.tools === null) return { missing: [], skipped: null };
   const declared = projectAgent.tools.map(toolName).filter(Boolean);
   if (folder.dir === COPILOT_PROJECT_AGENTS.dir) {
+    // Copilot matches tool names case-insensitively, and `*` enables every tool.
+    const lower = declared.map((d) => d.toLowerCase());
+    if (lower.includes("*")) return { missing: [], skipped: null };
     const gaps = allowedTools.filter((rule) => {
-      const names = COPILOT_DECLARED_FOR_RULE[toolName(rule)];
-      return names !== undefined && !declared.some((d) => names.includes(d));
+      const names = COPILOT_DECLARED_FOR_RULE[toolName(rule).toLowerCase()];
+      return names !== undefined && !lower.some((d) => names.includes(d));
     });
     return { missing: gaps, skipped: null };
   }

@@ -211,6 +211,11 @@ test("project agents of both harnesses are listed from their own folders; Copilo
       linkToolGaps(["shell(ls)", "write", "url(github.com)"], tooly, COPILOT_PROJECT_AGENTS).missing,
       [],
     );
+    // Copilot's tool names are case-insensitive, and tools: ["*"] enables every tool.
+    const capital = { tools: ["Write", "Execute"], frontmatterError: null };
+    assert.deepEqual(linkToolGaps(["shell(ls)", "write", "read"], capital, COPILOT_PROJECT_AGENTS).missing, ["read"]);
+    const all = { tools: ["*"], frontmatterError: null };
+    assert.deepEqual(linkToolGaps(["shell(ls)", "write", "read"], all, COPILOT_PROJECT_AGENTS).missing, []);
   } finally {
     t.cleanup();
   }
