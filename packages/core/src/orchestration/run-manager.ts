@@ -650,6 +650,8 @@ export class RunManager {
       title,
       modelRequested: input.model ?? null,
       modelUsed: null,
+      // What the execution request carries, so a resumed or continued run records what it passed.
+      effort: request.effort ?? null,
       status: "pending",
       createdAt: new Date().toISOString(),
       startedAt: null,

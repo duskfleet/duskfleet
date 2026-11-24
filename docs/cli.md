@@ -454,7 +454,8 @@ explicit model uses the Claude Code default.
 
 ## What a run records
 
-`id`, `agentId`, `projectPath`, `prompt`, `modelRequested`/`modelUsed`, `status`
+`id`, `agentId`, `projectPath`, `prompt`, `modelRequested`/`modelUsed`, `effort` (the agent's
+`effort:` as passed to the CLI; null when none was passed and for runs before migration 34), `status`
 (`pending → running → completed | failed | cancelled | timed_out`), timestamps and duration,
 `claudeSessionId`, `permissionMode`, the exact `command` (binary, argv, cwd; the prompt is sent on stdin, so it is not in argv), `exitCode`,
 `terminationReason`, `error`, `resultText`, `numTurns`, `toolCalls`, input/output/cache tokens,

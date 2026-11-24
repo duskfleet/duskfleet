@@ -79,6 +79,7 @@ interface RunRow {
   sandbox_violations?: number | null;
   harness?: string | null;
   project_agent_hash?: string | null;
+  effort?: string | null;
 }
 
 function rowToRun(r: RunRow): Run {
@@ -91,6 +92,7 @@ function rowToRun(r: RunRow): Run {
     title: r.title ?? null,
     modelRequested: r.model_requested,
     modelUsed: r.model_used,
+    effort: r.effort ?? null,
     status: r.status as RunStatus,
     createdAt: r.created_at,
     startedAt: r.started_at,
@@ -353,8 +355,8 @@ export class RunRepository {
            cache_read_tokens, cache_creation_tokens, cost_usd, permission_denials, denied_tools_json, mcp_json, human_intervention,
            context_exhausted, retries, log_path, raw_result_json, schedule_id, owner, phases_json, review_reasons_json, resumed_from_run_id, kind,
            usage_by_model_json, billing_type, error_code, error_family, error_detail_json, agent_hash, claude_code_version,
-           last_event_at, continued_from_run_id, title, cost_status, max_budget_usd, skills_bundle, harness, project_agent_hash)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+           last_event_at, continued_from_run_id, title, cost_status, max_budget_usd, skills_bundle, harness, project_agent_hash, effort)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         run.id,
@@ -412,6 +414,7 @@ export class RunRepository {
         run.skillsBundle ?? null,
         run.harness ?? DEFAULT_HARNESS,
         run.projectAgentHash ?? null,
+        run.effort ?? null,
       );
   }
 
