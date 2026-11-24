@@ -1,0 +1,7 @@
+{"type":"system","subtype":"init","apiKeySource":"login","cwd":"/work","session_id":"afaa0b59-a654-4c3e-85b2-0fcbff634c69","model":"Auto","permissionMode":"default"}
+{"type":"user","message":{"role":"user","content":[{"type":"text","text":"What file did you create earlier? Answer in one short sentence."}]},"session_id":"afaa0b59-a654-4c3e-85b2-0fcbff634c69"}
+{"type":"thinking","subtype":"delta","text":"The","session_id":"afaa0b59-a654-4c3e-85b2-0fcbff634c69","timestamp_ms":1795522004247}
+{"type":"thinking","subtype":"delta","text":" user is asking what file I created earlier.\n\nI created hello.txt.","session_id":"afaa0b59-a654-4c3e-85b2-0fcbff634c69","timestamp_ms":1795522004521}
+{"type":"thinking","subtype":"completed","session_id":"afaa0b59-a654-4c3e-85b2-0fcbff634c69","timestamp_ms":1795522004522}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"I created `hello.txt`."}]},"session_id":"afaa0b59-a654-4c3e-85b2-0fcbff634c69"}
+{"type":"result","subtype":"success","duration_ms":2234,"duration_api_ms":2234,"is_error":false,"result":"I created `hello.txt`.","session_id":"afaa0b59-a654-4c3e-85b2-0fcbff634c69","request_id":"645430c8-74e7-415b-bc15-24d999e69695","usage":{"inputTokens":11588,"outputTokens":29,"cacheReadTokens":3968,"cacheWriteTokens":0,"reasoningTokens":23}}

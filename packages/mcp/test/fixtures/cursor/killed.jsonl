@@ -1,0 +1,2 @@
+{"type":"system","subtype":"init","apiKeySource":"login","cwd":"/work","session_id":"af28b39d-08b2-4e21-99dd-a1e9d18b4eba","model":"Auto","permissionMode":"default"}
+{"type":"user","message":{"role":"user","content":[{"type":"text","text":"Write a 3000 word essay about the sea."}]},"session_id":"af28b39d-08b2-4e21-99dd-a1e9d18b4eba"}
