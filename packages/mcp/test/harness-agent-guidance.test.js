@@ -106,6 +106,42 @@ test("listProjectAgents reads the folder it is given: Copilot Markdown, Codex TO
   }
 });
 
+test("listProjectAgents (Codex TOML) skips multi-line strings: no header or key is read inside them", () => {
+  const project = mkdtempSync(path.join(tmpdir(), "duskfleet-toml-"));
+  try {
+    const dir = path.join(project, ".codex", "agents");
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(
+      path.join(dir, "a.toml"),
+      [
+        'developer_instructions = """',
+        "[ ] todo",
+        '[link](x) name = "x" \\""" still inside',
+        'name = "wrong"',
+        'model = "wrong"',
+        '"""',
+        "notes = '''",
+        "[[not.a.table]]",
+        "description = 'wrong'",
+        "'''",
+        'name = "planner"',
+        'description = "Plans [things]" # a comment with """',
+        'model = "gpt-5"',
+        "",
+        "[extra]",
+        'model = "not this"',
+        "",
+      ].join("\n"),
+    );
+    assert.deepEqual(
+      listProjectAgents(project, CODEX_PROJECT_AGENTS).map((a) => [a.name, a.description, a.model]),
+      [["planner", "Plans [things]", "gpt-5"]],
+    );
+  } finally {
+    rmSync(project, { recursive: true, force: true });
+  }
+});
+
 test("list_project_agents and create_agent over MCP answer for the agent's harness", async () => {
   const root = mkdtempSync(path.join(tmpdir(), "duskfleet-guidance-"));
   const configDir = path.join(root, "config");
