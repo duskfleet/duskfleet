@@ -45,8 +45,14 @@ export interface HarnessCapabilities {
   subagents: boolean;
   /** `inherit_mcp` (agent or project) gives the run the user's MCP connectors. */
   mcpInherit: boolean;
-  /** `link` agents: `claude_agent`, a persona defined by the project itself. */
+  /** `link` agents: `project_agent` (older name `claude_agent`), a persona defined by the project itself. */
   projectAgents: boolean;
+  /**
+   * A link's body (the Duskfleet file's extra instructions) reaches the run next to the project
+   * agent. `false` = a link with a non-empty body is refused (`system_prompt` named), never run
+   * without it. Absent = taken (Claude Code: `--append-system-prompt`).
+   */
+  projectAgentInstructions?: boolean;
   /**
    * Where this harness's agent definitions live in a project repository (issue #494), whether or
    * not a link can run them (`projectAgents`). Every text naming that folder is built from it.
@@ -117,7 +123,9 @@ export const COPILOT_HARNESS = "copilot";
  * GitHub Copilot CLI (1.0.112, docs/harnesses.md): its own tool rules (`toolRule`), deny by
  * default in a non-interactive run (`dontAsk`; `acceptEdits` adds `write`), resumable sessions, no
  * dollars (every run `unpriced`), none of the Claude-only fields. `addDirs` stays false: Copilot's
- * `--add-dir` also trusts that directory's skills and agents, not the same promise.
+ * `--add-dir` also trusts that directory's skills and agents, not the same promise. Links (#466,
+ * 1.0.114): `copilot --agent <name>` runs the project's `.github/agents/<name>.agent.md`; nothing
+ * else carries instructions next to it, so a link with a body is refused.
  */
 export const COPILOT_CAPABILITIES: HarnessCapabilities = Object.freeze({
   toolAllowList: true,
@@ -127,7 +135,8 @@ export const COPILOT_CAPABILITIES: HarnessCapabilities = Object.freeze({
   reportsCostUsd: false,
   subagents: false,
   mcpInherit: false,
-  projectAgents: false,
+  projectAgents: true,
+  projectAgentInstructions: false,
   projectAgentFolder: COPILOT_PROJECT_AGENTS,
   addDirs: false,
   skills: false,
@@ -237,6 +246,7 @@ type FitFields = Pick<
   | "sandbox_allowed_domains"
   | "sandbox_weaker_network_isolation"
   | "codex_network"
+  | "system_prompt"
 >;
 
 /**
@@ -277,6 +287,9 @@ export function harnessRefusal(
   if (spec.max_daily_cost_usd !== undefined && !caps.reportsCostUsd) return refuse("max_daily_cost_usd");
   if (spec.inherit_mcp === true && !caps.mcpInherit) return refuse("inherit_mcp");
   if (spec.claude_agent !== undefined && !caps.projectAgents) return linkRefusal(name, harnesses);
+  // A link's body is extra instructions for the project agent: refused where the CLI cannot take both.
+  if (spec.claude_agent !== undefined && spec.system_prompt?.trim() && caps.projectAgentInstructions === false)
+    return linkBodyRefusal(name, caps, spec.claude_agent);
   if (spec.add_dirs?.length && !caps.addDirs) return refuse("add_dirs");
   if (spec.skills?.length && !caps.skills) return refuse("skills");
   if (spec.effort !== undefined && !caps.effort) return refuse("effort");
@@ -327,9 +340,29 @@ export function linkRefusal(name: string, harnesses: HarnessLookup): string | nu
   return `claude_agent is not supported by harness ${name}: ${linkRemedy(name, caps, harnesses)}`;
 }
 
+/**
+ * A link with a body on a harness whose CLI takes nothing next to the project agent (#466, Copilot
+ * 1.0.114): the field named, and where the instructions can go instead.
+ */
+export function linkBodyRefusal(name: string, caps: HarnessCapabilities, projectAgent: string): string {
+  const file = caps.projectAgentFolder ? projectAgentFile(caps.projectAgentFolder, projectAgent) : "the project agent";
+  return `system_prompt (the agent file's body) is not supported next to project_agent by harness ${name}: the run is ${file} and nothing else reaches it. Move the instructions into that file, or leave the body empty`;
+}
+
 /** The folder a harness's project agents live in; undefined for an unknown harness or one that names none. */
 export function projectAgentFolderOf(name: string, harnesses: HarnessLookup): ProjectAgentFolder | undefined {
   return harnesses(name)?.projectAgentFolder;
+}
+
+/**
+ * The folder a link's project agent is read from: its harness's (`projectAgentFolderOf`), Claude
+ * Code's for a harness that names none. For the read-side helpers of `agent-files.ts`.
+ */
+export function linkFolder(
+  agent: { harness?: string | undefined },
+  harnesses: HarnessLookup = builtinHarnesses,
+): ProjectAgentFolder {
+  return projectAgentFolderOf(harnessOf(agent), harnesses) ?? CLAUDE_PROJECT_AGENTS;
 }
 
 /**

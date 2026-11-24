@@ -174,7 +174,8 @@ The capability set, as the shipped adapters declare it:
 | `reportsCostUsd` | the result carries a cost in dollars | yes | no (the stream has tokens only) | no (premium requests) |
 | `subagents` | nested agents are reported as rows | yes | no | no (later issue) |
 | `mcpInherit` | `inherit_mcp` gives the user's connectors | yes | no (`--ignore-user-config` drops the user's servers) | no (later issue) |
-| `projectAgents` | `link` agents (`claude_agent`); a link elsewhere is refused with the remedy (`kind: "own"`, or `harness: claude`) | yes | no: no documented way to start a session as a project agent | no (later issue, #466) |
+| `projectAgents` | `link` agents (`project_agent`, older name `claude_agent`); a link elsewhere is refused with the remedy (`kind: "own"`, or `harness: claude`). The adapter's `prepare` checks the project agent exists, before the run is recorded | yes | no: no documented way to start a session as a project agent | yes (`copilot --agent <name>` in the project, 1.0.114) |
+| `projectAgentInstructions` | a link's body reaches the run next to the project agent; `false` = a link with a body is refused (`system_prompt` named) | yes (`--append-system-prompt`) | | no: nothing carries instructions next to `--agent` |
 | `projectAgentFolder` | where the harness's project agents live; the only folder any text names for it (`list_project_agents { harness }` reads it) | `.claude/agents/<name>.md` | `.codex/agents/<file>.toml` (`name` field) | `.github/agents/<name>.agent.md` |
 | `addDirs` | `add_dirs` | yes | no (later issue: Codex's `--add-dir` makes a directory writable) | no: Copilot's `--add-dir` also trusts that directory's skills and agents |
 | `skills`, `sandbox` | the fields of the same name | yes | no (Codex runs in its own sandbox, always) | no (later issues) |
