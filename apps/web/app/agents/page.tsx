@@ -79,7 +79,7 @@ export default async function AgentsPage({ searchParams }: { searchParams: Promi
       description:
         a.description ||
         a.linked?.description ||
-        (a.claudeAgent ? `Runs claude --agent ${a.claudeAgent} in the project.` : "No description."),
+        (a.linked ? `Runs ${a.linked.command} in the project.` : "No description."),
     };
   });
 

@@ -49,6 +49,7 @@ import {
   harnessGrantWarnings,
   harnessOf,
   type LogLevel,
+  linkFolder,
   linkProjectPath,
   linkToolCheck,
   loadConfig,
@@ -785,7 +786,11 @@ async function main(): Promise<void> {
       const app = await open();
       // A link that leaves description / model out lists the project agent's (issue #459).
       const agents = [...app.config.agents.values()].map(({ systemPrompt: _p, ...a }) => {
-        const effective = effectiveAgentFields(a, linkProjectPath(a, app.config.projects));
+        const effective = effectiveAgentFields(
+          a,
+          linkProjectPath(a, app.config.projects),
+          linkFolder(a, app.harnesses.lookup),
+        );
         return {
           ...a,
           description: effective.description,
@@ -937,6 +942,7 @@ async function main(): Promise<void> {
               check: linkToolCheck(
                 { claude_agent: a.claudeAgent, allowed_tools: a.allowedTools },
                 linkProjectPath(a, app.config.projects),
+                linkFolder(a, app.harnesses.lookup),
               ),
             })),
         ),

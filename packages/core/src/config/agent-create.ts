@@ -5,7 +5,13 @@
  * longer loads. One bad agent file would otherwise break every later config reload.
  */
 
-import { assertAgentFitsHarness, builtinHarnesses, type HarnessLookup } from "../execution/harness.js";
+import {
+  assertAgentFitsHarness,
+  builtinHarnesses,
+  type HarnessLookup,
+  harnessOf,
+  projectAgentFolderOf,
+} from "../execution/harness.js";
 import {
   type AgentKind,
   type AgentSpec,
@@ -46,7 +52,13 @@ export function assertAgentWritable(
 ): void {
   // The harness first: an unknown one, or a field it cannot honour, is refused with the field named.
   assertAgentFitsHarness(spec, harnesses);
-  assertAgentKind(kind, spec, (id) => config.projects.get(id)?.path ?? null);
+  // A link is checked against its own harness's folder (#494), never another harness's.
+  assertAgentKind(
+    kind,
+    spec,
+    (id) => config.projects.get(id)?.path ?? null,
+    projectAgentFolderOf(harnessOf(spec), harnesses),
+  );
   assertWrapUpReserve(spec, config.claude.defaultMaxBudgetUsd);
   assertSandboxSpec(spec);
   const added = (spec.skills ?? []).filter((name) => !storedSkills.includes(name));

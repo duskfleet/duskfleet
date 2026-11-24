@@ -335,7 +335,8 @@ local run-data handling, and recommended configuration.
   | `--session-id <uuid>` / `--resume=<id>` | a fresh session with our id / a continued one |
   | `--model <model>`, `--reasoning-effort <level>` | only when the agent sets them |
   | `--allow-tool <rule>` / `--deny-tool <rule>` | the agent's `allowed_tools` / `disallowed_tools`, verbatim; `acceptEdits` adds `--allow-tool write` |
-  | `--add-dir <tmp> --agent duskfleet-agent` | the agent body as a per-run `.github/agents/duskfleet-agent.agent.md` (there is no system prompt flag; `COPILOT_CUSTOM_INSTRUCTIONS_DIRS` is not applied in an untrusted folder) |
+  | `--add-dir <tmp> --agent duskfleet-agent` | an own agent's body as a per-run `.github/agents/duskfleet-agent.agent.md` (there is no system prompt flag; `COPILOT_CUSTOM_INSTRUCTIONS_DIRS` is not applied in an untrusted folder) |
+  | `--agent <name>` (no `--add-dir`) | a link (`project_agent`, issue #466): the project's own `.github/agents/<name>.agent.md`, found from the working directory |
   | `--usage-output-file <tmp>/usage.json` | tokens per model for the result (cumulative for a resumed session) |
 
   Never passed: `--trust-folder` (it also cannot be combined with `--session-id`),
@@ -351,6 +352,30 @@ local run-data handling, and recommended configuration.
   `{ "mcpServers": { "<name>": { "type", "source", "enabled", ... } } }` on stdout (built-in entries
   have `"source": "builtin"`); only stdout is read. It runs in the run's folder, so a trusted
   folder's workspace servers are listed and disabled too.
+
+  Copilot link agents (issue #466), real runs of GitHub Copilot CLI 1.0.114 on 2026-11-23
+  (fixtures `link-*`, README section "Project agents"):
+
+  1. *Extra instructions next to `--agent <project agent>`*: no channel. `--add-dir <dir>` puts none
+     of that directory's `AGENTS.md`, `.github/copilot-instructions.md` or
+     `.github/instructions/*.instructions.md` in the prompt (`link-add-dir`), a same-named agent in
+     an added directory does not replace the project's (`link-shadowed`), `--agent` is given once
+     and there is no system prompt flag. So a Copilot link with a non-empty body is refused
+     (`projectAgentInstructions: false`), never run without it.
+  2. *The agent file's `tools:` against `--allow-tool` / `--deny-tool`*: the file cannot widen the
+     rules. Declared tools grant no permission (`link-tools-declared`: `touch` denied with shell
+     and edit declared and no rule); `tools:` narrows what exists (`link-tools-narrow-shell`: with
+     `tools: ["read"]` there is no shell tool although `shell(ls)` is allowed).
+  3. *The model*: without `--model`, the file's `model:` runs; `session.start` then has no
+     `selectedModel` and two `session.model_change` events follow (`source: "startup"`, then
+     `source: "agent"`), which the parser reads (`link-model`). With `--model`, the flag wins and no
+     change event is emitted (`link-model-flag`).
+
+  An unknown name exits 1 before any model call, nothing on stdout, `No such agent: <name>,
+  available: ...` on stderr (`link-unknown.stderr`): the adapter's `prepare` checks the file first.
+  Not specific to links, seen in `link-tools-declared`: Copilot ran a read-only shell command
+  (`ls -la marker.txt ...`) with no allow rule, which `dontAsk` = "the rules only" does not
+  describe; left to its own issue.
 - **Codex CLI flags** (`harness: codex`, `core/src/execution/codex.ts`): verified by hand against
   `codex exec --help` and real runs of codex-cli 0.167.1 (fixtures in
   `packages/mcp/test/fixtures/codex/`, their README lists the command of each). Tests point

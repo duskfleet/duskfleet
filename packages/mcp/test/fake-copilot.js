@@ -13,9 +13,12 @@
  *   `--disable-mcp-server` names disabled and `FAKE_COPILOT_MCP_LOADED` ones loaded (see below).
  * - `mcp add` / `mcp remove` edit the user servers of `FAKE_COPILOT_MCP_STATE` (issue #477).
  * - `FAKE_COPILOT_RECORD=<file>` (passed through by the test config) receives the argv, the
- *   environment's names, the prompt and the persona agent file `--add-dir` points at.
+ *   environment's names, the prompt and the persona agent file `--add-dir` points at (or, for a
+ *   link, the project's `.github/agents/<name>.agent.md`).
+ * - `--agent <name>` without `--add-dir` (a link, #466) exits 1 like `link-unknown` when the
+ *   working directory's `.github/agents/` has no `<name>.agent.md`.
  */
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -155,7 +158,8 @@ function main() {
   if (record) {
     const addDir = flag("--add-dir");
     const agent = flag("--agent");
-    const personaFile = addDir && agent ? path.join(addDir, ".github", "agents", `${agent}.agent.md`) : null;
+    // With --add-dir: the per-run persona; without: the project's own agent file (a link).
+    const personaFile = agent ? path.join(addDir ?? process.cwd(), ".github", "agents", `${agent}.agent.md`) : null;
     writeFileSync(
       record,
       JSON.stringify({
@@ -165,6 +169,24 @@ function main() {
         persona: personaFile && existsSync(personaFile) ? readFileSync(personaFile, "utf8") : null,
       }),
     );
+  }
+
+  // A project agent (`--agent <name>` without `--add-dir`, issue #466): the real CLI loads
+  // <cwd>/.github/agents/<name>.agent.md; an unknown name exits 1 before any model call with
+  // nothing on stdout and the names on stderr (fixture link-unknown.stderr, 1.0.114).
+  const linked = flag("--agent");
+  if (linked && !flag("--add-dir")) {
+    const dir = path.join(process.cwd(), ".github", "agents");
+    const names = existsSync(dir)
+      ? readdirSync(dir)
+          .filter((f) => f.endsWith(".agent.md"))
+          .map((f) => f.slice(0, -".agent.md".length))
+          .sort()
+      : [];
+    if (!names.includes(linked)) {
+      process.stderr.write(`No such agent: ${linked}, available: ${names.join(", ")}\n`);
+      process.exit(1);
+    }
   }
 
   if (name === "resume-unknown") {

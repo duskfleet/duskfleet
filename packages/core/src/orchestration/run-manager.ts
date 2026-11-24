@@ -8,6 +8,7 @@ import { randomUUID } from "node:crypto";
 import path from "node:path";
 import { agentDefinitionHash, projectAgentDefinitionHash } from "../config/agent-files.js";
 import { loadConfig, skippedAgentError } from "../config/loader.js";
+import { CLAUDE_PROJECT_AGENTS, projectAgentFile } from "../config/project-agent-folder.js";
 import { prepareSkillBundle } from "../config/skills.js";
 import {
   type AgentDefinition,
@@ -559,7 +560,9 @@ export class RunManager {
     const runId = randomUUID();
     const resume = input.resume ?? null;
     if (resume && input.continueFrom) throw new Error("resume and continueFrom are mutually exclusive");
-    const agentHash = agentDefinitionHash(agent, projectPath);
+    // Where the harness reads a link's project agent (`.claude/agents`, `.github/agents`): the adapter says.
+    const agentFolder = caps.projectAgentFolder ?? CLAUDE_PROJECT_AGENTS;
+    const agentHash = agentDefinitionHash(agent, projectPath, agentFolder);
     // A continuation resumes the earlier session only when it is the same agent, in the same
     // directory, with the same definition; anything else starts a fresh session (noted below).
     const continueFrom = input.continueFrom ?? null;
@@ -638,7 +641,9 @@ export class RunManager {
     }
     // The persona of a link on its own (it lives in the project, a pull can change it): no harness
     // named here, the request's claudeAgent says whether there is one.
-    const projectAgentHash = request.claudeAgent ? projectAgentDefinitionHash(projectPath, request.claudeAgent) : null;
+    const projectAgentHash = request.claudeAgent
+      ? projectAgentDefinitionHash(projectPath, request.claudeAgent, agentFolder)
+      : null;
 
     // Record the run (with the exact command) *before* launching it.
     const run: Run = {
@@ -726,7 +731,7 @@ export class RunManager {
     const personaChange = this.projectAgentChange(run);
     if (personaChange?.changed)
       this.runs.addEvent(runId, "note", {
-        message: `project agent file .claude/agents/${request.claudeAgent}.md changed since the previous run of this schedule (${personaChange.previousRunId}): ${personaChange.previousHash} -> ${personaChange.hash}`,
+        message: `project agent file ${projectAgentFile(agentFolder, request.claudeAgent)} changed since the previous run of this schedule (${personaChange.previousRunId}): ${personaChange.previousHash} -> ${personaChange.hash}`,
         projectAgentChange: personaChange,
       });
     if (resume) {
