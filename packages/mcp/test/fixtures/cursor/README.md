@@ -24,26 +24,26 @@ the configuration directory is the user's own (`~/.cursor`), whose `cli-config.j
 `cli-config.json`, holding `{"version":1,"permissions":{"allow":[...],"deny":[...]}}` with the
 lists of the table.
 
-| Fixture                | Differences from the common flags                              | Prompt                                           | Exit |
-| ---------------------- | -------------------------------------------------------------- | ------------------------------------------------ | ---- |
-| `untrusted`            | no `--trust`                                                   | create `hello.txt`                               | 1    |
-| `edit`                 |                                                                | create `hello.txt`                               | 0    |
-| `shell-denied`         |                                                                | run `git status --short .`                       | 0    |
-| `shell-allowed`        | `<cfg>` allow `Shell(git)`                                     | run `git status --short .`                       | 0    |
-| `write-denied`         | `<cfg>` deny `Write(**)`                                       | create `denied.txt`                              | 0    |
-| `force`                | `<cfg>` with empty lists, `--force`                            | run `git log --oneline .`                        | 0    |
-| `sandbox`              | `<cfg>` allow `Shell(curl)`, `Shell(touch)`; `--sandbox enabled` | `curl` `https://example.com`, `touch` outside the project | 0 |
-| `ask-write`            | `--mode ask`                                                   | create `ask.txt`                                 | 0    |
-| `failed-model`         | `--model no-such-model`                                        | "Say hi"                                         | 1    |
-| `resume`               | `--resume <session of edit>`                                   | "What file did you create earlier?"              | 0    |
-| `resume-unknown`       | `--resume 00000000-0000-4000-8000-000000000000`                | "Say hi"                                         | 0    |
-| `resume-same-config`   | `<cfg>` of `shell-allowed`, `--resume <session of shell-allowed>` | "Which shell command did you run earlier?"    | 0    |
-| `resume-other-config`  | the user's own directory, `--resume <session of shell-allowed>` | "Which shell command did you run earlier?"      | 0    |
-| `stdin`                | no prompt argument: the prompt is piped on stdin               | "Reply with exactly: stdin works"                | 0    |
-| `killed`               | SIGTERM after 16 s                                             | a 3000 word essay                                | 143  |
-| `add-dir-instructions` | `<cfg>` with empty lists, `--add-dir <dir>` holding an `AGENTS.md` | "Say hi in three words."                     | 0    |
-| `plugin-dir-rule`      | `<cfg>` with empty lists, `--plugin-dir <dir>` holding a rule  | "Say hi in three words."                         | 0    |
-| `subagent`             | `<cfg>` with empty lists, a `.cursor/agents/parrot.md` in the project | "/parrot what is the capital of France?"  | 0    |
+| Fixture                | Differences from the common flags                                     | Prompt                                                    | Exit |
+| ---------------------- | --------------------------------------------------------------------- | --------------------------------------------------------- | ---- |
+| `untrusted`            | no `--trust`                                                          | create `hello.txt`                                        | 1    |
+| `edit`                 |                                                                       | create `hello.txt`                                        | 0    |
+| `shell-denied`         |                                                                       | run `git status --short .`                                | 0    |
+| `shell-allowed`        | `<cfg>` allow `Shell(git)`                                            | run `git status --short .`                                | 0    |
+| `write-denied`         | `<cfg>` deny `Write(**)`                                              | create `denied.txt`                                       | 0    |
+| `force`                | `<cfg>` with empty lists, `--force`                                   | run `git log --oneline .`                                 | 0    |
+| `sandbox`              | `<cfg>` allow `Shell(curl)`, `Shell(touch)`; `--sandbox enabled`      | `curl` `https://example.com`, `touch` outside the project | 0    |
+| `ask-write`            | `--mode ask`                                                          | create `ask.txt`                                          | 0    |
+| `failed-model`         | `--model no-such-model`                                               | "Say hi"                                                  | 1    |
+| `resume`               | `--resume <session of edit>`                                          | "What file did you create earlier?"                       | 0    |
+| `resume-unknown`       | `--resume 00000000-0000-4000-8000-000000000000`                       | "Say hi"                                                  | 0    |
+| `resume-same-config`   | `<cfg>` of `shell-allowed`, `--resume <session of shell-allowed>`     | "Which shell command did you run earlier?"                | 0    |
+| `resume-other-config`  | the user's own directory, `--resume <session of shell-allowed>`       | "Which shell command did you run earlier?"                | 0    |
+| `stdin`                | no prompt argument: the prompt is piped on stdin                      | "Reply with exactly: stdin works"                         | 0    |
+| `killed`               | SIGTERM after 16 s                                                    | a 3000 word essay                                         | 143  |
+| `add-dir-instructions` | `<cfg>` with empty lists, `--add-dir <dir>` holding an `AGENTS.md`    | "Say hi in three words."                                  | 0    |
+| `plugin-dir-rule`      | `<cfg>` with empty lists, `--plugin-dir <dir>` holding a rule         | "Say hi in three words."                                  | 0    |
+| `subagent`             | `<cfg>` with empty lists, a `.cursor/agents/parrot.md` in the project | "/parrot what is the capital of France?"                  | 0    |
 
 The `AGENTS.md` of `add-dir-instructions` and the rule of `plugin-dir-rule`
 (`<dir>/.cursor-plugin/plugin.json` plus `<dir>/rules/duskfleet.mdc` with `alwaysApply: true`) both
