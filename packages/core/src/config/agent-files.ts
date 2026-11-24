@@ -18,6 +18,12 @@ import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 import { z } from "zod";
 import { ENV_PASSTHROUGH_PATTERN } from "../execution/child-env.js";
 import { SANDBOX_DOMAIN_MESSAGE, SANDBOX_DOMAIN_PATTERN } from "../execution/sandbox.js";
+import {
+  CLAUDE_PROJECT_AGENTS,
+  type ProjectAgentFolder,
+  projectAgentFile,
+  projectAgentSuffix,
+} from "./project-agent-folder.js";
 import { SKILL_NAME_MESSAGE, SKILL_NAME_PATTERN } from "./skills.js";
 import {
   type AgentDefinition,
@@ -200,7 +206,7 @@ export function assertSandboxSpec(
   }
 }
 
-/** A Claude Code agent defined by a project in `.claude/agents/<name>.md`. */
+/** An agent defined by a project in its harness's folder (Claude Code: `.claude/agents/<name>.md`). */
 export interface ProjectAgentInfo {
   name: string;
   description: string;
@@ -212,17 +218,25 @@ export interface ProjectAgentInfo {
 }
 
 /**
- * Lists the agents a project defines for Claude Code. These are what
- * `claude --agent <name>` (AgentDefinition.claudeAgent) can adopt.
+ * Lists the agents a project defines in a harness's folder (default: Claude Code's
+ * `.claude/agents/`, what `claude --agent <name>` (AgentDefinition.claudeAgent) can adopt).
  */
-export function listProjectAgents(projectPath: string): ProjectAgentInfo[] {
-  const dir = path.join(projectPath, ".claude", "agents");
+export function listProjectAgents(
+  projectPath: string,
+  folder: ProjectAgentFolder = CLAUDE_PROJECT_AGENTS,
+): ProjectAgentInfo[] {
+  const dir = path.join(projectPath, ...folder.dir.split("/"));
   if (!existsSync(dir)) return [];
+  const suffix = projectAgentSuffix(folder);
   const out: ProjectAgentInfo[] = [];
   for (const file of readdirSync(dir)
-    .filter((f) => f.endsWith(".md"))
+    .filter((f) => f.endsWith(suffix) && f.length > suffix.length)
     .sort()) {
     const full = path.join(dir, file);
+    if (folder.format === "toml") {
+      out.push(tomlProjectAgent(full, file));
+      continue;
+    }
     const match = /^---\r?\n([\s\S]*?)\r?\n---/.exec(readFileSync(full, "utf8"));
     let fm: Record<string, unknown> = {};
     let frontmatterError: string | null = null;
@@ -233,7 +247,7 @@ export function listProjectAgents(projectPath: string): ProjectAgentInfo[] {
       // unreadable frontmatter: still list the file by name
       frontmatterError = (err instanceof Error ? err.message : String(err)).split("\n")[0] ?? "invalid YAML";
     }
-    const name = typeof fm["name"] === "string" ? fm["name"] : file.replace(/\.md$/, "");
+    const name = typeof fm["name"] === "string" ? fm["name"] : file.slice(0, -suffix.length);
     const toolsRaw = fm["tools"];
     const tools = Array.isArray(toolsRaw)
       ? toolsRaw.map(String)
@@ -253,6 +267,36 @@ export function listProjectAgents(projectPath: string): ProjectAgentInfo[] {
     });
   }
   return out;
+}
+
+/**
+ * A Codex agent file (`.codex/agents/*.toml`): only the top-level `name`, `description` and `model`
+ * string keys are read (no TOML dependency). The `name` field identifies the agent, not the file
+ * name; a file without one is listed by file name with the reason.
+ */
+function tomlProjectAgent(full: string, file: string): ProjectAgentInfo {
+  const text = readFileSync(full, "utf8");
+  // Top-level keys end at the first table header.
+  const top = text.split(/^\s*\[/m)[0] ?? "";
+  const key = (k: string): string | null => {
+    const m = new RegExp(`^\\s*${k}\\s*=\\s*(?:"((?:[^"\\\\]|\\\\.)*)"|'([^']*)')\\s*(?:#.*)?$`, "m").exec(top);
+    if (!m) return null;
+    if (m[2] !== undefined) return m[2];
+    try {
+      return JSON.parse(`"${m[1] ?? ""}"`) as string;
+    } catch {
+      return m[1] ?? "";
+    }
+  };
+  const name = key("name");
+  return {
+    name: name ?? file.replace(/\.toml$/, ""),
+    description: key("description") ?? "",
+    tools: null,
+    model: key("model"),
+    path: full,
+    frontmatterError: name === null ? 'no top-level name = "..." key: Codex identifies an agent by it' : null,
+  };
 }
 
 /** What `linkToolGaps` found: allow-list entries the project agent does not declare, or why it could not tell. */
@@ -509,6 +553,8 @@ export function assertAgentKind(
   kind: AgentKind,
   spec: AgentSpec,
   resolveProjectPath: (projectId: string) => string | null,
+  /** The agent's harness's folder (`projectAgentFolderOf`); Claude Code's when omitted. */
+  folder: ProjectAgentFolder = CLAUDE_PROJECT_AGENTS,
 ): void {
   if (kind === "own") {
     if (spec.claude_agent)
@@ -523,19 +569,19 @@ export function assertAgentKind(
   }
   if (!spec.claude_agent)
     throw new Error(
-      `kind "link" needs claude_agent: the name of an agent in the project's .claude/agents/ (see list_project_agents).`,
+      `kind "link" needs claude_agent: the name of an agent in the project's ${folder.dir}/ (see list_project_agents).`,
     );
   if (!spec.project) {
     throw new Error(
-      `kind "link" needs the folder that defines the agent: pass project_path (absolute path with .claude/agents/${spec.claude_agent}.md) or a registered project id.`,
+      `kind "link" needs the folder that defines the agent: pass project_path (absolute path with ${projectAgentFile(folder, spec.claude_agent)}) or a registered project id.`,
     );
   }
   const projectPath = resolveProjectPath(spec.project);
   if (!projectPath) throw new Error(`unknown project "${spec.project}"`);
-  const available = listProjectAgents(projectPath).map((a) => a.name);
+  const available = listProjectAgents(projectPath, folder).map((a) => a.name);
   if (!available.includes(spec.claude_agent)) {
     throw new Error(
-      `project "${spec.project}" defines no agent "${spec.claude_agent}" in .claude/agents/ (available: ${available.join(", ") || "none"}). Pick one from list_project_agents, or use kind "own".`,
+      `project "${spec.project}" defines no agent "${spec.claude_agent}" in ${folder.dir}/ (available: ${available.join(", ") || "none"}). Pick one from list_project_agents, or use kind "own".`,
     );
   }
 }

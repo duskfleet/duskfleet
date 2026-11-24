@@ -173,10 +173,11 @@ test("every field Copilot cannot honour is refused, by name", () => {
     [{ sandbox_allowed_domains: ["x.org"] }, "sandbox_allowed_domains"],
   ];
   for (const [fields, name] of cases) {
-    assert.equal(
-      harnessRefusal({ harness: "copilot", ...fields }, builtinHarnesses),
-      `${name} is not supported by harness copilot`,
-    );
+    const why = harnessRefusal({ harness: "copilot", ...fields }, builtinHarnesses);
+    // claude_agent adds the remedy after a colon (#494); every other field is the bare refusal.
+    if (name === "claude_agent")
+      assert.match(why, /^claude_agent is not supported by harness copilot: .*\.github\/agents.*kind "own"/);
+    else assert.equal(why, `${name} is not supported by harness copilot`);
   }
   for (const mode of ["plan", "auto", "default", "bypassPermissions"]) {
     assert.match(harnessRefusal({ harness: "copilot", permission_mode: mode }, builtinHarnesses), /^permission_mode /);

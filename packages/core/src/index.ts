@@ -105,6 +105,13 @@ export {
   shellLine,
 } from "./config/mcp-entry.js";
 export {
+  CLAUDE_PROJECT_AGENTS,
+  CODEX_PROJECT_AGENTS,
+  COPILOT_PROJECT_AGENTS,
+  type ProjectAgentFolder,
+  projectAgentFile,
+} from "./config/project-agent-folder.js";
+export {
   PROJECT_ID_PATTERN,
   projectIdFromPath,
   readUserProjects,
@@ -191,6 +198,9 @@ export {
   harnessGrantWarnings,
   harnessOf,
   harnessRefusal,
+  linkRefusal,
+  projectAgentFolderOf,
+  projectAgentGuidance,
   SHIPPED_HARNESSES,
 } from "./execution/harness.js";
 export {
