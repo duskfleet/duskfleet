@@ -174,7 +174,8 @@ The capability set, as the shipped adapters declare it:
 | `reportsCostUsd` | the result carries a cost in dollars | yes | no (the stream has tokens only) | no (premium requests) |
 | `subagents` | nested agents are reported as rows | yes | no | no (later issue) |
 | `mcpInherit` | `inherit_mcp` gives the user's connectors | yes | no (`--ignore-user-config` drops the user's servers) | no (later issue) |
-| `projectAgents` | `link` agents (`claude_agent`) | yes | no: nothing in the CLI loads an agent from a project folder | no |
+| `projectAgents` | `link` agents (`claude_agent`); a link elsewhere is refused with the remedy (`kind: "own"`, or `harness: claude`) | yes | no: no documented way to start a session as a project agent | no (later issue, #466) |
+| `projectAgentFolder` | where the harness's project agents live; the only folder any text names for it (`list_project_agents { harness }` reads it) | `.claude/agents/<name>.md` | `.codex/agents/<file>.toml` (`name` field) | `.github/agents/<name>.agent.md` |
 | `addDirs` | `add_dirs` | yes | no (later issue: Codex's `--add-dir` makes a directory writable) | no: Copilot's `--add-dir` also trusts that directory's skills and agents |
 | `skills`, `sandbox` | the fields of the same name | yes | no (Codex runs in its own sandbox, always) | no (later issues) |
 | `effort` | `effort` | yes | yes (`-c model_reasoning_effort`) | yes (`--reasoning-effort`) |

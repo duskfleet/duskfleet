@@ -187,6 +187,11 @@ npm workspaces, one `config/` and one SQLite database shared by three deliverabl
   `.claude/agents/<name>.md`; Duskfleet owns only the unattended envelope). A folder that is
   not a project yet is registered in the private registry by `create_agent`. `create_agent` requires `kind` and `assertAgentKind` in core validates the
   combination before any file is written. Prefer link when the project already has the agent.
+  **The project-agent folder is the harness's** (#494, `config/project-agent-folder.ts`, the
+  adapter's `projectAgentFolder`): claude `.claude/agents/`, copilot `.github/agents/`, codex
+  `.codex/agents/` (TOML, `name` field). Every text naming it (server instructions, tool
+  descriptions, errors, hints) is built from it, never a literal `.claude/agents` in `packages/mcp`;
+  a link on a harness without `projectAgents` is refused by `linkRefusal` with the remedy.
   **A link is prompted as the agent, never as its caller**: "run your loop", not "run
   /some-command" when that command invokes the same agent (it would invoke itself as a
   subagent, verified 2026-10-13). And the project agent's `tools:` must use the

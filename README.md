@@ -234,7 +234,7 @@ with diagrams: [How it works](docs/how-it-works.md).
 
 | | |
 |---|---|
-| **Agents** | Markdown files: a persona of your own, or a link to an agent the project already defines in `.claude/agents/`. [Agents](docs/agents.md) |
+| **Agents** | Markdown files: a persona of your own, or a link to an agent the project already defines for the agent's harness (claude: `.claude/agents/`). [Agents](docs/agents.md) |
 | **Runs** | Every event, tool call, permission denial, token and dollar, in SQLite and a JSONL log per run. [CLI](docs/cli.md) |
 | **Schedules** | Cron schedules that defer a busy tick as one pending fire, retried until the agent is free or the next occurrence; no queue, no catch-up after sleep. [Schedules](docs/schedules.md) |
 | **Dashboard** | Runs with cost, timeline and issues; a run that hit a permission denial is "needs review", never green. [Dashboard](docs/dashboard.md) |

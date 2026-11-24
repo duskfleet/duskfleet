@@ -9,12 +9,33 @@ Claude Code's system prompt.
 | Kind | What it is | Required | Not allowed |
 |---|---|---|---|
 | **own** | A new agent whose persona lives in Duskfleet: the Markdown body is the system prompt | `system_prompt` (body) | `claude_agent` |
-| **link** | A reference to an agent that a project **folder** already defines in `.claude/agents/<name>.md`. The run starts as `claude --agent <name>` in that folder: the project agent brings prompt, tools and model; Duskfleet adds only the unattended envelope (permissions, allow-list, budget, MCP, optional extra instructions) | `claude_agent` + the folder: `project_path` (absolute; registered as a project on the fly if new) or a registered `project` id. The target file is verified to exist | — |
+| **link** | A reference to an agent that a project **folder** already defines for the agent's harness (claude: `.claude/agents/<name>.md`, see [the table below](#project-agents-per-harness)). The run starts as `claude --agent <name>` in that folder: the project agent brings prompt, tools and model; Duskfleet adds only the unattended envelope (permissions, allow-list, budget, MCP, optional extra instructions) | `claude_agent` + the folder: `project_path` (absolute; registered as a project on the fly if new) or a registered `project` id. The target file is verified to exist | — |
 
 `create_agent` makes you say which one (`kind: "own" | "link"`) and rejects inconsistent
 combinations; `list_agents` reports `kind` for every agent and the dashboard shows
-"link → name" or "own prompt". Rule of thumb: if the project already has a `.claude/agents/`
-entry that does the job, link it; write a persona only when nothing exists.
+"link → name" or "own prompt". Rule of thumb, per harness: settle the agent's harness first. On
+`claude`, if the project already has a `.claude/agents/` entry that does the job, link it; write a
+persona only when nothing exists. On a harness that cannot run a link yet (`copilot`, `codex`
+today), the agent is `own`: the persona goes in `system_prompt`, even when the project defines
+agents in that harness's folder.
+
+### Project agents per harness
+
+Each harness has one folder of project agents, and it is the only place guidance, errors and
+docs name for that harness. Whether a link can run there is a separate capability
+(`projectAgents`, [Harnesses](harnesses.md)):
+
+| Harness | Folder in the project repository | Link (`claude_agent`) |
+|---|---|---|
+| `claude` | `.claude/agents/<name>.md` | yes, `claude --agent <name>` |
+| `copilot` | `.github/agents/<name>.agent.md` | not yet: `own` only |
+| `codex` | `.codex/agents/<file>.toml` (the `name` field identifies the agent, not the file name) | not yet: `own` only |
+
+`list_project_agents { harness }` reads that harness's folder only (default `claude`) and says
+whether the result is `linkable`. A link on a harness without links is refused (create, update,
+`agents create` and run start, one message from core) with the way forward: `kind: "own"` on
+that harness, or `harness: claude` if the project really defines a Claude Code agent. Duskfleet
+never writes agent files into a project.
 
 ## Where agent files live
 
@@ -544,7 +565,8 @@ through `create_agent`.
 ## Reusing agents a project already defines
 
 Projects often ship their own Claude Code agents in `.claude/agents/*.md` (persona, tools,
-model). Instead of copying that prompt into Duskfleet, link to it:
+model). Instead of copying that prompt into Duskfleet, link to it (harness `claude`; see
+[Project agents per harness](#project-agents-per-harness) for the others):
 
 ```markdown
 ---
