@@ -452,6 +452,15 @@ const MIGRATIONS: ReadonlyArray<{ version: number; sql: string; backfill?: (db: 
       ALTER TABLE runs ADD COLUMN project_agent_hash TEXT;
     `,
   },
+  {
+    // The effort requested for the run (issue #496): the value RunManager put on the execution
+    // request (`effort:` of the agent). NULL when none was passed (the CLI's default) and for
+    // older rows; the effective effort is not reported by any CLI, so it is never guessed.
+    version: 34,
+    sql: `
+      ALTER TABLE runs ADD COLUMN effort TEXT;
+    `,
+  },
 ];
 
 /**

@@ -173,6 +173,8 @@ silently and never approximated: an allow-list a CLI ignored would be a permissi
 
 Claude Code has every capability, so a Claude agent runs exactly as before the field existed. The
 run records its harness (`harness` in `get_run` / `run-info --json`, a line on the run page).
+It also records the effort it was started with (`effort` in `get_run`, `list_runs` and `run-info`):
+the agent's `effort:` as passed to the CLI, null when the agent sets none (the CLI's default).
 
 ### Copilot agents
 
