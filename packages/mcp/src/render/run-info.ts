@@ -96,6 +96,8 @@ function runBlock(info: RunInfo, opts: RenderOpts): string[] {
               ? `default (${versionOf} ${run.claudeCodeVersion})`
               : null,
         ],
+        // The effort requested (the agent's `effort:`); no line when none was passed.
+        ["effort", run.effort ?? null],
         ["session", run.claudeSessionId],
         ["created", fmtWhen(run.createdAt, opts.now)],
         ["duration", run.durationMs !== null ? fmtDuration(run.durationMs) : null],

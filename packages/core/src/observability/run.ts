@@ -69,6 +69,11 @@ export interface Run {
   title: string | null;
   modelRequested: string | null;
   modelUsed: string | null;
+  /**
+   * The effort requested for the run (migration 34): the agent's `effort:` as put on the execution
+   * request. Null when none was passed (the CLI's default) and for older rows; never the effective one.
+   */
+  effort?: string | null;
   status: RunStatus;
   createdAt: string;
   startedAt: string | null;
@@ -518,6 +523,8 @@ export function summarizeRun(run: Run) {
     label: runLabel(run),
     prompt: run.prompt.length > 140 ? run.prompt.slice(0, 137) + "..." : run.prompt,
     model: run.modelUsed ?? run.modelRequested,
+    /** The effort requested for the run (the agent's `effort:`); null = none passed, the CLI's default. */
+    effort: run.effort ?? null,
     /** The agent CLI that ran (`claude` unless the agent sets another `harness:`). */
     harness: run.harness ?? "claude",
     /** Eval bundle: the agent definition and harness (Claude Code) version this run used; null when unknown. */
