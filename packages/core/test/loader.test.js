@@ -3,13 +3,14 @@
  * malformed agent file does to a reload. Each test builds its own config dir under tmp.
  */
 import assert from "node:assert/strict";
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { after, test } from "node:test";
 import { fileURLToPath } from "node:url";
 import {
   agentToSpec,
+  assertAgentFileFree,
   assertAgentIdFree,
   assertAgentKind,
   assertAgentSpecClean,
@@ -181,6 +182,35 @@ test("create still removes a file that does not load, and says why", () => {
   );
   assert.equal(existsSync(path.join(dataDir, "agents", "x.md")), false, "rolled back");
   assert.equal(loadConfig(configDir).agents.get("x").description, "taken");
+});
+
+test("create never writes over a file that holds another agent, overwrite or not (#501)", () => {
+  // helper.md declares code-helper: creating "helper" would write helper.md and delete code-helper.
+  const hand = agentFile("hand-written", "id: code-helper\n");
+  const { configDir, dataDir } = makeConfig({
+    userAgents: { helper: hand, broken: "---\nid: code-broken\nmodel: 3\n---\nbody\n" },
+  });
+  const config = loadConfig(configDir);
+  const runs = new RunManager(config, null, null, { owner: "test@host:1" });
+  const file = path.join(dataDir, "agents", "helper.md");
+  for (const overwrite of [false, true]) {
+    assert.doesNotThrow(() => assertAgentIdFree(config, "helper", overwrite, "overwrite: true", null));
+    assert.throws(
+      () => createAgentFromFields("own", { id: "helper", system_prompt: "New." }, config, () => runs.reloadConfig()),
+      (err) => err.message.includes(file) && /holds agent "code-helper", not "helper"/.test(err.message),
+    );
+  }
+  assert.throws(() => assertAgentFileFree(config, "broken"), /holds agent "code-broken"/, "a skipped file too");
+  assert.equal(readFileSync(file, "utf8"), hand, "the hand-written file is untouched");
+  assert.equal(loadConfig(configDir).agents.get("code-helper").description, "hand-written");
+
+  // A file the loaded config does not know yet is refused as well.
+  writeFileSync(path.join(dataDir, "agents", "late.md"), agentFile("late", "id: other\n"));
+  assert.throws(() => assertAgentFileFree(config, "late"), /late\.md already exists and does not hold agent "late"/);
+  // The agent's own file stays writable (overwrite / update).
+  assert.doesNotThrow(() => assertAgentFileFree(loadConfig(configDir), "code-helper"));
+  writeFileSync(path.join(dataDir, "agents", "same.md"), agentFile("same"));
+  assert.doesNotThrow(() => assertAgentFileFree(loadConfig(configDir), "same"));
 });
 
 test("unparseable YAML: the id line is the guess, so the builtin it overrides is not served", () => {

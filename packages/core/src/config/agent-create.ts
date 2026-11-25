@@ -5,6 +5,8 @@
  * longer loads. One bad agent file would otherwise break every later config reload.
  */
 
+import { existsSync } from "node:fs";
+import path from "node:path";
 import {
   assertAgentFitsHarness,
   builtinHarnesses,
@@ -15,6 +17,7 @@ import {
 import {
   type AgentKind,
   type AgentSpec,
+  agentFilePath,
   agentSpecSchema,
   assertAgentKind,
   assertSandboxSpec,
@@ -116,8 +119,33 @@ export function deleteSkippedUserAgentFiles(config: DuskFleetConfig, id: string)
 }
 
 /**
+ * Refuses to write `<user_agents_dir>/<id>.md` when that file belongs to another agent (#501): a
+ * user file, whatever its name, holds the id it declares, so `helper.md` declaring `code-helper`
+ * is not agent `helper`'s file. No `overwrite` / `--force` lifts this: those replace the agent of
+ * that id, never a different one. A file on disk the config does not know (written since the last
+ * load) is refused too: what it holds is unknown.
+ */
+export function assertAgentFileFree(config: DuskFleetConfig, id: string): void {
+  const file = agentFilePath(config.userAgentsDir, id);
+  if (!existsSync(file)) return;
+  const target = path.resolve(file);
+  const holders: { id: string; sourcePath: string }[] = [
+    ...[...config.agents.values()].filter((a) => a.source === "user"),
+    ...(config.skippedAgents ?? []).filter((s) => s.source === "user"),
+  ].filter((h) => path.resolve(h.sourcePath) === target);
+  if (holders.some((h) => h.id === id)) return;
+  const other = holders[0]?.id;
+  throw new Error(
+    other
+      ? `${file} holds agent "${other}", not "${id}": writing it would delete that agent. Rename that file (e.g. to ${other}.md) or choose another id.`
+      : `${file} already exists and does not hold agent "${id}": writing it would replace that file. Move it away or choose another id.`,
+  );
+}
+
+/**
  * Write the agent file into `user_agents_dir`, then make sure the config still loads (`reload`
  * re-reads it from disk and keeps the previous one on failure); otherwise remove the file and fail loudly.
+ * Never over a file that holds another agent (`assertAgentFileFree`).
  */
 export function writeAgentAndVerify(
   config: DuskFleetConfig,
@@ -125,6 +153,7 @@ export function writeAgentAndVerify(
   reload: () => DuskFleetConfig,
 ): AgentDefinition {
   assertSpecLoadable(spec, config);
+  assertAgentFileFree(config, spec.id);
   const file = writeAgentFile(config.userAgentsDir, spec);
   const reloaded = reload();
   const fresh = reloaded.agents.get(spec.id);
