@@ -4,6 +4,7 @@
  */
 
 export {
+  assertAgentFileFree,
   assertAgentIdFree,
   assertAgentWritable,
   assertSpecLoadable,
