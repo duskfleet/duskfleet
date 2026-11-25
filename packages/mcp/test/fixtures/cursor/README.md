@@ -45,6 +45,20 @@ lists of the table.
 | `plugin-dir-rule`      | `<cfg>` with empty lists, `--plugin-dir <dir>` holding a rule         | "Say hi in three words."                                  | 0    |
 | `subagent`             | `<cfg>` with empty lists, a `.cursor/agents/parrot.md` in the project | "/parrot what is the capital of France?"                  | 0    |
 
+The four `mcp-*` runs were captured on 2026-11-25 with **2026.11.22-e9042b2** (the CLI updates
+itself), in a scratch project holding a `.cursor/mcp.json` that declares one stdio server,
+`duskfleet-probe`, with one tool, `probe_secret`. The server logged every start and request to a
+file outside the project. Their prompt: "Call the MCP tool probe_secret of the server
+duskfleet-probe and reply with exactly its output. If you have no such tool or the call is refused,
+reply exactly NO_TOOL and nothing else."
+
+| Fixture          | Differences from the common flags                                                    | Exit |
+| ---------------- | ------------------------------------------------------------------------------------ | ---- |
+| `mcp-unapproved` | `<cfg>` with empty lists                                                             | 0    |
+| `mcp-no-rule`    | `<cfg>` with empty lists, `--approve-mcps`                                           | 0    |
+| `mcp-allowed`    | `<cfg>` allow `Mcp(duskfleet-probe:probe_secret)`, `--approve-mcps`                  | 0    |
+| `mcp-denied`     | `<cfg>` allow `Mcp(duskfleet-probe:probe_secret)`, deny `Mcp(*:*)`, `--approve-mcps` | 0    |
+
 The `AGENTS.md` of `add-dir-instructions` and the rule of `plugin-dir-rule`
 (`<dir>/.cursor-plugin/plugin.json` plus `<dir>/rules/duskfleet.mdc` with `alwaysApply: true`) both
 said "Always end every reply with the word PINEAPPLE on its own line."
@@ -69,7 +83,7 @@ said "Always end every reply with the word PINEAPPLE on its own line."
 - A tool call is a `tool_call` pair, `subtype: "started"` then `"completed"`, with the same
   `call_id` (it contains a newline character). `tool_call` holds one key naming the tool, with
   `args` and, when completed, `result`. Tools seen: `editToolCall` (`args.path`, absolute),
-  `shellToolCall` (`args.command`), `taskToolCall` and `getMcpToolsToolCall`.
+  `shellToolCall` (`args.command`), `taskToolCall`, `getMcpToolsToolCall` and `mcpToolCall`.
 - Two tool calls can be open at once: in `sandbox` both start before either completes, and they
   complete in the other order.
 
@@ -106,6 +120,32 @@ said "Always end every reply with the word PINEAPPLE on its own line."
   another one, the run starts empty under the same id, with no error (`resume-other-config`).
 - `cursor-agent mcp list` named the same server from the user's `~/.cursor/mcp.json` with and
   without `CURSOR_CONFIG_DIR`: the variable does not hide the user's MCP servers.
+
+**MCP servers**
+
+- A server declared in the project's `.cursor/mcp.json` and never approved is not loaded:
+  `cursor-agent mcp list` says `not loaded (needs approval)`, the server process is never started
+  and the model finds no tool (`getMcpToolsToolCall` with no match, `mcp-unapproved`).
+- `--approve-mcps` approves it and the approval outlives the run: it is written to
+  `~/.cursor/projects/<project slug>/mcp-approvals.json`, in the user's home whatever
+  `CURSOR_CONFIG_DIR` says. After one run with the flag, `mcp list` says `ready` for that project
+  from any configuration directory.
+- An approved server is started and its tools are listed to the model, but a call that no rule
+  allows is rejected without a prompt, like a shell command: the completed `mcpToolCall` has
+  `result.rejected` (`reason`: "User rejected MCP: <server>-<tool>") and the server receives no
+  `tools/call` (`mcp-no-rule`).
+- `permissions.allow: ["Mcp(<server>:<tool>)"]` lets the call run: `result.success` with
+  `content[].text.text` and `isError` (`mcp-allowed`).
+- `permissions.deny: ["Mcp(*:*)"]` wins over that allow rule: `result.permissionDenied` (`error`
+  ending in "Blocked by permissions configuration"), no `tools/call` (`mcp-denied`).
+- `mcpToolCall.args` holds `name` (`<server>-<tool>`), `providerIdentifier` (the server),
+  `toolName` and `args`.
+- Not shown by a run: a server of the user's own `~/.cursor/mcp.json`. `mcp list` tried to connect
+  to the one on this machine in a project where nothing had been approved (it is not in that
+  project's `mcp-approvals.json`), which suggests user-level servers need no approval; that server
+  did not connect, so no run called it.
+- The CLI also writes a transcript of every run under
+  `~/.cursor/projects/<project slug>/agent-transcripts/`, again outside `CURSOR_CONFIG_DIR`.
 
 **Sessions and failures**
 
