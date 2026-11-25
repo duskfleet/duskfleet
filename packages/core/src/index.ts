@@ -39,11 +39,13 @@ export {
   linkToolGaps,
   linkToolWarnings,
   listProjectAgents,
+  MAX_TIMEOUT_MINUTES,
   type ProjectAgentInfo,
   projectAgentDefinitionHash,
   renderAgentMarkdown,
   sandboxAllowedDomainsSchema,
   skillsSchema,
+  timeoutMinutesSchema,
   writeAgentFile,
 } from "./config/agent-files.js";
 export {

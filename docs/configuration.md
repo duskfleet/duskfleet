@@ -71,7 +71,7 @@ claude:
   strict_mcp_config: true       # child sessions ignore user-level MCP servers (faster, no hangs)
   setting_sources: null         # or [project, local] to skip ~/.claude/settings.json (user hooks) in runs
   allow_bypass_permissions: false
-  default_timeout_minutes: 30
+  default_timeout_minutes: 30   # at most 35791 (about 24.8 days), like an agent's timeout_minutes
   default_max_budget_usd: 5
   env_passthrough: []           # variables every run (and command gate) gets beyond the default allow-list, e.g. [GH_TOKEN]
   max_event_bytes: 65536        # cap of one stored run event; longer strings are cut with a marker (min 1024)
