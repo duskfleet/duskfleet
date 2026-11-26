@@ -53,6 +53,18 @@ An agent on the Codex harness is started the same way: `shell: false`, the promp
 - A command the sandbox blocked is recorded as a failed command; the stream does not mark the sandbox as the cause, so it is not counted as a denial or a sandbox violation.
 - No dollar budget is enforced by the CLI: `max_budget_usd` is refused, every run is `unpriced`, and monthly budgets count each run as its cap.
 
+## Cursor agents (`harness: cursor`)
+
+An agent on the Cursor harness is started the same way: `shell: false`, the prompt on stdin, the same environment allow-list (`CURSOR_API_KEY` only through an `env_passthrough`; `CURSOR_BIN` never), plus `CURSOR_CONFIG_DIR` pointing at the agent's own configuration directory under the data directory. What the mapping does and does not guarantee ([`CursorExecutor`](../packages/core/src/execution/cursor.ts), [Cursor agents](agents.md#cursor-agents)):
+
+- The rules are Cursor's own, written verbatim into `<data>/cursor/<agent id>/cli-config.json` before every run (`allowed_tools` = `permissions.allow`, `disallowed_tools` = `permissions.deny`); nothing is translated from Claude rules. A shell command no rule allows is rejected without a prompt. `dontAsk` adds `Write(**)` to the deny list; under `acceptEdits` the edit tool writes inside the project with no rule. Duskfleet never writes a file in the project.
+- **A `Shell(<command>)` rule does not confine the command's paths or network.** In the fixtures, a `curl` and a `touch` allowed by a rule reached the network and wrote outside the project, with `--sandbox enabled` as well (so `sandbox: true` is refused for this harness). Read-only is `dontAsk` plus no shell rule for a command that writes; allowing `Shell(git)` allows `git push`.
+- **No MCP tool can be called**: every run denies `Mcp(*:*)` (deny wins over allow) and `Mcp(...)` entries are refused. Not guaranteed: a server of the user's own `~/.cursor/mcp.json` may still be started by the CLI (its tools cannot be called). `--approve-mcps` is never passed: it writes a lasting approval into the user's home.
+- Never passed: `--force` / `--yolo` (skip every approval).
+- **Outside Duskfleet's directories:** the CLI writes a transcript of every run under `~/.cursor/projects/<project slug>/agent-transcripts/`, and its own login block (naming the account) into the agent's `cli-config.json`. The project's own `AGENTS.md`, `CLAUDE.md` and `.cursor/rules` apply to the run.
+- The agent body goes on stdin ahead of the task (not in argv), as user-turn text: a prompt in the task can argue with it more easily than with a system prompt.
+- No dollar budget is enforced by the CLI: `max_budget_usd` is refused, every run is `unpriced`, and monthly budgets count each run as its cap.
+
 ## Opt-in sandbox (`sandbox: true`)
 
 The allow-list checks a command's name, not what it does: an allowed `Bash(node:*)` or `Bash(npm test:*)` runs arbitrary code with your privileges. An agent with `sandbox: true` runs its Bash commands inside Claude Code's native sandbox (Seatbelt on macOS, bubblewrap on Linux). Duskfleet passes `--settings '{"sandbox":{"enabled":true,"allowUnsandboxedCommands":false,"network":{"allowedDomains":[...]}}}'`; an agent without the switch gets no `--settings` at all, today's argv. Off by default. ([`sandboxSettings()`](../packages/core/src/execution/sandbox.ts), [`buildArgv()`](../packages/core/src/execution/claude-code.ts))

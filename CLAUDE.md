@@ -227,7 +227,7 @@ npm workspaces, one `config/` and one SQLite database shared by three deliverabl
   and marks the open ones `interrupted` when the run ends. Per-message `output_tokens` of nested
   lines undercount; use `totalTokens`. Only main-session lines set the run's model and last text.
 - **Harnesses: one run path, one adapter per agent CLI** (`execution/harness.ts`, issue #445,
-  docs/harnesses.md): `harness:` in agent frontmatter (default `claude`; `copilot` since #446, `codex` since #50),
+  docs/harnesses.md): `harness:` in agent frontmatter (default `claude`; `copilot` since #446, `codex` since #50, `cursor` since #467),
   `runs.harness` (migration 31). `RunManager` picks the executor from the `HarnessRegistry` built in
   `bootstrap.ts`; `assertAgentFitsHarness` refuses (create / update and `startRun`, field named) any
   field the adapter's `capabilities` cannot honour, never drops or approximates it. CLI-specific
@@ -246,6 +246,14 @@ npm workspaces, one `config/` and one SQLite database shared by three deliverabl
   has no `-s`; never the resume form without it); an unknown thread is `sessionNotFound`
   (`isCodexSessionNotFound`). Fixtures in `packages/mcp/test/fixtures/codex/`,
   `CODEX_BIN` → `fake-codex.js` in `test/helpers.js`, `childEnv` drops `CODEX_BIN`.
+  Cursor (`harness: cursor`, #467, `execution/cursor.ts`, parser `cursor-stream.ts`, rules
+  `cursor-rules.ts`): Cursor's own rules verbatim (`toolRule`; `Mcp(...)` refused) written into
+  `cli-config.json` of a per-agent `CURSOR_CONFIG_DIR` (`<data>/cursor/<agent id>/`, never in the
+  project; stable because the CLI keeps its sessions there), `Write(**)` denied under `dontAsk`,
+  `Mcp(*:*)` always denied; never `--force`, `--approve-mcps`, `--sandbox`. The body is prepended to
+  the task in marked blocks (`cursorPrompt`: no system prompt channel). An unknown `--resume` id is
+  not a CLI error, so the adapter checks `chats/*/<id>/` first and returns `sessionNotFound` without
+  spawning. `request.agentId` carries the agent. `CURSOR_BIN` → `fake-cursor.js`, `childEnv` drops it.
 - **Opt-in sandbox** (`sandbox: true`, `execution/sandbox.ts`, issue #447): the only `--settings`
   Duskfleet passes; agents without it keep today's argv. A host without the sandbox refuses the run
   in `startRun` (never unsandboxed). Only network blocks are detectable (`remedy.kind:

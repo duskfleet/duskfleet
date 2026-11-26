@@ -188,10 +188,11 @@ export function harnessField(registered: readonly string[] | null) {
   return harnessNameSchema
     .optional()
     .describe(
-      `Agent CLI that runs the agent: claude (default), copilot (GitHub Copilot CLI) or codex (Codex CLI)${here}. ` +
+      `Agent CLI that runs the agent: claude (default), copilot (GitHub Copilot CLI), codex (Codex CLI) or cursor (Cursor Agent CLI)${here}. ` +
         "The agent runs on its harness whatever MCP host asks. A field the harness cannot honour is refused by name, never dropped: " +
         "copilot takes Copilot's own tool rules in allowed_tools / disallowed_tools (not Claude rules) and has no dollar budget (no max_budget_usd); " +
-        "codex has no tool rules, only its sandbox from permission_mode (dontAsk = read-only, acceptEdits = workspace-write)",
+        "codex has no tool rules, only its sandbox from permission_mode (dontAsk = read-only, acceptEdits = workspace-write); " +
+        "cursor takes Cursor's own permission rules (Shell(<command>), Read(<glob>), Write(<glob>), WebFetch(<domain>); no Mcp(...): every MCP tool is denied), no dollar budget, no effort, and its system_prompt is sent as a marked block ahead of the task",
     );
 }
 

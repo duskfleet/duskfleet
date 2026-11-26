@@ -80,6 +80,8 @@ copilot:
   binary: null                  # GitHub Copilot CLI for harness: copilot agents; null = copilot on PATH, none = harness not registered
 codex:
   binary: null                  # Codex CLI for harness: codex agents; null = codex on PATH, none = harness not registered
+cursor:
+  binary: null                  # Cursor Agent CLI for harness: cursor agents; null = cursor-agent on PATH, none = harness not registered
 scheduler:
   enabled: true                 # kill switch, re-read every tick
   tick_seconds: 30
@@ -149,6 +151,7 @@ for it). `max_concurrent_runs` always stays the hard cap. See
 | `CLAUDE_BIN` | Path to the Claude Code binary (overrides `claude.binary`). Read by Duskfleet only: it is not passed on to agent runs. |
 | `COPILOT_BIN` | Path to the GitHub Copilot CLI binary (overrides `copilot.binary`; the tests point it at `fake-copilot.js`). Read by Duskfleet only: it is not passed on to agent runs. |
 | `CODEX_BIN` | Path to the Codex CLI binary (overrides `codex.binary`; the tests point it at `fake-codex.js`). Read by Duskfleet only: it is not passed on to agent runs. |
+| `CURSOR_BIN` | Path to the Cursor Agent CLI binary (overrides `cursor.binary`; the tests point it at `fake-cursor.js`). Read by Duskfleet only: it is not passed on to agent runs. |
 | `DUSKFLEET_LOG_LEVEL` | `debug` \| `info` \| `warn` \| `error`, on stderr. Default: `warn` for one-shot CLI commands (`--verbose` = `info`), `info` for `serve` and the MCP server. When set, it wins over both. |
 
 ### What reaches a run

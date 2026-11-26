@@ -763,14 +763,14 @@ test("agents create --harness refuses a flag the harness cannot honour by name, 
       assert.notEqual(res.status, 0, flags.join(" "));
       assert.match(res.stderr, message, flags.join(" "));
     }
-    const unknown = cli(configDir, ["agents", "create", "x", "--harness", "cursor", "--", "Hi."], env);
+    const unknown = cli(configDir, ["agents", "create", "x", "--harness", "gemini", "--", "Hi."], env);
     assert.equal(unknown.status, 2);
-    assert.match(unknown.stderr, /--harness must be one of claude, copilot, codex, got "cursor"/);
+    assert.match(unknown.stderr, /--harness must be one of claude, copilot, codex, cursor, got "gemini"/);
     // Object prototype keys are not harnesses either (#490).
     for (const name of ["toString", "constructor", "__proto__"]) {
       const res = cli(configDir, ["agents", "create", "x", "--harness", name, "--", "Hi."], env);
       assert.equal(res.status, 2, name);
-      assert.match(res.stderr, new RegExp(`--harness must be one of claude, copilot, codex, got "${name}"`));
+      assert.match(res.stderr, new RegExp(`--harness must be one of claude, copilot, codex, cursor, got "${name}"`));
     }
     assert.equal(existsSync(agentsDir) ? readdirSync(agentsDir).length : 0, 0, "no file left behind");
   } finally {

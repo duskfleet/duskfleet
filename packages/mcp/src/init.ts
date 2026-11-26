@@ -56,6 +56,7 @@ function existingSettings(location: ConfigLocation): CliSettings {
       claudeBinary: config.claude.binary,
       copilotBinary: config.copilot?.binary ?? null,
       codexBinary: config.codex?.binary ?? null,
+      cursorBinary: config.cursor?.binary ?? null,
       envPassthrough: config.claude.envPassthrough,
     };
   } catch {

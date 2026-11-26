@@ -2,7 +2,8 @@
 
 A *harness* is an agent CLI that Duskfleet can spawn unattended. Claude Code (`claude`, the
 default), GitHub Copilot CLI (`copilot`, [#446](https://github.com/duskfleet/duskfleet/issues/446))
-and Codex CLI (`codex`, [#50](https://github.com/duskfleet/duskfleet/issues/50)) ship.
+Codex CLI (`codex`, [#50](https://github.com/duskfleet/duskfleet/issues/50)) and Cursor Agent CLI
+(`cursor`, [#467](https://github.com/duskfleet/duskfleet/issues/467), [below](#the-cursor-adapter)) ship.
 
 ## The idea in one paragraph
 
@@ -278,6 +279,61 @@ MCP server that loaded anyway (any `session.mcp_servers_loaded` entry not `disab
 as failed, until `mcpInherit` exists), and an unknown session on `--resume` (stderr `No session,
 task, or name matched`, `sessionNotFound`). A rate limit has no fixture yet, so it is not
 classified as `provider_quota`.
+
+## The Cursor adapter
+
+The Cursor adapter (`core/src/execution/cursor.ts`, parser `cursor-stream.ts`, rules
+`cursor-rules.ts`) is registered only when its binary resolves: `CURSOR_BIN`, then
+`cursor.binary` in `duskfleet.yaml`, then `cursor-agent` on PATH; `doctor` lists
+`cursor not installed` otherwise. Its parser follows real runs of Cursor Agent CLI 2026.11.19 and
+2026.11.22, kept as fixtures in `packages/mcp/test/fixtures/cursor/` (their README lists what each
+run shows) and replayed by `fake-cursor.js`.
+
+| | cursor |
+|---|---|
+| Unattended command | `cursor-agent -p --output-format stream-json --trust`, prompt on stdin; `--model`, `--resume <id>`, `--add-dir <dir>` |
+| End of run | a `result` line (`is_error: true` = failed); none = failed (a kill, an unknown model, an untrusted folder); 30 min without output = timed out (backstop) |
+| `toolAllowList`, `toolRule` | yes, Cursor's own rules written verbatim into the run's `cli-config.json`: `Shell(<command>)`, `Read(<glob>)`, `Write(<glob>)`, `WebFetch(<domain>)`. Claude rules and `Mcp(...)` are refused by name |
+| `permissionModes` | `dontAsk` (adds a `Write(**)` deny: the edit tool cannot write) and `acceptEdits` (the edit tool writes in the project with no rule) |
+| `resumeSession` | yes (`--resume <id>`, after a check that the session exists, see below) |
+| `hardBudgetUsd`, `reportsCostUsd` | no: the stream reports tokens only, every run is `unpriced` |
+| `subagents` | yes: one row per `taskToolCall` (type, prompt, final text, duration); the subagent's own steps are not in the stream |
+| `mcpInherit` | no: every run denies `Mcp(*:*)` |
+| `projectAgents` | no: `.cursor/agents/<name>.md` agents only run as subagents called from the prompt, no option starts the session as one |
+| `addDirs` | yes (`--add-dir`) |
+| `skills`, `effort`, `sandbox` | no (`--sandbox enabled` protected nothing observable in the fixtures) |
+| System prompt | none in the CLI: the agent body is prepended to the task (below) |
+| Session id | chosen by Cursor (`system/init`'s `session_id`) |
+| Auth | the user's stored Cursor login (`HOME` is enough), or `CURSOR_API_KEY` through `env_passthrough` |
+
+What it does and does not do:
+
+- **Permissions live in a file, one directory per agent.** Cursor takes no permission flags: its
+  rules are the `permissions` lists of `cli-config.json`. The adapter keeps one configuration
+  directory per agent, `<data>/cursor/<agent id>/`, passed as `CURSOR_CONFIG_DIR`, and rewrites
+  `permissions` there before every run (the CLI's own keys, such as its login block, are kept).
+  The directory is never in the project, and it is stable because the CLI keeps its sessions in
+  it: a session resumed from another directory starts empty, with no error.
+- **Deny by default.** Without a rule, a shell command is rejected without a prompt
+  (`result.rejected`), a write under `dontAsk` is `writePermissionDenied`, an MCP call is
+  `permissionDenied`. Each one is a denial of the run (needs review), with the tool and the
+  command, path or MCP tool named. `--force` / `--yolo` are never passed.
+- **No MCP.** `Mcp(*:*)` is denied in every run and `--approve-mcps` is never passed (it writes a
+  lasting approval into the user's home). `inherit_mcp` is refused.
+- **The body is user-turn text.** The CLI has no system prompt option, and neither an `AGENTS.md`
+  under `--add-dir` nor a plugin rule was applied. So an own agent's body goes ahead of the task,
+  each in its own marked block (`<duskfleet-agent-instructions>`, then `<duskfleet-task>`), so the
+  run log shows which is which. This is weaker than a system prompt: the project's own
+  `AGENTS.md`, `CLAUDE.md` and `.cursor/rules` still apply next to it. An empty body sends the task
+  alone. The body is sent again on every resume, as the other harnesses pass their instructions
+  again.
+- **Resume is checked first.** An unknown `--resume` id is not an error for the CLI (it starts a
+  fresh session under that id). The adapter looks for `<config dir>/chats/*/<session id>/` before
+  spawning; without it nothing is spawned and the result says `sessionNotFound`, so a continued
+  run starts fresh with a note, as for the other harnesses (a `resume_once` retry of it fails).
+- **Final text and model.** `result.result` joins every assistant message with no separator, so
+  the final text is the last `assistant` line. The run's model is the one asked for, else the
+  display name `init` reports (`Auto`).
 
 ## What is *not* a harness
 

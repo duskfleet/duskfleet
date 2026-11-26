@@ -34,7 +34,7 @@ export const SERVER_INSTRUCTIONS =
   "create_agent / update_agent manage agent definitions: an agent is either kind 'own' (new persona written in Duskfleet) " +
   "or kind 'link' (project_agent: reuses an agent the project defines for the agent's harness, see list_project_agents) — always choose explicitly. " +
   "create_schedule / list_schedules manage cron schedules. set_budget / list_budgets manage monthly budgets (global, agent, project). " +
-  "An agent runs on the harness its file names (claude, copilot or codex), whatever MCP host is asking. " +
+  "An agent runs on the harness its file names (claude, copilot, codex or cursor), whatever MCP host is asking. " +
   `Each harness has its own folder of project agents (${projectAgentGuidance(SHIPPED_HARNESSES, builtinHarnesses)}): ` +
   "only that folder is ever the place for an agent of that harness, and a harness without links takes kind 'own' only (the persona goes in system_prompt). " +
   "Settle the agent's harness before choosing link (ask when the project does not make it clear); Duskfleet never writes agent files into a project.";

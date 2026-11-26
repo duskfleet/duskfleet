@@ -141,7 +141,7 @@ max_budget_usd: 5
 # wrap_up_reserve_usd: 0.5     # part of max_budget_usd kept for the wrap-up pass; default 10%, min $0.50, 0 = off
 # on_failure: resume_once      # a schedule's next tick resumes a budget-exhausted / timed-out run, once (default none)
 # resume_budget_usd: 3         # budget of that resumed run (default max_budget_usd)
-# harness: claude              # the agent CLI that runs it: claude (default), copilot or codex (see "Harness")
+# harness: claude              # the agent CLI that runs it: claude (default), copilot, codex or cursor (see "Harness")
 # codex_network: true          # harness codex + acceptEdits only: network on, every host, your credentials (see "Codex agents")
 ---
 You are running unattended. Finish the task end to end and summarise what you changed.
@@ -154,7 +154,8 @@ An agent without `model` uses the Claude Code default, which can be far more exp
 
 `harness:` names the agent CLI that runs the agent. Leave it out: `claude` (Claude Code) is the
 default. `copilot` runs it with GitHub Copilot CLI (see [Copilot agents](#copilot-agents)), `codex`
-with Codex CLI (see [Codex agents](#codex-agents)). Each
+with Codex CLI (see [Codex agents](#codex-agents)), `cursor` with Cursor Agent CLI (see
+[Cursor agents](#cursor-agents)). Each
 CLI is one adapter behind the same run path; see [Harnesses](harnesses.md).
 
 Each harness declares what it can honour (its *capabilities*). An agent that sets a field its
@@ -327,6 +328,44 @@ Read the failing test and explain why it fails. Change nothing.
   `developer_instructions` on a resume has not been verified.
 - A command the sandbox blocked shows as a failed command in the run, not as a denial: the stream
   does not say the sandbox was the cause.
+
+### Cursor agents
+
+`harness: cursor` runs the agent with Cursor Agent CLI (`cursor-agent -p`), under the user's stored
+Cursor login (or `CURSOR_API_KEY`, through `env_passthrough`). It is available when Duskfleet finds
+the binary (`cursor.binary` in `duskfleet.yaml`, else `cursor-agent` on PATH; `doctor` says
+`cursor not installed` otherwise). Only `own` agents: Cursor's project agents
+(`.cursor/agents/<name>.md`) run only as subagents, never as the session.
+
+```markdown
+---
+description: Explains the failing test
+harness: cursor
+permission_mode: dontAsk
+allowed_tools: ["Shell(git)", "Read(**)"]
+timeout_minutes: 15
+---
+Read the failing test and explain why it fails. Change nothing.
+```
+
+- **Cursor's own rules.** `allowed_tools` / `disallowed_tools` take Cursor permission rules,
+  written verbatim into the agent's `cli-config.json`: `Shell(<command>)`, `Read(<glob>)`,
+  `Write(<glob>)`, `WebFetch(<domain>)`. Claude rules (`Bash(...)`, `Edit`, `mcp__*`) and
+  `Mcp(...)` are refused by name. A shell command no rule allows is rejected (a denial: the run
+  needs review). A `Shell(git)` rule allows every `git` subcommand, `git push` included.
+- **`dontAsk`** denies `Write(**)`: the edit tool cannot write. **`acceptEdits`** (the default) lets
+  it edit the project with no rule. Every other mode is refused.
+- **No MCP**: every MCP tool is denied, `inherit_mcp` is refused.
+- **The body is sent ahead of the task**, in a marked block (Cursor has no system prompt option),
+  on every run and resume. The project's own `AGENTS.md`, `CLAUDE.md` and `.cursor/rules` apply
+  too.
+- Taken: `model` (Cursor's ids, `auto` by default), `add_dirs`, `env_passthrough`,
+  `timeout_minutes`, `on_failure: resume_once`, the concurrency and daily-run caps. Refused:
+  `max_budget_usd` and the other dollar fields (every run is `unpriced`), `effort`, `skills`,
+  `sandbox`, `inherit_mcp`, `project_agent`.
+- **Sessions resume** in the same Cursor session: the CLI keeps them in the agent's configuration
+  directory (`<data>/cursor/<agent id>/`). A session that is not there makes a continued run start
+  a fresh session, with a note. Subagents the model starts (`taskToolCall`) are rows of the run.
 
 ## Sandbox
 

@@ -20,6 +20,11 @@ export interface ExecutionRequest {
    */
   resumeSessionId?: string;
   permissionMode: PermissionMode;
+  /**
+   * The agent that runs. Cursor keeps one configuration directory (sessions, permissions) per
+   * agent; the other adapters ignore it.
+   */
+  agentId?: string;
   model?: string;
   allowedTools?: string[];
   disallowedTools?: string[];

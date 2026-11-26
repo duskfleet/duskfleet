@@ -131,6 +131,11 @@ const globalSchema = z.object({
       binary: z.string().nullable().default(null),
     })
     .prefault({}),
+  cursor: z
+    .object({
+      binary: z.string().nullable().default(null),
+    })
+    .prefault({}),
   scheduler: z
     .object({
       enabled: z.boolean().default(true),
@@ -302,6 +307,9 @@ export function loadConfig(configDir: string): DuskFleetConfig {
     },
     codex: {
       binary: g.codex.binary ? expandHome(g.codex.binary) : null,
+    },
+    cursor: {
+      binary: g.cursor.binary ? expandHome(g.cursor.binary) : null,
     },
     scheduler: {
       enabled: g.scheduler.enabled,

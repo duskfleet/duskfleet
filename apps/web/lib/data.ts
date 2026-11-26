@@ -52,6 +52,7 @@ import {
   resolveCodexBinary,
   resolveConfigDir,
   resolveCopilotBinary,
+  resolveCursorBinary,
   ScheduleRepository,
   SHIPPED_HARNESSES,
   scheduleIdleStats,
@@ -221,6 +222,8 @@ export function hostHarnesses(cfg: DuskFleetConfig = config()): HostHarnesses {
       host.set(name, resolveCopilotBinary(cfg.copilot?.binary ?? null) ? null : "GitHub Copilot CLI not found");
     else if (name === "codex")
       host.set(name, resolveCodexBinary(cfg.codex?.binary ?? null) ? null : "Codex CLI not found");
+    else if (name === "cursor")
+      host.set(name, resolveCursorBinary(cfg.cursor?.binary ?? null) ? null : "Cursor Agent CLI not found");
     else host.set(name, `${name} CLI not found`);
   }
   return host;

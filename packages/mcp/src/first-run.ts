@@ -15,6 +15,7 @@ import {
   type AgentDefinition,
   CODEX_HARNESS,
   COPILOT_HARNESS,
+  CURSOR_HARNESS,
   createAgentFromFields,
   DEFAULT_HARNESS,
   type DuskFleetConfig,
@@ -47,6 +48,9 @@ export function firstRunCostNote(harness: string): string {
   }
   if (harness === CODEX_HARNESS) {
     return `It creates a read-only "${FIRST_RUN_AGENT_ID}" agent on Codex CLI (read-only sandbox, its default model) and counts against your Codex subscription's usage; no dollar cost is reported.`;
+  }
+  if (harness === CURSOR_HARNESS) {
+    return `It creates a read-only "${FIRST_RUN_AGENT_ID}" agent on Cursor Agent CLI (writes, shell commands and MCP denied, its default model) and counts against your Cursor plan's usage; no dollar cost is reported.`;
   }
   return FIRST_RUN_COST_NOTE;
 }
@@ -194,6 +198,10 @@ export function firstRunAgentProblems(
     const missing = COPILOT_READ_ONLY.disallowed.filter((t) => !(agent.disallowedTools ?? []).includes(t));
     if (missing.length > 0) problems.push(`disallowed_tools lacks ${missing.join(", ")}`);
     const writers = (agent.allowedTools ?? []).filter((t) => !/^read(\(|$)/.test(t));
+    if (writers.length > 0) problems.push(`allowed_tools contains ${writers.join(", ")}`);
+  } else if (runsOn === CURSOR_HARNESS) {
+    // dontAsk denies Write(**) and no shell rule means every command is rejected: allow reads only.
+    const writers = (agent.allowedTools ?? []).filter((t) => !/^Read\(/.test(t));
     if (writers.length > 0) problems.push(`allowed_tools contains ${writers.join(", ")}`);
   }
   // Codex: dontAsk is its read-only sandbox (checked above); it takes no tool rules.
@@ -351,6 +359,7 @@ export async function runFirstRun(app: App, options: FirstRunOptions, prompter: 
       claudeBinary: config.claude.binary,
       copilotBinary: config.copilot?.binary ?? null,
       codexBinary: config.codex?.binary ?? null,
+      cursorBinary: config.cursor?.binary ?? null,
       envPassthrough: config.claude.envPassthrough,
     });
     usable = clis.filter((c) => c.usable).map((c) => c.harness);
