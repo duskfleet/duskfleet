@@ -279,6 +279,14 @@ export function createSchedule(
   return repo.insert({ ...input, timeZone, nextRunAt });
 }
 
+/** A patch whose only set field is `enabled: false` (undefined keys count as omitted). */
+function isPauseOnly(patch: SchedulePatch): boolean {
+  const keys = Object.entries(patch)
+    .filter(([, value]) => value !== undefined)
+    .map(([key]) => key);
+  return keys.length === 1 && keys[0] === "enabled" && patch.enabled === false;
+}
+
 /**
  * Merge a patch into an existing schedule. Resuming (`enabled: true`) recomputes next_run_at from
  * `now` and clears an auto-pause reason (auto_paused_at stays: older runs do not count again).
@@ -314,9 +322,15 @@ export function updateSchedule(
     catchUpPolicy: patch.catchUpPolicy ?? existing.catchUpPolicy,
     triggerKind: patch.triggerKind ?? existing.triggerKind,
   };
-  // One schedule per agent is checked only when the agent changes: pausing or editing one of the
-  // duplicates an older database already holds must keep working until the owner deletes one.
-  validateScheduleInput(config, merged, merged.agentId !== existing.agentId ? repo : undefined, id);
+  // Pausing always works: a patch that only sets enabled: false changes no field the validation
+  // checks, and the stored row may name an agent that was deleted, no longer loads or was bound to
+  // another project since (#515). Refusing it would leave the schedule firing `error` every tick.
+  // Resuming and every other edit are validated in full.
+  if (!isPauseOnly(patch)) {
+    // One schedule per agent is checked only when the agent changes: pausing or editing one of the
+    // duplicates an older database already holds must keep working until the owner deletes one.
+    validateScheduleInput(config, merged, merged.agentId !== existing.agentId ? repo : undefined, id);
+  }
   assertCommandGateAllowed(config, patch.gate, configReloadError);
   if (merged.name !== existing.name && repo.findByName(merged.name))
     throw new Error(`a schedule named "${merged.name}" already exists`);
