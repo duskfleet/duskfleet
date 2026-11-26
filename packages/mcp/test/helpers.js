@@ -20,6 +20,10 @@ process.env.COPILOT_BIN = fakeCopilot;
 const fakeCodex = fileURLToPath(new URL("./fake-codex.js", import.meta.url));
 chmodSync(fakeCodex, 0o755);
 process.env.CODEX_BIN = fakeCodex;
+// Same for CURSOR_BIN: fake-cursor.js, never a real `cursor-agent`.
+const fakeCursor = fileURLToPath(new URL("./fake-cursor.js", import.meta.url));
+chmodSync(fakeCursor, 0o755);
+process.env.CURSOR_BIN = fakeCursor;
 
 /** Environment for spawned CLI / MCP processes: ours without CLAUDE_BIN / DUSKFLEET_DATA, plus `extra`. */
 export function testEnv(extra = {}) {

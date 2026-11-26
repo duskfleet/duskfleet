@@ -114,6 +114,7 @@ export {
   CLAUDE_PROJECT_AGENTS,
   CODEX_PROJECT_AGENTS,
   COPILOT_PROJECT_AGENTS,
+  CURSOR_PROJECT_AGENTS,
   type ProjectAgentFolder,
   projectAgentFile,
 } from "./config/project-agent-folder.js";
@@ -189,6 +190,24 @@ export {
 } from "./execution/copilot-jsonl.js";
 export { COPILOT_RULE_SHAPES, copilotRuleRefusal } from "./execution/copilot-rules.js";
 export {
+  CURSOR_MCP_DENY,
+  CURSOR_WRITE_DENY,
+  CursorExecutor,
+  type CursorExecutorOptions,
+  cursorPermissions,
+  cursorPrompt,
+  cursorSessionExists,
+  resolveCursorBinary,
+  writeCursorConfig,
+} from "./execution/cursor.js";
+export { CURSOR_RULE_SHAPES, cursorRuleRefusal } from "./execution/cursor-rules.js";
+export {
+  type CursorStreamState,
+  createCursorState,
+  cursorUsage,
+  ingestCursorLine,
+} from "./execution/cursor-stream.js";
+export {
   assertAgentFitsHarness,
   builtinHarnesses,
   CLAUDE_CAPABILITIES,
@@ -197,6 +216,8 @@ export {
   CODEX_NETWORK_GRANT,
   COPILOT_CAPABILITIES,
   COPILOT_HARNESS,
+  CURSOR_CAPABILITIES,
+  CURSOR_HARNESS,
   effortRefusal,
   HARNESS_CAPABILITY_KEYS,
   type HarnessCapabilities,

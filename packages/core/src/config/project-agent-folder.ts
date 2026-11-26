@@ -38,6 +38,16 @@ export const CODEX_PROJECT_AGENTS: ProjectAgentFolder = Object.freeze({
   format: "toml",
 });
 
+/**
+ * Cursor Agent CLI: `.cursor/agents/<name>.md` (fixture `subagent`, #467). The CLI runs them only as
+ * subagents called from the prompt, never as the session, so a link cannot run one.
+ */
+export const CURSOR_PROJECT_AGENTS: ProjectAgentFolder = Object.freeze({
+  dir: ".cursor/agents",
+  file: "<name>.md",
+  format: "markdown",
+});
+
 /** `.claude/agents/<name>.md`, with `<name>` replaced when given. */
 export function projectAgentFile(folder: ProjectAgentFolder, name?: string): string {
   const file =

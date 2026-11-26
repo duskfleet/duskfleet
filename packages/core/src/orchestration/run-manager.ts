@@ -625,6 +625,7 @@ export class RunManager {
       prompt,
       sessionId,
       permissionMode: agent.permissionMode,
+      agentId: agent.id,
       timeoutMs: timeoutMinutes * 60_000,
       logPath,
       maxLogBytes: this.config.claude.maxLogBytes,

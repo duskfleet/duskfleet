@@ -9,7 +9,7 @@
  *   - Claude Code: `claude auth status --json` (verified 2026-10-21).
  *   - Codex CLI: `codex login status` prints "Logged in using ChatGPT" (codex-cli 0.167.1). Any
  *     other output is not interpreted: the login is reported as not confirmed, never as logged out.
- *   - GitHub Copilot CLI: no verified command yet; the login is not checked.
+ *   - GitHub Copilot CLI and Cursor Agent CLI: no verified command yet; the login is not checked.
  * A CLI is usable when it is found and starts (`--version`); Claude Code also needs its login.
  */
 import { execFile } from "node:child_process";
@@ -18,11 +18,14 @@ import {
   COPILOT_HARNESS,
   CodexExecutor,
   CopilotExecutor,
+  CURSOR_HARNESS,
+  CursorExecutor,
   childEnv,
   DEFAULT_HARNESS,
   resolveClaudeBinary,
   resolveCodexBinary,
   resolveCopilotBinary,
+  resolveCursorBinary,
   SHIPPED_HARNESSES,
   spawnPlan,
 } from "@duskfleet/core";
@@ -32,6 +35,7 @@ export const HARNESS_LABELS: Readonly<Record<string, string>> = {
   [DEFAULT_HARNESS]: "Claude Code",
   [COPILOT_HARNESS]: "GitHub Copilot CLI",
   [CODEX_HARNESS]: "Codex CLI",
+  [CURSOR_HARNESS]: "Cursor Agent CLI",
 };
 
 export const harnessLabel = (name: string): string => HARNESS_LABELS[name] ?? name;
@@ -61,6 +65,8 @@ export interface CliSettings {
   claudeBinary: string | null;
   copilotBinary: string | null;
   codexBinary: string | null;
+  /** `cursor.binary`; absent = `cursor-agent` on PATH. */
+  cursorBinary?: string | null;
   /** `claude.env_passthrough`: the same environment runs get. */
   envPassthrough: string[];
 }
@@ -204,14 +210,39 @@ async function detectClaude(settings: CliSettings, env: NodeJS.ProcessEnv): Prom
   };
 }
 
+/** The binary lookup, the executor (for `--version`) and the override variable of a non-Claude harness. */
+function otherCli(
+  harness: string,
+  settings: CliSettings,
+): { binary: string | null; executor: (binary: string) => { version(): Promise<string> }; binVar: string } {
+  const envPassthrough = settings.envPassthrough;
+  if (harness === CODEX_HARNESS)
+    return {
+      binary: resolveCodexBinary(settings.codexBinary),
+      executor: (binary) => new CodexExecutor({ binary, envPassthrough }),
+      binVar: "CODEX_BIN",
+    };
+  if (harness === CURSOR_HARNESS)
+    return {
+      binary: resolveCursorBinary(settings.cursorBinary ?? null),
+      // `--version` only: no run, so no configuration directory is ever written.
+      executor: (binary) => new CursorExecutor({ binary, configRoot: "", envPassthrough }),
+      binVar: "CURSOR_BIN",
+    };
+  return {
+    binary: resolveCopilotBinary(settings.copilotBinary),
+    executor: (binary) => new CopilotExecutor({ binary, envPassthrough }),
+    binVar: "COPILOT_BIN",
+  };
+}
+
 async function detectOther(harness: string, settings: CliSettings, env: NodeJS.ProcessEnv): Promise<AgentCli> {
   const label = harnessLabel(harness);
   const isCodex = harness === CODEX_HARNESS;
-  const binary = isCodex ? resolveCodexBinary(settings.codexBinary) : resolveCopilotBinary(settings.copilotBinary);
+  const cli = otherCli(harness, settings);
+  const binary = cli.binary;
   if (!binary) return notFound(harness);
-  const executor = isCodex
-    ? new CodexExecutor({ binary, envPassthrough: settings.envPassthrough })
-    : new CopilotExecutor({ binary, envPassthrough: settings.envPassthrough });
+  const executor = cli.executor(binary);
   let version: string;
   try {
     version = await executor.version();
@@ -224,7 +255,7 @@ async function detectOther(harness: string, settings: CliSettings, env: NodeJS.P
       login: null,
       usable: false,
       line: `${label}: ${binary} --version failed: ${message(err)}`,
-      fix: `${label} does not start: reinstall it or point ${isCodex ? "CODEX_BIN" : "COPILOT_BIN"} at a working binary, ${THEN}`,
+      fix: `${label} does not start: reinstall it or point ${cli.binVar} at a working binary, ${THEN}`,
     };
   }
   const login: CliLogin = isCodex

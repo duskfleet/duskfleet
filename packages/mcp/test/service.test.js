@@ -211,7 +211,17 @@ test("units export the other harnesses' binaries and put their directories on PA
     /^Environment="PATH=\/opt\/node\/bin:\/home\/me\/\.npm-global\/bin:\/home\/me\/\.nvm\/versions\/node\/v24\/bin:\/usr\/local\/bin/m,
   );
   // None registered: the unit is unchanged.
-  assert.doesNotMatch(renderService({ ...base, platform: "linux" }).content, /CODEX_BIN|COPILOT_BIN/);
+  assert.doesNotMatch(renderService({ ...base, platform: "linux" }).content, /CODEX_BIN|COPILOT_BIN|CURSOR_BIN/);
+});
+
+test("units export CURSOR_BIN and its directory on PATH (#467)", () => {
+  const t = { ...base, claudeBin: null, cursorBin: "/home/me/.local/bin/cursor-agent" };
+  const mac = renderService({ ...t, platform: "darwin" });
+  assert.match(mac.content, /<key>CURSOR_BIN<\/key><string>\/home\/me\/\.local\/bin\/cursor-agent<\/string>/);
+  assert.match(mac.content, /<key>PATH<\/key><string>\/opt\/node\/bin:\/home\/me\/\.local\/bin:/);
+  const lin = renderService({ ...t, platform: "linux" });
+  assert.match(lin.content, /^Environment="CURSOR_BIN=\/home\/me\/\.local\/bin\/cursor-agent"$/m);
+  assert.match(lin.content, /^Environment="PATH=\/opt\/node\/bin:\/home\/me\/\.local\/bin:/m);
 });
 
 test("Task Scheduler XML: logon trigger, no time limit, restart on failure, cmd wrapper appends the log", () => {

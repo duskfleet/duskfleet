@@ -49,11 +49,13 @@ export interface ServiceTarget {
   claudeBin: string | null;
   /**
    * Resolved binaries of the other registered harnesses (#490), exported as COPILOT_BIN / CODEX_BIN
-   * with their directories on PATH: a CLI under an npm-global or nvm directory is not on the
-   * unit's PATH, and without Claude Code it is the only harness `serve` can start with.
+   * / CURSOR_BIN with their directories on PATH: a CLI under an npm-global, nvm or `~/.local/bin`
+   * directory is not on the unit's PATH, and without Claude Code it is the only harness `serve` can
+   * start with.
    */
   copilotBin?: string | null;
   codexBin?: string | null;
+  cursorBin?: string | null;
   home?: string;
   /** Windows only: account the task runs as; defaults to the current user. */
   user?: string;
@@ -161,6 +163,7 @@ function binEnv(t: ServiceTarget): Array<[string, string]> {
   if (t.claudeBin) env.push(["CLAUDE_BIN", t.claudeBin]);
   if (t.copilotBin) env.push(["COPILOT_BIN", t.copilotBin]);
   if (t.codexBin) env.push(["CODEX_BIN", t.codexBin]);
+  if (t.cursorBin) env.push(["CURSOR_BIN", t.cursorBin]);
   return env;
 }
 

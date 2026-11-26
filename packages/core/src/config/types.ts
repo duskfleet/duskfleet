@@ -185,6 +185,12 @@ export interface CodexConfig {
   binary: string | null;
 }
 
+/** `cursor:` in duskfleet.yaml: the Cursor Agent CLI harness (issue #467). */
+export interface CursorConfig {
+  /** Path of the `cursor-agent` binary; null = `cursor-agent` on PATH. Without one the harness is not registered. */
+  binary: string | null;
+}
+
 export interface SchedulerConfig {
   /** Kill switch: false stops every process from firing schedules (re-read every tick). */
   enabled: boolean;
@@ -242,6 +248,8 @@ export interface DuskFleetConfig {
   copilot?: CopilotConfig;
   /** Optional for configs built by hand (tests): absent = `codex` on PATH. */
   codex?: CodexConfig;
+  /** Optional for configs built by hand (tests): absent = `cursor-agent` on PATH. */
+  cursor?: CursorConfig;
   scheduler: SchedulerConfig;
   agents: Map<string, AgentDefinition>;
   projects: Map<string, ProjectDefinition>;

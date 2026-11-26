@@ -326,12 +326,12 @@ harness codex`), as for `create_agent`; see [Harnesses](harnesses.md).
 
 | Flag | Frontmatter field | Default when omitted |
 |---|---|---|
-| `--harness <name>` | `harness` | `claude`; or `copilot`, `codex` (written only when not `claude`) |
+| `--harness <name>` | `harness` | `claude`; or `copilot`, `codex`, `cursor` (written only when not `claude`) |
 | `--model <m>` | `model` | none: the CLI's default, which can be the most expensive model |
 | `--effort <level>` | `effort` | none: the CLI's default (`low`, `medium`, `high`, `xhigh` or `max`) |
-| `--budget <usd>` | `max_budget_usd` | `0.5` on Claude Code; none on Copilot and Codex (refused there: no dollar cap) |
-| `--permission-mode <mode>` | `permission_mode` | `dontAsk` (`bypassPermissions` is refused, as in `create_agent`); Codex: `acceptEdits`, its workspace-write sandbox (network off) |
-| `--allowed-tools <a,b>` | `allowed_tools` | Claude Code: `Read`, `Grep`, `Glob`, `Edit`, `Write` and `Bash(...)` for `npm test`, `npm run test`, `npx vitest`, `npx jest`, `pytest`, `python -m pytest`, `cargo test`, `go test`, `make test`. Copilot, in its own rules: `read`, `write`, `shell(npm test)`, `shell(npx vitest)`, `shell(npx jest)`, `shell(pytest)`, `shell(cargo test)`, `shell(go test)`, `shell(make test)` (no `npm run`: Copilot matches the first subcommand only, so it would allow every script). Codex: none (it takes no tool rules) |
+| `--budget <usd>` | `max_budget_usd` | `0.5` on Claude Code; none on Copilot, Codex and Cursor (refused there: no dollar cap) |
+| `--permission-mode <mode>` | `permission_mode` | `dontAsk` (`bypassPermissions` is refused, as in `create_agent`); Codex: `acceptEdits`, its workspace-write sandbox (network off); Cursor: `dontAsk`, so `Write(**)` is denied and the agent reads only |
+| `--allowed-tools <a,b>` | `allowed_tools` | Claude Code: `Read`, `Grep`, `Glob`, `Edit`, `Write` and `Bash(...)` for `npm test`, `npm run test`, `npx vitest`, `npx jest`, `pytest`, `python -m pytest`, `cargo test`, `go test`, `make test`. Copilot, in its own rules: `read`, `write`, `shell(npm test)`, `shell(npx vitest)`, `shell(npx jest)`, `shell(pytest)`, `shell(cargo test)`, `shell(go test)`, `shell(make test)` (no `npm run`: Copilot matches the first subcommand only, so it would allow every script). Codex: none (it takes no tool rules). Cursor: none (a shell command without a rule is rejected; only a bare command name such as `Shell(git)` was verified as a rule, so add your own) |
 | `--disallowed-tools <a,b>` | `disallowed_tools` | none |
 | `--timeout <minutes>` | `timeout_minutes` | `10` |
 | `--description <text>` | `description` | empty |

@@ -72,7 +72,7 @@ function onlyCodexEnv(root) {
   const home = path.join(root, "home");
   mkdirSync(home, { recursive: true });
   const missing = path.join(root, "no-such-binary");
-  return { CLAUDE_BIN: undefined, COPILOT_BIN: missing, PATH: bin, HOME: home };
+  return { CLAUDE_BIN: undefined, COPILOT_BIN: missing, CURSOR_BIN: missing, PATH: bin, HOME: home };
 }
 
 test("run --first end to end: registers the project, creates the agent, runs haiku, prints the summary, deletes on n", () => {
@@ -323,9 +323,9 @@ test("run --first with only Codex CLI found (#489): defaults to it", () => {
     });
     assert.equal(refused.status, 1);
     assert.match(refused.stderr, /GitHub Copilot CLI is not usable here \(GitHub Copilot CLI: not found/);
-    const unknown = cli(configDir, ["run", "--first", "--harness", "cursor", "--project", project]);
+    const unknown = cli(configDir, ["run", "--first", "--harness", "gemini", "--project", project]);
     assert.equal(unknown.status, 1);
-    assert.match(unknown.stderr, /--harness must be one of claude, copilot, codex, got "cursor"/);
+    assert.match(unknown.stderr, /--harness must be one of claude, copilot, codex, cursor, got "gemini"/);
     assert.equal(JSON.parse(cli(configDir, ["runs", "--json"]).stdout).length, 1, "nothing else run");
   } finally {
     rmSync(root, { recursive: true, force: true });
@@ -346,7 +346,7 @@ test("first run harness choice: Claude Code by default when usable, else the fir
 });
 
 test("the first-run agent of each harness passes that harness's checks", () => {
-  for (const harness of ["claude", "copilot", "codex"]) {
+  for (const harness of ["claude", "copilot", "codex", "cursor"]) {
     const fields = firstRunAgentFields(harness);
     assert.equal(harnessRefusal(fields, builtinHarnesses), null, harness);
   }

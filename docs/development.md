@@ -376,6 +376,14 @@ local run-data handling, and recommended configuration.
   Not specific to links, seen in `link-tools-declared`: Copilot ran a read-only shell command
   (`ls -la marker.txt ...`) with no allow rule, which `dontAsk` = "the rules only" does not
   describe; left to its own issue.
+- **Cursor Agent CLI flags** (`harness: cursor`, `core/src/execution/cursor.ts`): verified by hand
+  against `cursor-agent --help` and real runs of 2026.11.19-f005e9d and 2026.11.22-e9042b2
+  (fixtures in `packages/mcp/test/fixtures/cursor/`, their README lists the command of each).
+  Tests point `CURSOR_BIN` at `fake-cursor.js` (`test/helpers.js`); `childEnv()` never passes
+  `CURSOR_BIN` to a run. Used: `-p`, `--output-format stream-json`, `--trust` (an untrusted folder
+  exits 1), `--model <id>`, `--resume <session id>`, `--add-dir <dir>`, the prompt on stdin, and
+  `CURSOR_CONFIG_DIR=<dir>` (where `cli-config.json` and the sessions live). Never used: `--force`
+  / `--yolo`, `--approve-mcps`, `--sandbox`, `--mode`.
 - **Codex CLI flags** (`harness: codex`, `core/src/execution/codex.ts`): verified by hand against
   `codex exec --help` and real runs of codex-cli 0.167.1 (fixtures in
   `packages/mcp/test/fixtures/codex/`, their README lists the command of each). Tests point

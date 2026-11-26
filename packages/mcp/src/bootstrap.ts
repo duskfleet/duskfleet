@@ -3,11 +3,13 @@
  * database, build the executor and the RunManager.
  */
 
+import path from "node:path";
 import type { ConfigLocation, DuskFleetConfig, Executor, Run, SchedulerRole } from "@duskfleet/core";
 import {
   ClaudeCodeExecutor,
   CodexExecutor,
   CopilotExecutor,
+  CursorExecutor,
   HarnessRegistry,
   loadConfig,
   locateConfig,
@@ -18,6 +20,7 @@ import {
   RunRepository,
   resolveCodexBinary,
   resolveCopilotBinary,
+  resolveCursorBinary,
   ScheduleRepository,
   Scheduler,
 } from "@duskfleet/core";
@@ -103,6 +106,18 @@ export async function bootstrap(entryFileUrl: string, options: BootstrapOptions 
   if (codexBinary) {
     executors.push(new CodexExecutor({ binary: codexBinary, envPassthrough: config.claude.envPassthrough }));
     log.info("codex executor ready", { binary: codexBinary });
+  }
+  // Cursor (#467), same rule. Its per-agent configuration directories live under the data directory.
+  const cursorBinary = resolveCursorBinary(config.cursor?.binary ?? null);
+  if (cursorBinary) {
+    executors.push(
+      new CursorExecutor({
+        binary: cursorBinary,
+        configRoot: path.join(config.dataDir, "cursor"),
+        envPassthrough: config.claude.envPassthrough,
+      }),
+    );
+    log.info("cursor executor ready", { binary: cursorBinary });
   }
   // Claude Code follows the same rule since #489 (any one agent CLI is enough), as long as another
   // CLI is there: with none at all, the Claude Code lookup error stays the start-up error (unless

@@ -13,6 +13,7 @@ import {
   CLAUDE_PROJECT_AGENTS,
   CODEX_PROJECT_AGENTS,
   COPILOT_PROJECT_AGENTS,
+  CURSOR_PROJECT_AGENTS,
   type ProjectAgentFolder,
   projectAgentFile,
 } from "../config/project-agent-folder.js";
@@ -25,6 +26,7 @@ import {
   type ProjectDefinition,
 } from "../config/types.js";
 import { copilotRuleRefusal } from "./copilot-rules.js";
+import { cursorRuleRefusal } from "./cursor-rules.js";
 import type { Executor } from "./types.js";
 
 /** What an adapter can honour. `false` (or a mode left out) makes the agent fields behind it refused. */
@@ -174,6 +176,34 @@ export const CODEX_CAPABILITIES: HarnessCapabilities = Object.freeze({
   networkModes: ["acceptEdits"] as const,
 });
 
+/** Name of the Cursor Agent CLI harness (issue #467). */
+export const CURSOR_HARNESS = "cursor";
+
+/**
+ * Cursor Agent CLI (2026.11.19 / 2026.11.22, docs/harnesses.md): its own permission rules
+ * (`toolRule`), written into a per-agent `cli-config.json` (`dontAsk` adds a `Write(**)` deny,
+ * `acceptEdits` lets the project be edited), every MCP tool denied, resumable sessions, `--add-dir`,
+ * subagent rows from its task tool, no dollars (every run `unpriced`). Its project agents
+ * (`.cursor/agents/`) only run as subagents, so no link. No sandbox (`--sandbox enabled` protected
+ * nothing observable), no effort, no skills.
+ */
+export const CURSOR_CAPABILITIES: HarnessCapabilities = Object.freeze({
+  toolAllowList: true,
+  permissionModes: ["dontAsk", "acceptEdits"] as const,
+  resumeSession: true,
+  hardBudgetUsd: false,
+  reportsCostUsd: false,
+  subagents: true,
+  mcpInherit: false,
+  projectAgents: false,
+  projectAgentFolder: CURSOR_PROJECT_AGENTS,
+  addDirs: true,
+  skills: false,
+  effort: false,
+  sandbox: false,
+  toolRule: cursorRuleRefusal,
+});
+
 /**
  * What `codex_network: true` grants (issue #488), verified by hand on codex-cli 0.167.1
  * (docs/security.md "Codex agents and the network").
@@ -207,7 +237,7 @@ export function harnessGrantWarnings(
 }
 
 /** The harnesses Duskfleet ships an adapter for, in the order `doctor` lists them. */
-export const SHIPPED_HARNESSES: readonly string[] = [DEFAULT_HARNESS, COPILOT_HARNESS, CODEX_HARNESS];
+export const SHIPPED_HARNESSES: readonly string[] = [DEFAULT_HARNESS, COPILOT_HARNESS, CODEX_HARNESS, CURSOR_HARNESS];
 
 /** The capabilities of a harness by name; undefined = no executor registered under that name. */
 export type HarnessLookup = (name: string) => HarnessCapabilities | undefined;
@@ -220,7 +250,9 @@ export const builtinHarnesses: HarnessLookup = (name) =>
       ? COPILOT_CAPABILITIES
       : name === CODEX_HARNESS
         ? CODEX_CAPABILITIES
-        : undefined;
+        : name === CURSOR_HARNESS
+          ? CURSOR_CAPABILITIES
+          : undefined;
 
 /**
  * Why an effort override (`run_agent { effort }`, a schedule's `effort`, `gate.agent.effort`;

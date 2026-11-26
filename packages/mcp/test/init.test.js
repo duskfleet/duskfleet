@@ -72,6 +72,7 @@ function only(s, ...present) {
   }
   if (!present.includes("copilot")) s.env.COPILOT_BIN = missing;
   if (!present.includes("codex")) s.env.CODEX_BIN = missing;
+  if (!present.includes("cursor")) s.env.CURSOR_BIN = missing;
 }
 
 test("init with only Claude Code (#489): usable, the other two named as optional, exit 0", () => {
@@ -85,7 +86,7 @@ test("init with only Claude Code (#489): usable, the other two named as optional
     assert.match(init.stdout, /^ {6}Codex CLI: not found \(optional; harness: codex\)$/m);
     assert.match(
       init.stdout,
-      /Optional, not installed: GitHub Copilot CLI \(harness: copilot\), Codex CLI \(harness: codex\)\. One agent CLI is enough/,
+      /Optional, not installed: GitHub Copilot CLI \(harness: copilot\), Codex CLI \(harness: codex\), Cursor Agent CLI \(harness: cursor\)\. One agent CLI is enough/,
     );
     assert.doesNotMatch(init.stdout + init.stderr, /none usable|Until then/);
   } finally {
@@ -182,7 +183,7 @@ test("init with no agent CLI (#489): none usable, how to get one, exit 0 and the
     }
     assert.match(
       init.stdout,
-      /No agent CLI is installed: install one of Claude Code, GitHub Copilot CLI, Codex CLI \(any one is enough/,
+      /No agent CLI is installed: install one of Claude Code, GitHub Copilot CLI, Codex CLI, Cursor Agent CLI \(any one is enough/,
     );
     assert.match(
       init.stdout,
@@ -219,9 +220,9 @@ test("init with no agent CLI (#489): none usable, how to get one, exit 0 and the
 test("init --harness: an unknown name is a usage error (exit 2)", () => {
   const s = sandbox();
   try {
-    const bad = s.cli("init", "--yes", "--harness", "cursor");
+    const bad = s.cli("init", "--yes", "--harness", "gemini");
     assert.equal(bad.status, 2);
-    assert.match(bad.stderr, /--harness must be one of claude, copilot, codex, got "cursor"/);
+    assert.match(bad.stderr, /--harness must be one of claude, copilot, codex, cursor, got "gemini"/);
   } finally {
     rmSync(s.root, { recursive: true, force: true });
   }
@@ -255,8 +256,12 @@ test("init --yes from an empty directory: starter config, exit 0, doctor works, 
   try {
     const init = s.cli("init", "--yes");
     assert.equal(init.status, 0, init.stderr);
-    // All three CLIs found (fake-claude, and COPILOT_BIN / CODEX_BIN from helpers.js): three lines.
-    assert.match(init.stdout, /\[2\/5\] Agent CLIs: Claude Code, GitHub Copilot CLI, Codex CLI usable/);
+    // All four CLIs found (fake-claude, and COPILOT_BIN / CODEX_BIN / CURSOR_BIN from helpers.js): four lines.
+    assert.match(
+      init.stdout,
+      /\[2\/5\] Agent CLIs: Claude Code, GitHub Copilot CLI, Codex CLI, Cursor Agent CLI usable/,
+    );
+    assert.match(init.stdout, /^ {6}Cursor Agent CLI 2026\.11\.22-e9042b2 \(.+\): login not checked/m);
     assert.match(init.stdout, /^ {6}Claude Code 9\.9\.9 \(fake\) \(.+\): logged in \(claude\.ai\)$/m);
     assert.match(init.stdout, /^ {6}GitHub Copilot CLI 1\.0\.112\. \(.+\): login not checked/m);
     assert.match(init.stdout, /^ {6}Codex CLI codex-cli 0\.167\.1 \(.+\): logged in \(ChatGPT\)$/m);

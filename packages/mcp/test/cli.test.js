@@ -710,7 +710,7 @@ test("agents create refuses an existing id without --force, home paths, secrets 
   }
 });
 
-for (const harness of ["copilot", "codex"]) {
+for (const harness of ["copilot", "codex", "cursor"]) {
   test(`agents create --harness ${harness} (#489): defaults that harness honours, the agent loads and runs through the fake CLI`, () => {
     const { root, configDir, project } = makeFreshRoot();
     const env = { CLAUDE_BIN: fakeBinary };
@@ -729,6 +729,9 @@ for (const harness of ["copilot", "codex"]) {
         assert.equal(agent.permissionMode, "dontAsk");
         assert.ok(agent.allowedTools.includes("read") && agent.allowedTools.includes("shell(npm test)"));
         assert.ok(!agent.allowedTools.some((t) => t.startsWith("Bash(")), "Copilot's own rules, never Claude's");
+      } else if (harness === "cursor") {
+        assert.equal(agent.permissionMode, "dontAsk", "Write(**) denied: reads only");
+        assert.equal(agent.allowedTools, undefined, "no rule guessed, never Claude's");
       } else {
         assert.equal(agent.permissionMode, "acceptEdits", "the workspace-write sandbox");
         assert.equal(agent.allowedTools, undefined, "Codex takes no tool rules");
@@ -757,20 +760,21 @@ test("agents create --harness refuses a flag the harness cannot honour by name, 
         ["--harness", "copilot", "--allowed-tools", "Bash(npm test:*)"],
         /"Bash\(npm test:\*\)" is not a Copilot tool rule/,
       ],
+      [["--harness", "cursor", "--budget", "1"], /max_budget_usd is not supported by harness cursor/],
     ];
     for (const [flags, message] of cases) {
       const res = cli(configDir, ["agents", "create", "x", ...flags, "--", "Hi."], env);
       assert.notEqual(res.status, 0, flags.join(" "));
       assert.match(res.stderr, message, flags.join(" "));
     }
-    const unknown = cli(configDir, ["agents", "create", "x", "--harness", "cursor", "--", "Hi."], env);
+    const unknown = cli(configDir, ["agents", "create", "x", "--harness", "gemini", "--", "Hi."], env);
     assert.equal(unknown.status, 2);
-    assert.match(unknown.stderr, /--harness must be one of claude, copilot, codex, got "cursor"/);
+    assert.match(unknown.stderr, /--harness must be one of claude, copilot, codex, cursor, got "gemini"/);
     // Object prototype keys are not harnesses either (#490).
     for (const name of ["toString", "constructor", "__proto__"]) {
       const res = cli(configDir, ["agents", "create", "x", "--harness", name, "--", "Hi."], env);
       assert.equal(res.status, 2, name);
-      assert.match(res.stderr, new RegExp(`--harness must be one of claude, copilot, codex, got "${name}"`));
+      assert.match(res.stderr, new RegExp(`--harness must be one of claude, copilot, codex, cursor, got "${name}"`));
     }
     assert.equal(existsSync(agentsDir) ? readdirSync(agentsDir).length : 0, 0, "no file left behind");
   } finally {
