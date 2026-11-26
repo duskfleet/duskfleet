@@ -17,6 +17,7 @@ import {
   maxDailyRunsSchema,
   sandboxAllowedDomainsSchema,
   skillsSchema,
+  timeoutMinutesSchema,
 } from "./agent-files.js";
 import { dataDirFromEnv, type LocationContext, userConfigDir, userDataDir } from "./locations.js";
 import {
@@ -114,7 +115,7 @@ const globalSchema = z.object({
         .nullable()
         .default(null),
       allow_bypass_permissions: z.boolean().default(false),
-      default_timeout_minutes: z.number().positive().default(30),
+      default_timeout_minutes: timeoutMinutesSchema("claude.default_timeout_minutes").default(30),
       default_max_budget_usd: z.number().positive().default(5),
       env_passthrough: envPassthroughSchema.default([]),
       max_event_bytes: z.number().int().min(1024).default(DEFAULT_MAX_EVENT_BYTES),
@@ -176,7 +177,7 @@ const agentFrontmatterSchema = z
     allowed_tools: z.array(z.string()).optional(),
     disallowed_tools: z.array(z.string()).optional(),
     effort: z.enum(EFFORT_LEVELS).optional(),
-    timeout_minutes: z.number().positive().optional(),
+    timeout_minutes: timeoutMinutesSchema("timeout_minutes").optional(),
     max_budget_usd: z.number().positive().optional(),
     wrap_up_reserve_usd: z.number().nonnegative().optional(),
     on_failure: z.enum(ON_FAILURE_POLICIES).optional(),

@@ -136,7 +136,7 @@ permission_mode: acceptEdits      # acceptEdits | dontAsk | auto | manual  (plan
 # sandbox: true                   # Bash inside Claude Code's sandbox: no writes outside the project and add_dirs (see "Sandbox")
 # sandbox_allowed_domains: [github.com, api.github.com, registry.npmjs.org]   # hosts a sandboxed run may reach; default none
 # sandbox_weaker_network_isolation: true   # macOS: lets gh verify TLS inside the sandbox; weaker isolation (see "Sandbox")
-timeout_minutes: 30
+timeout_minutes: 30               # at most 35791 (about 24.8 days, the longest timer Node holds); more is refused
 max_budget_usd: 5
 # wrap_up_reserve_usd: 0.5     # part of max_budget_usd kept for the wrap-up pass; default 10%, min $0.50, 0 = off
 # on_failure: resume_once      # a schedule's next tick resumes a budget-exhausted / timed-out run, once (default none)
