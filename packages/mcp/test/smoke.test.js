@@ -15,11 +15,13 @@ import "./helpers.js"; // before @duskfleet/core: drops an inherited CLAUDE_BIN
 
 import {
   agentDefinitionHash,
+  agentSpecSchema,
   billingTypeOf,
   budgetPlan,
   ClaudeCodeExecutor,
   loadConfig,
   looksLikeContextExhaustion,
+  MAX_TIMEOUT_MINUTES,
   mergeResults,
   needsReview,
   openDatabase,
@@ -765,6 +767,41 @@ test("max_concurrent must be a whole number >= 1", async () => {
     const error = await skippedError({ broken: `---\nmax_concurrent: ${bad}\n---\nx\n` }, "broken");
     assert.match(error, /invalid agent file .*broken\.md: max_concurrent: /);
     assert.match(error, /max_concurrent must be a whole number >= 1/);
+  }
+});
+
+test("timeout_minutes is capped at the longest timer Node holds (#502)", async () => {
+  assert.equal(MAX_TIMEOUT_MINUTES, 35791);
+  assert.ok(MAX_TIMEOUT_MINUTES * 60_000 <= 2 ** 31 - 1, "the cap fits a setTimeout");
+  const app = makeApp({
+    agents: { edge: `---\ntimeout_minutes: 35791\n---\nx\n`, over: `---\ntimeout_minutes: 35792\n---\nx\n` },
+  });
+  try {
+    assert.equal(app.config.agents.get("edge")?.timeoutMinutes, 35791);
+    assert.equal(app.config.agents.has("over"), false);
+    const error = app.config.skippedAgents.find((s) => s.id === "over")?.error ?? "";
+    assert.match(error, /timeout_minutes must be a number > 0 and <= 35791/);
+  } finally {
+    await app.cleanup();
+  }
+  assert.equal(agentSpecSchema.safeParse({ id: "edge", system_prompt: "x", timeout_minutes: 35791 }).success, true);
+  const spec = agentSpecSchema.safeParse({ id: "over", system_prompt: "x", timeout_minutes: 40000 });
+  assert.equal(spec.success, false);
+  assert.match(spec.error.issues[0].message, /<= 35791/);
+});
+
+test("claude.default_timeout_minutes above the timer cap is refused (#502)", () => {
+  const root = mkdtempSync(path.join(tmpdir(), "duskfleet-test-"));
+  try {
+    const configDir = path.join(root, "config");
+    mkdirSync(path.join(configDir, "agents"), { recursive: true });
+    writeFileSync(
+      path.join(configDir, "duskfleet.yaml"),
+      `data_dir: ../data\nclaude:\n  binary: "${fakeBinary}"\n  default_timeout_minutes: 40000\n`,
+    );
+    assert.throws(() => loadConfig(configDir), /claude\.default_timeout_minutes must be a number > 0 and <= 35791/);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
   }
 });
 
