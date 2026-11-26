@@ -10,6 +10,7 @@ import { after, test } from "node:test";
 import { fileURLToPath } from "node:url";
 import {
   agentToSpec,
+  agentWriteTarget,
   assertAgentFileFree,
   assertAgentIdFree,
   assertAgentKind,
@@ -24,6 +25,7 @@ import {
   RunManager,
   skippedAgentError,
   skippedUserAgentFiles,
+  writeAgentAndVerify,
 } from "@duskfleet/core";
 
 const roots = [];
@@ -172,9 +174,11 @@ test("an invalid duskfleet.yaml still fails the load, and a reload keeps the pre
 });
 
 test("create still removes a file that does not load, and says why", () => {
-  // other.md declares id x: the new x.md sorts after it, so the loader skips x.md as a duplicate.
-  const { configDir, dataDir } = makeConfig({ userAgents: { other: agentFile("taken", "id: x\n") } });
+  // other.md, written after the load, declares id x: the new x.md sorts after it, so the loader
+  // skips x.md as a duplicate.
+  const { configDir, dataDir } = makeConfig();
   const config = loadConfig(configDir);
+  writeFileSync(path.join(dataDir, "agents", "other.md"), agentFile("taken", "id: x\n"));
   const runs = new RunManager(config, null, null, { owner: "test@host:1" });
   assert.throws(
     () => createAgentFromFields("own", { id: "x", system_prompt: "Hi." }, config, () => runs.reloadConfig()),
@@ -182,6 +186,36 @@ test("create still removes a file that does not load, and says why", () => {
   );
   assert.equal(existsSync(path.join(dataDir, "agents", "x.md")), false, "rolled back");
   assert.equal(loadConfig(configDir).agents.get("x").description, "taken");
+});
+
+test("a write of a loaded user agent goes to its own file, whatever its name, and a failed one restores it (#508)", () => {
+  const hand = agentFile("hand-written", "id: zed\n");
+  const { configDir, dataDir } = makeConfig({ userAgents: { "a-hand": hand } });
+  const config = loadConfig(configDir);
+  const runs = new RunManager(config, null, null, { owner: "test@host:1" });
+  const file = path.join(dataDir, "agents", "a-hand.md");
+  assert.equal(agentWriteTarget(config, "zed"), file);
+  assert.equal(agentWriteTarget(config, "new"), path.join(dataDir, "agents", "new.md"));
+
+  // The reload does not serve the agent from the file just written: its old content comes back.
+  assert.throws(
+    () =>
+      writeAgentAndVerify(config, { ...agentToSpec(config.agents.get("zed")), description: "lost" }, () => ({
+        ...config,
+        agents: new Map(),
+        skippedAgents: [],
+      })),
+    /a-hand\.md did not load .*; its previous content has been restored/,
+  );
+  assert.equal(readFileSync(file, "utf8"), hand, "rolled back to the hand-written file");
+
+  const fresh = writeAgentAndVerify(config, { ...agentToSpec(config.agents.get("zed")), description: "updated" }, () =>
+    runs.reloadConfig(),
+  );
+  assert.equal(fresh.sourcePath, file, "updated in place");
+  assert.equal(fresh.description, "updated");
+  assert.equal(existsSync(path.join(dataDir, "agents", "zed.md")), false, "no second file of the same id");
+  assert.deepEqual(loadConfig(configDir).skippedAgents, []);
 });
 
 test("create never writes over a file that holds another agent, overwrite or not (#501)", () => {

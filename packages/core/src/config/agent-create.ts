@@ -5,7 +5,7 @@
  * longer loads. One bad agent file would otherwise break every later config reload.
  */
 
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import {
   assertAgentFitsHarness,
@@ -22,9 +22,9 @@ import {
   assertAgentKind,
   assertSandboxSpec,
   assertWrapUpReserve,
-  deleteAgentFile,
   deleteAgentFileAt,
   writeAgentFile,
+  writeAgentFileAt,
 } from "./agent-files.js";
 import { assertAgentSpecClean } from "./agent-lint.js";
 import { assertSkillsAvailable } from "./skills.js";
@@ -143,9 +143,20 @@ export function assertAgentFileFree(config: DuskFleetConfig, id: string): void {
 }
 
 /**
- * Write the agent file into `user_agents_dir`, then make sure the config still loads (`reload`
- * re-reads it from disk and keeps the previous one on failure); otherwise remove the file and fail loudly.
- * Never over a file that holds another agent (`assertAgentFileFree`).
+ * The file a write of agent `id` goes to: the file a valid user agent of that id was loaded from,
+ * whatever its name (#508: `a-hand.md` declaring `zed` is updated in place, never next to a new
+ * `zed.md` that would make one of the two a skipped duplicate), else `<user_agents_dir>/<id>.md`.
+ */
+export function agentWriteTarget(config: DuskFleetConfig, id: string): string {
+  const existing = config.agents.get(id);
+  return existing?.source === "user" ? existing.sourcePath : agentFilePath(config.userAgentsDir, id);
+}
+
+/**
+ * Write the agent file into `user_agents_dir` (`agentWriteTarget`: a user agent's own file, else
+ * `<id>.md`), then make sure the config still loads (`reload` re-reads it from disk and keeps the
+ * previous one on failure); otherwise put back what the file held before (or remove it when it is
+ * new) and fail loudly. Never over a file that holds another agent (`assertAgentFileFree`).
  */
 export function writeAgentAndVerify(
   config: DuskFleetConfig,
@@ -153,15 +164,25 @@ export function writeAgentAndVerify(
   reload: () => DuskFleetConfig,
 ): AgentDefinition {
   assertSpecLoadable(spec, config);
-  assertAgentFileFree(config, spec.id);
-  const file = writeAgentFile(config.userAgentsDir, spec);
+  const target = agentWriteTarget(config, spec.id);
+  const inPlace = path.resolve(target) !== path.resolve(agentFilePath(config.userAgentsDir, spec.id));
+  // The agent's own file holds this id by definition; `<id>.md` may hold another agent (#501).
+  if (!inPlace) assertAgentFileFree(config, spec.id);
+  const previous = existsSync(target) ? readFileSync(target, "utf8") : null;
+  const file = inPlace
+    ? writeAgentFileAt(config.userAgentsDir, target, spec)
+    : writeAgentFile(config.userAgentsDir, spec);
   const reloaded = reload();
   const fresh = reloaded.agents.get(spec.id);
-  if (!fresh || fresh.sourcePath !== file) {
-    deleteAgentFile(config.userAgentsDir, spec.id);
+  if (!fresh || path.resolve(fresh.sourcePath) !== path.resolve(file)) {
+    if (previous === null) deleteAgentFileAt(config.userAgentsDir, file);
+    else writeFileSync(file, previous, "utf8");
+    reload();
     // The loader skips a file that does not load instead of throwing (#462): its entry says why.
-    const why = reloaded.skippedAgents?.find((s) => s.sourcePath === file)?.error;
-    throw new Error(`agent file ${file} did not load (${why ?? "see server log"}); it has been removed again`);
+    const why = reloaded.skippedAgents?.find((s) => path.resolve(s.sourcePath) === path.resolve(file))?.error;
+    throw new Error(
+      `agent file ${file} did not load (${why ?? "see server log"}); ${previous === null ? "it has been removed again" : "its previous content has been restored"}`,
+    );
   }
   return fresh;
 }

@@ -13,7 +13,7 @@ import {
   CLAUDE_PROJECT_AGENTS,
   createAgentFromFields,
   type DuskFleetConfig,
-  deleteAgentFile,
+  deleteAgentFileAt,
   deleteSkippedUserAgentFiles,
   EFFORT_LEVELS,
   effectiveAgentFields,
@@ -609,8 +609,9 @@ export function registerAgentTools(server: McpServer, ctx: ToolContext): void {
         if (broken.length) {
           removedFiles = deleteSkippedUserAgentFiles(config, args.id);
         } else {
-          deleteAgentFile(config.userAgentsDir, args.id);
-          removedFiles = existing ? [existing.sourcePath] : [];
+          // The file the agent was loaded from, whatever its name (#508), never a guessed `<id>.md`.
+          removedFiles =
+            existing && deleteAgentFileAt(config.userAgentsDir, existing.sourcePath) ? [existing.sourcePath] : [];
         }
         const after = ctx.config.agents.get(args.id);
         return jsonResult({

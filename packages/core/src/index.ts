@@ -4,6 +4,7 @@
  */
 
 export {
+  agentWriteTarget,
   assertAgentFileFree,
   assertAgentIdFree,
   assertAgentWritable,
@@ -46,6 +47,7 @@ export {
   sandboxAllowedDomainsSchema,
   skillsSchema,
   writeAgentFile,
+  writeAgentFileAt,
 } from "./config/agent-files.js";
 export {
   type AgentLintProblem,

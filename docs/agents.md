@@ -87,10 +87,13 @@ file and loads everything else, so the other agents keep running and their sched
   `--force`), naming the file and its error. `update_agent` refuses it too: fix the file by hand,
   replace it, or remove it with `delete_agent` or the dashboard's delete, which delete the broken
   user file whatever its name.
-- A file belongs to the id it declares, not to its name. `create_agent`, `update_agent` and
-  `agents create` write `data/agents/<id>.md`, so when that file holds another agent (say
-  `helper.md` declaring `id: code-helper`) they refuse, even with `overwrite: true` / `--force`:
-  rename that file to its own id, or choose another one.
+- A file belongs to the id it declares, not to its name. `update_agent`, `delete_agent`, the
+  dashboard's delete and unlink, and an overwrite by `create_agent` / `agents create --force` act on
+  the file a user agent was loaded from, whatever its name (`a-hand.md` declaring `id: zed` is
+  updated in place, never next to a new `zed.md`). A failed update puts the file's previous content
+  back. A new agent, or a user override of a builtin, is written to `data/agents/<id>.md`, so when
+  that file holds another agent (say `helper.md` declaring `id: code-helper`) they refuse, even
+  with `overwrite: true` / `--force`: rename that file to its own id, or choose another one.
 - `list_agents` (`skippedAgents`), `duskfleet agents` (after the table; with `--json` on stderr,
   stdout stays the list) and `duskfleet doctor` (one warning line per file, `skippedAgents` in
   `--json`) name the file and its error.
