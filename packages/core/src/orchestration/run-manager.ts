@@ -228,6 +228,8 @@ export const WRAP_UP_PROMPT =
  * the run's own timeout (the run as a whole never outlasts `timeout_minutes`).
  */
 const WRAP_UP_TIMEOUT_MS = 10 * 60_000;
+/** The longest delay `setTimeout` holds; Node turns a longer one into 1 ms. */
+const MAX_TIMER_MS = 2 ** 31 - 1;
 
 /**
  * How a run's budget is split: the main pass gets `main`, the wrap-up pass (only after
@@ -1021,13 +1023,18 @@ export class RunManager {
       const finished = await Promise.race([
         handle.done.then(() => true),
         new Promise<boolean>((r) => {
-          timer = setTimeout(() => r(false), remaining);
+          // Node clamps a delay above 2^31 - 1 ms to 1 ms: wait in slices, the loop re-checks the deadline.
+          timer = setTimeout(() => r(false), Math.min(remaining, MAX_TIMER_MS));
         }),
       ]);
       clearTimeout(timer);
       // Give the completion handler a tick to write the final state (or start the next phase).
       await new Promise((r) => setImmediate(r));
-      if (!finished || this.active.get(id)?.handle === handle) break;
+      if (!finished) {
+        if (deadline - Date.now() > 0) continue;
+        break;
+      }
+      if (this.active.get(id)?.handle === handle) break;
     }
     return this.runs.get(id)!;
   }
