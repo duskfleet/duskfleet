@@ -42,6 +42,19 @@ export const maxConcurrentSchema = z
   .int("max_concurrent must be a whole number >= 1")
   .min(1, "max_concurrent must be a whole number >= 1");
 
+/**
+ * Longest run timeout the executors can honour, in minutes (issue #502): the timer is a
+ * `setTimeout` of `minutes * 60000` ms, and Node clamps anything above 2^31 - 1 ms to 1 ms,
+ * which would end the run at once. 35791 minutes is about 24.8 days.
+ */
+export const MAX_TIMEOUT_MINUTES = Math.floor((2 ** 31 - 1) / 60_000);
+
+/** A run timeout in minutes (`timeout_minutes`, `claude.default_timeout_minutes`): > 0, at most MAX_TIMEOUT_MINUTES. */
+export function timeoutMinutesSchema(field: string) {
+  const message = `${field} must be a number > 0 and <= ${MAX_TIMEOUT_MINUTES} (about 24.8 days, the longest timer Node can hold)`;
+  return z.number({ error: message }).positive(message).max(MAX_TIMEOUT_MINUTES, message);
+}
+
 /** Per-agent daily run cap (UTC day): a whole number of runs, at least 1. */
 export const maxDailyRunsSchema = z
   .number({ error: "max_daily_runs must be a whole number >= 1" })
@@ -88,7 +101,7 @@ const agentSpecInputSchema = z.object({
   allowed_tools: z.array(z.string().min(1)).optional(),
   disallowed_tools: z.array(z.string().min(1)).optional(),
   effort: z.enum(EFFORT_LEVELS).optional(),
-  timeout_minutes: z.number().positive().optional(),
+  timeout_minutes: timeoutMinutesSchema("timeout_minutes").optional(),
   max_budget_usd: z.number().positive().optional(),
   wrap_up_reserve_usd: z.number().nonnegative().optional(),
   on_failure: z.enum(ON_FAILURE_POLICIES).optional(),

@@ -27,6 +27,7 @@ import {
   linkToolWarnings,
   listProjectAgents,
   loadAgentDir,
+  MAX_TIMEOUT_MINUTES,
   ON_FAILURE_POLICIES,
   PERMISSION_MODES,
   projectAgentFile,
@@ -39,6 +40,7 @@ import {
   skillsSchema,
   skippedAgentError,
   skippedUserAgentFiles,
+  timeoutMinutesSchema,
   upsertUserProject,
   validateProjectPath,
   writeAgentAndVerify,
@@ -251,11 +253,11 @@ const agentFields = {
     .describe(
       "Reasoning effort passed to the agent's harness CLI (refused on a harness without effort); omit for the CLI default. run_agent and schedules can override it per run",
     ),
-  timeout_minutes: z
-    .number()
-    .positive()
+  timeout_minutes: timeoutMinutesSchema("timeout_minutes")
     .optional()
-    .describe("Kill the run after this many minutes; defaults to claude.default_timeout_minutes"),
+    .describe(
+      `Kill the run after this many minutes (at most ${MAX_TIMEOUT_MINUTES}); defaults to claude.default_timeout_minutes`,
+    ),
   max_budget_usd: z
     .number()
     .positive()
