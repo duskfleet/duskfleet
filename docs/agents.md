@@ -85,6 +85,11 @@ closed), an id another file in the same
 directory already has, or a `project:` that is not in `projects.yaml`. Duskfleet skips that one
 file and loads everything else, so the other agents keep running and their schedules keep firing.
 
+A frontmatter key Duskfleet does not know counts as invalid frontmatter: it is never dropped.
+A misspelled `max_budget: 0.1` would otherwise run with the default budget. The error names the
+key and the known key it most likely meant (`unknown frontmatter key "max_budget" (did you mean
+max_budget_usd?)`).
+
 - Its id is unavailable until the file is fixed. A broken file in `data/agents/` never falls back
   to the builtin of the same id: a run, a schedule or a gate of that agent fails with an error that
   names the file. With two files of the same id in one directory, the first one (by file name)
