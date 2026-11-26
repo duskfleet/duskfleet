@@ -1498,7 +1498,8 @@ test("pausing always works: a deleted, broken or rebound agent; resuming and oth
   const { root, configDir, project } = makeRoot();
   const t = makeScheduler(configDir);
   try {
-    const gone = t.scheduler.create({ name: "gone", agentId: "coder", prompt: "ok", cron: "0 9 * * *" });
+    // coder3, not coder: coder is default_agent, deleting it would make every config reload fail.
+    const gone = t.scheduler.create({ name: "gone", agentId: "coder3", prompt: "ok", cron: "0 9 * * *" });
     const broken = t.scheduler.create({ name: "broken", agentId: "coder2", prompt: "ok", cron: "0 9 * * *" });
     const rebound = t.scheduler.create({
       name: "rebound",
@@ -1507,11 +1508,13 @@ test("pausing always works: a deleted, broken or rebound agent; resuming and oth
       prompt: "ok",
       cron: "0 9 * * *",
     });
-    rmSync(path.join(configDir, "agents", "coder.md"));
+    rmSync(path.join(configDir, "agents", "coder3.md"));
     writeFileSync(path.join(configDir, "agents", "coder2.md"), "---\nmodel: [unclosed\n---\nbody\n");
+    const other = path.join(root, "other");
+    mkdirSync(other);
     writeFileSync(
       path.join(configDir, "projects.yaml"),
-      `projects:\n  demo:\n    path: ${project}\n  other:\n    path: ${project}\n`,
+      `projects:\n  demo:\n    path: ${project}\n  other:\n    path: ${other}\n`,
     );
     writeFileSync(path.join(configDir, "agents", "free.md"), "---\nproject: other\n---\nBound now.\n");
 
@@ -1522,10 +1525,10 @@ test("pausing always works: a deleted, broken or rebound agent; resuming and oth
       assert.equal(paused.nextRunAt, null, s.name);
       assert.equal(t.repo.get(s.id).enabled, false, s.name);
     }
-    assert.throws(() => t.scheduler.update(gone.id, { enabled: true }), /unknown agent "coder"/);
+    assert.throws(() => t.scheduler.update(gone.id, { enabled: true }), /unknown agent "coder3"/);
     assert.throws(() => t.scheduler.update(broken.id, { enabled: true }), /coder2\.md does not load/);
     assert.throws(() => t.scheduler.update(rebound.id, { enabled: true }), /belongs to project "other"/);
-    assert.throws(() => t.scheduler.update(gone.id, { enabled: false, name: "renamed" }), /unknown agent "coder"/);
+    assert.throws(() => t.scheduler.update(gone.id, { enabled: false, name: "renamed" }), /unknown agent "coder3"/);
     assert.equal(t.repo.get(gone.id).name, "gone", "a refused edit writes nothing");
 
     t.due(gone.id);
