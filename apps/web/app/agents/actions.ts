@@ -3,12 +3,12 @@
 import path from "node:path";
 import {
   agentToSpec,
-  deleteAgentFile,
+  deleteAgentFileAt,
   deleteSkippedUserAgentFiles,
   loadAgentDir,
   skippedAgentError,
   skippedUserAgentFiles,
-  writeAgentFile,
+  writeAgentFileAt,
 } from "@duskfleet/core";
 /**
  * The dashboard's writes on agents: edits to *user* agent files (data/agents).
@@ -41,7 +41,8 @@ export async function deleteAgentAction(id: string): Promise<ActionResult> {
     };
   }
   if (broken.length) deleteSkippedUserAgentFiles(cfg, id);
-  else deleteAgentFile(cfg.userAgentsDir, id);
+  // The file the agent was loaded from, whatever its name (#508).
+  else if (agent) deleteAgentFileAt(cfg.userAgentsDir, agent.sourcePath);
   revalidatePath("/agents");
   revalidatePath("/");
   return {
@@ -59,7 +60,7 @@ export async function unlinkAgentAction(id: string): Promise<ActionResult> {
     return { ok: false, message: `"${id}" is a builtin agent: edit the repo, not the dashboard.` };
   if (!agent.claudeAgent) return { ok: false, message: `"${id}" is not linked to a project agent.` };
   const { claude_agent: _link, ...spec } = agentToSpec(agent);
-  writeAgentFile(cfg.userAgentsDir, spec);
+  writeAgentFileAt(cfg.userAgentsDir, agent.sourcePath, spec);
   revalidatePath("/agents");
   return {
     ok: true,

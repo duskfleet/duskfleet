@@ -490,6 +490,64 @@ test("list_agents names an agent file that does not load; its run fails with tha
   }
 });
 
+test("update_agent and delete_agent act on the file a user agent was loaded from, whatever its name (#508)", async () => {
+  const root = mkdtempSync(path.join(tmpdir(), "duskfleet-agents-named-"));
+  const configDir = path.join(root, "config");
+  mkdirSync(path.join(configDir, "agents"), { recursive: true });
+  writeFileSync(path.join(configDir, "duskfleet.yaml"), `data_dir: ../data\nclaude:\n  binary: "${fakeBinary}"\n`);
+  writeFileSync(path.join(configDir, "agents", "coder.md"), `---\nname: Coder\n---\nBe brief.\n`);
+  const userDir = path.join(root, "data", "agents");
+  mkdirSync(userDir, { recursive: true });
+  const hand = (id, body) =>
+    `---\nid: ${id}\ndescription: hand-written\nmodel: haiku\npermission_mode: dontAsk\nallowed_tools: [Read]\n---\n${body}\n`;
+  // `a-hand.md` sorts before `zed.md`, `zz-hand.md` after `yak.md`: both orders of a stray `<id>.md`.
+  const zedFile = path.join(userDir, "a-hand.md");
+  const yakFile = path.join(userDir, "zz-hand.md");
+  writeFileSync(zedFile, hand("zed", "Zed body v1"));
+  writeFileSync(yakFile, hand("yak", "Yak body v1"));
+
+  const transport = new StdioClientTransport({
+    command: process.execPath,
+    args: [serverEntry],
+    env: testEnv({ DUSKFLEET_CONFIG: configDir, DUSKFLEET_LOG_LEVEL: "warn" }),
+    stderr: "pipe",
+  });
+  const client = new Client({ name: "test-client", version: "0.0.0" });
+  try {
+    await client.connect(transport);
+    const zed = ok(await client.callTool({ name: "update_agent", arguments: { id: "zed", description: "updated" } }));
+    assert.equal(zed.agent.path, zedFile, "updated in place");
+    assert.equal(zed.agent.description, "updated");
+    const yak = ok(
+      await client.callTool({
+        name: "update_agent",
+        arguments: { id: "yak", description: "updated", system_prompt: "Yak body v2" },
+      }),
+    );
+    assert.equal(yak.agent.path, yakFile, "updated in place");
+    assert.deepEqual(readdirSync(userDir).sort(), ["a-hand.md", "zz-hand.md"], "one file per agent, no new <id>.md");
+    assert.match(readFileSync(yakFile, "utf8"), /Yak body v2/);
+    assert.match(readFileSync(zedFile, "utf8"), /^id: zed$/m, "the file keeps the id it declares");
+
+    const listed = ok(await client.callTool({ name: "list_agents", arguments: {} }));
+    assert.deepEqual(listed.skippedAgents, [], "no duplicate was created");
+
+    for (const [id, file] of [
+      ["yak", yakFile],
+      ["zed", zedFile],
+    ]) {
+      const deleted = ok(await client.callTool({ name: "delete_agent", arguments: { id } }));
+      assert.deepEqual(deleted.files, [file]);
+      assert.equal(deleted.nowResolvesTo, null, `no definition of ${id} is left`);
+      assert.equal(existsSync(file), false);
+    }
+    assert.deepEqual(readdirSync(userDir), []);
+  } finally {
+    await client.close();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("a linked folder under the home directory is registered as ~/..., without the path in its description", {
   skip: process.platform === "win32",
 }, async () => {
