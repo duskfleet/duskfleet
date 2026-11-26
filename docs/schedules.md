@@ -442,6 +442,10 @@ What to change when a schedule keeps skipping (`skipped_busy`, `skipped_daily_ca
 - New schedules are best created paused (`enabled: false`), tried once with `run_schedule_now`
   or the dashboard's **Run now**, checked on the dashboard (denials, missing MCP servers, cost)
   and only then enabled.
+- Pausing a schedule (`update_schedule { enabled: false }` with no other field, the dashboard's
+  pause button) always works, even when its agent was deleted, no longer loads or is now bound
+  to another project. Resuming it, or any other edit, is validated in full and is refused until
+  the agent is fixed or the schedule points at another one.
 - Two ways to fire a schedule by hand, both outside its cron and even when paused:
   `run_schedule_now` over MCP starts the run immediately in the MCP server process;
   **Run now** on the dashboard and `duskfleet schedules run-now <id or name>` on the CLI set
