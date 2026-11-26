@@ -108,6 +108,55 @@ test("a malformed agent file is skipped by name, the other agents load", () => {
   assert.deepEqual(loadConfig(configDir).skippedAgents, [], "a fixed file loads again");
 });
 
+/** A UTF-8 byte order mark, built from its code point so the source holds no invisible character. */
+const BOM = String.fromCharCode(0xfeff);
+
+test("a BOM, leading blank lines and trailing spaces on --- still read the frontmatter (#507)", () => {
+  const fm =
+    "id: IDX\ndescription: hand-written\nmodel: haiku\npermission_mode: dontAsk\nallowed_tools: [Read]\nmax_budget_usd: 0.1\ntimeout_minutes: 2\n";
+  const variants = {
+    bom: `${BOM}---\n${fm}---\nOnly read files.\n`,
+    blank: `\n---\n${fm}---\nOnly read files.\n`,
+    blanks: ` \n\t\r\n---\n${fm}---\nOnly read files.\n`,
+    trailing: `--- \n${fm}---\t\nOnly read files.\n`,
+    crlf: `${BOM}---\r\n${fm.replaceAll("\n", "\r\n")}---\r\nOnly read files.\r\n`,
+    "no-body": `---\n${fm}---`,
+  };
+  const userAgents = Object.fromEntries(Object.entries(variants).map(([k, v]) => [k, v.replace("IDX", k)]));
+  const { configDir } = makeConfig({ userAgents });
+  const config = loadConfig(configDir);
+  assert.deepEqual(config.skippedAgents, []);
+  for (const id of Object.keys(variants)) {
+    const a = config.agents.get(id);
+    assert.ok(a, `${id} loads`);
+    assert.equal(a.model, "haiku", `${id}: model read`);
+    assert.equal(a.permissionMode, "dontAsk", `${id}: permission mode read`);
+    assert.deepEqual(a.allowedTools, ["Read"], `${id}: allow-list read`);
+    assert.equal(a.maxBudgetUsd, 0.1, `${id}: budget read`);
+    assert.equal(a.timeoutMinutes, 2, `${id}: timeout read`);
+    assert.equal(a.systemPrompt, id === "no-body" ? "" : "Only read files.", `${id}: the YAML is not the body`);
+  }
+});
+
+test("an opening --- that is never closed does not load; a file without --- is all body (#507)", () => {
+  const { configDir } = makeConfig({
+    userAgents: {
+      unclosed: `${BOM}---\nid: unclosed\nmodel: haiku\npermission_mode: dontAsk\nOnly read files.\n`,
+      plain: "You are a plain agent.\n---\nnot frontmatter\n",
+      empty: `${BOM}---\n---\nUnbound.\n`,
+    },
+  });
+  const config = loadConfig(configDir);
+  assert.equal(config.agents.has("unclosed"), false);
+  assert.equal(config.skippedAgents.length, 1);
+  assert.equal(config.skippedAgents[0].id, "unclosed", "the id line is the guess, BOM or not");
+  assert.match(config.skippedAgents[0].error, /never closed/);
+  assert.equal(config.agents.get("plain").systemPrompt, "You are a plain agent.\n---\nnot frontmatter");
+  assert.equal(config.agents.get("empty").systemPrompt, "Unbound.", "an empty frontmatter block is a frontmatter");
+  assert.equal(guessAgentId(`\n${BOM}---\nid: nope\n---\n`), null, "a BOM is only a BOM at the very start");
+  assert.equal(guessAgentId(`${BOM}\n--- \nid: guessed\n`), "guessed");
+});
+
 test("unreadable YAML, a duplicate id and an unknown project each skip one file only", () => {
   const { configDir, dataDir } = makeConfig({
     userAgents: {
