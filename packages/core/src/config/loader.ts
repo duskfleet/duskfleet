@@ -167,7 +167,7 @@ const globalSchema = z.object({
     .prefault({}),
 });
 
-const agentFrontmatterSchema = z
+const agentFrontmatterObject = z
   .object({
     id: z.string().regex(AGENT_ID_PATTERN, "agent id must be lowercase letters, digits, - or _").optional(),
     name: z.string().optional(),
@@ -204,10 +204,28 @@ const agentFrontmatterSchema = z
     // run start, never on load (the loader does not know the executors).
     harness: harnessNameSchema.optional(),
   })
-  .refine((fm) => fm.project_agent === undefined || fm.claude_agent === undefined, {
-    message: BOTH_PROJECT_AGENT_FIELDS,
-    path: ["project_agent"],
-  });
+  // An unknown key is refused, never dropped (#503): a misspelled `max_budget` would otherwise run
+  // with the default budget, timeout or allow-list the author believes they replaced.
+  .strict();
+
+const agentFrontmatterSchema = agentFrontmatterObject.refine(
+  (fm) => fm.project_agent === undefined || fm.claude_agent === undefined,
+  { message: BOTH_PROJECT_AGENT_FIELDS, path: ["project_agent"] },
+);
+
+const AGENT_FRONTMATTER_KEYS = Object.keys(agentFrontmatterObject.shape);
+
+/**
+ * The refusal of one key the frontmatter schema does not know, with the known key it most likely
+ * meant: the same name with `_` for `-` (`allowed-tools`), or the one key it is a prefix of
+ * (`max_budget`, `timeout`).
+ */
+function unknownKeyMessage(key: string): string {
+  const snake = key.replace(/-/g, "_");
+  const prefixed = AGENT_FRONTMATTER_KEYS.filter((k) => k.startsWith(snake));
+  const guess = AGENT_FRONTMATTER_KEYS.includes(snake) ? snake : prefixed.length === 1 ? prefixed[0] : null;
+  return `unknown frontmatter key "${key}"${guess ? ` (did you mean ${guess}?)` : ""}`;
+}
 
 const projectsSchema = z.object({
   projects: z
@@ -410,7 +428,11 @@ export function loadAgentDir(
     }
     const parsed = agentFrontmatterSchema.safeParse(frontmatter);
     if (!parsed.success) {
-      const issues = parsed.error.issues.map((i) => `${i.path.join(".") || "(frontmatter)"}: ${i.message}`);
+      const issues = parsed.error.issues.map((i) =>
+        i.code === "unrecognized_keys"
+          ? i.keys.map(unknownKeyMessage).join("; ")
+          : `${i.path.join(".") || "(frontmatter)"}: ${i.message}`,
+      );
       const declared = (frontmatter as { id?: unknown } | null)?.id;
       skipped.push({
         sourcePath,

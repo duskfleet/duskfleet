@@ -174,7 +174,7 @@ npm workspaces, one `config/` and one SQLite database shared by three deliverabl
 - **Agents can be bound to a project** (`project: <id>`): grouped, default target, refused
   elsewhere. `create_agent`/`update_agent` and the CLI's `agents create` validate the spec
   *before* writing, and roll the file back if it does not load. A hand-edited agent file that does
-  not load (frontmatter, duplicate id, unknown `project`) is skipped, never fatal: it lands in
+  not load (frontmatter, an unknown key included (#503: never dropped), duplicate id, unknown `project`) is skipped, never fatal: it lands in
   `config.skippedAgents` (`loadAgentDir`, #462), its id is unavailable (a broken user file never
   falls back to the builtin of the same id; `skippedAgentError` names the file for runs, schedules
   and gates), and `list_agents`, `agents` and `doctor` list it. `duskfleet.yaml` and the
