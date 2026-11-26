@@ -4,6 +4,13 @@ An agent is a Markdown file with YAML frontmatter. The frontmatter is the unatte
 (model, permission mode, allow-lists, budget, MCP); the body, when present, is appended to
 Claude Code's system prompt.
 
+The frontmatter is the block between the file's first `---` line and the next `---` line. A UTF-8
+byte order mark, blank lines before the opening `---` and spaces or tabs after either `---` are
+ignored, so a file saved by an editor that adds them still loads with its settings. A file whose
+first non-blank line is `---` but has no closing `---` line does not load
+([below](#a-file-that-does-not-load)); a file that does not start with `---` has no frontmatter
+and is all body.
+
 ## Two kinds, chosen explicitly
 
 | Kind | What it is | Required | Not allowed |
@@ -73,7 +80,8 @@ see [where the unattended envelope lives](security.md#where-the-unattended-envel
 
 ### A file that does not load
 
-An agent file you edit by hand can break: invalid frontmatter, an id another file in the same
+An agent file you edit by hand can break: invalid frontmatter (or an opening `---` that is never
+closed), an id another file in the same
 directory already has, or a `project:` that is not in `projects.yaml`. Duskfleet skips that one
 file and loads everything else, so the other agents keep running and their schedules keep firing.
 

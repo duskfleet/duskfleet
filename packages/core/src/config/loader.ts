@@ -466,7 +466,7 @@ export function loadAgentDir(
  * declares another id than its file name still takes that id out instead of leaving a builtin served.
  */
 export function guessAgentId(raw: string): string | null {
-  const block = /^---\r?\n([\s\S]*?)(?:\r?\n---|$)/.exec(raw)?.[1];
+  const block = /^---[ \t]*\r?\n([\s\S]*?)(?:\r?\n---|$)/.exec(frontmatterText(raw))?.[1];
   if (!block) return null;
   const m = /^id:[ \t]*(["']?)([a-z0-9][a-z0-9_-]*)\1[ \t]*(?:#.*)?$/m.exec(block);
   return m?.[2] ?? null;
@@ -487,10 +487,33 @@ function loadProjects(file: string, configDir: string): Map<string, ProjectDefin
   return projects;
 }
 
+/**
+ * The text an agent file's frontmatter is looked for in (#507): a leading UTF-8 BOM and leading
+ * blank lines dropped, both common results of editors and of copy and paste. Without this the
+ * opening `---` was missed and the whole file, YAML included, loaded as the body with every
+ * setting (model, tools, budget, timeout) dropped.
+ */
+function frontmatterText(content: string): string {
+  // The BOM by its code point, never as an invisible literal in the source.
+  const noBom = content.charCodeAt(0) === 0xfeff ? content.slice(1) : content;
+  return noBom.replace(/^(?:[ \t]*\r?\n)+/, "");
+}
+
+/**
+ * Frontmatter and body of an agent file. The delimiter lines are `---` with optional trailing
+ * spaces or tabs. A file that opens with a `---` line and never closes it throws (the loader lists
+ * it as a file that does not load) instead of loading as an agent with no settings; a file whose
+ * first non-blank line is not `---` has no frontmatter.
+ */
 export function splitFrontmatter(content: string): { frontmatter: unknown; body: string } {
-  const match = /^---\r?\n([\s\S]*?)\r?\n---\r?\n?([\s\S]*)$/.exec(content);
-  if (!match) return { frontmatter: {}, body: content };
-  return { frontmatter: parseYaml(match[1] ?? "") ?? {}, body: match[2] ?? "" };
+  const text = frontmatterText(content);
+  // The block may be empty (`---` right after `---`).
+  const match = /^---[ \t]*\r?\n(?:([\s\S]*?)\r?\n)?---[ \t]*(?:\r?\n|$)([\s\S]*)$/.exec(text);
+  if (match) return { frontmatter: parseYaml(match[1] ?? "") ?? {}, body: match[2] ?? "" };
+  if (/^---[ \t]*(?:\r?\n|$)/.test(text)) {
+    throw new Error("the frontmatter opened by the first --- line is never closed by a --- line");
+  }
+  return { frontmatter: {}, body: content };
 }
 
 /** True when `p` is an existing directory. */
