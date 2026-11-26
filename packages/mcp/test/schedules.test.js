@@ -1494,6 +1494,51 @@ test("a schedule whose agent file does not load records error naming the file; t
   }
 });
 
+test("pausing always works: a deleted, broken or rebound agent; resuming and other edits are still validated (#515)", async () => {
+  const { root, configDir, project } = makeRoot();
+  const t = makeScheduler(configDir);
+  try {
+    // coder3, not coder: coder is default_agent, deleting it would make every config reload fail.
+    const gone = t.scheduler.create({ name: "gone", agentId: "coder3", prompt: "ok", cron: "0 9 * * *" });
+    const broken = t.scheduler.create({ name: "broken", agentId: "coder2", prompt: "ok", cron: "0 9 * * *" });
+    const rebound = t.scheduler.create({
+      name: "rebound",
+      agentId: "free",
+      projectId: "demo",
+      prompt: "ok",
+      cron: "0 9 * * *",
+    });
+    rmSync(path.join(configDir, "agents", "coder3.md"));
+    writeFileSync(path.join(configDir, "agents", "coder2.md"), "---\nmodel: [unclosed\n---\nbody\n");
+    const other = path.join(root, "other");
+    mkdirSync(other);
+    writeFileSync(
+      path.join(configDir, "projects.yaml"),
+      `projects:\n  demo:\n    path: ${project}\n  other:\n    path: ${other}\n`,
+    );
+    writeFileSync(path.join(configDir, "agents", "free.md"), "---\nproject: other\n---\nBound now.\n");
+
+    for (const s of [gone, broken, rebound]) {
+      // undefined keys count as omitted, the way the MCP tool and the dashboard build the patch
+      const paused = t.scheduler.update(s.id, { enabled: false, name: undefined });
+      assert.equal(paused.enabled, false, s.name);
+      assert.equal(paused.nextRunAt, null, s.name);
+      assert.equal(t.repo.get(s.id).enabled, false, s.name);
+    }
+    assert.throws(() => t.scheduler.update(gone.id, { enabled: true }), /unknown agent "coder3"/);
+    assert.throws(() => t.scheduler.update(broken.id, { enabled: true }), /coder2\.md does not load/);
+    assert.throws(() => t.scheduler.update(rebound.id, { enabled: true }), /belongs to project "other"/);
+    assert.throws(() => t.scheduler.update(gone.id, { enabled: false, name: "renamed" }), /unknown agent "coder3"/);
+    assert.equal(t.repo.get(gone.id).name, "gone", "a refused edit writes nothing");
+
+    t.due(gone.id);
+    await t.tickAll();
+    assert.equal(t.repo.get(gone.id).lastOutcome, null, "a paused schedule does not tick");
+  } finally {
+    await t.close(root);
+  }
+});
+
 test("command gates fail closed: switched off while config/ fails to load, the stale true is not trusted", async () => {
   const { root, configDir, project } = makeRoot();
   const t = makeScheduler(configDir);

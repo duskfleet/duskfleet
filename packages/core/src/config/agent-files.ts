@@ -170,17 +170,35 @@ export function deleteAgentFile(dir: string, id: string): boolean {
   return true;
 }
 
+/** Refuses a path that is not a `.md` file directly inside `dir`. */
+function assertAgentFileIn(dir: string, file: string, verb: string): void {
+  if (path.dirname(path.resolve(file)) !== path.resolve(dir) || !file.endsWith(".md")) {
+    throw new Error(`refusing to ${verb} ${file}: not an agent file in ${dir}`);
+  }
+}
+
 /**
- * Removes one agent file by path, for a file the loader skipped (#462): its name need not match
- * the id it declares. Only a `.md` file directly inside `dir` is removed. False when it did not exist.
+ * Removes one agent file by path, for a file whose name need not match the id it declares (a
+ * file the loader skipped, #462, or a hand-named user file, #508). Only a `.md` file directly
+ * inside `dir` is removed. False when it did not exist.
  */
 export function deleteAgentFileAt(dir: string, file: string): boolean {
-  if (path.dirname(path.resolve(file)) !== path.resolve(dir) || !file.endsWith(".md")) {
-    throw new Error(`refusing to delete ${file}: not an agent file in ${dir}`);
-  }
+  assertAgentFileIn(dir, file, "delete");
   if (!existsSync(file)) return false;
   unlinkSync(file);
   return true;
+}
+
+/**
+ * Writes a spec into one agent file by path (#508): the file a user agent was loaded from, whose
+ * name need not be `<id>.md`. Only a `.md` file directly inside `dir`. Returns the file path.
+ */
+export function writeAgentFileAt(dir: string, file: string, spec: AgentSpec): string {
+  assertAgentFileIn(dir, file, "write");
+  agentFilePath(dir, spec.id); // validates the id
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(file, renderAgentMarkdown(spec), "utf8");
+  return file;
 }
 
 /** Inverse of the loader: a loaded definition back to a writable spec (used by update_agent). */

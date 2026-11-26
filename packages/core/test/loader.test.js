@@ -10,6 +10,7 @@ import { after, test } from "node:test";
 import { fileURLToPath } from "node:url";
 import {
   agentToSpec,
+  agentWriteTarget,
   assertAgentFileFree,
   assertAgentIdFree,
   assertAgentKind,
@@ -24,6 +25,7 @@ import {
   RunManager,
   skippedAgentError,
   skippedUserAgentFiles,
+  writeAgentAndVerify,
 } from "@duskfleet/core";
 
 const roots = [];
@@ -126,6 +128,55 @@ test("a misspelled frontmatter key skips the file, naming the key and the one it
   assert.match(s.error, /unknown frontmatter key "flavour"(;|$)/, "no guess when nothing is close");
 });
 
+/** A UTF-8 byte order mark, built from its code point so the source holds no invisible character. */
+const BOM = String.fromCharCode(0xfeff);
+
+test("a BOM, leading blank lines and trailing spaces on --- still read the frontmatter (#507)", () => {
+  const fm =
+    "id: IDX\ndescription: hand-written\nmodel: haiku\npermission_mode: dontAsk\nallowed_tools: [Read]\nmax_budget_usd: 0.1\ntimeout_minutes: 2\n";
+  const variants = {
+    bom: `${BOM}---\n${fm}---\nOnly read files.\n`,
+    blank: `\n---\n${fm}---\nOnly read files.\n`,
+    blanks: ` \n\t\r\n---\n${fm}---\nOnly read files.\n`,
+    trailing: `--- \n${fm}---\t\nOnly read files.\n`,
+    crlf: `${BOM}---\r\n${fm.replaceAll("\n", "\r\n")}---\r\nOnly read files.\r\n`,
+    "no-body": `---\n${fm}---`,
+  };
+  const userAgents = Object.fromEntries(Object.entries(variants).map(([k, v]) => [k, v.replace("IDX", k)]));
+  const { configDir } = makeConfig({ userAgents });
+  const config = loadConfig(configDir);
+  assert.deepEqual(config.skippedAgents, []);
+  for (const id of Object.keys(variants)) {
+    const a = config.agents.get(id);
+    assert.ok(a, `${id} loads`);
+    assert.equal(a.model, "haiku", `${id}: model read`);
+    assert.equal(a.permissionMode, "dontAsk", `${id}: permission mode read`);
+    assert.deepEqual(a.allowedTools, ["Read"], `${id}: allow-list read`);
+    assert.equal(a.maxBudgetUsd, 0.1, `${id}: budget read`);
+    assert.equal(a.timeoutMinutes, 2, `${id}: timeout read`);
+    assert.equal(a.systemPrompt, id === "no-body" ? "" : "Only read files.", `${id}: the YAML is not the body`);
+  }
+});
+
+test("an opening --- that is never closed does not load; a file without --- is all body (#507)", () => {
+  const { configDir } = makeConfig({
+    userAgents: {
+      unclosed: `${BOM}---\nid: unclosed\nmodel: haiku\npermission_mode: dontAsk\nOnly read files.\n`,
+      plain: "You are a plain agent.\n---\nnot frontmatter\n",
+      empty: `${BOM}---\n---\nUnbound.\n`,
+    },
+  });
+  const config = loadConfig(configDir);
+  assert.equal(config.agents.has("unclosed"), false);
+  assert.equal(config.skippedAgents.length, 1);
+  assert.equal(config.skippedAgents[0].id, "unclosed", "the id line is the guess, BOM or not");
+  assert.match(config.skippedAgents[0].error, /never closed/);
+  assert.equal(config.agents.get("plain").systemPrompt, "You are a plain agent.\n---\nnot frontmatter");
+  assert.equal(config.agents.get("empty").systemPrompt, "Unbound.", "an empty frontmatter block is a frontmatter");
+  assert.equal(guessAgentId(`\n${BOM}---\nid: nope\n---\n`), null, "a BOM is only a BOM at the very start");
+  assert.equal(guessAgentId(`${BOM}\n--- \nid: guessed\n`), "guessed");
+});
+
 test("unreadable YAML, a duplicate id and an unknown project each skip one file only", () => {
   const { configDir, dataDir } = makeConfig({
     userAgents: {
@@ -192,9 +243,11 @@ test("an invalid duskfleet.yaml still fails the load, and a reload keeps the pre
 });
 
 test("create still removes a file that does not load, and says why", () => {
-  // other.md declares id x: the new x.md sorts after it, so the loader skips x.md as a duplicate.
-  const { configDir, dataDir } = makeConfig({ userAgents: { other: agentFile("taken", "id: x\n") } });
+  // other.md, written after the load, declares id x: the new x.md sorts after it, so the loader
+  // skips x.md as a duplicate.
+  const { configDir, dataDir } = makeConfig();
   const config = loadConfig(configDir);
+  writeFileSync(path.join(dataDir, "agents", "other.md"), agentFile("taken", "id: x\n"));
   const runs = new RunManager(config, null, null, { owner: "test@host:1" });
   assert.throws(
     () => createAgentFromFields("own", { id: "x", system_prompt: "Hi." }, config, () => runs.reloadConfig()),
@@ -202,6 +255,36 @@ test("create still removes a file that does not load, and says why", () => {
   );
   assert.equal(existsSync(path.join(dataDir, "agents", "x.md")), false, "rolled back");
   assert.equal(loadConfig(configDir).agents.get("x").description, "taken");
+});
+
+test("a write of a loaded user agent goes to its own file, whatever its name, and a failed one restores it (#508)", () => {
+  const hand = agentFile("hand-written", "id: zed\n");
+  const { configDir, dataDir } = makeConfig({ userAgents: { "a-hand": hand } });
+  const config = loadConfig(configDir);
+  const runs = new RunManager(config, null, null, { owner: "test@host:1" });
+  const file = path.join(dataDir, "agents", "a-hand.md");
+  assert.equal(agentWriteTarget(config, "zed"), file);
+  assert.equal(agentWriteTarget(config, "new"), path.join(dataDir, "agents", "new.md"));
+
+  // The reload does not serve the agent from the file just written: its old content comes back.
+  assert.throws(
+    () =>
+      writeAgentAndVerify(config, { ...agentToSpec(config.agents.get("zed")), description: "lost" }, () => ({
+        ...config,
+        agents: new Map(),
+        skippedAgents: [],
+      })),
+    /a-hand\.md did not load .*; its previous content has been restored/,
+  );
+  assert.equal(readFileSync(file, "utf8"), hand, "rolled back to the hand-written file");
+
+  const fresh = writeAgentAndVerify(config, { ...agentToSpec(config.agents.get("zed")), description: "updated" }, () =>
+    runs.reloadConfig(),
+  );
+  assert.equal(fresh.sourcePath, file, "updated in place");
+  assert.equal(fresh.description, "updated");
+  assert.equal(existsSync(path.join(dataDir, "agents", "zed.md")), false, "no second file of the same id");
+  assert.deepEqual(loadConfig(configDir).skippedAgents, []);
 });
 
 test("create never writes over a file that holds another agent, overwrite or not (#501)", () => {

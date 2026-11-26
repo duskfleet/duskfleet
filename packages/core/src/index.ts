@@ -4,6 +4,7 @@
  */
 
 export {
+  agentWriteTarget,
   assertAgentFileFree,
   assertAgentIdFree,
   assertAgentWritable,
@@ -48,6 +49,7 @@ export {
   skillsSchema,
   timeoutMinutesSchema,
   writeAgentFile,
+  writeAgentFileAt,
 } from "./config/agent-files.js";
 export {
   type AgentLintProblem,

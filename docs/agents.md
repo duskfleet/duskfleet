@@ -4,6 +4,13 @@ An agent is a Markdown file with YAML frontmatter. The frontmatter is the unatte
 (model, permission mode, allow-lists, budget, MCP); the body, when present, is appended to
 Claude Code's system prompt.
 
+The frontmatter is the block between the file's first `---` line and the next `---` line. A UTF-8
+byte order mark, blank lines before the opening `---` and spaces or tabs after either `---` are
+ignored, so a file saved by an editor that adds them still loads with its settings. A file whose
+first non-blank line is `---` but has no closing `---` line does not load
+([below](#a-file-that-does-not-load)); a file that does not start with `---` has no frontmatter
+and is all body.
+
 ## Two kinds, chosen explicitly
 
 | Kind | What it is | Required | Not allowed |
@@ -73,7 +80,8 @@ see [where the unattended envelope lives](security.md#where-the-unattended-envel
 
 ### A file that does not load
 
-An agent file you edit by hand can break: invalid frontmatter, an id another file in the same
+An agent file you edit by hand can break: invalid frontmatter (or an opening `---` that is never
+closed), an id another file in the same
 directory already has, or a `project:` that is not in `projects.yaml`. Duskfleet skips that one
 file and loads everything else, so the other agents keep running and their schedules keep firing.
 
@@ -92,10 +100,13 @@ max_budget_usd?)`).
   `--force`), naming the file and its error. `update_agent` refuses it too: fix the file by hand,
   replace it, or remove it with `delete_agent` or the dashboard's delete, which delete the broken
   user file whatever its name.
-- A file belongs to the id it declares, not to its name. `create_agent`, `update_agent` and
-  `agents create` write `data/agents/<id>.md`, so when that file holds another agent (say
-  `helper.md` declaring `id: code-helper`) they refuse, even with `overwrite: true` / `--force`:
-  rename that file to its own id, or choose another one.
+- A file belongs to the id it declares, not to its name. `update_agent`, `delete_agent`, the
+  dashboard's delete and unlink, and an overwrite by `create_agent` / `agents create --force` act on
+  the file a user agent was loaded from, whatever its name (`a-hand.md` declaring `id: zed` is
+  updated in place, never next to a new `zed.md`). A failed update puts the file's previous content
+  back. A new agent, or a user override of a builtin, is written to `data/agents/<id>.md`, so when
+  that file holds another agent (say `helper.md` declaring `id: code-helper`) they refuse, even
+  with `overwrite: true` / `--force`: rename that file to its own id, or choose another one.
 - `list_agents` (`skippedAgents`), `duskfleet agents` (after the table; with `--json` on stderr,
   stdout stays the list) and `duskfleet doctor` (one warning line per file, `skippedAgents` in
   `--json`) name the file and its error.
