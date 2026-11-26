@@ -7,7 +7,17 @@
  * (completed unpriced, failed, cancelled, continued, an unknown session started fresh).
  */
 import assert from "node:assert/strict";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { test } from "node:test";
@@ -132,6 +142,47 @@ test("permissions: rules verbatim, Write(**) denied under dontAsk, Mcp(*:*) alwa
     assert.equal(cursorSessionExists(dir, "s1"), true);
   } finally {
     rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("cli-config.json: replaced by rename (no temp file left), untouched when unchanged; a live run with other permissions refuses the next", async () => {
+  const root = mkdtempSync(path.join(tmpdir(), "duskfleet-cursor-live-"));
+  const cursor = new CursorExecutor({ binary: fakeCursor, configRoot: path.join(root, "cfg") });
+  const dir = cursor.configDir("a");
+  const file = path.join(dir, "cli-config.json");
+  const req = (allowedTools, prompt = "fixture:killed") => ({
+    ...base,
+    cwd: root,
+    prompt,
+    permissionMode: "dontAsk",
+    agentId: "a",
+    allowedTools,
+  });
+  try {
+    writeCursorConfig(dir, { allow: ["Shell(ls)"], deny: [] });
+    const first = readFileSync(file, "utf8");
+    writeFileSync(file, first); // same bytes, fresh mtime baseline
+    const { mtimeMs } = statSync(file);
+    writeCursorConfig(dir, { allow: ["Shell(ls)"], deny: [] });
+    assert.equal(statSync(file).mtimeMs, mtimeMs, "unchanged permissions: the file is not rewritten");
+    writeCursorConfig(dir, { allow: ["Shell(git)"], deny: [] });
+    assert.deepEqual(JSON.parse(readFileSync(file, "utf8")).permissions.allow, ["Shell(git)"]);
+    assert.deepEqual(readdirSync(dir), ["cli-config.json"], "no temp file left behind");
+
+    const live = cursor.execute(req(["Shell(git)"]));
+    const refused = await cursor.execute(req(["Shell(rm)"], "fixture:edit")).done;
+    assert.equal(refused.outcome, "failed");
+    assert.match(refused.error, /another run of this agent is live .* with different permissions/);
+    assert.deepEqual(JSON.parse(readFileSync(file, "utf8")).permissions.allow, ["Shell(git)"], "the live run's file");
+    const same = await cursor.execute(req(["Shell(git)"], "fixture:edit")).done;
+    assert.equal(same.outcome, "completed", "same permissions: runs side by side");
+    live.cancel();
+    assert.equal((await live.done).outcome, "cancelled");
+    const after = await cursor.execute(req(["Shell(rm)"], "fixture:edit")).done;
+    assert.equal(after.outcome, "completed", "the live run ended: the new permissions are written");
+    assert.deepEqual(JSON.parse(readFileSync(file, "utf8")).permissions.allow, ["Shell(rm)"]);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
   }
 });
 

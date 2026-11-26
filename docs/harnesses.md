@@ -285,7 +285,9 @@ classified as `provider_quota`.
 The Cursor adapter (`core/src/execution/cursor.ts`, parser `cursor-stream.ts`, rules
 `cursor-rules.ts`) is registered only when its binary resolves: `CURSOR_BIN`, then
 `cursor.binary` in `duskfleet.yaml`, then `cursor-agent` on PATH; `doctor` lists
-`cursor not installed` otherwise. Its parser follows real runs of Cursor Agent CLI 2026.11.19 and
+`cursor not installed` otherwise. `install-service` exports the binary it found as `CURSOR_BIN`
+(its directory on the unit's `PATH`), so `serve` finds a `cursor-agent` outside the unit's `PATH`;
+re-run it after installing the CLI. Its parser follows real runs of Cursor Agent CLI 2026.11.19 and
 2026.11.22, kept as fixtures in `packages/mcp/test/fixtures/cursor/` (their README lists what each
 run shows) and replayed by `fake-cursor.js`.
 
@@ -312,6 +314,10 @@ What it does and does not do:
   rules are the `permissions` lists of `cli-config.json`. The adapter keeps one configuration
   directory per agent, `<data>/cursor/<agent id>/`, passed as `CURSOR_CONFIG_DIR`, and rewrites
   `permissions` there before every run (the CLI's own keys, such as its login block, are kept).
+  Unchanged permissions leave the file alone; changed ones go to a temp file renamed over it, so
+  a run never reads a half-written file. A run whose permissions differ from those of a live run of
+  the same agent in the same Duskfleet process (the agent file was edited meanwhile) is refused
+  rather than changing them under that run.
   The directory is never in the project, and it is stable because the CLI keeps its sessions in
   it: a session resumed from another directory starts empty, with no error.
 - **Deny by default.** Without a rule, a shell command is rejected without a prompt

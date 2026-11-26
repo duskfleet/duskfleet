@@ -38,6 +38,7 @@ import {
   CODEX_HARNESS,
   COPILOT_HARNESS,
   ConfigNotFoundError,
+  CURSOR_HARNESS,
   costTotals,
   costTotalsLine,
   createAgentFromFields,
@@ -175,14 +176,14 @@ function usage(asked = false): never {
       "Duskfleet - A fleet of agents for your own machine.",
       "",
       "Usage:",
-      "  duskfleet init [--yes] [--mcp claude-code|claude-desktop|copilot|codex] [--harness claude|copilot|codex]",
+      "  duskfleet init [--yes] [--mcp claude-code|claude-desktop|copilot|codex] [--harness claude|copilot|codex|cursor]",
       "  duskfleet agents",
-      "  duskfleet agents create <id> [--harness claude|copilot|codex] [--model <m>] [--effort <level>] [--budget <usd>] [--permission-mode <mode>]",
+      "  duskfleet agents create <id> [--harness claude|copilot|codex|cursor] [--model <m>] [--effort <level>] [--budget <usd>] [--permission-mode <mode>]",
       "                          [--allowed-tools <a,b>] [--disallowed-tools <a,b>] [--timeout <minutes>]",
       '                          [--description <text>] [--force] (-- "<system prompt>" | --prompt-file <file>)',
       "  duskfleet projects",
       '  duskfleet run --project <id or path> [--agent <id>] [--model <m>] [--effort <level>] [--no-wait] [--json [--full]] -- "<prompt>"',
-      "  duskfleet run --first [--project <absolute path>] [--harness claude|copilot|codex]",
+      "  duskfleet run --first [--project <absolute path>] [--harness claude|copilot|codex|cursor]",
       "  duskfleet runs [--status <status>] [--limit <n>] [--agent <id>]",
       "  duskfleet run-info <run_id> [--events]",
       "  duskfleet repair-subagents",
@@ -279,6 +280,10 @@ const AGENT_CREATE_DEFAULTS: Readonly<Record<string, AgentCreateDefaults>> = {
     ],
   },
   [CODEX_HARNESS]: { permissionMode: "acceptEdits", timeoutMinutes: 10 },
+  // Cursor: no budget, no rules. dontAsk denies Write(**) and a shell command without a rule is
+  // rejected, so the default agent reads only; only a bare command name (`Shell(git)`) was ever
+  // verified as a rule, so no test-runner rule is guessed here (add them with --allowed-tools).
+  [CURSOR_HARNESS]: { permissionMode: "dontAsk", timeoutMinutes: 10 },
 };
 
 function csv(value: string): string[] {
@@ -713,6 +718,7 @@ async function main(): Promise<void> {
         // serve would otherwise not find a Codex or Copilot outside the unit's PATH and crash-loop.
         copilotBin: app.harnesses.get("copilot")?.binary ?? null,
         codexBin: app.harnesses.get("codex")?.binary ?? null,
+        cursorBin: app.harnesses.get(CURSOR_HARNESS)?.binary ?? null,
         // macOS only, default on: serve runs under caffeinate -i -s
         keepAwake: !values["no-keep-awake"],
       };

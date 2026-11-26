@@ -26,7 +26,8 @@
  * nothing is spawned and the result says `sessionNotFound`: the run path starts fresh, with a note.
  */
 import { type ChildProcess, execFile, spawn } from "node:child_process";
-import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
+import { randomUUID } from "node:crypto";
+import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { createInterface } from "node:readline";
 import { classifyFailure } from "../observability/failure.js";
@@ -123,9 +124,52 @@ export function writeCursorConfig(dir: string, permissions: { allow: string[]; d
       // A file the CLI left half-written: start again from the permissions alone.
     }
   }
-  const next = { ...current, version: 1, approvalMode: "allowlist", permissions };
-  writeFileSync(file, `${JSON.stringify(next, null, 2)}\n`, { mode: 0o600 });
+  const next = `${JSON.stringify({ ...current, version: 1, approvalMode: "allowlist", permissions }, null, 2)}\n`;
+  // Unchanged (the usual case, a second run of the same agent): never touch a file a live run reads.
+  if (existsSync(file) && readFileSync(file, "utf8") === next) return file;
+  // Changed: a temp file renamed over it, so a reader sees the old file or the new one, never half.
+  const tmp = path.join(dir, `.cli-config.${process.pid}.${randomUUID()}.tmp`);
+  try {
+    writeFileSync(tmp, next, { mode: 0o600 });
+    renameSync(tmp, file);
+  } catch (err) {
+    rmSync(tmp, { force: true });
+    throw err;
+  }
   return file;
+}
+
+/**
+ * Live runs per configuration directory and the permissions each was started with (JSON). One
+ * directory per agent holds one `cli-config.json`: a run whose permissions differ from a live run's
+ * (the agent file was edited while it ran) is refused rather than changing them under that run.
+ */
+const liveConfigs = new Map<string, Map<symbol, string>>();
+
+/** Why a run with `permissions` cannot start in `dir` now, or null. */
+export function cursorConfigConflict(dir: string, permissions: { allow: string[]; deny: string[] }): string | null {
+  const live = liveConfigs.get(dir);
+  if (!live?.size) return null;
+  const wanted = JSON.stringify(permissions);
+  for (const p of live.values()) {
+    if (p !== wanted)
+      return `another run of this agent is live in ${dir} with different permissions (the agent file changed); start it again when that run has ended`;
+  }
+  return null;
+}
+
+function holdConfig(dir: string, permissions: { allow: string[]; deny: string[] }): () => void {
+  const key = Symbol(dir);
+  let live = liveConfigs.get(dir);
+  if (!live) {
+    live = new Map();
+    liveConfigs.set(dir, live);
+  }
+  live.set(key, JSON.stringify(permissions));
+  return () => {
+    live.delete(key);
+    if (!live.size) liveConfigs.delete(dir);
+  };
 }
 
 /** Whether the CLI has session `id` in configuration directory `dir` (`chats/<hash>/<id>/`). */
@@ -235,11 +279,15 @@ export class CursorExecutor implements Executor {
     // The CLI would start an empty session under an unknown id without a word: look first.
     if (req.resumeSessionId && !cursorSessionExists(configDir, req.resumeSessionId))
       return refuse(`cursor session ${req.resumeSessionId} not found in ${configDir}`, true);
+    const permissions = cursorPermissions(req);
+    const conflict = cursorConfigConflict(configDir, permissions);
+    if (conflict) return refuse(conflict, false);
     try {
-      writeCursorConfig(configDir, cursorPermissions(req));
+      writeCursorConfig(configDir, permissions);
     } catch (err) {
       return refuse(`could not write the cursor configuration in ${configDir}: ${String(err)}`, false);
     }
+    const release = holdConfig(configDir, permissions);
 
     let logStream: CappedLogWriter | null = null;
     if (req.logPath) {
@@ -295,6 +343,7 @@ export class CursorExecutor implements Executor {
         detached: OWN_PROCESS_GROUP,
       });
     } catch (err) {
+      release();
       const ended = logStream?.end() ?? Promise.resolve();
       const result = finalResult({
         ...base,
@@ -355,6 +404,7 @@ export class CursorExecutor implements Executor {
 
       child.on("close", (code, sig) => {
         closed = true;
+        release();
         for (const t of [killTimer, resultTimer, timeoutTimer, inactivityTimer]) if (t) clearTimeout(t);
         const endedAt = new Date();
         let error: string | null = null;
