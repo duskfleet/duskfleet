@@ -106,6 +106,26 @@ test("a malformed agent file is skipped by name, the other agents load", () => {
   assert.deepEqual(loadConfig(configDir).skippedAgents, [], "a fixed file loads again");
 });
 
+test("a misspelled frontmatter key skips the file, naming the key and the one it meant (#503)", () => {
+  const { configDir } = makeConfig({
+    agents: { typo: agentFile("builtin typo", "max_budget_usd: 0.1\n") },
+    userAgents: {
+      typo: "---\nmodel: haiku\npermission_mode: dontAsk\nallowed-tools: [Read]\nmax_budget: 0.1\ntimeout: 1\nflavour: x\n---\nbody\n",
+      ok: agentFile("ok", "max_budget_usd: 0.1\n"),
+    },
+  });
+  const config = loadConfig(configDir);
+  assert.deepEqual([...config.agents.keys()], ["ok"], "not loaded with the default budget, nor the builtin");
+  assert.equal(config.agents.get("ok").maxBudgetUsd, 0.1);
+  assert.equal(config.skippedAgents.length, 1);
+  const [s] = config.skippedAgents;
+  assert.equal(s.id, "typo");
+  assert.match(s.error, /unknown frontmatter key "allowed-tools" \(did you mean allowed_tools\?\)/);
+  assert.match(s.error, /unknown frontmatter key "max_budget" \(did you mean max_budget_usd\?\)/);
+  assert.match(s.error, /unknown frontmatter key "timeout" \(did you mean timeout_minutes\?\)/);
+  assert.match(s.error, /unknown frontmatter key "flavour"(;|$)/, "no guess when nothing is close");
+});
+
 test("unreadable YAML, a duplicate id and an unknown project each skip one file only", () => {
   const { configDir, dataDir } = makeConfig({
     userAgents: {
