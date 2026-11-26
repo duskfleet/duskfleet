@@ -295,7 +295,7 @@ run shows) and replayed by `fake-cursor.js`.
 |---|---|
 | Unattended command | `cursor-agent -p --output-format stream-json --trust`, prompt on stdin; `--model`, `--resume <id>`, `--add-dir <dir>` |
 | End of run | a `result` line (`is_error: true` = failed); none = failed (a kill, an unknown model, an untrusted folder); 30 min without output = timed out (backstop) |
-| `toolAllowList`, `toolRule` | yes, Cursor's own rules written verbatim into the run's `cli-config.json`: `Shell(<command>)`, `Read(<glob>)`, `Write(<glob>)`, `WebFetch(<domain>)`. Claude rules and `Mcp(...)` are refused by name |
+| `toolAllowList`, `toolRule` | yes, Cursor's own rules written verbatim into the run's `cli-config.json`: `Shell(<command>)`, `Read(<glob>)`, `Write(<glob>)`, `WebFetch(<domain>)`; only the kind and the outer parentheses are checked, any non-empty argument (parentheses included, `Read(src/(app)/**)`) is left to the Cursor CLI. Claude rules and `Mcp(...)` are refused by name |
 | `permissionModes` | `dontAsk` (adds a `Write(**)` deny: the edit tool cannot write) and `acceptEdits` (the edit tool writes in the project with no rule) |
 | `resumeSession` | yes (`--resume <id>`, after a check that the session exists, see below) |
 | `hardBudgetUsd`, `reportsCostUsd` | no: the stream reports tokens only, every run is `unpriced` |

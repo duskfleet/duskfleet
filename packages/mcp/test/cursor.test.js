@@ -208,6 +208,11 @@ test("capabilities: Cursor rules only, no MCP rule, no budget, effort, sandbox, 
     "an Mcp() entry is refused by name",
   );
   assert.equal(cursorRuleRefusal("WebFetch(github.com)"), null);
+  for (const rule of ["Read(src/(app)/**)", "Shell(git log --format=(%h))", "Write(app/(group)/page.tsx)"])
+    assert.equal(cursorRuleRefusal(rule), null, `${rule}: the argument is left to the Cursor CLI`);
+  for (const rule of ["Shell()", "Read()", "Bash(git (log))", "Edit", "mcp__srv__tool", "Read(src", "Read(a)b"])
+    assert.match(cursorRuleRefusal(rule) ?? "", /not a Cursor/, `${rule} stays refused`);
+  for (const rule of ["Mcp(srv:(tool))", "Mcp(*:*)"]) assert.match(cursorRuleRefusal(rule) ?? "", /MCP rule/);
   for (const [fields, named] of [
     [{ max_budget_usd: 1 }, "max_budget_usd"],
     [{ max_daily_cost_usd: 1 }, "max_daily_cost_usd"],

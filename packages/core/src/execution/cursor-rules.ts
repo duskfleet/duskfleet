@@ -10,8 +10,12 @@
  * denies `Mcp(*:*)` (MCP for Cursor agents is a later issue).
  */
 
-/** The rule kinds accepted: `Shell(<command>)`, `Read(<glob>)`, `Write(<glob>)`, `WebFetch(<domain>)`. */
-const CURSOR_RULE = /^(?:Shell|Read|Write|WebFetch)\([^()]+\)$/;
+/**
+ * The rule kinds accepted: `Shell(<command>)`, `Read(<glob>)`, `Write(<glob>)`, `WebFetch(<domain>)`.
+ * Only the kind and the outer parentheses are checked: any non-empty argument (parentheses included,
+ * e.g. `Read(src/(app)/**)`) is left to the Cursor CLI.
+ */
+const CURSOR_RULE = /^(?:Shell|Read|Write|WebFetch)\(.+\)$/;
 
 /** The accepted shapes, for messages and docs. */
 export const CURSOR_RULE_SHAPES = "Shell(<command>), Read(<glob>), Write(<glob>), WebFetch(<domain>)";
