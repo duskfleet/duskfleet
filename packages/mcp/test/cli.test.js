@@ -4,7 +4,16 @@
  */
 import assert from "node:assert/strict";
 import { spawn, spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { hostname, tmpdir } from "node:os";
 import path from "node:path";
 import { test } from "node:test";
@@ -684,6 +693,18 @@ test("agents create refuses an existing id without --force, home paths, secrets 
     assert.notEqual(badId.status, 0);
 
     assert.deepEqual(files(), ["fixer.md"], "no file left behind by a refused create");
+
+    // #501: helper.md declares code-helper; creating "helper" must not replace it, --force or not.
+    const hand = "---\nid: code-helper\ndescription: hand-written\nmodel: haiku\n---\nHand-written body.\n";
+    writeFileSync(path.join(agentsDir, "helper.md"), hand);
+    for (const extra of [[], ["--force"]]) {
+      const clash = cli(configDir, ["agents", "create", "helper", ...extra, "--", "A new persona."], env);
+      assert.notEqual(clash.status, 0, clash.stdout);
+      assert.match(clash.stderr, /helper\.md holds agent "code-helper", not "helper"/);
+    }
+    assert.equal(readFileSync(path.join(agentsDir, "helper.md"), "utf8"), hand, "the hand-written file is untouched");
+    const ids = JSON.parse(cli(configDir, ["agents", "--json"], env).stdout).map((a) => a.id);
+    assert.ok(ids.includes("code-helper"), ids.join(", "));
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
