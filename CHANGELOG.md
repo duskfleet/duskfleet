@@ -8,9 +8,42 @@ All notable changes to Duskfleet are listed here. The format follows
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-11-26
+
+Four schema migrations (32 to 35) run on the first open of an existing database; nothing to do by hand.
+
 ### Added
 
-- `codex_network: true` for Codex agents with `permission_mode: acceptEdits`: the run's sandbox gets the network, every host, so a Codex agent can push, open pull requests and install. It acts with the credentials of the user who runs Duskfleet; create / update warn, `doctor` lists such agents, each run records a note, and the field is refused on other harnesses and on `dontAsk` (#488). A token-like `env_passthrough` name on a Codex agent now warns: Codex drops it from its commands' environment.
+- **Four harnesses.** An agent's `harness:` can now be `claude` (the default), `copilot`, `codex` or `cursor`. Each adapter is registered only when its CLI is found (`<NAME>_BIN`, `<name>.binary` in `duskfleet.yaml`, else PATH), takes that CLI's own permission model, and refuses by name any agent field it cannot honour. See [docs/harnesses.md](docs/harnesses.md).
+- `harness: copilot`: own agents run with GitHub Copilot CLI, prompt on stdin, Copilot's own tool rules verbatim (Claude rules refused), never `--allow-all`, `--yolo` or `--trust-folder` ([#457](https://github.com/duskfleet/duskfleet/pull/457)). Every MCP server Copilot has configured is disabled in the child, and a run whose server list cannot be read is refused before it starts ([#483](https://github.com/duskfleet/duskfleet/pull/483)).
+- `harness: codex`: own agents run with `codex exec --json`, always with `--ignore-user-config --ignore-rules`; `dontAsk` runs read-only and `acceptEdits` in the workspace-write sandbox, network off, the agent body as Codex's developer instructions ([#484](https://github.com/duskfleet/duskfleet/pull/484)). Sessions can be resumed and continued (`on_failure: resume_once`, a schedule's `continue`, `run_agent { resume_run_id }`), always with the sandbox of the agent's `permission_mode`; an unknown thread starts a fresh session ([#487](https://github.com/duskfleet/duskfleet/pull/487)).
+- `codex_network: true` for Codex agents with `permission_mode: acceptEdits`: the run's sandbox gets the network, every host, so a Codex agent can push, open pull requests and install. It acts with the credentials of the user who runs Duskfleet; create / update warn, `doctor` lists such agents, each run records a note, and the field is refused on other harnesses and on `dontAsk`. A token-like `env_passthrough` name on a Codex agent now warns: Codex drops it from its commands' environment ([#492](https://github.com/duskfleet/duskfleet/pull/492)).
+- `harness: cursor`: own agents run with Cursor Agent CLI (`cursor-agent -p --output-format stream-json`). Cursor's own rules are written into a per-agent configuration directory under the data directory, never into the project; `dontAsk` denies writes and MCP tools are always denied; never `--force`. The agent body is prepended to the task. Resume and continue work, and an unknown session id is caught before spawning ([#520](https://github.com/duskfleet/duskfleet/pull/520)).
+- **Link agents for Copilot, and a harness-neutral `project_agent` field.** A link can now run a project's `.github/agents/<name>.agent.md` as `copilot --agent <name>`. `project_agent` replaces `claude_agent` in frontmatter, `create_agent` and `update_agent`; `claude_agent` is still accepted as its older name (same definition, same hash), setting both is refused. A Copilot link with a body is refused: Copilot has no channel for it ([#506](https://github.com/duskfleet/duskfleet/pull/506)).
+- `init`, the guided first run and `agents create` for every harness: `init` lists each agent CLI found, with its version and login state where a verified check exists; one usable CLI is enough. `agents create --harness` writes an agent for any of them ([#490](https://github.com/duskfleet/duskfleet/pull/490)).
+- `duskfleet mcp register --target copilot | codex`: registers the Duskfleet MCP server with Copilot CLI or Codex CLI through their own `mcp add`, with the same `--dry-run` / `--yes` contract as the Claude targets; Duskfleet never edits their configuration files ([#491](https://github.com/duskfleet/duskfleet/pull/491)).
+- **Effort.** Runs record the effort they were started with (`runs.effort`, migration 34), shown by `get_run`, `list_runs` and `run-info` ([#504](https://github.com/duskfleet/duskfleet/pull/504)). Effort can be overridden per run (`run_agent { effort }`, `duskfleet run --effort`), per schedule (`effort`, migration 35, cleared with `clear_effort`) and for a gate's agent (`gate.agent.effort`); `agents create --effort <level>` writes it ([#512](https://github.com/duskfleet/duskfleet/pull/512)).
+- `run_artifacts` (migration 32): the pull requests a run opened, recorded from its `gh pr create` output and listed by `get_run` and `run-info` ([#456](https://github.com/duskfleet/duskfleet/pull/456)).
+- A scheduled link run whose project agent file changed since the schedule's previous run gets a run note naming the file and both hashes (`runs.project_agent_hash`, migration 33); nothing is blocked ([#473](https://github.com/duskfleet/duskfleet/pull/473)).
+- Link agents: `create_agent`, `update_agent` and `agents create` warn when an `allowed_tools` entry is not in the project agent's `tools:`; warnings only ([#471](https://github.com/duskfleet/duskfleet/pull/471)). A link's description and model fall back to the project agent's when the Duskfleet file leaves them empty, shown with their source by `list_agents` and `agents` ([#472](https://github.com/duskfleet/duskfleet/pull/472)).
+- Dashboard: the harness of each agent, schedule and run on the Agents, Schedules and Runs lists, amber when its CLI is not installed or not registered on this host ([#480](https://github.com/duskfleet/duskfleet/pull/480)).
+- Dashboard, Alerts: agent files that do not load, and link personas changed since a schedule's previous run ([#486](https://github.com/duskfleet/duskfleet/pull/486)).
+- Docs: which prompt of a link holds which rule ([#475](https://github.com/duskfleet/duskfleet/pull/475)), and why the unattended envelope lives outside the project ([#474](https://github.com/duskfleet/duskfleet/pull/474)).
+
+### Changed
+
+- An agent file that does not load (bad YAML, a frontmatter error, a duplicate id, an unknown `project`) is skipped and listed by `list_agents`, `agents` and `doctor` instead of failing the whole configuration. Its id is unavailable: a broken user file never falls back to the builtin of the same id ([#470](https://github.com/duskfleet/duskfleet/pull/470)).
+- **An unknown frontmatter key now makes an agent file skipped** instead of being silently dropped; the error suggests the key it most likely meant (`max_budget` → `max_budget_usd`). Check `doctor` after upgrading ([#521](https://github.com/duskfleet/duskfleet/pull/521)).
+- Agent guidance follows the harness: tool descriptions, errors and hints name the harness's own project-agent folder (`.claude/agents/`, `.github/agents/`, `.codex/agents/`), and a link on a harness without project agents is refused with the way forward ([#505](https://github.com/duskfleet/duskfleet/pull/505)).
+- Entries Duskfleet writes into the private `projects.yaml` store a path under home as `~/...` ([#469](https://github.com/duskfleet/duskfleet/pull/469)).
+
+### Fixed
+
+- `agents create`, `create_agent` and `update_agent` no longer overwrite a file that holds another agent; `--force` / `overwrite` do not lift the guard ([#518](https://github.com/duskfleet/duskfleet/pull/518)).
+- `timeout_minutes` (and `claude.default_timeout_minutes`) above 35791 is refused: Node clamped such a timer to 1 ms and every run timed out at once ([#519](https://github.com/duskfleet/duskfleet/pull/519)).
+- Agent frontmatter is read after a UTF-8 BOM, leading blank lines or trailing spaces on a delimiter, instead of loading the whole file as the system prompt with every setting dropped ([#522](https://github.com/duskfleet/duskfleet/pull/522)).
+- `update_agent` and `delete_agent` (and the dashboard's delete) act on the file the agent was loaded from, whatever its name, instead of a guessed `<id>.md`; a failed update puts the previous content back ([#523](https://github.com/duskfleet/duskfleet/pull/523)).
+- A schedule whose agent was deleted, no longer loads or was bound to another project can be paused again; resuming and every other edit are still validated ([#524](https://github.com/duskfleet/duskfleet/pull/524)).
 
 ## [0.5.0] - 2026-11-16
 
@@ -271,7 +304,8 @@ localhost dashboard.
 - An allow-listed MCP server that a run did not use no longer counts as missing ([#165](https://github.com/duskfleet/duskfleet/pull/165)).
 - The published packages had `bin` paths with a `./` prefix, which npm 11 drops at publish time, so `npx duskfleet` would have had no executable; the pack gate now refuses such entries and `publish --dry-run` fails when npm auto-corrects the manifest ([#278](https://github.com/duskfleet/duskfleet/pull/278)); the publish job itself now runs that check before each `npm publish`, so a tag cut before the fix cannot ship without its executables ([#312](https://github.com/duskfleet/duskfleet/pull/312)).
 
-[Unreleased]: https://github.com/duskfleet/duskfleet/compare/v0.5.0...HEAD
+[Unreleased]: https://github.com/duskfleet/duskfleet/compare/v0.6.0...HEAD
+[0.6.0]: https://github.com/duskfleet/duskfleet/releases/tag/v0.6.0
 [0.5.0]: https://github.com/duskfleet/duskfleet/releases/tag/v0.5.0
 [0.4.0]: https://github.com/duskfleet/duskfleet/releases/tag/v0.4.0
 [0.3.1]: https://github.com/duskfleet/duskfleet/releases/tag/v0.3.1
